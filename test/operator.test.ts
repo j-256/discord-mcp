@@ -213,6 +213,11 @@ function status(
       applicationEmojiCreationEnabled: false,
       applicationEmojiRootCount: 0,
       applicationIntentChangesEnabled: false,
+      applicationEntitlementGuildIds: [],
+      applicationEntitlementUserIds: [],
+      applicationMonetizationAuditEnabled: false,
+      applicationMonetizationSkuIds: [],
+      applicationSubscriptionUserIds: [],
       applicationRoleConnectionMetadataChangesEnabled: false,
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
@@ -434,8 +439,10 @@ function toolService(
   return {
     addReaction: unexpected,
     auditApplicationCommands: unexpected,
+    auditApplicationEntitlements: unexpected,
     auditApplicationRoleConnectionMetadata: unexpected,
     auditApplicationSkus: unexpected,
+    auditApplicationSubscriptions: unexpected,
     auditGuildWebhooks: unexpected,
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,
@@ -3152,6 +3159,57 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
   assert.match(omitted.warnings.join("\n"), /application-emojis toolset/)
 })
 
+test("doctor and setup explain exact-beneficiary application monetization audit", async () => {
+  const skuId = "610000000000000001"
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationMonetizationAudit: true,
+    },
+    scopes: {
+      applicationEntitlementGuildIds: [GUILD_ID],
+      applicationEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [skuId],
+      applicationSubscriptionUserIds: [USER_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const check = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationMonetizationAuditPolicy,
+  )
+  assert.equal(check?.status, "pass")
+  assert.match(check?.summary || "", /1 exact current-application SKUs/)
+  assert.match(check?.summary || "", /1 exact entitlement guild beneficiaries/)
+  assert.match(check?.summary || "", /1 exact entitlement user beneficiaries/)
+  assert.match(check?.summary || "", /1 exact subscription users/)
+  assert.match(check?.summary || "", /entitlement-only access authority/)
+  assert.match(check?.summary || "", /no persistence/)
+  assert.match(check?.summary || "", /no monetization mutations/)
+  assert.match(omitted.warnings.join("\n"), /application-monetization toolset/)
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.applicationMonetizationAuditPolicy,
+    )?.summary || "",
+    /disabled/,
+  )
+})
+
 test("doctor and setup explain reviewed guild application-command scope", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5596,6 +5654,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_application_commands",
     "review_application_emoji_change",
     "review_application_intent_enablement",
+    "review_application_monetization",
     "review_application_role_connection_metadata",
     "review_application_role_connection_metadata_change",
     "review_application_skus",

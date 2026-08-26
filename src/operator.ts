@@ -135,6 +135,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   applicationEmojiChangePolicy: "application-emoji-change-policy",
   applicationCommandChangePolicy: "application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
+  applicationMonetizationAuditPolicy: "application-monetization-audit-policy",
   applicationRoleConnectionMetadataChangePolicy:
     "application-role-connection-metadata-change-policy",
   applicationBotVisibility: "application-bot-visibility",
@@ -895,6 +896,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationIntentChanges,
       "application-security",
       "Reviewed application privileged-intent enablement",
+    ],
+    [
+      config.allowApplicationMonetizationAudit,
+      "application-monetization",
+      "Exact-beneficiary application monetization audit",
     ],
     [
       config.allowApplicationRoleConnectionMetadataChanges,
@@ -3067,6 +3073,17 @@ export async function diagnoseConnector(
         `Reviewed application emoji changes are bound to the verified pinned current application and ${config.applicationEmojiRoots.length} canonical creation roots with application-wide coordination, one-shot execution, and exact metadata or absence readback`,
       ))
     }
+    checks.push(config.allowApplicationMonetizationAudit
+      ? check(
+        DOCTOR_CHECK_IDS.applicationMonetizationAuditPolicy,
+        "pass",
+        `Read-only application monetization audit is constrained to ${config.applicationMonetizationSkuIds.size} exact current-application SKUs, ${config.applicationEntitlementGuildIds.size} exact entitlement guild beneficiaries, ${config.applicationEntitlementUserIds.size} exact entitlement user beneficiaries, and ${config.applicationSubscriptionUserIds.size} exact subscription users with bounded projections, entitlement-only access authority, no persistence, and no monetization mutations`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.applicationMonetizationAuditPolicy,
+        "pass",
+        "Exact-beneficiary application monetization audit is disabled",
+      ))
     checks.push(config.allowApplicationCommandChanges
       ? check(
         DOCTOR_CHECK_IDS.applicationCommandChangePolicy,

@@ -605,6 +605,10 @@ export class ApplicationSkuEvidenceError extends Error {
   override name = "ApplicationSkuEvidenceError"
 }
 
+export class ApplicationMonetizationEvidenceError extends Error {
+  override name = "ApplicationMonetizationEvidenceError"
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

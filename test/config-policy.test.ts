@@ -41,8 +41,11 @@ const OTHER_CHANNEL_ID = "200000000000000002"
 const ROLE_ID = "300000000000000001"
 const OTHER_ROLE_ID = "300000000000000002"
 const USER_ID = "400000000000000001"
+const OTHER_USER_ID = "400000000000000002"
 const INTEGRATION_ID = "500000000000000001"
 const OTHER_INTEGRATION_ID = "500000000000000002"
+const SKU_ID = "600000000000000001"
+const OTHER_SKU_ID = "600000000000000002"
 
 function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   return {
@@ -199,6 +202,11 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
     applicationIntentChangesEnabled: false,
+    applicationEntitlementGuildIds: [],
+    applicationEntitlementUserIds: [],
+    applicationMonetizationAuditEnabled: false,
+    applicationMonetizationSkuIds: [],
+    applicationSubscriptionUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -405,6 +413,154 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
       ConfigurationError,
     )
   }
+})
+
+test("configuration and policy isolate exact-beneficiary application monetization audits", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      applicationMonetizationAudit: true,
+    },
+    readScope: {
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      applicationEntitlementGuildIds: [GUILD_ID],
+      applicationEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [SKU_ID],
+      applicationSubscriptionUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowApplicationMonetizationAudit, true)
+  assert.deepEqual([...config.applicationEntitlementGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.applicationEntitlementUserIds], [USER_ID])
+  assert.deepEqual([...config.applicationMonetizationSkuIds], [SKU_ID])
+  assert.deepEqual([...config.applicationSubscriptionUserIds], [USER_ID])
+  policy.assertApplicationEntitlementsAuditable(
+    { id: GUILD_ID, type: "guild" },
+    [SKU_ID],
+  )
+  policy.assertApplicationEntitlementsAuditable(
+    { id: USER_ID, type: "user" },
+    [SKU_ID],
+  )
+  policy.assertApplicationSubscriptionsAuditable(USER_ID, SKU_ID)
+  assert.deepEqual(policy.applicationMonetizationSkuScope(), [SKU_ID])
+  assert.deepEqual(
+    {
+      applicationMonetizationAuditEnabled:
+        policy.describe().applicationMonetizationAuditEnabled,
+      applicationEntitlementGuildIds: policy.describe().applicationEntitlementGuildIds,
+      applicationEntitlementUserIds: policy.describe().applicationEntitlementUserIds,
+      applicationMonetizationSkuIds: policy.describe().applicationMonetizationSkuIds,
+      applicationSubscriptionUserIds: policy.describe().applicationSubscriptionUserIds,
+    },
+    {
+      applicationMonetizationAuditEnabled: true,
+      applicationEntitlementGuildIds: [GUILD_ID],
+      applicationEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [SKU_ID],
+      applicationSubscriptionUserIds: [USER_ID],
+    },
+  )
+
+  assert.throws(
+    () => policy.assertApplicationEntitlementsAuditable(
+      { id: OTHER_GUILD_ID, type: "guild" },
+      [SKU_ID],
+    ),
+    /outside the configured read scope/,
+  )
+  assert.throws(
+    () => policy.assertApplicationEntitlementsAuditable(
+      { id: OTHER_USER_ID, type: "user" },
+      [SKU_ID],
+    ),
+    /outside the application entitlement scope/,
+  )
+  assert.throws(
+    () => policy.assertApplicationEntitlementsAuditable(
+      { id: USER_ID, type: "user" },
+      [OTHER_SKU_ID],
+    ),
+    /SKU .* outside the application monetization scope/,
+  )
+  assert.throws(
+    () => policy.assertApplicationSubscriptionsAuditable(OTHER_USER_ID, SKU_ID),
+    /outside the application subscription scope/,
+  )
+
+  const entitlementOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { applicationMonetizationAudit: true },
+    scopes: {
+      applicationEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [SKU_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  entitlementOnly.assertApplicationEntitlementsAuditable(
+    { id: USER_ID, type: "user" },
+    [SKU_ID],
+  )
+  assert.throws(
+    () => entitlementOnly.assertApplicationSubscriptionsAuditable(USER_ID, SKU_ID),
+    /outside the application subscription scope/,
+  )
+
+  const subscriptionOnly = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { applicationMonetizationAudit: true },
+    scopes: {
+      applicationMonetizationSkuIds: [SKU_ID],
+      applicationSubscriptionUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  subscriptionOnly.assertApplicationSubscriptionsAuditable(USER_ID, SKU_ID)
+  assert.throws(
+    () => subscriptionOnly.assertApplicationEntitlementsAuditable(
+      { id: USER_ID, type: "user" },
+      [SKU_ID],
+    ),
+    /outside the application entitlement scope/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.applicationMonetizationSkuScope(),
+    /application monetization audit is disabled/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: { applicationEntitlementUserIds: [USER_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires .*applicationMonetizationSkuIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: { applicationMonetizationSkuIds: [SKU_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires at least one exact application entitlement beneficiary or subscription user/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationMonetizationAudit: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: {
+        applicationEntitlementGuildIds: [OTHER_GUILD_ID],
+        applicationMonetizationSkuIds: [SKU_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /applicationEntitlementGuildIds.*subset/,
+  )
 })
 
 test("configuration keeps Gateway disabled and requires pinned bounded scope when enabled", () => {
@@ -1323,6 +1479,11 @@ test("configuration and policy require an exact administration guild and protect
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
     applicationIntentChangesEnabled: false,
+    applicationEntitlementGuildIds: [],
+    applicationEntitlementUserIds: [],
+    applicationMonetizationAuditEnabled: false,
+    applicationMonetizationSkuIds: [],
+    applicationSubscriptionUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -4990,6 +5151,11 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
     applicationIntentChangesEnabled: false,
+    applicationEntitlementGuildIds: [],
+    applicationEntitlementUserIds: [],
+    applicationMonetizationAuditEnabled: false,
+    applicationMonetizationSkuIds: [],
+    applicationSubscriptionUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,

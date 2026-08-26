@@ -132,6 +132,18 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.messageReactions, "channelId", "allowedChannelIds"),
 
   promptBinding(MCP_PROMPT_NAMES.reviewApplicationCommands, "guildId", "allowedGuildIds"),
+  promptBinding(
+    MCP_PROMPT_NAMES.reviewApplicationMonetization,
+    "subjectId",
+    "applicationEntitlementGuildIds",
+    "applicationEntitlementUserIds",
+    "applicationSubscriptionUserIds",
+  ),
+  promptBinding(
+    MCP_PROMPT_NAMES.reviewApplicationMonetization,
+    "skuIds",
+    "applicationMonetizationSkuIds",
+  ),
   promptBinding(MCP_PROMPT_NAMES.findGuildMembers, "guildId", "memberDirectoryGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.inspectGuildBan, "guildId", "banAuditGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewAttachmentMessage, "channelId", "attachmentChannelIds"),

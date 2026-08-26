@@ -510,6 +510,10 @@ import {
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
+import {
+  fixtureApplicationEntitlementAudit,
+  fixtureApplicationSubscriptionAudit,
+} from "./application-monetization-audit-fixture.js"
 import { fixtureGuildWebhookAudit } from "./guild-webhook-audit-fixture.js"
 import type {
   ThreadChangePlan,
@@ -580,6 +584,9 @@ const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
 const USER_ID = "400000000000000001"
 const OTHER_USER_ID = "400000000000000002"
+const APPLICATION_SKU_ID = "410000000000000001"
+const APPLICATION_ENTITLEMENT_ID = "420000000000000001"
+const APPLICATION_SUBSCRIPTION_ID = "430000000000000001"
 const DIRECT_MESSAGE_OPERATION_KEY = "direct-message-operation-0001"
 const DIRECT_MESSAGE_CONTENT = "Private reviewed message"
 const DIRECT_MESSAGE_COMPONENT_TEXT = "Private reviewed component"
@@ -7694,6 +7701,11 @@ function fixturePolicy(): PolicyDescription {
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
     applicationIntentChangesEnabled: false,
+    applicationEntitlementGuildIds: [],
+    applicationEntitlementUserIds: [],
+    applicationMonetizationAuditEnabled: false,
+    applicationMonetizationSkuIds: [],
+    applicationSubscriptionUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -7933,8 +7945,12 @@ function serviceFixture(overrides: {
   applicationRoleConnectionMetadataChangePlanDigest?: string
   applicationRoleConnectionMetadataError?: Error
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
+  applicationEntitlementError?: Error
+  applicationEntitlementResult?: ReturnType<typeof fixtureApplicationEntitlementAudit>
   applicationSkuError?: Error
   applicationSkuResult?: ReturnType<typeof fixtureApplicationSkuAudit>
+  applicationSubscriptionError?: Error
+  applicationSubscriptionResult?: ReturnType<typeof fixtureApplicationSubscriptionAudit>
   guildWebhookError?: Error
   guildWebhookResult?: ReturnType<typeof fixtureGuildWebhookAudit>
   attachmentError?: Error
@@ -8130,6 +8146,14 @@ function serviceFixture(overrides: {
   const guildApplicationCommandCalls = {
     execute: 0,
     plan: 0,
+  }
+  const applicationMonetizationCalls = {
+    entitlementArguments: null as Parameters<
+      DiscordToolService["auditApplicationEntitlements"]
+    > | null,
+    subscriptionArguments: null as Parameters<
+      DiscordToolService["auditApplicationSubscriptions"]
+    > | null,
   }
   const calls = {
     active: 0,
@@ -8592,6 +8616,24 @@ function serviceFixture(overrides: {
         guildId,
       })
     },
+    async auditApplicationEntitlements(...arguments_) {
+      if (overrides.applicationEntitlementError) {
+        throw overrides.applicationEntitlementError
+      }
+      applicationMonetizationCalls.entitlementArguments = arguments_
+      const beneficiary = arguments_[0]
+      return overrides.applicationEntitlementResult
+        || fixtureApplicationEntitlementAudit({
+          applicationId: APPLICATION_ID,
+          beneficiaryId: beneficiary.type === "guild"
+            ? beneficiary.guildId
+            : beneficiary.userId,
+          beneficiaryType: beneficiary.type,
+          botId: BOT_ID,
+          entitlementId: APPLICATION_ENTITLEMENT_ID,
+          skuId: arguments_[1][0] || APPLICATION_SKU_ID,
+        })
+    },
     async auditApplicationRoleConnectionMetadata() {
       if (overrides.applicationRoleConnectionMetadataError) {
         throw overrides.applicationRoleConnectionMetadataError
@@ -8608,6 +8650,20 @@ function serviceFixture(overrides: {
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
       })
+    },
+    async auditApplicationSubscriptions(...arguments_) {
+      if (overrides.applicationSubscriptionError) {
+        throw overrides.applicationSubscriptionError
+      }
+      applicationMonetizationCalls.subscriptionArguments = arguments_
+      return overrides.applicationSubscriptionResult
+        || fixtureApplicationSubscriptionAudit({
+          applicationId: APPLICATION_ID,
+          botId: BOT_ID,
+          skuId: arguments_[1],
+          subscriptionId: APPLICATION_SUBSCRIPTION_ID,
+          userId: arguments_[0],
+        })
     },
     async auditGuildWebhooks(guildId) {
       calls.guildWebhookAudit += 1
@@ -12189,6 +12245,7 @@ function serviceFixture(overrides: {
     },
   }
   return {
+    applicationMonetizationCalls,
     calls,
     guildBlueprintCaptureCalls,
     guildIncidentCalls,
@@ -12607,6 +12664,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_application_commands",
       "audit_application_role_connection_metadata",
       "audit_application_skus",
+      "audit_application_entitlements",
+      "audit_application_subscriptions",
       "get_connector_status",
       "parse_discord_reference",
       "get_observability_status",
@@ -15745,6 +15804,35 @@ test("progressive discovery reveals the pinned application SKU audit independent
   )
 })
 
+test("progressive discovery reveals exact-beneficiary monetization audits independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["application-monetization"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { limit: 2, toolset: "application-monetization" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "audit_application_entitlements",
+    "audit_application_subscriptions",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "audit_application_entitlements",
+      "audit_application_subscriptions",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery reveals guild webhook exposure audit independently", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: {
@@ -15914,6 +16002,9 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
   assert.match(content.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
   assert.match(content.text, /Current-application SKU audit re-verifies pinned identity/u)
+  assert.match(content.text, /Application monetization audit requires a separate disabled-by-default capability/u)
+  assert.match(content.text, /Subscription reads require exactly one separately configured user/u)
+  assert.match(content.text, /entitlements remain authority for access conclusions/u)
 })
 
 test("MCP linked-role metadata audit redacts configured secrets from transient labels", async (context) => {
@@ -15964,6 +16055,107 @@ test("MCP application SKU audit redacts configured secrets from transient labels
   assert.notEqual(response.isError, true)
   assert.doesNotMatch(JSON.stringify(response), new RegExp(TOKEN, "u"))
   assert.match(JSON.stringify(response), /\[redacted\]/u)
+})
+
+test("MCP application monetization audits require exact bounded beneficiary queries", async (context) => {
+  const cursor = "420000000000000000"
+  const { applicationMonetizationCalls, client } = await connectedFixture(context)
+
+  const entitlementResponse = await client.callTool({
+    arguments: {
+      after: cursor,
+      beneficiary: { guildId: GUILD_ID, type: "guild" },
+      limit: 2,
+      skuIds: [APPLICATION_SKU_ID],
+    },
+    name: "audit_application_entitlements",
+  })
+  const subscriptionResponse = await client.callTool({
+    arguments: {
+      limit: 3,
+      skuId: APPLICATION_SKU_ID,
+      userId: USER_ID,
+    },
+    name: "audit_application_subscriptions",
+  })
+
+  assert.notEqual(entitlementResponse.isError, true)
+  assert.notEqual(subscriptionResponse.isError, true)
+  const entitlements = structuredContent(entitlementResponse)
+  const subscriptions = structuredContent(subscriptionResponse)
+  assert.deepEqual(entitlements.beneficiary, { id: GUILD_ID, type: "guild" })
+  assert.equal((entitlements.records as unknown[]).length, 1)
+  assert.equal(
+    (subscriptions.inventory as Record<string, unknown>).accessAuthority,
+    "entitlements-only",
+  )
+  assert.equal((subscriptions.records as unknown[]).length, 1)
+  assert.deepEqual(applicationMonetizationCalls.entitlementArguments?.slice(0, 2), [
+    { guildId: GUILD_ID, type: "guild" },
+    [APPLICATION_SKU_ID],
+  ])
+  assert.deepEqual(
+    applicationMonetizationCalls.entitlementArguments?.[2],
+    {
+      after: cursor,
+      limit: 2,
+      signal: applicationMonetizationCalls.entitlementArguments?.[2]?.signal,
+    },
+  )
+  assert.ok(
+    applicationMonetizationCalls.entitlementArguments?.[2]?.signal instanceof AbortSignal,
+  )
+  assert.deepEqual(applicationMonetizationCalls.subscriptionArguments?.slice(0, 2), [
+    USER_ID,
+    APPLICATION_SKU_ID,
+  ])
+  assert.deepEqual(
+    applicationMonetizationCalls.subscriptionArguments?.[2],
+    {
+      limit: 3,
+      signal: applicationMonetizationCalls.subscriptionArguments?.[2]?.signal,
+    },
+  )
+  const entitlementRecord = (entitlements.records as Array<Record<string, unknown>>)[0]
+  const subscriptionRecord = (subscriptions.records as Array<Record<string, unknown>>)[0]
+  assert.ok(entitlementRecord)
+  assert.ok(subscriptionRecord)
+  assert.equal("userId" in entitlementRecord, false)
+  assert.equal("country" in subscriptionRecord, false)
+  assert.equal("entitlementIds" in subscriptionRecord, false)
+
+  const invalidCursorResponse = await client.callTool({
+    arguments: {
+      after: cursor,
+      before: APPLICATION_ENTITLEMENT_ID,
+      beneficiary: { userId: USER_ID, type: "user" },
+      skuIds: [APPLICATION_SKU_ID],
+    },
+    name: "audit_application_entitlements",
+  })
+  const invalidBeneficiaryResponse = await client.callTool({
+    arguments: {
+      beneficiary: { guildId: GUILD_ID, type: "guild", userId: USER_ID },
+      skuIds: [APPLICATION_SKU_ID],
+    },
+    name: "audit_application_entitlements",
+  })
+  assert.equal(invalidCursorResponse.isError, true)
+  assert.equal(invalidBeneficiaryResponse.isError, true)
+
+  const tools = await client.listTools()
+  for (const name of [
+    "audit_application_entitlements",
+    "audit_application_subscriptions",
+  ]) {
+    const tool = tools.tools.find((candidate) => candidate.name === name)
+    assert.deepEqual(tool?.annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    })
+  }
 })
 
 test("MCP Gateway tools expose local health and cursor continuity without content", async (context) => {

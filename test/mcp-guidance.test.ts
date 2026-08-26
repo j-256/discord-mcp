@@ -78,6 +78,8 @@ const SCHEDULED_EVENT_ID = "390000000000000001"
 const STAGE_INSTANCE_ID = "395000000000000001"
 const SOUNDBOARD_SOUND_ID = "397000000000000001"
 const USER_ID = "400000000000000001"
+const APPLICATION_SKU_ID = "410000000000000001"
+const SECOND_APPLICATION_SKU_ID = "410000000000000002"
 const SECOND_USER_ID = "400000000000000002"
 const OPERATION_KEY = "channel-create-attempt-0001"
 
@@ -227,6 +229,10 @@ interface GuidanceCalls {
 }
 
 function guidanceService(options: {
+  applicationEntitlementGuildIds?: readonly string[]
+  applicationEntitlementUserIds?: readonly string[]
+  applicationMonetizationSkuIds?: readonly string[]
+  applicationSubscriptionUserIds?: readonly string[]
   messageContent?: string
   messageError?: Error
   webhookGuildIds?: readonly string[]
@@ -303,6 +309,7 @@ function guidanceService(options: {
         guildId,
       })
     },
+    auditApplicationEntitlements: unexpected,
     async auditApplicationRoleConnectionMetadata() {
       calls.applicationRoleConnectionMetadata += 1
       return fixtureApplicationRoleConnectionMetadataAudit({
@@ -317,6 +324,7 @@ function guidanceService(options: {
         botId: BOT_ID,
       })
     },
+    auditApplicationSubscriptions: unexpected,
     async auditGuildWebhooks(guildId) {
       calls.guildWebhookAudits += 1
       calls.lastGuildId = guildId
@@ -2012,6 +2020,17 @@ function guidanceService(options: {
         applicationEmojiCreationEnabled: false,
         applicationEmojiRootCount: 0,
         applicationIntentChangesEnabled: false,
+        applicationEntitlementGuildIds: [...(options.applicationEntitlementGuildIds ?? [])],
+        applicationEntitlementUserIds: [...(options.applicationEntitlementUserIds ?? [])],
+        applicationMonetizationAuditEnabled:
+          (options.applicationMonetizationSkuIds?.length ?? 0) > 0
+          && (
+            (options.applicationEntitlementGuildIds?.length ?? 0) > 0
+            || (options.applicationEntitlementUserIds?.length ?? 0) > 0
+            || (options.applicationSubscriptionUserIds?.length ?? 0) > 0
+          ),
+        applicationMonetizationSkuIds: [...(options.applicationMonetizationSkuIds ?? [])],
+        applicationSubscriptionUserIds: [...(options.applicationSubscriptionUserIds ?? [])],
         applicationRoleConnectionMetadataChangesEnabled: false,
         announcementCrosspostChannelIds: [],
         announcementCrosspostsEnabled: false,
@@ -2774,6 +2793,30 @@ async function connectedFixture(
 ) {
   const fixture = guidanceService({
     ...options,
+    ...(options.configOverrides?.scopes?.applicationEntitlementGuildIds === undefined
+      ? {}
+      : {
+          applicationEntitlementGuildIds:
+            options.configOverrides.scopes.applicationEntitlementGuildIds,
+        }),
+    ...(options.configOverrides?.scopes?.applicationEntitlementUserIds === undefined
+      ? {}
+      : {
+          applicationEntitlementUserIds:
+            options.configOverrides.scopes.applicationEntitlementUserIds,
+        }),
+    ...(options.configOverrides?.scopes?.applicationMonetizationSkuIds === undefined
+      ? {}
+      : {
+          applicationMonetizationSkuIds:
+            options.configOverrides.scopes.applicationMonetizationSkuIds,
+        }),
+    ...(options.configOverrides?.scopes?.applicationSubscriptionUserIds === undefined
+      ? {}
+      : {
+          applicationSubscriptionUserIds:
+            options.configOverrides.scopes.applicationSubscriptionUserIds,
+        }),
     ...(options.configOverrides?.scopes?.webhookGuildIds === undefined
       ? {}
       : { webhookGuildIds: options.configOverrides.scopes.webhookGuildIds }),
@@ -3309,6 +3352,89 @@ test("MCP application SKU guidance performs one private pinned audit", async (co
   assert.match(text, /Do not infer why an unavailable SKU is unavailable/u)
   assert.match(text, /Stop after the audit/u)
   assert.equal(calls.applicationSkus, 1)
+})
+
+test("MCP application monetization guidance separates access from lifecycle evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: {
+        applicationEntitlementGuildIds: [GUILD_ID],
+        applicationEntitlementUserIds: [USER_ID],
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID, SECOND_APPLICATION_SKU_ID],
+        applicationSubscriptionUserIds: [SECOND_USER_ID],
+      },
+    },
+  })
+
+  const [beneficiaryCompletion, skuCompletion] = await Promise.all([
+    client.complete({
+      argument: { name: "subjectId", value: "" },
+      ref: {
+        name: MCP_PROMPT_NAMES.reviewApplicationMonetization,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "skuIds", value: APPLICATION_SKU_ID.slice(0, 6) },
+      ref: {
+        name: MCP_PROMPT_NAMES.reviewApplicationMonetization,
+        type: "ref/prompt",
+      },
+    }),
+  ])
+  assert.deepEqual(
+    beneficiaryCompletion.completion.values,
+    [GUILD_ID, SECOND_USER_ID, USER_ID].sort(),
+  )
+  assert.deepEqual(skuCompletion.completion.values, [
+    APPLICATION_SKU_ID,
+    SECOND_APPLICATION_SKU_ID,
+  ])
+  assert.equal(totalCalls(calls), 0)
+
+  const entitlementPrompt = await client.getPrompt({
+    arguments: {
+      limit: "2",
+      mode: "guild-entitlements",
+      skuIds: `${APPLICATION_SKU_ID},${SECOND_APPLICATION_SKU_ID}`,
+      subjectId: GUILD_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationMonetization,
+  })
+  const entitlementText = promptText(entitlementPrompt)
+  assert.match(entitlementText, /Call audit_application_entitlements exactly once/u)
+  assert.match(entitlementText, /"type":"guild"/u)
+  assert.match(entitlementText, /excluded ended and deleted entitlements/u)
+  assert.match(entitlementText, /absence from this page is not historical evidence/u)
+  assert.match(entitlementText, /Do not call entitlement consumption/u)
+
+  const subscriptionPrompt = await client.getPrompt({
+    arguments: {
+      mode: "user-subscriptions",
+      skuIds: APPLICATION_SKU_ID,
+      subjectId: SECOND_USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewApplicationMonetization,
+  })
+  const subscriptionText = promptText(subscriptionPrompt)
+  assert.match(subscriptionText, /Call audit_application_subscriptions exactly once/u)
+  assert.match(subscriptionText, /"userId":"400000000000000002"/u)
+  assert.match(subscriptionText, /never authority to grant access/u)
+  assert.match(subscriptionText, /only entitlement evidence can support an access conclusion/u)
+  assert.equal(totalCalls(calls), 0)
+
+  await assert.rejects(
+    () => client.getPrompt({
+      arguments: {
+        mode: "user-subscriptions",
+        skuIds: `${APPLICATION_SKU_ID},${SECOND_APPLICATION_SKU_ID}`,
+        subjectId: SECOND_USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewApplicationMonetization,
+    }),
+    /requires exactly one SKU ID/,
+  )
 })
 
 test("MCP guild webhook guidance completes scope and performs one private audit", async (context) => {

@@ -25,6 +25,11 @@ import {
   ApplicationSkuAuditService,
   type ApplicationSkuAuditResult,
 } from "./application-sku-audit-service.js"
+import {
+  ApplicationMonetizationAuditService,
+  type ApplicationEntitlementAuditResult,
+  type ApplicationSubscriptionAuditResult,
+} from "./application-monetization-audit-service.js"
 import type {
   ApplicationEmojiChangeRequest,
   ApplicationEmojiInventoryResult,
@@ -275,6 +280,9 @@ import {
   DirectMessageService,
 } from "./direct-message-service.js"
 import type {
+  ApplicationEntitlementBeneficiary,
+  ApplicationEntitlementPageOptions,
+  ApplicationSubscriptionPageOptions,
   DiscordClientOptions,
   GuildPageOptions,
   GuildMessageSearchOptions,
@@ -886,6 +894,8 @@ export interface DiscordServiceClient {
   listApplicationRoleConnectionMetadata: DiscordClient["listApplicationRoleConnectionMetadata"]
   replaceApplicationRoleConnectionMetadata: DiscordClient["replaceApplicationRoleConnectionMetadata"]
   listApplicationSkus: DiscordClient["listApplicationSkus"]
+  listApplicationEntitlements: DiscordClient["listApplicationEntitlements"]
+  listApplicationSubscriptions: DiscordClient["listApplicationSubscriptions"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
@@ -1388,6 +1398,7 @@ export class ConnectorService {
   readonly #applicationRoleConnectionMetadataAuditService: ApplicationRoleConnectionMetadataAuditService
   readonly #applicationRoleConnectionMetadataService: ApplicationRoleConnectionMetadataService
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
+  readonly #applicationMonetizationAuditService: ApplicationMonetizationAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
   readonly #embedMessageService: EmbedMessageService
@@ -1539,6 +1550,9 @@ export class ConnectorService {
       ...options.applicationRoleConnectionMetadataOptions,
     })
     this.#applicationSkuAuditService = new ApplicationSkuAuditService({
+      client: this.#client,
+    })
+    this.#applicationMonetizationAuditService = new ApplicationMonetizationAuditService({
       client: this.#client,
     })
     this.#guildWebhookAuditService = new GuildWebhookAuditService({
@@ -2154,6 +2168,58 @@ export class ConnectorService {
     return this.#applicationSkuAuditService.audit(
       identity.application,
       identity.bot.id,
+      options,
+    )
+  }
+
+  async auditApplicationEntitlements(
+    beneficiary: ApplicationEntitlementBeneficiary,
+    skuIds: readonly string[],
+    options: ApplicationEntitlementPageOptions = {},
+  ): Promise<ApplicationEntitlementAuditResult> {
+    const beneficiaryId = beneficiary.type === "guild"
+      ? beneficiary.guildId
+      : beneficiary.userId
+    this.#policy.assertApplicationEntitlementsAuditable(
+      { id: beneficiaryId, type: beneficiary.type },
+      skuIds,
+    )
+    const identity = await this.#verifyIdentity(options)
+    const skuAudit = await this.#applicationSkuAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      options,
+    )
+    return this.#applicationMonetizationAuditService.auditEntitlements(
+      identity.application,
+      identity.bot.id,
+      beneficiary,
+      skuIds,
+      skuAudit.records,
+      options,
+    )
+  }
+
+  async auditApplicationSubscriptions(
+    userId: string,
+    skuId: string,
+    options: ApplicationSubscriptionPageOptions = {},
+  ): Promise<ApplicationSubscriptionAuditResult> {
+    this.#policy.assertApplicationSubscriptionsAuditable(userId, skuId)
+    const configuredSkuScope = this.#policy.applicationMonetizationSkuScope()
+    const identity = await this.#verifyIdentity(options)
+    const skuAudit = await this.#applicationSkuAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      options,
+    )
+    return this.#applicationMonetizationAuditService.auditSubscriptions(
+      identity.application,
+      identity.bot.id,
+      userId,
+      skuId,
+      configuredSkuScope,
+      skuAudit.records,
       options,
     )
   }

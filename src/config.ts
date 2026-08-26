@@ -53,6 +53,7 @@ export interface ConnectorConfig {
   allowApplicationEmojiAudit: boolean
   allowApplicationEmojiChanges: boolean
   allowApplicationIntentChanges: boolean
+  allowApplicationMonetizationAudit: boolean
   allowApplicationRoleConnectionMetadataChanges: boolean
   allowAnnouncementCrossposts: boolean
   allowAnnouncementSubscriptionAudit: boolean
@@ -154,6 +155,10 @@ export interface ConnectorConfig {
   allowWidgetSettingsChanges: boolean
   applicationEmojiRoots: readonly string[]
   applicationCommandGuildIds: ReadonlySet<string>
+  applicationEntitlementGuildIds: ReadonlySet<string>
+  applicationEntitlementUserIds: ReadonlySet<string>
+  applicationMonetizationSkuIds: ReadonlySet<string>
+  applicationSubscriptionUserIds: ReadonlySet<string>
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -456,6 +461,26 @@ export function loadConnectorConfigDocument(
     "applicationCommandGuildIds",
     CONNECTOR_LIMITS.applicationCommandGuildAllowlist,
   )
+  const applicationEntitlementGuildIds = configScope(
+    document,
+    "applicationEntitlementGuildIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
+  const applicationEntitlementUserIds = configScope(
+    document,
+    "applicationEntitlementUserIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
+  const applicationMonetizationSkuIds = configScope(
+    document,
+    "applicationMonetizationSkuIds",
+    CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist,
+  )
+  const applicationSubscriptionUserIds = configScope(
+    document,
+    "applicationSubscriptionUserIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
   const bulkBanGuildIds = configScope(document, "bulkBanGuildIds")
   const guildPruneGuildIds = configScope(document, "guildPruneGuildIds")
@@ -603,6 +628,7 @@ export function loadConnectorConfigDocument(
   for (const [name, guildIds] of [
     [configPolicyPath("adminGuildIds"), adminGuildIds],
     [configPolicyPath("applicationCommandGuildIds"), applicationCommandGuildIds],
+    [configPolicyPath("applicationEntitlementGuildIds"), applicationEntitlementGuildIds],
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
     [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
@@ -1006,6 +1032,10 @@ export function loadConnectorConfigDocument(
   const allowApplicationEmojiAudit = configCapability(document, "applicationEmojiAudit")
   const allowApplicationEmojiChanges = configCapability(document, "applicationEmojiChanges")
   const allowApplicationIntentChanges = configCapability(document, "applicationIntentChanges")
+  const allowApplicationMonetizationAudit = configCapability(
+    document,
+    "applicationMonetizationAudit",
+  )
   const allowApplicationRoleConnectionMetadataChanges = configCapability(
     document,
     "applicationRoleConnectionMetadataChanges",
@@ -1013,6 +1043,23 @@ export function loadConnectorConfigDocument(
   if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowApplicationEmojiChanges")} requires ${configPolicyPath("allowApplicationEmojiAudit")}`,
+    )
+  }
+  if (allowApplicationMonetizationAudit && applicationMonetizationSkuIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowApplicationMonetizationAudit")} requires `
+      + configPolicyPath("applicationMonetizationSkuIds"),
+    )
+  }
+  if (
+    allowApplicationMonetizationAudit
+    && applicationEntitlementGuildIds.size === 0
+    && applicationEntitlementUserIds.size === 0
+    && applicationSubscriptionUserIds.size === 0
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowApplicationMonetizationAudit")} requires at least one exact `
+      + "application entitlement beneficiary or subscription user",
     )
   }
   const allowGuildTemplateAudit = configCapability(document, "guildTemplateAudit")
@@ -1156,6 +1203,7 @@ export function loadConnectorConfigDocument(
     allowApplicationEmojiAudit,
     allowApplicationEmojiChanges,
     allowApplicationIntentChanges,
+    allowApplicationMonetizationAudit,
     allowApplicationRoleConnectionMetadataChanges,
     announcementCrosspostChannelIds,
     announcementSubscriptionSourceChannelIds,
@@ -1266,6 +1314,10 @@ export function loadConnectorConfigDocument(
       "$.storage.applicationEmojiRoots",
     ),
     applicationCommandGuildIds,
+    applicationEntitlementGuildIds,
+    applicationEntitlementUserIds,
+    applicationMonetizationSkuIds,
+    applicationSubscriptionUserIds,
     auditFile: resolveConnectorConfigDocumentAuditFile(document, environment, options),
     attachmentChannelIds,
     attachmentMaxBytes: configLimit(

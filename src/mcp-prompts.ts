@@ -215,6 +215,24 @@ const messageIdListSchema = z.string()
       && new Set(messageIds).size === messageIds.length
   }, `messageIds must be a comma-separated list of at most ${DISCORD_LIMITS.deletionMessages} unique Discord snowflakes without spaces`)
 
+function parseApplicationMonetizationSkuIds(value: string): string[] {
+  return value.split(",")
+}
+
+const applicationMonetizationSkuIdListSchema = z.string()
+  .min(1)
+  .max(
+    (DISCORD_LIMITS.snowflakeCharacters + 1)
+    * CONNECTOR_LIMITS.applicationMonetizationSkuFilters
+    - 1,
+  )
+  .refine((value) => {
+    const skuIds = parseApplicationMonetizationSkuIds(value)
+    return skuIds.length <= CONNECTOR_LIMITS.applicationMonetizationSkuFilters
+      && skuIds.every((skuId) => positiveSnowflakeSchema.safeParse(skuId).success)
+      && new Set(skuIds).size === skuIds.length
+  }, `skuIds must be a comma-separated list of at most ${CONNECTOR_LIMITS.applicationMonetizationSkuFilters} unique positive Discord snowflakes without spaces`)
+
 const promptAuditReasonSchema = z.string()
   .min(1)
   .max(DISCORD_LIMITS.auditReasonEncodedCharacters)
@@ -768,6 +786,22 @@ const reviewApplicationCommandsPromptSchema = z.strictObject({
   guildId: positiveSnowflakeSchema.describe("Exact Discord guild ID"),
 })
 const reviewApplicationRoleConnectionMetadataPromptSchema = z.strictObject({})
+const reviewApplicationMonetizationPromptSchema = z.strictObject({
+  limit: decimalIntegerSchema(
+    1,
+    DISCORD_LIMITS.applicationEntitlementPage,
+    "limit",
+  ).optional().describe(`Records to return, from 1 to ${DISCORD_LIMITS.applicationEntitlementPage}; defaults to ${CONNECTOR_LIMITS.applicationMonetizationPageDefault}`),
+  mode: z.enum([
+    "guild-entitlements",
+    "user-entitlements",
+    "user-subscriptions",
+  ]).describe("Exact evidence family and beneficiary type"),
+  skuIds: applicationMonetizationSkuIdListSchema
+    .describe("Comma-separated configured current-application SKU IDs without spaces; subscriptions require exactly one"),
+  subjectId: positiveSnowflakeSchema
+    .describe("Exact configured entitlement beneficiary or subscription user ID selected by mode"),
+})
 const reviewApplicationSkusPromptSchema = z.strictObject({})
 const reviewGuildWebhooksPromptSchema = z.strictObject({
   guildId: positiveSnowflakeSchema.describe("Exact webhook-audit Discord guild ID"),
@@ -2771,6 +2805,56 @@ export function registerDiscordPrompts(
       "Read-only privacy-safe Discord application command review",
       secrets,
     ),
+  )
+
+  if (toolsets.has("application-monetization")) server.registerPrompt(
+    MCP_PROMPT_NAMES.reviewApplicationMonetization,
+    {
+      argsSchema: policyCompletablePromptSchema(
+        MCP_PROMPT_NAMES.reviewApplicationMonetization,
+        reviewApplicationMonetizationPromptSchema,
+        completionPolicy,
+      ),
+      description: "Review one exact configured application monetization subject through bounded entitlement access evidence or subscription lifecycle evidence without enumerating purchasers, mutating commerce state, or persisting Discord data.",
+      title: "Review Discord application monetization",
+    },
+    ({ limit, mode, skuIds: skuIdList, subjectId }) => {
+      const skuIds = parseApplicationMonetizationSkuIds(skuIdList)
+      const requestedLimit = limit === undefined
+        ? CONNECTOR_LIMITS.applicationMonetizationPageDefault
+        : parseDecimalInteger(limit)
+      if (mode === "user-subscriptions" && skuIds.length !== 1) {
+        throw new RangeError("user-subscriptions mode requires exactly one SKU ID")
+      }
+      const toolName = mode === "user-subscriptions"
+        ? "audit_application_subscriptions"
+        : "audit_application_entitlements"
+      const toolInput = mode === "user-subscriptions"
+        ? { limit: requestedLimit, skuId: skuIds[0], userId: subjectId }
+        : {
+            beneficiary: mode === "guild-entitlements"
+              ? { guildId: subjectId, type: "guild" as const }
+              : { type: "user" as const, userId: subjectId },
+            limit: requestedLimit,
+            skuIds,
+          }
+      return userPrompt(
+        promptText(
+          { limit: requestedLimit, mode, skuIds, subjectId },
+          [
+            `1. Call ${toolName} exactly once with this exact input: ${JSON.stringify(toolInput)}.`,
+            "2. Treat returned records as bounded privacy-minimized evidence. Do not infer omitted purchaser identities, subject profiles, payment geography or source, product names or benefits, prices, revenue, unconfigured related SKU IDs, entitlement links, raw fields, or historical records.",
+            mode === "user-subscriptions"
+              ? "3. Summarize subscription lifecycle status and periods by exact subscription ID. State prominently that subscription records are reporting evidence only and never authority to grant access; only entitlement evidence can support an access conclusion."
+              : "3. Summarize present-access entitlement evidence by exact entitlement and SKU ID, normalized type, optional validity interval, and consumed state. State that Discord excluded ended and deleted entitlements, the page is bounded, and absence from this page is not historical evidence.",
+            "4. Report page boundaries, cursor direction, possible-more status, projection completeness, count-only future evidence, privacy omissions, and every fixed warning. Never convert unknown evidence into a known negative.",
+            "5. Stop after this audit. Do not call entitlement consumption, test-grant creation or deletion, SKU changes, administration, deletion, or any other write tool.",
+          ],
+        ),
+        "Read-only exact-beneficiary Discord application monetization review",
+        secrets,
+      )
+    },
   )
 
   if (toolsets.has("connector")) server.registerPrompt(

@@ -132,6 +132,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "applicationCommandChanges",
   "applicationEmojiAudit",
   "applicationEmojiChanges",
+  "applicationMonetizationAudit",
   "applicationIntentChanges",
   "applicationRoleConnectionMetadataChanges",
   "announcementCrossposts",
@@ -236,6 +237,10 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
 export const CONFIG_SCOPE_NAMES = Object.freeze([
   "adminGuildIds",
   "applicationCommandGuildIds",
+  "applicationEntitlementGuildIds",
+  "applicationEntitlementUserIds",
+  "applicationMonetizationSkuIds",
+  "applicationSubscriptionUserIds",
   "announcementCrosspostChannelIds",
   "announcementSubscriptionSourceChannelIds",
   "announcementSubscriptionTargetChannelIds",
@@ -446,8 +451,16 @@ const DIRECT_MESSAGE_EDITING_CAPABILITY_DESCRIPTION = "Enable reviewed edits of 
 const DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION = "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
 const EMBED_MESSAGE_CAPABILITY_DESCRIPTION = "Enable reviewed remote-free static rich-embed message creation and exact bot-owned replacement"
 const EMBED_MESSAGE_SCOPE_DESCRIPTION = "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages"
+const APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION = "Enable exact-beneficiary entitlement and exact-user subscription lifecycle audits"
+const APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION = "Exact guild beneficiary ID allowlist for application entitlement audit"
+const APPLICATION_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user beneficiary ID allowlist for application entitlement audit"
+const APPLICATION_MONETIZATION_SKU_SCOPE_DESCRIPTION = "Exact current-application SKU ID allowlist for entitlement and subscription audit"
+const APPLICATION_SUBSCRIPTION_USER_SCOPE_DESCRIPTION = "Exact user ID allowlist for application subscription lifecycle audit"
 
 function capabilityDescription(documentKey: string): string {
+  if (documentKey === "applicationMonetizationAudit") {
+    return APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION
+  }
   if (documentKey === "applicationCommandChanges") {
     return APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION
   }
@@ -512,6 +525,18 @@ function capabilityDescription(documentKey: string): string {
 }
 
 function scopeDescription(documentKey: string): string {
+  if (documentKey === "applicationEntitlementGuildIds") {
+    return APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationEntitlementUserIds") {
+    return APPLICATION_ENTITLEMENT_USER_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationMonetizationSkuIds") {
+    return APPLICATION_MONETIZATION_SKU_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationSubscriptionUserIds") {
+    return APPLICATION_SUBSCRIPTION_USER_SCOPE_DESCRIPTION
+  }
   if (documentKey === "applicationCommandGuildIds") {
     return APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION
   }
@@ -574,7 +599,13 @@ const scopeShape = Object.fromEntries(
       0,
       name === "directMessageUserIds"
         ? CONNECTOR_LIMITS.directMessageUserAllowlist
-        : CONFIG_SCOPE_ENTRIES,
+        : name === "applicationEntitlementGuildIds"
+          || name === "applicationEntitlementUserIds"
+          || name === "applicationSubscriptionUserIds"
+          ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
+          : name === "applicationMonetizationSkuIds"
+            ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
+            : CONFIG_SCOPE_ENTRIES,
     )
       .describe(scopeDescription(name))
       .optional(),

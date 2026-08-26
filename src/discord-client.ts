@@ -39,6 +39,7 @@ import {
 } from "./embed-layout.js"
 import {
   ApplicationEmojiEvidenceError,
+  ApplicationMonetizationEvidenceError,
   AutoModerationEvidenceError,
   ChannelMetadataEvidenceError,
   DirectMessageEvidenceError,
@@ -121,6 +122,7 @@ import type {
 import type {
   DiscordApplication,
   DiscordApplicationCommand,
+  DiscordApplicationEntitlement,
   DiscordApplicationRoleConnectionMetadata,
   DiscordApplicationSku,
   DiscordBan,
@@ -138,6 +140,7 @@ import type {
   DiscordPollVoters,
   DiscordReactionType,
   DiscordRole,
+  DiscordSkuSubscription,
   DiscordThreadList,
   DiscordThreadMember,
   DiscordUser,
@@ -1087,6 +1090,22 @@ export interface ArchivedThreadPageOptions extends RequestOptions {
   before?: string
   limit?: number
 }
+
+export interface ApplicationEntitlementPageOptions extends RequestOptions {
+  after?: string
+  before?: string
+  limit?: number
+}
+
+export interface ApplicationSubscriptionPageOptions extends RequestOptions {
+  after?: string
+  before?: string
+  limit?: number
+}
+
+export type ApplicationEntitlementBeneficiary =
+  | { guildId: string; type: "guild" }
+  | { type: "user"; userId: string }
 
 export type DiscordAllowedMentions =
   | {
@@ -8738,6 +8757,110 @@ export class DiscordClient {
         suppressFailureCause: true,
       },
     )
+  }
+
+  async listApplicationEntitlements(
+    applicationId: string,
+    beneficiary: ApplicationEntitlementBeneficiary,
+    skuIds: readonly string[],
+    options: ApplicationEntitlementPageOptions = {},
+  ): Promise<DiscordApplicationEntitlement[]> {
+    assertSearchSnowflake(applicationId, "Discord application entitlement application ID")
+    if (!beneficiary || typeof beneficiary !== "object") {
+      throw new RangeError("Discord application entitlement beneficiary is invalid")
+    }
+    if (beneficiary.type === "guild") {
+      assertSearchSnowflake(beneficiary.guildId, "Discord application entitlement guild ID")
+    } else if (beneficiary.type === "user") {
+      assertSearchSnowflake(beneficiary.userId, "Discord application entitlement user ID")
+    } else {
+      throw new RangeError("Discord application entitlement beneficiary type is invalid")
+    }
+    assertBoundedArray(
+      skuIds,
+      CONNECTOR_LIMITS.applicationMonetizationSkuFilters,
+      "Discord application entitlement SKU filters",
+    )
+    for (const skuId of skuIds) {
+      assertSearchSnowflake(skuId, "Discord application entitlement SKU ID")
+    }
+    if (options.before !== undefined && options.after !== undefined) {
+      throw new RangeError("Discord application entitlement page accepts only one cursor")
+    }
+    assertSearchSnowflake(options.before, "Discord application entitlement before cursor")
+    assertSearchSnowflake(options.after, "Discord application entitlement after cursor")
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.applicationEntitlementPage,
+      "Discord application entitlement page limit",
+    )
+    const limit = options.limit ?? CONNECTOR_LIMITS.applicationMonetizationPageDefault
+    const response = await this.#request<unknown>(
+      "list_application_entitlements",
+      `/applications/${applicationId}/entitlements${queryString({
+        after: options.after,
+        before: options.before,
+        exclude_deleted: true,
+        exclude_ended: true,
+        guild_id: beneficiary.type === "guild" ? beneficiary.guildId : undefined,
+        limit,
+        sku_ids: skuIds.join(","),
+        user_id: beneficiary.type === "user" ? beneficiary.userId : undefined,
+      })}`,
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        diagnosticRoute: "/applications/{application.id}/entitlements",
+        maxResponseBytes: DISCORD_LIMITS.applicationEntitlementResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    if (!Array.isArray(response) || response.length > limit) {
+      throw new ApplicationMonetizationEvidenceError(
+        "Discord returned an invalid bounded application entitlement page",
+      )
+    }
+    return response as DiscordApplicationEntitlement[]
+  }
+
+  async listApplicationSubscriptions(
+    skuId: string,
+    userId: string,
+    options: ApplicationSubscriptionPageOptions = {},
+  ): Promise<DiscordSkuSubscription[]> {
+    assertSearchSnowflake(skuId, "Discord application subscription SKU ID")
+    assertSearchSnowflake(userId, "Discord application subscription user ID")
+    if (options.before !== undefined && options.after !== undefined) {
+      throw new RangeError("Discord application subscription page accepts only one cursor")
+    }
+    assertSearchSnowflake(options.before, "Discord application subscription before cursor")
+    assertSearchSnowflake(options.after, "Discord application subscription after cursor")
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.applicationSubscriptionPage,
+      "Discord application subscription page limit",
+    )
+    const limit = options.limit ?? CONNECTOR_LIMITS.applicationMonetizationPageDefault
+    const response = await this.#request<unknown>(
+      "list_application_subscriptions",
+      `/skus/${skuId}/subscriptions${queryString({
+        after: options.after,
+        before: options.before,
+        limit,
+        user_id: userId,
+      })}`,
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        diagnosticRoute: "/skus/{sku.id}/subscriptions",
+        maxResponseBytes: DISCORD_LIMITS.applicationSubscriptionResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    if (!Array.isArray(response) || response.length > limit) {
+      throw new ApplicationMonetizationEvidenceError(
+        "Discord returned an invalid bounded application subscription page",
+      )
+    }
+    return response as DiscordSkuSubscription[]
   }
 
   listGlobalApplicationCommands(

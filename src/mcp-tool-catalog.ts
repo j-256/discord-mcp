@@ -119,6 +119,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "audit", "command", "context", "exposure", "install", "permission", "security", "slash"],
     toolset: "connector",
   },
+  audit_application_entitlements: {
+    keywords: ["access", "application", "audit", "beneficiary", "entitlement", "monetization", "sku"],
+    toolset: "application-monetization",
+  },
   audit_application_posture: {
     keywords: ["application", "audit", "bot", "install", "intent", "security", "setup"],
     toolset: "connector",
@@ -130,6 +134,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   audit_application_skus: {
     keywords: ["application", "audit", "availability", "catalog", "monetization", "offering", "product", "sku", "subscription"],
     toolset: "connector",
+  },
+  audit_application_subscriptions: {
+    keywords: ["application", "audit", "lifecycle", "monetization", "renewal", "sku", "subscription"],
+    toolset: "application-monetization",
   },
   audit_guild_webhooks: {
     keywords: ["application", "audit", "bearer", "credential", "exposure", "guild", "security", "webhook"],

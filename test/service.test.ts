@@ -104,6 +104,9 @@ const CREATED_ROLE_ID = "700000000000000001"
 const ANCHOR_ROLE_ID = "700000000000000002"
 const FORUM_TAG_ID = "800000000000000001"
 const MEMBER_USER_ID = "600000000000000001"
+const APPLICATION_SKU_ID = "610000000000000001"
+const APPLICATION_ENTITLEMENT_ID = "620000000000000001"
+const APPLICATION_SUBSCRIPTION_ID = "630000000000000001"
 const WEBHOOK_ID = "900000000000000001"
 const FOLLOWER_WEBHOOK_ID = "900000000000000002"
 const INTEGRATION_ID = "905000000000000001"
@@ -832,6 +835,12 @@ function serviceFixture(overrides: {
     async listApplicationSkus() {
       return []
     },
+    async listApplicationEntitlements() {
+      throw new Error("Unexpected application entitlement inventory")
+    },
+    async listApplicationSubscriptions() {
+      throw new Error("Unexpected application subscription inventory")
+    },
     async listGuildStickers() {
       return []
     },
@@ -1480,6 +1489,148 @@ test("service pins SKU audits to verified current application identity", async (
   ])
   assert.ok(reads.every(({ signal }) => signal === controller.signal))
   assert.equal(reads[2]?.applicationId, APPLICATION_ID)
+})
+
+test("service audits one exact guild beneficiary across configured current-application SKUs", async () => {
+  const controller = new AbortController()
+  const cursor = "620000000000000000"
+  const reads: string[] = []
+  const { service } = serviceFixture({
+    configOverrides: {
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: {
+        applicationEntitlementGuildIds: [GUILD_ID],
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID],
+      },
+    },
+    client: {
+      async listApplicationSkus(applicationId, options) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(options?.signal, controller.signal)
+        reads.push("skus")
+        return [{
+          application_id: APPLICATION_ID,
+          flags: 132,
+          id: APPLICATION_SKU_ID,
+          name: "Private supporter name",
+          slug: "private-supporter-slug",
+          type: 5,
+        }]
+      },
+      async listApplicationEntitlements(applicationId, beneficiary, skuIds, options) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.deepEqual(beneficiary, { guildId: GUILD_ID, type: "guild" })
+        assert.deepEqual(skuIds, [APPLICATION_SKU_ID])
+        assert.deepEqual(options, {
+          after: cursor,
+          limit: 2,
+          signal: controller.signal,
+        })
+        reads.push("entitlements")
+        return [{
+          application_id: APPLICATION_ID,
+          consumed: false,
+          deleted: false,
+          guild_id: GUILD_ID,
+          id: APPLICATION_ENTITLEMENT_ID,
+          sku_id: APPLICATION_SKU_ID,
+          type: 8,
+          user_id: MEMBER_USER_ID,
+        }]
+      },
+    },
+  })
+
+  const result = await service.auditApplicationEntitlements(
+    { guildId: GUILD_ID, type: "guild" },
+    [APPLICATION_SKU_ID],
+    { after: cursor, limit: 2, signal: controller.signal },
+  )
+
+  assert.deepEqual(reads, ["skus", "entitlements"])
+  assert.deepEqual(result.application, { botId: BOT_ID, id: APPLICATION_ID })
+  assert.deepEqual(result.beneficiary, { id: GUILD_ID, type: "guild" })
+  assert.deepEqual(result.inventory.skuIds, [APPLICATION_SKU_ID])
+  assert.deepEqual(result.records, [{
+    consumed: false,
+    endsAt: null,
+    id: APPLICATION_ENTITLEMENT_ID,
+    skuId: APPLICATION_SKU_ID,
+    startsAt: null,
+    type: "application-subscription",
+    unknownFieldCount: 0,
+  }])
+  assert.equal(JSON.stringify(result).includes(MEMBER_USER_ID), false)
+  assert.equal(JSON.stringify(result).includes("Private supporter"), false)
+})
+
+test("service treats exact-user subscription state as lifecycle evidence only", async () => {
+  const controller = new AbortController()
+  const reads: string[] = []
+  const { calls, service } = serviceFixture({
+    configOverrides: {
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: {
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID],
+        applicationSubscriptionUserIds: [MEMBER_USER_ID],
+      },
+    },
+    client: {
+      async listApplicationSkus() {
+        reads.push("skus")
+        return [{
+          application_id: APPLICATION_ID,
+          flags: 260,
+          id: APPLICATION_SKU_ID,
+          name: "Private subscriber name",
+          slug: "private-subscriber-slug",
+          type: 5,
+        }]
+      },
+      async listApplicationSubscriptions(skuId, userId, options) {
+        assert.equal(skuId, APPLICATION_SKU_ID)
+        assert.equal(userId, MEMBER_USER_ID)
+        assert.deepEqual(options, { limit: 1, signal: controller.signal })
+        reads.push("subscriptions")
+        return [{
+          canceled_at: null,
+          country: "US",
+          current_period_end: "2026-09-01T00:00:00Z",
+          current_period_start: "2026-08-01T00:00:00Z",
+          entitlement_ids: [APPLICATION_ENTITLEMENT_ID],
+          id: APPLICATION_SUBSCRIPTION_ID,
+          renewal_sku_ids: [APPLICATION_SKU_ID],
+          sku_ids: [APPLICATION_SKU_ID],
+          status: 0,
+          user_id: MEMBER_USER_ID,
+        }]
+      },
+    },
+  })
+
+  const result = await service.auditApplicationSubscriptions(
+    MEMBER_USER_ID,
+    APPLICATION_SKU_ID,
+    { limit: 1, signal: controller.signal },
+  )
+
+  assert.deepEqual(reads, ["skus", "subscriptions"])
+  assert.equal(result.inventory.accessAuthority, "entitlements-only")
+  assert.equal(result.inventory.userId, MEMBER_USER_ID)
+  assert.equal(result.records[0]?.status, "active")
+  assert.equal(result.records[0]?.entitlementCount, 1)
+  assert.equal(JSON.stringify(result).includes("US"), false)
+  assert.equal(JSON.stringify(result).includes("Private subscriber"), false)
+
+  await assert.rejects(
+    () => service.auditApplicationSubscriptions(
+      "600000000000000002",
+      APPLICATION_SKU_ID,
+    ),
+    PolicyError,
+  )
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
 })
 
 test("service pins guild webhook audits to verified connector identity and exact scope", async () => {

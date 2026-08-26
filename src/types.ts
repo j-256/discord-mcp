@@ -85,6 +85,19 @@ export interface DiscordApplicationRoleConnectionMetadata {
   type: number
 }
 
+export interface DiscordApplicationEntitlement {
+  application_id: string
+  consumed?: boolean
+  deleted: boolean
+  ends_at?: string | null
+  guild_id?: string | null
+  id: string
+  sku_id: string
+  starts_at?: string | null
+  type: number
+  user_id?: string | null
+}
+
 export interface DiscordApplicationSku {
   application_id: string
   flags: number
@@ -92,6 +105,19 @@ export interface DiscordApplicationSku {
   name: string
   slug: string
   type: number
+}
+
+export interface DiscordSkuSubscription {
+  canceled_at?: string | null
+  country?: string
+  current_period_end: string
+  current_period_start: string
+  entitlement_ids: string[]
+  id: string
+  renewal_sku_ids?: string[] | null
+  sku_ids: string[]
+  status: number
+  user_id: string
 }
 
 export interface DiscordBan {

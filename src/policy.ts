@@ -20,6 +20,11 @@ export interface PolicyDescription {
   applicationEmojiCreationEnabled: boolean
   applicationEmojiRootCount: number
   applicationIntentChangesEnabled: boolean
+  applicationEntitlementGuildIds: string[]
+  applicationEntitlementUserIds: string[]
+  applicationMonetizationAuditEnabled: boolean
+  applicationMonetizationSkuIds: string[]
+  applicationSubscriptionUserIds: string[]
   applicationRoleConnectionMetadataChangesEnabled: boolean
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
@@ -234,6 +239,7 @@ export class ScopePolicy {
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
   readonly #allowApplicationIntentChanges: boolean
+  readonly #allowApplicationMonetizationAudit: boolean
   readonly #allowApplicationRoleConnectionMetadataChanges: boolean
   readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAnnouncementSubscriptionAudit: boolean
@@ -344,6 +350,10 @@ export class ScopePolicy {
   readonly #attachmentRoots: readonly string[]
   readonly #applicationEmojiRoots: readonly string[]
   readonly #applicationCommandGuildIds: ReadonlySet<string>
+  readonly #applicationEntitlementGuildIds: ReadonlySet<string>
+  readonly #applicationEntitlementUserIds: ReadonlySet<string>
+  readonly #applicationMonetizationSkuIds: ReadonlySet<string>
+  readonly #applicationSubscriptionUserIds: ReadonlySet<string>
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
@@ -446,6 +456,7 @@ export class ScopePolicy {
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
     | "allowApplicationIntentChanges"
+    | "allowApplicationMonetizationAudit"
     | "allowApplicationRoleConnectionMetadataChanges"
     | "allowAnnouncementSubscriptionAudit"
     | "allowAnnouncementSubscriptionChanges"
@@ -552,6 +563,10 @@ export class ScopePolicy {
     | "attachmentRoots"
     | "applicationEmojiRoots"
     | "applicationCommandGuildIds"
+    | "applicationEntitlementGuildIds"
+    | "applicationEntitlementUserIds"
+    | "applicationMonetizationSkuIds"
+    | "applicationSubscriptionUserIds"
     | "automodAlertChannelIds"
     | "automodGuildIds"
     | "banAuditGuildIds"
@@ -624,6 +639,7 @@ export class ScopePolicy {
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
+    this.#allowApplicationMonetizationAudit = config.allowApplicationMonetizationAudit ?? false
     this.#allowApplicationRoleConnectionMetadataChanges =
       config.allowApplicationRoleConnectionMetadataChanges ?? false
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
@@ -740,6 +756,10 @@ export class ScopePolicy {
     this.#attachmentRoots = config.attachmentRoots ?? []
     this.#applicationEmojiRoots = config.applicationEmojiRoots ?? []
     this.#applicationCommandGuildIds = config.applicationCommandGuildIds ?? new Set()
+    this.#applicationEntitlementGuildIds = config.applicationEntitlementGuildIds ?? new Set()
+    this.#applicationEntitlementUserIds = config.applicationEntitlementUserIds ?? new Set()
+    this.#applicationMonetizationSkuIds = config.applicationMonetizationSkuIds ?? new Set()
+    this.#applicationSubscriptionUserIds = config.applicationSubscriptionUserIds ?? new Set()
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
@@ -833,6 +853,17 @@ export class ScopePolicy {
         && this.#applicationEmojiRoots.length > 0,
       applicationEmojiRootCount: this.#applicationEmojiRoots.length,
       applicationIntentChangesEnabled: this.#allowApplicationIntentChanges,
+      applicationEntitlementGuildIds: [...this.#applicationEntitlementGuildIds].sort(),
+      applicationEntitlementUserIds: [...this.#applicationEntitlementUserIds].sort(),
+      applicationMonetizationAuditEnabled: this.#allowApplicationMonetizationAudit
+        && this.#applicationMonetizationSkuIds.size > 0
+        && (
+          this.#applicationEntitlementGuildIds.size > 0
+          || this.#applicationEntitlementUserIds.size > 0
+          || this.#applicationSubscriptionUserIds.size > 0
+        ),
+      applicationMonetizationSkuIds: [...this.#applicationMonetizationSkuIds].sort(),
+      applicationSubscriptionUserIds: [...this.#applicationSubscriptionUserIds].sort(),
       applicationRoleConnectionMetadataChangesEnabled:
         this.#allowApplicationRoleConnectionMetadataChanges,
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
@@ -1932,6 +1963,67 @@ export class ScopePolicy {
   assertApplicationEmojiAuditable(): void {
     if (!this.#allowApplicationEmojiAudit) {
       throw new PolicyError("Discord application emoji audit is disabled by connector configuration")
+    }
+  }
+
+  applicationMonetizationSkuScope(): string[] {
+    this.#assertApplicationMonetizationAuditEnabled()
+    return [...this.#applicationMonetizationSkuIds].sort()
+  }
+
+  assertApplicationEntitlementsAuditable(
+    beneficiary: Readonly<{ type: "guild" | "user"; id: string }>,
+    skuIds: readonly string[],
+  ): void {
+    this.#assertApplicationMonetizationAuditEnabled()
+    if (beneficiary.type === "guild") {
+      this.assertGuildAllowed(beneficiary.id)
+      if (!this.#applicationEntitlementGuildIds.has(beneficiary.id)) {
+        throw new PolicyError(
+          `Discord guild ${beneficiary.id} is outside the application entitlement scope`,
+        )
+      }
+    } else if (!this.#applicationEntitlementUserIds.has(beneficiary.id)) {
+      throw new PolicyError(
+        `Discord user ${beneficiary.id} is outside the application entitlement scope`,
+      )
+    }
+    this.#assertApplicationMonetizationSkuIdsAuditable(skuIds)
+  }
+
+  assertApplicationSubscriptionsAuditable(userId: string, skuId: string): void {
+    this.#assertApplicationMonetizationAuditEnabled()
+    if (!this.#applicationSubscriptionUserIds.has(userId)) {
+      throw new PolicyError(
+        `Discord user ${userId} is outside the application subscription scope`,
+      )
+    }
+    this.#assertApplicationMonetizationSkuIdsAuditable([skuId])
+  }
+
+  #assertApplicationMonetizationAuditEnabled(): void {
+    if (!this.#allowApplicationMonetizationAudit) {
+      throw new PolicyError(
+        "Discord application monetization audit is disabled by connector configuration",
+      )
+    }
+    if (this.#applicationMonetizationSkuIds.size === 0) {
+      throw new PolicyError(
+        "Discord application monetization audit requires an exact SKU allowlist",
+      )
+    }
+  }
+
+  #assertApplicationMonetizationSkuIdsAuditable(skuIds: readonly string[]): void {
+    if (skuIds.length === 0) {
+      throw new PolicyError(
+        "Discord application monetization audit requires at least one exact SKU ID",
+      )
+    }
+    for (const skuId of new Set(skuIds)) {
+      if (!this.#applicationMonetizationSkuIds.has(skuId)) {
+        throw new PolicyError(`Discord SKU ${skuId} is outside the application monetization scope`)
+      }
     }
   }
 

@@ -16,6 +16,7 @@ import {
 } from "../src/discord-client.js"
 import {
   ApplicationEmojiEvidenceError,
+  ApplicationMonetizationEvidenceError,
   ChannelMetadataEvidenceError,
   DirectMessageEvidenceError,
   DiscordApiError,
@@ -2428,6 +2429,161 @@ test("Discord client bounds and protects current-application SKU inventories", a
   assert.throws(
     () => client.listApplicationSkus("invalid"),
     /application SKU application ID/u,
+  )
+})
+
+test("Discord client requests only exact filtered application entitlement pages", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const entitlement = {
+    application_id: "100",
+    consumed: false,
+    deleted: false,
+    id: "600",
+    sku_id: "400",
+    type: 1,
+    user_id: "300",
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([entitlement])
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.listApplicationEntitlements(
+    "100",
+    { type: "guild", guildId: "200" },
+    ["400", "500"],
+  ), [entitlement])
+  assert.deepEqual(await client.listApplicationEntitlements(
+    "100",
+    { type: "user", userId: "300" },
+    ["400"],
+    { after: "550", limit: 10 },
+  ), [entitlement])
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/entitlements?exclude_deleted=true&exclude_ended=true&guild_id=200&limit=25&sku_ids=400%2C500`,
+  }, {
+    method: "GET",
+    url: `${API_BASE_URL}/applications/100/entitlements?after=550&exclude_deleted=true&exclude_ended=true&limit=10&sku_ids=400&user_id=300`,
+  }])
+
+  await assert.rejects(
+    client.listApplicationEntitlements(
+      "100",
+      { type: "user", userId: "300" },
+      ["400"],
+      { after: "500", before: "600" },
+    ),
+    /only one cursor/u,
+  )
+  await assert.rejects(
+    client.listApplicationEntitlements(
+      "100",
+      { type: "user", userId: "300" },
+      [],
+    ),
+    /SKU filters/u,
+  )
+  await assert.rejects(
+    client.listApplicationEntitlements(
+      "100",
+      { type: "guild", guildId: "invalid" },
+      ["400"],
+    ),
+    /guild ID/u,
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.applicationEntitlementResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listApplicationEntitlements(
+      "100",
+      { type: "user", userId: "300" },
+      ["400"],
+    ),
+    /exceeded its local response bound/u,
+  )
+
+  const overfull = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse([entitlement, entitlement]),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    overfull.listApplicationEntitlements(
+      "100",
+      { type: "user", userId: "300" },
+      ["400"],
+      { limit: 1 },
+    ),
+    ApplicationMonetizationEvidenceError,
+  )
+})
+
+test("Discord client requires exact-user application subscription pages", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const subscription = {
+    current_period_end: "2026-09-01T00:00:00Z",
+    current_period_start: "2026-08-01T00:00:00Z",
+    entitlement_ids: ["500"],
+    id: "600",
+    sku_ids: ["200"],
+    status: 0,
+    user_id: "300",
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse([subscription])
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.listApplicationSubscriptions(
+    "200",
+    "300",
+    { before: "700", limit: 50 },
+  ), [subscription])
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: `${API_BASE_URL}/skus/200/subscriptions?before=700&limit=50&user_id=300`,
+  }])
+
+  await assert.rejects(
+    client.listApplicationSubscriptions("200", "invalid"),
+    /subscription user ID/u,
+  )
+  await assert.rejects(
+    client.listApplicationSubscriptions(
+      "200",
+      "300",
+      { after: "500", before: "700" },
+    ),
+    /only one cursor/u,
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.applicationSubscriptionResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.listApplicationSubscriptions("200", "300"),
+    /exceeded its local response bound/u,
   )
 })
 

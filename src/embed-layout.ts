@@ -3,6 +3,9 @@ import {
   canonicalDiscordNotificationUserIds,
   discordMentionedUserIds,
 } from "./message-safety.js"
+import { isExplicitOffsetIso8601Timestamp } from "./iso-timestamp.js"
+
+export { isExplicitOffsetIso8601Timestamp } from "./iso-timestamp.js"
 
 export const EMBED_LAYOUT_LIMITS = Object.freeze({
   aggregateCharacters: 6_000,
@@ -115,7 +118,6 @@ const DISCORD_AUTHOR_KEYS = new Set(["name"])
 const DISCORD_FOOTER_KEYS = new Set(["text"])
 const HTTP_URL_PATTERN = /https?:\/\//iu
 const TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
-const ISO_8601_TIMESTAMP_PATTERN = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/
 const MESSAGE_CONTENT_CHARACTERS = 2_000
 
 function record(value: unknown, path: string): Record<string, unknown> {
@@ -169,30 +171,6 @@ function optionalText(
   path: string,
 ): string | null {
   return value === undefined ? null : normalizedText(value, maximum, path)
-}
-
-export function isExplicitOffsetIso8601Timestamp(
-  value: unknown,
-): value is string {
-  if (typeof value !== "string") return false
-  const match = ISO_8601_TIMESTAMP_PATTERN.exec(value)
-  if (!match) return false
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  const hour = Number(match[4])
-  const minute = Number(match[5])
-  const second = Number(match[6])
-  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-  const monthDays = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return month >= 1
-    && month <= 12
-    && day >= 1
-    && day <= (monthDays[month - 1] ?? 0)
-    && hour <= 23
-    && minute <= 59
-    && second <= 59
-    && !Number.isNaN(Date.parse(value))
 }
 
 function normalizedTimestamp(value: unknown, path: string): string | null {

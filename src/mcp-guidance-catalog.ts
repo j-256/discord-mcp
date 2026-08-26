@@ -132,6 +132,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewApplicationRoleConnectionMetadata: "review_application_role_connection_metadata",
   reviewApplicationRoleConnectionMetadataChange:
     "review_application_role_connection_metadata_change",
+  reviewApplicationMonetization: "review_application_monetization",
   reviewApplicationSkus: "review_application_skus",
   reviewAnnouncementCrosspost: "review_announcement_crosspost",
   reviewAnnouncementSubscription: "review_announcement_subscription",
@@ -207,6 +208,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewApplicationCommands]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadata]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationRoleConnectionMetadataChange]: "linked-roles",
+  [MCP_PROMPT_NAMES.reviewApplicationMonetization]: "application-monetization",
   [MCP_PROMPT_NAMES.reviewApplicationSkus]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationIntentEnablement]: "application-security",
   [MCP_PROMPT_NAMES.reviewInviteCreation]: "invites",
