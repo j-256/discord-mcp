@@ -249,6 +249,10 @@ const PROFILE_NAME = "installed-profile"
 const PROFILE_TOKEN_VARIABLE = "DISCORD_INSTALLED_BOT_TOKEN"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const EXPECTED_MCP_TOOL_PROGRESS = [
+  { message: "Discord request round started", progress: 0, total: 1 },
+  { message: "Discord request round finished", progress: 1, total: 1 },
+]
 const entrypoint = process.argv[2]
 const version = process.argv[3]
 assert.equal(connector.CONNECTOR_VERSION, version)
@@ -414,10 +418,14 @@ try {
   ])
   assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
   assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
+  const progress = []
   const discovery = await client.callTool({
     arguments: { query: REVIEWED_DELETION_TOOLS[0] },
     name: DISCOVERY_TOOL_NAME,
+  }, {
+    onprogress: (update) => progress.push(update),
   })
+  assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
   assert.equal(discovery.isError, undefined)
   assert.deepEqual(
     discovery.structuredContent.newlyEnabledToolNames,
@@ -449,11 +457,19 @@ const modernClient = new Client(
 try {
   await modernClient.connect(modernTransport)
   assert.deepEqual(modernClient.getServerVersion(), expectedServerIdentity)
+  const progress = []
+  await modernClient.callTool({
+    arguments: { query: REVIEWED_DELETION_TOOLS[0] },
+    name: DISCOVERY_TOOL_NAME,
+  }, {
+    onprogress: (update) => progress.push(update),
+  })
   const completion = await modernClient.complete({
     argument: { name: "guildId", value: "300" },
     ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
   })
   assert.equal(modernClient.getProtocolEra(), "modern")
+  assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
   assert.deepEqual(modernClient.getServerCapabilities().completions, {})
   assert.deepEqual(completion.completion.values, [GUILD_ID])
 } finally {

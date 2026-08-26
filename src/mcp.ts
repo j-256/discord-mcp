@@ -100,6 +100,12 @@ import {
   type ChannelPermissionOverwriteRequest,
 } from "./channel-permission-overwrite-service.js"
 import { catalogOnlyResult } from "./catalog-contract.js"
+import { installMcpRequestCancellation } from "./mcp-request-cancellation.js"
+import {
+  MCP_TOOL_PROGRESS,
+  notifyMcpToolProgress,
+  type McpToolContext,
+} from "./mcp-tool-progress.js"
 import {
   normalizeForumPostRequest,
   type ForumPostRequest,
@@ -10231,7 +10237,7 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
     name: McpToolName,
     handler: (
       input: Input,
-      context: Parameters<Parameters<McpServer["registerTool"]>[2]>[1],
+      context: McpToolContext,
     ) => Promise<ReturnType<typeof toolResult> | ReturnType<typeof inputRequired>>,
     secrets: readonly (string | undefined)[],
     observability: OperationalObserver,
@@ -10242,7 +10248,7 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
     ].includes(MCP_TOOL_RISK_CLASSES[name])
     return async (
       input: Input,
-      context: Parameters<Parameters<McpServer["registerTool"]>[2]>[1],
+      context: McpToolContext,
     ) => {
       let observation: OperationObservation | undefined
       try {
@@ -10251,6 +10257,7 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
           extractMcpRemoteSpanContext(context.mcpReq._meta),
         )
       } catch {}
+      await notifyMcpToolProgress(context, MCP_TOOL_PROGRESS.started)
       try {
         const invoke = () => handler(input, context)
         const result = observation ? await observation.run(invoke) : await invoke()
@@ -10288,6 +10295,8 @@ function createSafeToolHandler(mcpReadResponseMaxBytes: number) {
           mcpReadResponseMaxBytes,
           mutationCapable,
         )
+      } finally {
+        await notifyMcpToolProgress(context, MCP_TOOL_PROGRESS.finished)
       }
     }
   }
@@ -16837,6 +16846,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       requestState: { verify: requestStateCodec.verify },
     },
   )
+  installMcpRequestCancellation(server)
 
   registerDiscordPlanReviewApp(server, config.mcpReadResponseMaxBytes)
   const policy = service.describePolicy()

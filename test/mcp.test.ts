@@ -10,10 +10,12 @@ import {
   Client,
   InMemoryTransport,
   ReadBuffer,
+  SdkError,
   serializeMessage,
   specTypeSchemas,
   type ClientOptions,
   type JSONRPCMessage,
+  type Progress,
   type Tool,
   type Transport,
   withInputRequired,
@@ -523,7 +525,21 @@ const PROGRESSIVE_TOOL_SURFACE_CONFIG: FixtureConfigOverrides = {
 }
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
 const LIST_CHANGED_TIMEOUT_MS = 2_000
+const MCP_CANCELLATION_NOTIFICATION_METHOD = "notifications/cancelled"
+const MCP_PROGRESS_NOTIFICATION_METHOD = "notifications/progress"
 const STATIC_RESOURCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
+const EXPECTED_MCP_TOOL_PROGRESS: readonly Progress[] = [
+  {
+    message: "Discord request round started",
+    progress: 0,
+    total: 1,
+  },
+  {
+    message: "Discord request round finished",
+    progress: 1,
+    total: 1,
+  },
+]
 const EXPECTED_SERVER_IDENTITY = {
   description: CONNECTOR_DESCRIPTION,
   icons: [{
@@ -7858,6 +7874,9 @@ function serviceFixture(overrides: {
   stageInstanceEffect?: "change" | "none"
   stageInstanceError?: Error
   stageInstancePlanDigest?: string
+  statusRequest?: (
+    options: Parameters<DiscordToolService["getStatus"]>[0],
+  ) => Promise<void>
   threadCreationError?: Error
   threadCreationPlanDigest?: string
   threadCreationWriteRequired?: boolean
@@ -11108,7 +11127,8 @@ function serviceFixture(overrides: {
     async getApplicationPosture() {
       return fixtureApplicationPosture()
     },
-    async getStatus() {
+    async getStatus(options) {
+      await overrides.statusRequest?.(options)
       const applicationPosture = fixtureApplicationPosture()
       return {
         application: {
@@ -11925,6 +11945,7 @@ async function connectedFixture(
     gateway?: GatewayEventSource
     nativeInteractions?: NativeInteractionSource
     observability?: OperationalObserver
+    progressNotificationError?: Error
     runtimeMcpReadResponseMaxBytes?: number
   } = {},
 ) {
@@ -11953,10 +11974,13 @@ async function connectedFixture(
     service: serviceData.service,
   })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  if (options.serverMessages) {
+  if (options.serverMessages || options.progressNotificationError) {
     const send = serverTransport.send.bind(serverTransport)
     serverTransport.send = async (message, sendOptions) => {
       options.serverMessages?.push(structuredClone(message))
+      if (options.progressNotificationError && isProgressNotification(message)) {
+        throw options.progressNotificationError
+      }
       await send(message, sendOptions)
     }
   }
@@ -11992,6 +12016,7 @@ async function connectedFixture(
 function inProcessStdioClientTransport(
   serverInput: PassThrough,
   serverOutput: PassThrough,
+  clientMessages?: unknown[],
 ): Transport {
   const readBuffer = new ReadBuffer()
   let closed = false
@@ -12008,6 +12033,7 @@ function inProcessStdioClientTransport(
     },
     async send(message: JSONRPCMessage) {
       if (closed) throw new Error("In-process stdio transport is closed")
+      clientMessages?.push(structuredClone(message))
       serverInput.write(serializeMessage(message))
     },
     async start() {
@@ -12048,6 +12074,7 @@ async function connectedModernStdioFixture(
   context: TestContext,
   serviceOverrides?: Parameters<typeof serviceFixture>[0],
   observability?: OperationalObserver,
+  clientMessages?: unknown[],
 ) {
   const serviceData = serviceFixture(serviceOverrides)
   const serverInput = new PassThrough()
@@ -12083,7 +12110,11 @@ async function connectedModernStdioFixture(
       await handle.close()
     } catch {}
   })
-  await client.connect(inProcessStdioClientTransport(serverInput, serverOutput))
+  await client.connect(inProcessStdioClientTransport(
+    serverInput,
+    serverOutput,
+    clientMessages,
+  ))
   return { client, ...serviceData }
 }
 
@@ -12116,12 +12147,172 @@ async function settleNotifications(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve))
 }
 
+function isProgressNotification(message: unknown): boolean {
+  return typeof message === "object"
+    && message !== null
+    && "method" in message
+    && message.method === MCP_PROGRESS_NOTIFICATION_METHOD
+}
+
+function isCancellationNotification(message: unknown): boolean {
+  return typeof message === "object"
+    && message !== null
+    && "method" in message
+    && message.method === MCP_CANCELLATION_NOTIFICATION_METHOD
+}
+
+function isCancelledClientRequest(error: unknown): boolean {
+  return error instanceof SdkError && error.message.startsWith("AbortError:")
+}
+
+function statusCancellationProbe() {
+  let resolveEntered!: (signal: AbortSignal) => void
+  let resolveAborted!: (signal: AbortSignal) => void
+  const entered = new Promise<AbortSignal>((resolve) => {
+    resolveEntered = resolve
+  })
+  const aborted = new Promise<AbortSignal>((resolve) => {
+    resolveAborted = resolve
+  })
+  const request = async (
+    options: Parameters<DiscordToolService["getStatus"]>[0],
+  ): Promise<void> => {
+    const signal = options?.signal
+    assert.ok(signal)
+    resolveEntered(signal)
+    await new Promise<void>((_resolve, reject) => {
+      const onAbort = () => {
+        resolveAborted(signal)
+        reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new DOMException("Request cancelled", "AbortError"),
+        )
+      }
+      if (signal.aborted) onAbort()
+      else signal.addEventListener("abort", onAbort, { once: true })
+    })
+  }
+  return { aborted, entered, request }
+}
+
 test("MCP server advertises complete public identity in both protocol eras", async (context) => {
   const legacy = await connectedFixture(context)
   const modern = await connectedModernStdioFixture(context)
 
   assert.deepEqual(legacy.client.getServerVersion(), EXPECTED_SERVER_IDENTITY)
   assert.deepEqual(modern.client.getServerVersion(), EXPECTED_SERVER_IDENTITY)
+  assert.equal(modern.client.getProtocolEra(), "modern")
+})
+
+test("MCP canonical tools emit requested content-free progress in both protocol eras", async (context) => {
+  const legacy = await connectedFixture(context)
+  const modern = await connectedModernStdioFixture(context)
+
+  for (const client of [legacy.client, modern.client]) {
+    const progress: Progress[] = []
+    await client.callTool({
+      arguments: {},
+      name: "get_connector_status",
+    }, {
+      onprogress: (update) => progress.push(update),
+    })
+    assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
+  }
+  assert.equal(modern.client.getProtocolEra(), "modern")
+})
+
+test("MCP canonical tools do not emit unsolicited progress", async (context) => {
+  const serverMessages: unknown[] = []
+  const { client } = await connectedFixture(context, { serverMessages })
+
+  await client.callTool({ arguments: {}, name: "get_connector_status" })
+  await settleNotifications()
+
+  assert.equal(serverMessages.some(isProgressNotification), false)
+})
+
+test("MCP progress delivery failures do not change tool results", async (context) => {
+  const { client } = await connectedFixture(context, {
+    progressNotificationError: new Error("Progress transport unavailable"),
+  })
+  const progress: Progress[] = []
+
+  const result = await client.callTool({
+    arguments: {},
+    name: "get_connector_status",
+  }, {
+    onprogress: (update) => progress.push(update),
+  })
+
+  assert.equal(structuredContent(result).status, "ok")
+  assert.deepEqual(progress, [])
+})
+
+test("MCP cancellation aborts connector work without terminal progress in both protocol eras", async (context) => {
+  const legacyProbe = statusCancellationProbe()
+  const legacyMessages: unknown[] = []
+  const legacy = await connectedFixture(context, {
+    serverMessages: legacyMessages,
+    serviceOverrides: { statusRequest: legacyProbe.request },
+  })
+  const legacyProgress: Progress[] = []
+  const legacyController = new AbortController()
+  const legacyMessageStart = legacyMessages.length
+  const legacyCall = legacy.client.callTool({
+    arguments: {},
+    name: "get_connector_status",
+  }, {
+    onprogress: (update) => legacyProgress.push(update),
+    signal: legacyController.signal,
+  })
+  const legacyServerSignal = await legacyProbe.entered
+  await settleNotifications()
+  assert.equal(legacyServerSignal.aborted, false)
+  legacyController.abort()
+  await assert.rejects(legacyCall, isCancelledClientRequest)
+  await settleNotifications()
+  assert.equal(legacyServerSignal.aborted, true)
+  assert.equal(await legacyProbe.aborted, legacyServerSignal)
+  assert.deepEqual(legacyProgress, EXPECTED_MCP_TOOL_PROGRESS.slice(0, 1))
+  assert.equal(
+    legacyMessages.slice(legacyMessageStart).some((message) => (
+      typeof message === "object"
+      && message !== null
+      && ("result" in message || "error" in message)
+    )),
+    false,
+  )
+
+  const modernProbe = statusCancellationProbe()
+  const modernClientMessages: unknown[] = []
+  const modern = await connectedModernStdioFixture(context, {
+    statusRequest: modernProbe.request,
+  }, undefined, modernClientMessages)
+  const modernProgress: Progress[] = []
+  const modernController = new AbortController()
+  const modernCall = modern.client.callTool({
+    arguments: {},
+    name: "get_connector_status",
+  }, {
+    onprogress: (update) => modernProgress.push(update),
+    signal: modernController.signal,
+  })
+  const modernServerSignal = await modernProbe.entered
+  await settleNotifications()
+  assert.equal(modernServerSignal.aborted, false)
+  modernController.abort()
+  await assert.rejects(modernCall, isCancelledClientRequest)
+  await settleNotifications()
+  const modernCancellation = modernClientMessages.find(isCancellationNotification)
+  assert.ok(modernCancellation)
+  assert.equal(
+    (modernCancellation as { params?: { requestId?: unknown } }).params?.requestId,
+    0,
+  )
+  assert.equal(modernServerSignal.aborted, true)
+  assert.equal(await modernProbe.aborted, modernServerSignal)
+  assert.deepEqual(modernProgress, EXPECTED_MCP_TOOL_PROGRESS.slice(0, 1))
   assert.equal(modern.client.getProtocolEra(), "modern")
 })
 
