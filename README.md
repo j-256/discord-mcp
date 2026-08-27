@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Get a verified read](docs/getting-started.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -21,7 +21,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 | Plan review | Every plan tool returns complete text and structured evidence and can add display-only, authority-free review in MCP Apps hosts |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
 
-Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
+Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. Read [product boundaries and host compatibility](docs/limitations.md) to decide whether the custody, privacy, approval, and recovery model fits. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and workflow-specific limitation.
 
 ## Quick start
 
@@ -274,6 +274,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 ## Documentation
 
 - [First verified read and initialization recovery](docs/getting-started.md)
+- [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)
 - [Complete operator and capability reference](docs/reference.md)
 - [Setup and operator support](SUPPORT.md)
 - [Security model and reporting](SECURITY.md)

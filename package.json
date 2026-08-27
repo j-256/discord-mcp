@@ -37,6 +37,7 @@
     "dist",
     "discord-mcp.config.schema.json",
     "docs/getting-started.md",
+    "docs/limitations.md",
     "docs/reference.md",
     "docs/releasing.md",
     "LICENSE",
