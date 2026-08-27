@@ -28,6 +28,7 @@ const ICON_SIZE = "1254x1254"
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
+const FIRST_PUBLICATION_COMMAND = "npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public --provenance=false"
 const OCI_IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
 const NODE_IMAGE = "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
 const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
@@ -391,6 +392,11 @@ async function checkDocumentation(packageJson) {
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
   invariant(releasing.includes(`description exactly to \`${MCP_DESCRIPTION}\``), "release runbook lacks the canonical repository description")
   invariant(releasing.includes("exact model- and harness-neutral topic set"), "release runbook lacks the repository topic policy")
+  assertEqual(
+    releasing.match(/^npm publish .+$/gm) || [],
+    [FIRST_PUBLICATION_COMMAND],
+    "release runbook first-publication command must explicitly disable local automatic provenance",
+  )
   for (const topic of [
     "ai-agents",
     "automation",

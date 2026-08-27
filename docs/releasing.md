@@ -60,12 +60,12 @@ gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-5. From an authenticated maintainer workstation, publish that exact tarball and complete npm's interactive passkey challenge:
+5. From an authenticated maintainer workstation, publish that exact tarball and complete npm's interactive passkey challenge. Package metadata enables automatic provenance for normal OIDC releases, so this exceptional local first publication must explicitly disable it. The protected GitHub artifact attestations verified above remain the first version's public provenance:
 
 ```sh
 npm login --auth-type=web
 npm whoami
-npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public
+npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public --provenance=false
 ```
 
 6. After npm makes the version available, require its published SHA-512 integrity to match the candidate before any OCI or MCP Registry operation:
