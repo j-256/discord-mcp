@@ -186,7 +186,7 @@ test("activity HTML renders one exact private incident review", async () => {
   assert.doesNotMatch(html, /XMLHttpRequest|WebSocket|EventSource|sendBeacon/)
   assert.doesNotMatch(html, /localStorage|sessionStorage|indexedDB|document\.cookie|serviceWorker/)
 
-  const script = html.match(/<script>([\s\S]+)<\/script>/)?.[1]
+  const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]
   assert.ok(script)
   const expectedSource = `script-src 'sha256-${createHash("sha256").update(script).digest("base64")}'`
   assert.ok(html.includes(expectedSource))

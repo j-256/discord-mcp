@@ -1374,6 +1374,22 @@ test("Discord client retries short rate limits using Discord retry timing", asyn
   assert.deepEqual(waits, [12])
 })
 
+test("Discord client trims a separator-heavy test transport origin once", async () => {
+  const requests: string[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: `${API_BASE_URL}${"/".repeat(512)}`,
+    fetchImplementation: async (input) => {
+      requests.push(String(input))
+      return jsonResponse({ bot: true, id: "1", username: "bot" })
+    },
+    token: TOKEN,
+  })
+
+  await client.getCurrentUser()
+
+  assert.deepEqual(requests, [`${API_BASE_URL}/users/@me`])
+})
+
 test("Discord client observes only fixed REST operations, outcomes, status, and retries", async () => {
   const records: RecordedObservation[] = []
   let calls = 0

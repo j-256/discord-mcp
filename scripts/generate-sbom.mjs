@@ -35,7 +35,7 @@ const result = await run(
   { capture: true },
 )
 const document = JSON.parse(result.stdout)
-const namespacePackage = encodeURIComponent(packageJson.name).replace("%40", "@").toLowerCase()
+const namespacePackage = encodeURIComponent(packageJson.name).replaceAll("%40", "@").toLowerCase()
 invariant(document.spdxVersion === "SPDX-2.3", "SBOM must use SPDX 2.3")
 invariant(document.dataLicense === "CC0-1.0", "SBOM data license is invalid")
 invariant(document.SPDXID === "SPDXRef-DOCUMENT", "SBOM document identity is invalid")

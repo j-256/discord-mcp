@@ -3,6 +3,7 @@ import test from "node:test"
 
 import { DiscordClient } from "../src/discord-client.js"
 import { DiscordApiError } from "../src/errors.js"
+import { escapeRegularExpression } from "./regular-expression.js"
 
 const API_BASE_URL = "https://discord.test/api/v10"
 const TOKEN = "test-token-never-log"
@@ -402,7 +403,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
     () => listClient.listGuildInvites("100"),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+      assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
       assert.equal((error as Error & { cause?: unknown }).cause, undefined)
       return true
     },
@@ -425,7 +426,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
     () => bodyClient.listGuildInvites("100"),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+      assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
       assert.equal((error as Error & { cause?: unknown }).cause, undefined)
       return true
     },
@@ -442,7 +443,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
     () => networkClient.deleteInvite(PRIVATE_CODE, "Reviewed cleanup"),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+      assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
       assert.doesNotMatch(error.message, /private%2FA%3Fcode/)
       assert.equal((error as Error & { cause?: unknown }).cause, undefined)
       return true
@@ -452,7 +453,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
     () => networkClient.getInvite(PRIVATE_CODE),
     (error: unknown) => {
       assert.ok(error instanceof Error)
-      assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+      assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
       assert.doesNotMatch(error.message, /private%2FA%3Fcode/)
       assert.equal((error as Error & { cause?: unknown }).cause, undefined)
       return true
@@ -466,7 +467,7 @@ test("Discord client never exposes an invite code through invite failures", asyn
       lookup,
       (error: unknown) => {
         assert.ok(error instanceof Error)
-        assert.doesNotMatch(error.message, new RegExp(PRIVATE_CODE.replace(/[/?]/gu, "\\$&")))
+        assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
         assert.doesNotMatch(error.message, /private%2FA%3Fcode/)
         assert.equal((error as Error & { cause?: unknown }).cause, undefined)
         return true

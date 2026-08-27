@@ -108,8 +108,8 @@ test("configuration workbench renders a deterministic complete offline editor", 
   assert.doesNotMatch(html, /localStorage|sessionStorage|indexedDB|document\.cookie|serviceWorker/)
   assert.doesNotMatch(html, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/)
 
-  const script = html.match(/<script>([\s\S]+)<\/script>/)?.[1]
-  const style = html.match(/<style>([\s\S]+)<\/style>/)?.[1]
+  const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]
+  const style = html.match(/<style>([\s\S]+)<\/style>/iu)?.[1]
   assert.ok(script)
   assert.ok(style)
   assert.ok(html.includes(`script-src 'sha256-${createHash("sha256").update(script).digest("base64")}'`))
@@ -166,6 +166,13 @@ test("configuration workbench base64 payload contains hostile non-secret paths w
   assert.doesNotMatch(html, /<img-onerror-alert>/)
   assert.doesNotMatch(html, /<active>/)
   assert.match(html, /data-payload="[A-Za-z0-9+/=]+"/)
+})
+
+test("configuration workbench bounds and trims separator-heavy candidate names", () => {
+  const activeFile = `/configuration/${".-".repeat(100)}.json`
+  const model = createDiscordConfigWorkbenchModel(activeFile, document(), "darwin")
+
+  assert.equal(model.candidateFilename, "discord-mcp.candidate.json")
 })
 
 test("configuration workbench rejects a model changed after validation", () => {

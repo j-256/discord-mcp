@@ -836,12 +836,20 @@ function workbenchFields(): readonly ConfigWorkbenchField[] {
   })))
 }
 
+function trimFilenameSeparators(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && (value[start] === "." || value[start] === "-")) start += 1
+  while (end > start && (value[end - 1] === "." || value[end - 1] === "-")) end -= 1
+  return value.slice(start, end)
+}
+
 function suggestedCandidateFilename(activeFile: string): string {
-  const stem = basename(activeFile)
+  const sanitizedStem = basename(activeFile)
     .replace(/\.json$/iu, "")
     .replace(/[^a-zA-Z0-9._-]+/gu, "-")
-    .replace(/^[.-]+|[.-]+$/gu, "")
     .slice(0, 96)
+  const stem = trimFilenameSeparators(sanitizedStem)
   return `${stem || "discord-mcp"}.candidate.json`
 }
 
