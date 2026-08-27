@@ -182,6 +182,42 @@ jobs:
       - run: npm run security:check
       - run: npm run --silent sbom > /dev/null
 
+  documentation:
+    name: Documentation portal
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
+      - run: npm run deps:locked
+      - run: npm run build
+      - run: npm run deps:locked
+        working-directory: site
+      - run: npm run security:check
+        working-directory: site
+      - run: npm run browser:install:ci
+        working-directory: site
+      - run: npm run verify
+        working-directory: site
+      - if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: npm run test:evidence-links
+        working-directory: site
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: documentation-portal
+          path: site/dist
+          if-no-files-found: error
+          retention-days: 7
+
   gate:
     name: CI gate
     if: ${{ always() }}
@@ -190,6 +226,7 @@ jobs:
       - package
       - container
       - package-identity
+      - documentation
       - security
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -199,6 +236,7 @@ jobs:
           PACKAGE_RESULT: ${{ needs.package.result }}
           PACKAGE_IDENTITY_RESULT: ${{ needs.package-identity.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
+          DOCUMENTATION_RESULT: ${{ needs.documentation.result }}
           SECURITY_RESULT: ${{ needs.security.result }}
           SOURCE_RESULT: ${{ needs.source.result }}
         run: |
@@ -207,4 +245,5 @@ jobs:
           test "$PACKAGE_RESULT" = success
           test "$CONTAINER_RESULT" = success
           test "$PACKAGE_IDENTITY_RESULT" = success
+          test "$DOCUMENTATION_RESULT" = success
           test "$SECURITY_RESULT" = success

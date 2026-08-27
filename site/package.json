@@ -1,0 +1,40 @@
+{
+  "name": "@j-256/discord-mcp-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Static documentation portal for Discord MCP",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "browser:install": "playwright install chromium",
+    "browser:install:ci": "playwright install --with-deps chromium",
+    "build": "npm run generate && astro build",
+    "check": "npm run generate && astro check",
+    "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
+    "dev": "npm run generate && astro dev",
+    "generate": "node scripts/generate.mjs",
+    "preview": "astro preview",
+    "security:check": "npm audit --audit-level=moderate && npm audit signatures",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node scripts/browser-test.mjs",
+    "test:evidence-links": "node scripts/evidence-link-test.mjs",
+    "verify": "npm run check && npm run build && npm test && npm run test:browser"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/markdown-remark": "7.2.4",
+    "@astrojs/starlight": "0.41.9",
+    "@axe-core/playwright": "4.13.0",
+    "astro": "7.2.9",
+    "playwright": "1.62.1",
+    "typescript": "6.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.2": false,
+    "fsevents@2.3.3": false
+  }
+}

@@ -1,0 +1,28 @@
+---
+title: Contribute safely
+description: Find the design, verification, conduct, support, and private reporting routes
+sidebar:
+  label: Contribution paths
+  order: 1
+---
+
+import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Contributions are welcome when they preserve the project's least-privilege architecture, privacy boundaries, exact-ID semantics, and fail-closed behavior. Substantial capabilities should begin with an issue that identifies Discord prerequisites, authority, persistence, and failure semantics.
+
+<CardGrid>
+  <LinkCard title="Contribution guide" href="./contributing/" description="Development setup, capability design questions, verification, and pull-request expectations." />
+  <LinkCard title="Code of conduct" href="./code-of-conduct/" description="The behavior expected in project spaces and the enforcement route." />
+  <LinkCard title="Security details" href="../security/" description="Credential, privacy, reviewed-write, operation, and reporting boundaries." />
+  <LinkCard title="Operator support" href="../operate/troubleshooting/" description="Collect privacy-safe offline evidence and choose the correct public or private route." />
+</CardGrid>
+
+<Aside type="danger" title="Never publish live Discord data or credentials">
+
+Do not include bot tokens, webhook credentials, invite or template codes, collector headers, bearer values, Discord content, names, profiles, private identifiers, screenshots, recordings, or raw live output in an issue or pull request. Rotate any credential that may have been exposed and use a private security advisory for an undisclosed vulnerability.
+
+</Aside>
+
+## Design before wrapping an endpoint
+
+A credible capability proposal explains the exact Discord route or event, required permissions and intents, strict policy scope, privacy projection, plan and approval model, freshness evidence, durable coordination, retry behavior, exact readback, ambiguity handling, and test strategy. A thin endpoint wrapper is not enough when the real Discord prerequisite carries additional protocol or privacy surface.

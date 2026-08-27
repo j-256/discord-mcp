@@ -1,0 +1,29 @@
+---
+title: Choose your path
+description: Route directly to setup, expansion, recovery, verification, or contribution
+sidebar:
+  label: Choose your path
+  order: 1
+---
+
+import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Start from the outcome you need. The paths below preserve the same owner-managed custody and exact-scope model, but they avoid making every reader traverse the complete reference.
+
+<CardGrid>
+  <LinkCard title="I want the first verified read" href="../getting-started/" description="Create the bot, generate the minimum grant, validate the policy, prove stdio startup, and copy one read request." />
+  <LinkCard title="I need to decide whether it fits" href="../../understand/boundaries/" description="Review custody, privacy, approval, deployment, and compatibility boundaries before installation." />
+  <LinkCard title="I need to compare alternatives" href="../../understand/comparison/" description="Review a dated source-audited matrix with published criteria, direct evidence, and explicit audit limits." />
+  <LinkCard title="I want more read coverage" href="../../operate/#expand-deliberately" description="Add one bounded recipe or policy scope after the read-only baseline works." />
+  <LinkCard title="I need a reviewed write" href="../../understand/safety/#the-reviewed-write-path" description="Understand the plan, approval, freshness, coordination, execution, readback, and receipt sequence first." />
+  <LinkCard title="The host cannot initialize" href="../../operate/troubleshooting/#start-with-offline-evidence" description="Compare the launch contract field by field, then separate policy, credential, Discord, stdio, and host failures." />
+  <LinkCard title="I need the exact contract" href="../../generated/contract-explorer.html" description="Search the release's tools, schemas, annotations, prompts, resources, completion routes, and digests without credentials." />
+  <LinkCard title="I need release evidence" href="../../operate/release-verification/" description="Verify package identity, provenance, inventories, signatures, image evidence, and their explicit limits." />
+  <LinkCard title="I want to contribute" href="../../contribute/" description="Review security boundaries, capability design expectations, tests, and reporting routes." />
+</CardGrid>
+
+<Aside type="caution" title="Keep the first success read-only">
+
+Do not use a write as a connectivity test. A successful read proves identity, policy, Discord access, process launch, MCP negotiation, and response handling without creating Discord state.
+
+</Aside>

@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -277,6 +277,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 - [First verified read and initialization recovery](docs/getting-started.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)
+- [Source-audited field comparison](docs/comparison.md)
 - [Complete operator and capability reference](docs/reference.md)
 - [Setup and operator support](SUPPORT.md)
 - [Security model and reporting](SECURITY.md)

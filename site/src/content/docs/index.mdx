@@ -1,0 +1,68 @@
+---
+title: Discord MCP
+description: Owner-managed Discord access with exact scope, reviewed writes, and privacy-safe evidence
+template: splash
+editUrl: https://github.com/j-256/discord-mcp/edit/main/site/src/content/docs/index.mdx
+hero:
+  title: Discord MCP
+  tagline: Owner-managed Discord access with exact scope, reviewed writes, and privacy-safe evidence.
+  actions:
+    - text: Get a verified read
+      link: /discord-mcp/start/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: Check fit first
+      link: /discord-mcp/understand/boundaries/
+      icon: open-book
+---
+
+import { Aside, Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Discord MCP is a local stdio connector for a Discord bot you create, install, and control. It combines broad typed Discord coverage with a strict non-secret policy, bounded privacy-aware results, reviewed writes, and content-free operational evidence.
+
+<Aside type="tip" title="The safest useful start">
+
+Create an owner-managed bot, grant only the read permission selected by a preset, verify one guild, and complete one host-side channel inventory. Write workflows remain off until you deliberately add one.
+
+</Aside>
+
+## What makes the boundary different
+
+<CardGrid stagger>
+  <Card title="You keep custody" icon="seti:lock">
+    The project does not operate a shared bot, hosted relay, or token store. The token stays in a caller-owned secret source and out of the non-secret policy file.
+  </Card>
+  <Card title="Policy narrows discovery" icon="approve-check-circle">
+    Exact guild, channel, user, feature, and toolset policy decides which capabilities the MCP host can discover. Unconfigured authority is absent from the callable surface.
+  </Card>
+  <Card title="Writes are reviewed workflows" icon="pencil">
+    Mutating operations use exact IDs, fresh keyed plans, signed request state, interactive approval, final freshness checks, durable coordination, and exact readback where the Discord API permits it.
+  </Card>
+  <Card title="Evidence excludes Discord content" icon="document">
+    Activity records preserve identifiers, hashes, timestamps, numeric parameters, outcomes, and sanitized errors without persisting messages, names, topics, URLs, embeds, or profiles.
+  </Card>
+</CardGrid>
+
+## From install to verified outcome
+
+<ol class="proof-flow" aria-label="Verified setup flow">
+  <li><strong>Create</strong><span>Make a Discord application and bot you control</span></li>
+  <li><strong>Grant</strong><span>Generate and review the minimum preset permission</span></li>
+  <li><strong>Scope</strong><span>Create one strict non-secret policy</span></li>
+  <li><strong>Prove</strong><span>Run offline validation, online doctor, and stdio smoke</span></li>
+  <li><strong>Use</strong><span>Copy the first read into any compatible MCP host</span></li>
+</ol>
+
+## Choose the depth you need
+
+<CardGrid>
+  <LinkCard title="Choose an outcome" href="./start/choose/" description="Find the shortest safe route for setup, reads, reviewed writes, recovery, or verification." />
+  <LinkCard title="Understand the safety model" href="./understand/safety/" description="See how policy, planning, approval, coordination, readback, and evidence fit together." />
+  <LinkCard title="Compare the field" href="./understand/comparison/" description="Inspect the dated head-to-head matrix, rubric, release sources, and evidence behind every lead." />
+  <LinkCard title="Browse the complete reference" href="./reference/" description="Navigate the canonical capability documentation as searchable task-sized pages." />
+  <LinkCard title="Inspect the exact contract" href="./generated/contract-explorer.html" description="Open the credential-free explorer generated from the production MCP registrations." />
+</CardGrid>
+
+## Honest boundaries
+
+This is self-hosted local software, not a managed service. Discord permissions, role hierarchy, channel overwrites, intents, rate limits, API availability, and the MCP host's approval behavior remain real external constraints. Start with the [fit and boundaries guide](./understand/boundaries/) when evaluating custody or compatibility, and use the [troubleshooting ladder](./operate/troubleshooting/) when setup fails.

@@ -36,6 +36,7 @@
   "files": [
     "dist",
     "discord-mcp.config.schema.json",
+    "docs/comparison.md",
     "docs/getting-started.md",
     "docs/limitations.md",
     "docs/reference.md",

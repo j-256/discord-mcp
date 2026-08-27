@@ -1,0 +1,119 @@
+:root {
+  --sl-color-accent-low: #e4e7ff;
+  --sl-color-accent: #525fdf;
+  --sl-color-accent-high: #28328f;
+  --sl-color-white: #172033;
+  --sl-color-gray-1: #283247;
+  --sl-color-gray-2: #465168;
+  --sl-color-gray-3: #667087;
+  --sl-color-gray-4: #aeb6c7;
+  --sl-color-gray-5: #d9deea;
+  --sl-color-gray-6: #eef1f7;
+  --sl-color-black: #f8f9fc;
+  --sl-content-width: 56rem;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #232a66;
+  --sl-color-accent: #98a0ff;
+  --sl-color-accent-high: #e4e6ff;
+  --sl-color-white: #f4f6ff;
+  --sl-color-gray-1: #e2e6f2;
+  --sl-color-gray-2: #b5bdd0;
+  --sl-color-gray-3: #8994aa;
+  --sl-color-gray-4: #4e586c;
+  --sl-color-gray-5: #30394b;
+  --sl-color-gray-6: #1a2130;
+  --sl-color-black: #0d121d;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.hero {
+  border-bottom: 1px solid var(--sl-color-gray-5);
+  padding-bottom: clamp(2.5rem, 7vw, 5rem);
+}
+
+.hero .tagline {
+  max-width: 44rem;
+}
+
+.sl-link-card {
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.sl-link-card:hover {
+  transform: translateY(-2px);
+}
+
+.proof-flow {
+  counter-reset: proof-step;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 1.5rem 0;
+  padding: 0;
+}
+
+.proof-flow li {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.85rem;
+  display: grid;
+  font-size: var(--sl-text-sm);
+  gap: 0.5rem;
+  list-style: none;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.proof-flow li::before {
+  align-items: center;
+  background: var(--sl-color-accent-low);
+  border-radius: 999px;
+  color: var(--sl-color-accent-high);
+  content: counter(proof-step);
+  counter-increment: proof-step;
+  display: inline-flex;
+  font-weight: 800;
+  height: 1.75rem;
+  justify-content: center;
+  width: 1.75rem;
+}
+
+.decision-table td:first-child {
+  font-weight: 700;
+}
+
+.sl-markdown-content table:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 0.25rem;
+}
+
+@media (max-width: 72rem) {
+  .proof-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 36rem) {
+  .proof-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .sl-link-card {
+    transition: none;
+  }
+
+  .sl-link-card:hover {
+    transform: none;
+  }
+}
