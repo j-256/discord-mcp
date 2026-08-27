@@ -2,7 +2,7 @@
 
 [Project overview and quick start](../README.md)
 
-<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.1/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
 Discord MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, exact allowlisted one-to-one private messages, current-application command exposure, privacy-bounded guild profiles, complete obfuscation-safe channel layouts, named guild settings, time-bounded guild incident actions, exact channel metadata and transient voice-channel status, complete ordered forum tags, roles, threads, forums, message pins, privacy-safe reaction aggregates, native polls, privacy-safe guild integrations, application-owned emojis, guild emojis, stickers, soundboard sounds, AutoMod rules, scheduled events, active Stage instances, exact member voice state, guild onboarding, Welcome Screens, authenticated widget settings, and guild bans, credential-redacted webhooks and announcement subscriptions, capability-safe guild invites and native Guild Templates, channel permission overwrites, effective permissions, privacy-minimized members and guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, portable non-secret multi-bot profiles, an optional privacy-safe real-time Gateway feed, optional exact-scope native Discord Interaction ingress, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, safe idempotent message interactions, reviewed exact-recipient private-message plain-text or static Components V2 send, reply, same-format edit, deletion, and receipt verification, reviewed static Components V2 and remote-free rich-embed creation and editing, opt-in reaction-user and scheduled-event-subscriber audits, reviewed reaction moderation, reviewed native command management, reviewed policy-justified privileged-intent enablement, reviewed test-entitlement creation and receipt-proven deletion, reviewed externally fulfilled consumable-entitlement consumption, reviewed native poll creation and irreversible ending, reviewed exact announcement crossposts, reviewed immutable message forwarding, reviewed announcement subscribe and exact-ID unsubscribe operations, reviewed Guild Template lifecycle, guild-integration deletion, sparse guild-profile text, named guild-settings changes, time-bounded guild incident-action changes, forum-tag, application-emoji, guild-expression, soundboard, AutoMod, scheduled-event, Stage-instance, complete onboarding, complete ordered Welcome Screen, authenticated widget-settings, member nickname, member verification-bypass, member-role, member voice, and exact thread lifecycle and membership administration, reviewed credential-safe webhook creation, rename, move, and deletion, credential-private webhook message reads, idempotent plain-text delivery and editing, and signed exact-message deletion, capability-safe invite revocation, reviewed message pin, channel metadata, voice-channel status, channel ordering, exact channel and standard-role retirement, atomic same-guild channel cloning, channel permission overwrite, exact standard-role configuration, and exact relative role-order changes, reviewed local-file attachment messages, reviewed forum posts, reviewed message-anchored and standalone public or private thread creation, caller-retained declarative guild blueprints, resumable additive guild scaffolds, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, reviewed native bulk guild bans, bounded reviewed non-exact guild pruning, and content-free local activity records.
 
@@ -545,7 +545,7 @@ Activity and receipt records contain only application, beneficiary, SKU, and ent
 After a release is published, run an exact version from npm:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 help
+npx --yes @j-256/discord-mcp@0.1.1 help
 ```
 
 Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
@@ -561,14 +561,14 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
+  ghcr.io/j-256/discord-mcp:0.1.1 catalog --check
 ```
 
 For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and supply only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
 
 ```sh
 export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
-npx --yes @j-256/discord-mcp@0.1.0 setup \
+npx --yes @j-256/discord-mcp@0.1.1 setup \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
@@ -580,7 +580,7 @@ docker run --rm -i \
   --pids-limit=64 \
   --env DISCORD_BOT_TOKEN \
   --mount "type=bind,source=$PWD/discord-mcp.json,target=/configuration/discord-mcp.json,readonly" \
-  ghcr.io/j-256/discord-mcp:0.1.0 serve --config /configuration/discord-mcp.json
+  ghcr.io/j-256/discord-mcp:0.1.1 serve --config /configuration/discord-mcp.json
 ```
 
 For a Docker or Kubernetes secret volume, create the policy with `credential.provider` set to `file` and `credential.path` set to the exact in-container path such as `/run/secrets/discord_bot_token`, then mount both the policy and secret read-only. The projected target must be owned by root or the image's `node` user, must not be group or world writable, and must have one hard link; the common root-owned read-only secret-volume shape passes this boundary. A projected-secret symlink is accepted so atomic orchestrator rotation works without broadening ordinary config-file link policy.
@@ -803,7 +803,7 @@ Create that canonical directory before startup with ownership matching the conne
 
 The path is operational policy rather than a credential value, so it may appear in the local configuration and offline workbench. It is deliberately absent from MCP results, errors, diagnostics, telemetry, activity records, and operation receipts. Back up and permission this directory as bearer-secret storage. Moving or sharing it changes credential custody, not Discord or connector authorization; exact capability gates and channel scope remain mandatory.
 
-When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. Host configuration formats differ, so the launch descriptor remains typed data rather than a client-specific configuration fragment.
+When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `@j-256/discord-mcp@0.1.1`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. Host configuration formats differ, so the launch descriptor remains typed data rather than a client-specific configuration fragment.
 
 Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
@@ -3170,23 +3170,23 @@ Release candidates are reconstructed from the selected tag, packed twice, instal
 To verify a downloaded release archive:
 
 ```sh
-npm pack @j-256/discord-mcp@0.1.0
-gh attestation verify j-256-discord-mcp-0.1.0.tgz \
+npm pack @j-256/discord-mcp@0.1.1
+gh attestation verify j-256-discord-mcp-0.1.1.tgz \
   --repo j-256/discord-mcp \
   --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.0 \
+  --source-ref refs/tags/v0.1.1 \
   --deny-self-hosted-runners
-gh attestation verify j-256-discord-mcp-0.1.0.tgz \
+gh attestation verify j-256-discord-mcp-0.1.1.tgz \
   --repo j-256/discord-mcp \
   --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.0 \
+  --source-ref refs/tags/v0.1.1 \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
-docker pull ghcr.io/j-256/discord-mcp:0.1.0
-gh attestation verify oci://ghcr.io/j-256/discord-mcp:0.1.0 \
+docker pull ghcr.io/j-256/discord-mcp:0.1.1
+gh attestation verify oci://ghcr.io/j-256/discord-mcp:0.1.1 \
   --repo j-256/discord-mcp \
   --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.0 \
+  --source-ref refs/tags/v0.1.1 \
   --deny-self-hosted-runners \
   --bundle-from-oci
 ```

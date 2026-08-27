@@ -13,7 +13,7 @@ RUN npm run build \
   && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
-ARG VERSION=0.1.0
+ARG VERSION=0.1.1
 ARG REVISION=local
 
 LABEL org.opencontainers.image.title="Discord MCP" \

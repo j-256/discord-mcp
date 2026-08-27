@@ -1,6 +1,6 @@
 # Discord MCP
 
-<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.0/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.1/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
 Discord MCP is a local stdio Model Context Protocol server for safe Discord guild and separately allowlisted one-to-one access through an operator-owned bot. It combines broad typed coverage with exact scope, privacy-minimized results, reviewed writes, content-free evidence, and explicit ambiguity handling.
 
@@ -42,9 +42,9 @@ Do not grant the bot `Administrator`. Generate the exact initial permission gran
 For an exact published version, inspect the real production contract and the recommended read-only preset without a token or Discord request:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 catalog --check
-npx --yes @j-256/discord-mcp@0.1.0 catalog --html ./discord-mcp-contract.html
-npx --yes @j-256/discord-mcp@0.1.0 preset show server-observer
+npx --yes @j-256/discord-mcp@0.1.1 catalog --check
+npx --yes @j-256/discord-mcp@0.1.1 catalog --html ./discord-mcp-contract.html
+npx --yes @j-256/discord-mcp@0.1.1 preset show server-observer
 ```
 
 `catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, templates, completion capability, and optional plan-review MCP App, verifies every policy-completion route with zero returned identifiers, fingerprints the app's exact HTML and authority boundary, and verifies that every tool call is blocked by the catalog-only guard.
@@ -60,7 +60,7 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/discord-mcp:0.1.0 catalog --check
+  ghcr.io/j-256/discord-mcp:0.1.1 catalog --check
 ```
 
 ### Install your owner-managed bot
@@ -68,7 +68,7 @@ docker run --rm -i \
 Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications), copy the public Application ID and target Server ID, and generate a callback-free install link whose guild and least-privilege permission grant come from the recommended preset:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 preset install server-observer \
+npx --yes @j-256/discord-mcp@0.1.1 preset install server-observer \
   --application-id YOUR_APPLICATION_ID \
   --guild-id YOUR_GUILD_ID \
   --html ./discord-mcp-onboarding.html
@@ -84,13 +84,13 @@ Keep the token in a secret-capable launching environment, verify one exact guild
 
 ```sh
 export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
-npx --yes @j-256/discord-mcp@0.1.0 setup \
+npx --yes @j-256/discord-mcp@0.1.1 setup \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.0 config validate ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.0 doctor --config ./discord-mcp.json --online
-npx --yes @j-256/discord-mcp@0.1.0 smoke --config ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.1 config validate ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json --online
+npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
 ```
 
 On PowerShell, set the token in the current process before running the same commands:
@@ -102,7 +102,7 @@ $env:DISCORD_BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN"
 If the launcher, container runtime, or orchestrator mounts the token as a file, select that input instead. The path must be absolute, the file must already exist for verified setup, and `--token-file` cannot be combined with `--token-env` or an ambient `DISCORD_BOT_TOKEN`:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 setup \
+npx --yes @j-256/discord-mcp@0.1.1 setup \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID \
@@ -126,13 +126,13 @@ Offline `doctor` remains useful before a secret is mounted or when its reference
 Keep the active policy unchanged while editing a separate candidate, then review and apply only an exact fresh plan:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 config workbench \
+npx --yes @j-256/discord-mcp@0.1.1 config workbench \
   ./discord-mcp.json \
   --html ./discord-mcp-workbench.html
-npx --yes @j-256/discord-mcp@0.1.0 config plan \
+npx --yes @j-256/discord-mcp@0.1.1 config plan \
   ./discord-mcp.json \
   ./discord-mcp.candidate.json
-npx --yes @j-256/discord-mcp@0.1.0 config apply \
+npx --yes @j-256/discord-mcp@0.1.1 config apply \
   ./discord-mcp.json \
   ./discord-mcp.candidate.json \
   --plan-digest SHA256_FROM_THE_PLAN \
@@ -146,7 +146,7 @@ Planning remains authoritative. It reads two protected non-secret documents and 
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 activity \
+npx --yes @j-256/discord-mcp@0.1.1 activity \
   --config ./discord-mcp.json \
   --html ./discord-mcp-activity.html
 ```
@@ -158,7 +158,7 @@ Feature policy uses the same document shape. Bulk bans, bulk member-role changes
 Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 setup \
+npx --yes @j-256/discord-mcp@0.1.1 setup \
   --config ./discord-reader.json \
   --preset channel-reader \
   --guild-id YOUR_GUILD_ID \
@@ -170,16 +170,16 @@ npx --yes @j-256/discord-mcp@0.1.0 setup \
 Keep first setup read-only, then plan an additive recipe when a write workflow is needed. `guild-builder` adds model-neutral, caller-retained authoring and two-pass capture for guild structure, profile, settings, Community, Welcome Screen, onboarding, staged AutoMod, and static publications without storing the objective or blueprint. Its settings, Community, and onboarding evidence uses a nonprivileged `GUILDS`-only layout-evidence connection without changing the event feed. `incident-response` adds privacy-minimized incident audit and reviewed time-bounded lockdown changes with no Gateway or privileged intent. `channel-publisher` adds bounded text, static Components V2, and remote-free rich-embed publication and reports the required Message Content intent. [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds exact-user reads plus reviewed text and static Components V2 delivery, same-format edits, and deletion. Optional private-file delivery requires a separate capability and owned attachment root; the recipe does not grant it. Private messaging adds no guild permission, privileged intent, Gateway feed, group DM, recipient discovery, remote-file fetch, interactive callback, or immediate write path.
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.0 recipe list
-npx --yes @j-256/discord-mcp@0.1.0 recipe plan guild-builder ./discord-mcp.json \
+npx --yes @j-256/discord-mcp@0.1.1 recipe list
+npx --yes @j-256/discord-mcp@0.1.1 recipe plan guild-builder ./discord-mcp.json \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.0 recipe apply guild-builder ./discord-mcp.json \
+npx --yes @j-256/discord-mcp@0.1.1 recipe apply guild-builder ./discord-mcp.json \
   --guild-id YOUR_GUILD_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm guild-builder
-npx --yes @j-256/discord-mcp@0.1.0 recipe plan direct-messenger ./discord-mcp.json \
+npx --yes @j-256/discord-mcp@0.1.1 recipe plan direct-messenger ./discord-mcp.json \
   --user-id EXPECTED_RECIPIENT_USER_ID
-npx --yes @j-256/discord-mcp@0.1.0 recipe apply direct-messenger ./discord-mcp.json \
+npx --yes @j-256/discord-mcp@0.1.1 recipe apply direct-messenger ./discord-mcp.json \
   --user-id EXPECTED_RECIPIENT_USER_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm direct-messenger
