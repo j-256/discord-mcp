@@ -29,6 +29,8 @@ import {
 } from "./onboarding-html.js"
 import {
   CONNECTOR_NAME,
+  CONNECTOR_NPX_ARGUMENTS,
+  CONNECTOR_NPX_COMMAND,
   CONNECTOR_VERSION,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   CONNECTOR_LIMITS,
@@ -316,6 +318,7 @@ export type ParsedCliArguments =
     json: boolean
     launcherCommand: string | undefined
     overwrite: boolean
+    packageLaunch?: true
     preset?: SetupPresetSelection
     profileName?: string
     serverName: string | undefined
@@ -472,6 +475,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
   let json = false
   let launcherCommand: string | undefined
   let overwrite = false
+  let packageLaunch = false
   let presetName: string | undefined
   let profileName: string | undefined
   let serverName: string | undefined
@@ -494,12 +498,17 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       overwrite = true
       continue
     }
+    if (argument === "--npx") {
+      packageLaunch = true
+      continue
+    }
     if (![
       "--channel-id",
       "--command",
       "--config",
       "--guild-id",
       "--name",
+      "--npx",
       "--preset",
       "--profile",
       "--token-file",
@@ -531,6 +540,9 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
   if (credentialFile !== undefined && credentialVariable !== undefined) {
     throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
   }
+  if (packageLaunch && launcherCommand !== undefined) {
+    throw new ConfigurationError("Options --npx and --command are mutually exclusive")
+  }
   if (!presetName && (
     credentialFile !== undefined
     || credentialVariable !== undefined
@@ -561,6 +573,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
     json,
     launcherCommand,
     overwrite,
+    ...(packageLaunch ? { packageLaunch: true as const } : {}),
     ...(preset
       ? {
           preset: {
@@ -1326,7 +1339,7 @@ function helpText(topic: CliCommand | undefined): string {
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor."
+    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory."
   }
   if (topic === "smoke") {
     return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
@@ -1689,13 +1702,16 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
     `2. Review privileged intents: ${intents}.`,
     "3. Open this callback-free, guild-locked URL and approve only the permissions listed above:",
     report.installUrl,
-    `4. Store the bot token as ${report.postInstall.credentialVariable} in a secret-capable MCP host setting. Never put its value in the config file or command line.`,
-    `5. ${report.preset.name === "channel-reader" ? "Replace CHANNEL_ID, then run" : "Run"} verified setup to create the strict non-secret policy file:`,
+    `4. Make the bot token available to setup as ${report.postInstall.credentialVariable} through a protected environment or secret launcher. Later configure the MCP host to supply the same reference. Never put its value in the config file or command line.`,
+    `5. From a canonical process-owned private directory, ${report.preset.name === "channel-reader" ? "replace CHANNEL_ID, then run" : "run"} verified setup to create the strict non-secret policy file:`,
     `   ${setup}`,
     "6. Validate the file, verify Discord identity and access, then exercise the read-only MCP path:",
     `   ${validate}`,
     `   ${doctor}`,
     `   ${smoke}`,
+    "7. Add the portable launch descriptor printed by setup to the MCP host, then complete this first read-only outcome:",
+    `   ${report.postInstall.firstRead.prompt}`,
+    `   Required tools: ${report.postInstall.firstRead.toolNames.join(", ")}. Discord writes: disabled.`,
     "",
     "Discord was not contacted and no browser was opened. Guild roles and channel overrides determine effective access; online doctor is the post-install authority.",
   ].join("\n")
@@ -2095,6 +2111,16 @@ function currentEntrypointLaunch(options: CliOptions): {
         args: ["serve"],
         command: CONNECTOR_NAME,
       }
+}
+
+function publishedPackageLaunch(): {
+  args: string[]
+  command: string
+} {
+  return {
+    args: [...CONNECTOR_NPX_ARGUMENTS, "serve"],
+    command: CONNECTOR_NPX_COMMAND,
+  }
 }
 
 function configSelectionEnvironment(
@@ -2562,9 +2588,14 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       case "setup": {
         const defaultLauncher = currentEntrypointLaunch(options)
+        const launcher = parsed.packageLaunch
+          ? publishedPackageLaunch()
+          : parsed.launcherCommand
+            ? { args: ["serve"], command: parsed.launcherCommand }
+            : defaultLauncher
         const report = await dependencies.prepareSetup({
-          args: parsed.launcherCommand ? ["serve"] : defaultLauncher.args,
-          command: parsed.launcherCommand || defaultLauncher.command,
+          args: launcher.args,
+          command: launcher.command,
           ...(parsed.configFile
             ? {
                 configFile: parsed.configFile,

@@ -1,6 +1,6 @@
 # Discord MCP complete reference
 
-[Project overview and quick start](../README.md)
+[Getting started and first verified read](getting-started.md) | [Project overview](../README.md)
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.1/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 
@@ -374,10 +374,10 @@ The application public key is not used by the local REST or Gateway connections.
 
 Discord MCP is self-hosted and uses no shared application identity. Each operator creates and controls a separate Discord application, bot user, installation, and token. The connector is the local software that drives that bot; it is not a hosted bot, relay, or account provider. A Developer Portal URL containing an application ID identifies one account-owned application and does not install that application for other operators.
 
-The recommended first installation is derived from the same immutable read-only preset contract used by setup. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), add its bot user, copy the public Application ID, enable Guild Install on the Installation page, copy the target Server ID with Discord Developer Mode, and run:
+The recommended first installation is derived from the same immutable read-only preset contract used by setup. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), confirm its Bot page has a bot user, copy the public Application ID, enable Guild Install on the Installation page, copy the target Server ID with Discord Developer Mode, and run:
 
 ```sh
-discord-mcp preset install server-observer \
+npx --yes @j-256/discord-mcp@0.1.1 preset install server-observer \
   --application-id APPLICATION_ID \
   --guild-id GUILD_ID \
   --html ./discord-mcp-onboarding.html
@@ -385,7 +385,7 @@ discord-mcp preset install server-observer \
 
 `preset install` validates both public IDs and prints a fixed-origin Discord authorization URL with the `bot` scope, the exact preset permission bitfield, the selected `guild_id`, and `disable_guild_select=true`. Discord's [bot authorization flow](https://docs.discord.com/developers/topics/oauth2#bot-authorization-flow) documents this callback-free shape: it requires no redirect URI, client secret, authorization code, or user access token. Supplying the exact scope and permission bitfield avoids depending on mutable default install settings. The command itself needs no credential, contacts neither Discord nor a browser, opens no Gateway, writes no profile or config, and creates no activity record.
 
-Optional `--html FILE` exclusively writes a private deterministic `discord-mcp.onboarding-html.v1` guide for the exact plan. The page exposes the public IDs, required permissions and intents, fixed-origin install link, credential reference, and post-install commands through an accessible checklist and non-secret copy controls. It never accepts or embeds a token, automatically navigates, fetches a resource, persists checklist state, or configures a client. Its restrictive content security policy authorizes only the exact embedded interaction script, while every external Discord navigation requires a deliberate link click. The CLI reports separate plan and HTML SHA-256 digests and refuses to replace an existing file.
+Optional `--html FILE` exclusively writes a private deterministic `discord-mcp.onboarding-html.v2` guide for the exact plan. The page exposes the public IDs, required permissions and intents, fixed-origin install link, credential reference, pinned `npx` post-install commands, and one read-only first-use request through an accessible checklist and non-secret copy controls. It never accepts or embeds a token, automatically navigates, fetches a resource, persists checklist state, or configures a client. Its restrictive content security policy authorizes only the exact embedded interaction script, while every external Discord navigation requires a deliberate link click. The CLI reports separate plan and HTML SHA-256 digests and refuses to replace an existing file.
 
 For `server-observer`, the generated grant is only `VIEW_CHANNEL`, decimal bitfield `1024`, and no privileged intent. For `channel-reader`, it is `VIEW_CHANNEL` plus `READ_MESSAGE_HISTORY`, decimal bitfield `66560`, with `MESSAGE_CONTENT` identified as the recommended Developer Portal intent. Discord defines these bits in its [permission flags](https://docs.discord.com/developers/topics/permissions#permissions-bitwise-permission-flags) and documents that channel message history needs both effective permissions in its [message resource](https://docs.discord.com/developers/resources/message#get-channel-messages). Preset construction mechanically rejects `ADMINISTRATOR`, noncanonical or duplicate permissions, and any write-capable tool.
 
@@ -404,6 +404,7 @@ Complete the first installation in this order:
 5. Store the bot token in a secret-capable local launcher or MCP host setting under `DISCORD_BOT_TOKEN`, or mount it as a protected file. Do not put its value in a config file, client arguments, shell history, source control, or an authorization URL.
 6. Make the token available only through the chosen secret input and run the plan's `setup` command, replacing its optional `CHANNEL_ID` placeholder and adding `--token-file ABSOLUTE_FILE` when using a mounted file. Setup discovers and verifies both public identities from the bot credential, checks bounded guild membership, and saves only the external reference in the non-secret config.
 7. Run `config validate`, online `doctor`, and `smoke` exactly as printed. Online doctor verifies the token's application and bot identities, privacy-safe application security posture, and bounded guild membership after the interactive installation; the generated URL alone is not proof that installation succeeded or that channel overrides allow access.
+8. Translate the portable descriptor printed by setup into the MCP host, then run the generated `get_connector_status` plus `list_channels` first-use request for the exact guild. This final layer proves the host launch and one useful scoped read, not any write authority.
 
 The generator deliberately covers only the two audited read-only first-use presets. Arbitrary write-enabled policies need feature-specific Discord permissions, narrower local allowlists, and reviewed execution gates, so no single static permission bitfield can represent them safely.
 
@@ -566,9 +567,13 @@ docker run --rm -i \
 
 For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and supply only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
 
-```sh
-export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+```bash
+export DISCORD_BOT_TOKEN
+printf 'Discord bot token: '
+read -r -s DISCORD_BOT_TOKEN
+printf '\n'
 npx --yes @j-256/discord-mcp@0.1.1 setup \
+  --npx \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
@@ -640,7 +645,7 @@ node dist/cli.js smoke --config ./discord-mcp.json
 
 `preset list` and `preset show NAME` inspect deterministic least-privilege setup contracts without a credential, Discord request, Gateway connection, telemetry exporter, profile write, or activity record. Each report includes the exact toolsets and tool names derived from the production catalogs, allowed risk classes, exact scope requirements, bot permission names and decimal bitfield, privileged-intent guidance, disabled Gateway state, and an explicit zero-write assertion.
 
-`preset install NAME --application-id ID --guild-id ID` turns one of those read-only contracts into a deterministic Discord bot installation plan. Its fixed-origin authorization URL uses only the bot scope, exact preset permissions, a preselected guild, and a locked guild selector. The versioned JSON report explicitly states that no credential was required, no Discord request or browser open occurred, no callback or user token is involved, and Administrator is absent. It also prints the strict-config, offline-validation, online-doctor, and read-only-smoke commands needed after interactive approval. Add `--html FILE` for the deterministic standalone guide described in [Discord bot setup](#discord-bot-setup); human output appends its privacy and digest evidence, while JSON output adds the guide report without changing the installation-plan fields. It does not install the bot by itself or claim that guild role and channel overrides are sufficient until online doctor verifies the resulting access.
+`preset install NAME --application-id ID --guild-id ID` turns one of those read-only contracts into a deterministic Discord bot installation plan. Its fixed-origin authorization URL uses only the bot scope, exact preset permissions, a preselected guild, and a locked guild selector. The versioned JSON report explicitly states that no credential was required, no Discord request or browser open occurred, no callback or user token is involved, and Administrator is absent. It prints exact-version `npx` commands for strict setup with `--npx`, offline validation, online doctor, and read-only smoke, followed by one structured first-read request using only `get_connector_status` and `list_channels`. Add `--html FILE` for the deterministic standalone guide described in [Discord bot setup](#discord-bot-setup); human output appends its privacy and digest evidence, while JSON output adds the guide report without changing the installation-plan fields. It does not install the bot by itself or claim that guild role and channel overrides are sufficient until online doctor verifies the resulting access.
 
 `doctor` requires `--config FILE`, `--profile NAME`, or `DISCORD_MCP_CONFIG_FILE`. It checks the Node.js version, referenced bot credential, configuration syntax, application and bot identity pins, local allowlists, exact MCP tool surface and toolsets, Gateway policy, native Interaction ingress and managed-command policies, observability policy, interaction policy, static rich-embed policy, exact-user private-message audit, delivery, editing, and deletion policies, reaction-user-audit and reaction-moderation policies, member-directory policy, ban-audit policy, guild-prune audit and execution policies, invite-creation, audit, and revocation policies, onboarding-audit and replacement policy, Welcome Screen audit and replacement policy, guild-profile audit and change policies, named guild-settings audit and change policies, guild incident-action audit and change policies, authenticated widget-settings audit, replacement, and public-exposure policies, member-role policy, member voice-audit and change policies, attachment policy, forum-post policy, forum-tag audit and change policies, message-pin policy, announcement-crosspost policy, native message-forwarding and cross-guild policies, announcement-subscription audit and change policies, native-poll audit, voter-audit, creation, and ending policies, webhook administration and webhook-message policies, guild-expression policy, soundboard audit and change policy, scheduled-event inventory, subscriber-audit, and change policies, Stage-instance audit, lifecycle, and notification policies, channel-clone audit and change policies, channel-deletion audit and change policies, channel-metadata policy, permission-overwrite policy, guild-scaffold policy, channel-creation policy, role-creation policy, role-configuration policy, role-deletion audit and change policies, role-order audit and change policies, message-deletion policy, and administration policy. Offline checks attempt the selected bot credential but treat a missing environment value or unavailable credential file as a separate failure, then continue inspecting every policy field without substituting diagnostic data into service execution. They inspect the configured private webhook credential root but never read a stored webhook credential. They do not read attachment, soundboard, or cover files, contact Discord, open a Gateway connection, or start telemetry export. Add `--online` to verify the application, bot identity, Message Content and Guild Members intent flags, and first guild-membership page without listing guild members, guild bans, reaction users, scheduled-event subscribers, invites, onboarding, Welcome Screens, guild profiles, guild settings, guild incident actions, widget settings, announcement subscriptions, webhook messages, private messages, member voice state, soundboard sounds, Stage instances, or channels, estimating or beginning a guild prune, calling anonymous widget routes, reading messages or reasons, opening a Gateway connection, or starting telemetry export. Online verification is skipped without constructing a Discord service when the real selected credential is unavailable. Configured announcement crossposts, message forwarding, static Components V2, or static rich embeds make an unconfirmed Message Content intent an online failure. Native Interaction startup separately verifies the outgoing-endpoint state and exact managed-command inventory before the Gateway begins accepting requests.
 
@@ -662,7 +667,7 @@ Every non-passing doctor check includes one bounded next action and one package-
 
 The offline nickname diagnostics report the base self-only gate, exact guild scope, broader other-member gate, protected-user and hierarchy boundary, required `CHANGE_NICKNAME` or `MANAGE_NICKNAMES` evidence, signed approval, one-shot execution, and exact readback without reading a member or nickname or contacting Discord.
 
-`setup` requires one `--config FILE` or `--profile NAME`, performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. When invoked through the built CLI, the descriptor points at that exact Node.js executable and CLI entrypoint, selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
+`setup` requires one `--config FILE` or `--profile NAME`, performs the same safe online identity check, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes @j-256/discord-mcp@0.1.1 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
 
 Preset setup requires an exact non-empty guild scope; channel scope may remain empty to inherit the exact guild boundary where the preset permits it. `--token-env DISCORD_NAME_TOKEN` selects a caller-owned credential variable, while `--token-file ABSOLUTE_FILE` selects a mounted or otherwise externally managed credential file. The two inputs are mutually exclusive. `--force` replaces only a target whose saved application and bot identities still match while retaining a recoverable hidden backup. These options are valid only with `--preset`. Use `--profile NAME` when private per-user managed storage is preferable; profiles use the same complete policy contract and secret-only launch boundary.
 
@@ -716,8 +721,11 @@ Complete tool results retain their concise human-readable summary as the first t
 
 Create and verify the first file directly against the caller-owned bot:
 
-```sh
-export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+```bash
+export DISCORD_BOT_TOKEN
+printf 'Discord bot token: '
+read -r -s DISCORD_BOT_TOKEN
+printf '\n'
 discord-mcp setup \
   --config ./discord-mcp.json \
   --preset server-observer \
@@ -753,7 +761,7 @@ Offline `doctor` also inspects the selected policy when its referenced bot crede
 
 Selecting a file with `--config FILE` or `DISCORD_MCP_CONFIG_FILE` makes that document the exclusive policy source. The CLI resolves a relative `--config` path, while the environment selector must contain an absolute canonical path. Startup permits only the selector and the exact secrets referenced by the document. It rejects every other populated `DISCORD_MCP_*` or `OTEL_*` variable and every undeclared Discord token variable so ambient state cannot override, extend, or ambiguously combine with file policy. A config file and profile are mutually exclusive.
 
-Run `discord-mcp setup --config FILE --json` and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, pinned command and arguments, exact secret environment variables and file paths, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Never copy a secret value into the JSON document or another static host configuration.
+Run `discord-mcp setup --npx --config FILE --json` for a stable exact-version package launch and map the returned `launch` object into the MCP host's stdio configuration. The descriptor supplies the server name, pinned command and arguments, exact secret environment variables and file paths, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Never copy a secret value into the JSON document or another static host configuration.
 
 A standalone descriptor runs `serve --config ABSOLUTE_FILE` and sets no identity or policy environment values. A profile descriptor runs `serve --profile NAME` with the same secret-only boundary. Profiles use private managed storage and load the same complete saved policy directly; only its exact referenced secrets are resolved from caller-owned sources. Unsupported schema versions fail closed; no older profile or environment-policy shape is accepted.
 

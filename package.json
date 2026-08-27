@@ -36,11 +36,13 @@
   "files": [
     "dist",
     "discord-mcp.config.schema.json",
+    "docs/getting-started.md",
     "docs/reference.md",
     "docs/releasing.md",
     "LICENSE",
     "README.md",
     "SECURITY.md",
+    "SUPPORT.md",
     "server.json"
   ],
   "publishConfig": {

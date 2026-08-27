@@ -114,8 +114,10 @@ const EXPECTED_PACKAGE_FILES = [
   "SECURITY.md",
   "dist",
   "discord-mcp.config.schema.json",
+  "docs/getting-started.md",
   "docs/reference.md",
   "docs/releasing.md",
+  "SUPPORT.md",
   "server.json",
 ]
 
@@ -286,6 +288,7 @@ async function checkSourceIdentity(packageJson) {
   const connectorName = source.match(/export const CONNECTOR_NAME = "([^"]+)"/)?.[1]
   const connectorTitle = source.match(/export const CONNECTOR_TITLE = "([^"]+)"/)?.[1]
   const connectorVersion = source.match(/export const CONNECTOR_VERSION = "([^"]+)"/)?.[1]
+  const connectorNpmPackage = source.match(/export const CONNECTOR_NPM_PACKAGE = "([^"]+)"/)?.[1]
   const connectorDescription = source.match(/export const CONNECTOR_DESCRIPTION = "([^"]+)"/)?.[1]
   const connectorWebsiteUrl = source.match(/export const CONNECTOR_WEBSITE_URL = "([^"]+)"/)?.[1]
   const connectorIconUrl = source.match(/export const CONNECTOR_ICON_URL = `([^`]+)`/)?.[1]
@@ -308,6 +311,7 @@ async function checkSourceIdentity(packageJson) {
   invariant(connectorName === "discord-mcp", "source connector name is out of sync")
   invariant(connectorTitle === MCP_TITLE, "source connector title is out of sync")
   invariant(connectorVersion === packageJson.version, "source connector version is out of sync")
+  invariant(connectorNpmPackage === packageJson.name, "source npm package is out of sync")
   invariant(connectorDescription === MCP_DESCRIPTION, "source connector description is out of sync")
   invariant(connectorWebsiteUrl === REPOSITORY_URL, "source connector website is out of sync")
   invariant(
@@ -338,12 +342,16 @@ async function checkSourceIdentity(packageJson) {
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
   const security = await readFile(join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")
+  const gettingStarted = await readFile(
+    join(REPOSITORY_ROOT, "docs/getting-started.md"),
+    "utf8",
+  )
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
   )
-  const documentation = `${readme}\n${reference}`
+  const documentation = `${readme}\n${gettingStarted}\n${reference}`
   const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
@@ -388,7 +396,21 @@ async function checkDocumentation(packageJson) {
   invariant(security.includes("no environment-policy compatibility shape is accepted"), "security policy lacks clean-break configuration policy")
   invariant(security.includes("An already-current application is a no-write, no-backup operation"), "security policy lacks guarded recipe application")
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
-  invariant(reference.includes("[Project overview and quick start](../README.md)"), "complete reference lacks the landing-page link")
+  invariant(reference.includes("[Getting started and first verified read](getting-started.md)"), "complete reference lacks the getting-started link")
+  invariant(reference.includes("[Project overview](../README.md)"), "complete reference lacks the landing-page link")
+  invariant(gettingStarted.startsWith("# Getting started: first verified Discord read\n"), "getting-started heading is invalid")
+  invariant(!/DISCORD_BOT_TOKEN\s*=\s*["']YOUR_DISCORD_BOT_TOKEN["']/.test(documentation), "documentation must not teach token literals in command history")
+  for (const required of [
+    "--npx",
+    "get_connector_status",
+    "list_channels",
+    "## Recovery ladder",
+    "dist/index.js",
+    "environment.forward",
+  ]) {
+    invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
+  }
+  invariant(readme.includes("[Get a verified read](docs/getting-started.md)"), "README lacks the getting-started route")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
@@ -518,6 +540,7 @@ async function checkCommunityFiles() {
   invariant(verifiedOutcome.includes("Voluntary outcome reports never authorize"), "outcome form lacks its maintainer-authority boundary")
   invariant(issueConfig.startsWith("blank_issues_enabled: false\n"), "blank issues must remain disabled")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/security/advisories/new`), "issue routing lacks private vulnerability reporting")
+  invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/getting-started.md`), "issue routing lacks the getting-started guide")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/reference.md`), "issue routing lacks the operator reference")
   invariant(pullRequest.startsWith("## Summary\n"), "pull-request template heading is invalid")
   for (const required of [

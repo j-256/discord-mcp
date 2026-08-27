@@ -334,30 +334,55 @@ async function syncDirectory(directory: string): Promise<void> {
 
 async function assertConfigDirectory(directory: string): Promise<void> {
   let metadata
-  let canonical
   try {
     metadata = await lstat(directory)
-    canonical = await realpath(directory)
   } catch (error) {
+    if (isNodeError(error, "ENOENT")) {
+      throw new ConfigDocumentError(
+        "Configuration directory was not found; create a canonical process-owned private directory before setup",
+      )
+    }
     throw new ConfigDocumentError("Unable to inspect configuration directory", {
       cause: error,
     })
   }
-  if (
-    !metadata.isDirectory()
-    || metadata.isSymbolicLink()
-    || canonical !== directory
-    || (
-      process.platform !== "win32"
-      && (
-        typeof process.getuid !== "function"
-        || metadata.uid !== process.getuid()
-        || (metadata.mode & 0o022) !== 0
-      )
-    )
-  ) {
+  if (metadata.isSymbolicLink()) {
     throw new ConfigDocumentError(
-      "Configuration directory must be canonical, owned by the process user, and not group or world writable",
+      "Configuration directory must not be a symbolic link",
+    )
+  }
+  if (!metadata.isDirectory()) {
+    throw new ConfigDocumentError(
+      "Configuration parent must be a directory",
+    )
+  }
+  let canonical
+  try {
+    canonical = await realpath(directory)
+  } catch (error) {
+    throw new ConfigDocumentError("Unable to resolve configuration directory", {
+      cause: error,
+    })
+  }
+  if (canonical !== directory) {
+    throw new ConfigDocumentError(
+      "Configuration directory path must be canonical and contain no symbolic-link component",
+    )
+  }
+  if (process.platform === "win32") return
+  if (typeof process.getuid !== "function") {
+    throw new ConfigDocumentError(
+      "Configuration directory ownership could not be verified",
+    )
+  }
+  if (metadata.uid !== process.getuid()) {
+    throw new ConfigDocumentError(
+      "Configuration directory must be owned by the process user",
+    )
+  }
+  if ((metadata.mode & 0o022) !== 0) {
+    throw new ConfigDocumentError(
+      "Configuration directory must not be group or world writable",
     )
   }
 }

@@ -62,6 +62,11 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(html, /This first policy is read-only/)
   assert.match(html, /Cannot configure an MCP host/)
   assert.match(html, /portable stdio launch descriptor/)
+  assert.match(html, /stable exact-version package launch/)
+  assert.match(html, /canonical process-owned private directory/)
+  assert.ok(html.includes(escaped(observer.postInstall.firstRead.prompt)))
+  assert.match(html, /First useful read/)
+  assert.match(html, /Discord writes remain disabled/)
   assert.match(html, /No token/)
   assert.match(html, /No shared bot/iu)
   assert.match(html, new RegExp(APPLICATION_ID))
@@ -77,6 +82,8 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(html, /role="status" aria-live="polite"/)
   assert.match(html, /<main id="main" class="shell" tabindex="-1">/)
   assert.match(html, /prefers-reduced-motion/)
+  assert.match(html, /@media\(max-width:520px\).*\.sticky\{position:static\}/)
+  assert.match(html, />Supply secret<\/a>/)
   assert.equal(
     [...html.matchAll(/data-step autocomplete="off" aria-label="Mark step (\d) complete"/g)]
       .map((match) => match[1])
@@ -95,10 +102,11 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.ok(verificationStart >= 0)
   assert.ok(verificationEnd > verificationStart)
   const verificationCommands = html.slice(verificationStart, verificationEnd)
-  assert.doesNotMatch(verificationCommands, /discord-mcp setup/)
-  assert.match(verificationCommands, /discord-mcp config validate/)
-  assert.match(verificationCommands, /discord-mcp doctor/)
-  assert.match(verificationCommands, /discord-mcp smoke/)
+  assert.doesNotMatch(verificationCommands, / setup /)
+  assert.match(verificationCommands, / config validate /)
+  assert.match(verificationCommands, / doctor /)
+  assert.match(verificationCommands, / smoke /)
+  assert.match(verificationCommands, /npx --yes @j-256\/discord-mcp@/)
 
   const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]
   assert.ok(script)
