@@ -912,6 +912,6 @@ If private advisory access is unavailable, open a minimal public issue asking fo
 
 ## Release credentials
 
-Normal npm staging and MCP Registry registration use GitHub OIDC and must not use long-lived registry tokens. The first npm publication is the only bootstrap exception. Its short-lived credential must exist only in the protected `release` environment, must not be printed or stored in artifacts, and must be deleted from both GitHub and npm immediately after the package is created.
+Release automation must not store or receive an npm token. The first npm publication uses an exact GitHub-attested candidate and an interactive maintainer session with passkey authentication because npm does not permit staging or trusted publishing before the package exists. Later npm staging and MCP Registry registration use GitHub OIDC, with npm restricted to stage-only trusted publishing and token-based publication disabled.
 
-Release automation must keep provenance enabled, verify the checksum-pinned MCP publisher, compare the reconstructed archive with npm's SHA-512 integrity before registry registration, and preserve full commit SHA pins for every GitHub Action.
+Release automation must attest the first-publication candidate, keep OIDC provenance enabled for later staged versions, verify the checksum-pinned MCP publisher, compare the reconstructed archive with npm's SHA-512 integrity before OCI or registry publication, and preserve full commit SHA pins for every GitHub Action.

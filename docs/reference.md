@@ -3165,7 +3165,7 @@ Neither command queries or changes voice-channel status or application linked-ro
 
 The npm package, OCI image, source constant, lockfile root, MCP Registry manifest, versioned icon URL, generated config schema, and release tag are checked as one identity. The Registry packages prompt only for the bot-token secret and one non-secret config file; the OCI entry additionally fixes the operational command and hardened read-only mount. The same metadata gate scans every tracked and unignored repository file as raw bytes to prevent model- or harness-specific branding, including hidden binary metadata. Production and development dependencies are exactly pinned to the public npm registry, both container stages use one reviewed base-image digest, and the build engine, architecture emulator, and SBOM generator used by automation are pinned by image digest. Dependency installation disables lifecycle scripts and explicitly rebuilds only the reviewed esbuild version. CI also audits known vulnerabilities and npm registry signatures.
 
-Release candidates are reconstructed from the selected tag, packed twice, installed into an isolated consumer, accompanied by an SPDX SBOM, and signed through GitHub artifact attestations. Normal npm releases use trusted publishing to create a private stage. A human approves that stage with two-factor authentication. A separately approved image operation publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime before Registry publication. Existing image tags are never overwritten.
+Release candidates are reconstructed from the selected tag, packed twice, installed into an isolated consumer, accompanied by an SPDX SBOM, and signed through GitHub artifact attestations. Because npm does not permit staging or trusted publishing before a package exists, the first version is published from the exact attested archive by a maintainer completing an interactive passkey challenge. Every later npm release uses stage-only trusted publishing, followed by human two-factor approval. A separately approved image operation publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime before Registry publication. Existing image tags are never overwritten.
 
 To verify a downloaded release archive:
 
@@ -3191,7 +3191,7 @@ gh attestation verify oci://ghcr.io/j-256/discord-mcp:0.1.0 \
   --bundle-from-oci
 ```
 
-The [release runbook](releasing.md) covers the one-time bootstrap, protected npm staging, human approval, immutable OCI publication, registry registration, and independent verification.
+The [release runbook](releasing.md) covers the one-time attested first publication, protected npm staging, human approval, immutable OCI publication, registry registration, and independent verification.
 
 ## Expansion
 

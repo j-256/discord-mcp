@@ -1,6 +1,6 @@
 # Release runbook
 
-Discord MCP uses deliberately separate release operations for one-time npm bootstrap, normal staged npm publication, immutable OCI publication, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
+Discord MCP uses deliberately separate release operations for a credential-free first-publication candidate, normal staged npm publication, immutable OCI publication, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
 
 ## Public-source preflight
 
@@ -27,26 +27,63 @@ Before any publication:
 6. Enable two-factor authentication on the npm maintainer account.
 7. Confirm that the npm maintainer controls the `@j-256` scope.
 8. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
-9. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first package version is created by the protected workflow and requires one explicit visibility review before it can be made public.
+9. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
 The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version.
 
-## One-time npm bootstrap
+## First npm publication
 
-Staged and trusted publishing cannot create a package that does not exist. Bootstrap is a one-use exception:
+npm requires a package to exist before staged or trusted publishing can be configured. Do not bridge that boundary with a token that bypasses two-factor authentication. The first version uses a credential-free protected workflow to produce an attested candidate, followed by an interactive maintainer publication:
 
-1. Create a short-expiration npm granular access token that can create `@j-256/discord-mcp` and is permitted to bypass publication 2FA for this operation. Do not grant unrelated organization or package access.
-2. Add it as the `NPM_BOOTSTRAP_TOKEN` environment secret in GitHub's protected `release` environment.
-3. Create and push the exact release tag after its commit has passed CI on `main`.
-4. Dispatch `release.yml` at that tag with operation `bootstrap` and the same exact tag as input. The job refuses to proceed if the GitHub repository is private, the workflow ref differs from the tag input, the npm package, OCI tag, or MCP Registry version already exists, any source or supply-chain check fails, or the protected secret is absent.
-5. Confirm that npm shows the exact version and provenance before continuing.
-6. Delete `NPM_BOOTSTRAP_TOKEN` from the GitHub environment and revoke the npm token. Do not retain a bootstrap token for recovery.
+1. Create and push the exact release tag after its commit has passed CI on `main`.
+2. Dispatch `release.yml` at that tag with operation `candidate` and the same exact tag as input:
 
-Bootstrap publishes the already verified tarball rather than asking npm to repack the checkout. The workflow then requires npm's published SHA-512 integrity to match that tarball.
+```sh
+gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=candidate -f tag=vMAJOR.MINOR.PATCH
+```
+
+3. Approve the protected `release` environment only after confirming the exact tag, source commit, and absent npm, OCI, and MCP Registry versions. The workflow receives no npm credential, verifies source and supply-chain state, reconstructs the archive twice, verifies its installed behavior, signs the archive, SPDX SBOM, and catalog evidence with GitHub artifact attestations, and retains the exact files.
+4. Download the completed workflow artifact, inspect its archive, catalog evidence, and SBOM, and verify both archive attestations before publication:
+
+```sh
+gh run download RUN_ID --name release-evidence-candidate-vMAJOR.MINOR.PATCH
+gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/discord-mcp \
+  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --source-ref refs/tags/vMAJOR.MINOR.PATCH \
+  --deny-self-hosted-runners
+gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/discord-mcp \
+  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --source-ref refs/tags/vMAJOR.MINOR.PATCH \
+  --deny-self-hosted-runners \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+5. From an authenticated maintainer workstation, publish that exact tarball and complete npm's interactive passkey challenge:
+
+```sh
+npm login --auth-type=web
+npm whoami
+npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public
+```
+
+6. After npm makes the version available, require its published SHA-512 integrity to match the candidate before any OCI or MCP Registry operation:
+
+```sh
+node scripts/check-published-artifacts.mjs \
+  --tarball ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
+  --expect-package matching \
+  --expect-npm matching \
+  --expect-oci missing \
+  --expect-registry missing
+```
+
+The first version's public provenance is the GitHub artifact attestation bound to the protected workflow, tag, and source commit. Publishing the exact tarball preserves that byte identity. npm OIDC provenance begins with later stage-only trusted publications because npm cannot configure that trust relationship before the package exists.
 
 ## Configure trusted staged publishing
 
-After bootstrap, configure the npm package's trusted publisher with these exact boundaries:
+Immediately after the first publication, configure the npm package's trusted publisher with these exact boundaries:
 
 - Provider: GitHub Actions
 - Repository owner: `j-256`
@@ -55,7 +92,7 @@ After bootstrap, configure the npm package's trusted publisher with these exact 
 - Environment: `release`
 - Permission: allow staged publishing and disallow direct publishing
 
-Set package publishing access to require two-factor authentication and disallow tokens. The trusted publisher may run `npm stage publish`; a human still supplies 2FA for `npm stage approve`. No npm token belongs in the workflow after bootstrap.
+Set package publishing access to require two-factor authentication and disallow tokens. The trusted publisher may run `npm stage publish`; a human still supplies 2FA for `npm stage approve`. No npm token belongs in any release workflow.
 
 ## Prepare a version
 
@@ -214,6 +251,8 @@ The exact registry response is also available from `https://registry.modelcontex
 
 - [npm staged publishing](https://docs.npmjs.com/staged-publishing/)
 - [npm trusted publishers](https://docs.npmjs.com/trusted-publishers/)
+- [npm scoped public package publication](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/)
+- [npm bypass-2FA token restrictions](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)
 - [GitHub workflow event refs and SHAs](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch)
 - [GitHub repository visibility consequences](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility)
 - [GitHub private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)

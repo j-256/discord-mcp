@@ -633,18 +633,17 @@ async function checkAutomation() {
   const release = await readFile(join(workflowsDirectory, "release.yml"), "utf8")
   for (const required of [
     "environment: release",
-    "bootstrap",
+    "candidate",
     "stage",
     "image",
     "register",
+    "Require a clean first-publication candidate",
     "npm stage publish",
     "--provenance",
     "test \"$(node --version)\" = \"v24.19.0\"",
     "test \"$(npm --version)\" = \"11.17.0\"",
     "package-manager-cache: false",
     "registry-url: https://registry.npmjs.org",
-    "NPM_BOOTSTRAP_TOKEN",
-    "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}",
     "refs/tags/$RELEASE_TAG",
     "Verify versioned public icon",
     "cmp assets/discord-mcp-icon.png",
@@ -670,6 +669,15 @@ async function checkAutomation() {
     "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc",
   ]) {
     invariant(release.includes(required), `release workflow is missing ${required}`)
+  }
+  for (const forbidden of [
+    "NPM_BOOTSTRAP_TOKEN",
+    "NODE_AUTH_TOKEN",
+    "_authToken",
+    "operation == 'bootstrap'",
+    'npm publish "$TARBALL"',
+  ]) {
+    invariant(!release.includes(forbidden), `release workflow contains forbidden first-publication automation ${forbidden}`)
   }
   const ci = await readFile(join(workflowsDirectory, "ci.yml"), "utf8")
   invariant(

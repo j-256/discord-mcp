@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         options:
-          - bootstrap
+          - candidate
           - stage
           - image
           - register
@@ -107,6 +107,19 @@ jobs:
           printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
           printf 'CATALOG_EVIDENCE=%s\n' "$RUNNER_TEMP/release/catalog-evidence.json" >> "$GITHUB_ENV"
 
+      - name: Require a clean first-publication candidate
+        if: ${{ inputs.operation == 'candidate' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package missing \
+            --expect-npm missing \
+            --expect-oci missing \
+            --expect-registry missing
+
       - name: Install and verify MCP Registry publisher
         run: |
           set -eu
@@ -139,60 +152,13 @@ jobs:
       - name: Retain candidate for review
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-candidate-${{ inputs.operation }}-${{ inputs.tag }}
+          name: release-evidence-${{ inputs.operation }}-${{ inputs.tag }}
           path: |
             ${{ env.TARBALL }}
             ${{ env.CATALOG_EVIDENCE }}
             ${{ runner.temp }}/release/sbom.spdx.json
           if-no-files-found: error
           retention-days: 14
-
-      - name: Require a clean bootstrap state
-        if: ${{ inputs.operation == 'bootstrap' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          set -eu
-          test -n "$NPM_BOOTSTRAP_TOKEN"
-          node scripts/check-published-artifacts.mjs \
-            --tarball "$TARBALL" \
-            --expect-package missing \
-            --expect-npm missing \
-            --expect-oci missing \
-            --expect-registry missing
-      - name: Publish the first npm version
-        if: ${{ inputs.operation == 'bootstrap' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          set -eu
-          npmrc="$RUNNER_TEMP/npmrc"
-          cleanup_npmrc() {
-            rm -f "$npmrc"
-          }
-          trap cleanup_npmrc EXIT
-          # shellcheck disable=SC2016
-          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$npmrc"
-          NPM_CONFIG_USERCONFIG="$npmrc" npm publish "$TARBALL" --access public --provenance
-      - name: Verify the bootstrapped npm artifact
-        if: ${{ inputs.operation == 'bootstrap' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          attempt=1
-          until node scripts/check-published-artifacts.mjs \
-            --tarball "$TARBALL" \
-            --expect-package matching \
-            --expect-npm matching \
-            --expect-oci missing \
-            --expect-registry missing
-          do
-            test "$attempt" -lt 6
-            attempt=$((attempt + 1))
-            sleep 10
-          done
 
       - name: Require a clean staged-release state
         if: ${{ inputs.operation == 'stage' }}
