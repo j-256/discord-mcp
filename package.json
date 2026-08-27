@@ -1,6 +1,6 @@
 {
   "name": "@j-256/discord-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
   "license": "AGPL-3.0-only",
   "author": "j-256",
