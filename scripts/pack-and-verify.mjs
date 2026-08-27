@@ -253,17 +253,29 @@ const EXPECTED_MCP_TOOL_PROGRESS = [
   { message: "Discord request round started", progress: 0, total: 1 },
   { message: "Discord request round finished", progress: 1, total: 1 },
 ]
-const MCP_PROGRESS_SETTLE_ROUNDS = 2
+const MCP_PROGRESS_NOTIFICATION_METHOD = "notifications/progress"
 
-async function settleMcpProgress(progress) {
-  for (
-    let round = 0;
-    round < MCP_PROGRESS_SETTLE_ROUNDS
-      && progress.length < EXPECTED_MCP_TOOL_PROGRESS.length;
-    round += 1
-  ) {
-    await new Promise((resolve) => setImmediate(resolve))
+function collectWireMcpProgress(updates) {
+  return (message) => {
+    if (message?.method !== MCP_PROGRESS_NOTIFICATION_METHOD) return
+    const params = message.params
+    updates.push({
+      ...(params.message === undefined ? {} : { message: params.message }),
+      progress: params.progress,
+      ...(params.total === undefined ? {} : { total: params.total }),
+    })
   }
+}
+
+function assertInstalledMcpProgress(callbackUpdates, wireUpdates) {
+  // The SDK may retire the progress token before dispatching a
+  // coalesced terminal frame, so the raw wire is authoritative
+  assert.deepEqual(wireUpdates, EXPECTED_MCP_TOOL_PROGRESS)
+  assert.ok(callbackUpdates.length <= EXPECTED_MCP_TOOL_PROGRESS.length)
+  assert.deepEqual(
+    callbackUpdates,
+    EXPECTED_MCP_TOOL_PROGRESS.slice(0, callbackUpdates.length),
+  )
 }
 
 function assertOperationalInstructions(client) {
@@ -413,6 +425,8 @@ const transport = new StdioClientTransport({
   args: [entrypoint, "serve", "--profile", PROFILE_NAME],
   env: operationalEnvironment,
 })
+const wireProgress = []
+transport.onmessage = collectWireMcpProgress(wireProgress)
 const client = new Client({ name: "installed-package-verifier", version: "1.0.0" }, { capabilities: {} })
 try {
   await client.connect(transport)
@@ -448,8 +462,7 @@ try {
   }, {
     onprogress: (update) => progress.push(update),
   })
-  await settleMcpProgress(progress)
-  assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
+  assertInstalledMcpProgress(progress, wireProgress)
   assert.equal(discovery.isError, undefined)
   assert.deepEqual(
     discovery.structuredContent.newlyEnabledToolNames,
@@ -471,6 +484,8 @@ const modernTransport = new StdioClientTransport({
   args: [entrypoint, "serve", "--profile", PROFILE_NAME],
   env: operationalEnvironment,
 })
+const modernWireProgress = []
+modernTransport.onmessage = collectWireMcpProgress(modernWireProgress)
 const modernClient = new Client(
   { name: "installed-modern-package-verifier", version: "1.0.0" },
   {
@@ -489,13 +504,12 @@ try {
   }, {
     onprogress: (update) => progress.push(update),
   })
-  await settleMcpProgress(progress)
   const completion = await modernClient.complete({
     argument: { name: "guildId", value: "300" },
     ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
   })
   assert.equal(modernClient.getProtocolEra(), "modern")
-  assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
+  assertInstalledMcpProgress(progress, modernWireProgress)
   assert.deepEqual(modernClient.getServerCapabilities().completions, {})
   assert.deepEqual(completion.completion.values, [GUILD_ID])
 } finally {
