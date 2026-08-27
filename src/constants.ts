@@ -1,6 +1,6 @@
 export const CONNECTOR_NAME = "discord-mcp"
 export const CONNECTOR_TITLE = "Discord MCP"
-export const CONNECTOR_VERSION = "0.1.0"
+export const CONNECTOR_VERSION = "0.1.1"
 export const CONNECTOR_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
 export const CONNECTOR_WEBSITE_URL = "https://github.com/j-256/discord-mcp"
 export const CONNECTOR_ICON_URL = `https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png`
