@@ -853,6 +853,9 @@ function serviceFixture(overrides: {
     async listApplicationEntitlements() {
       throw new Error("Unexpected application entitlement inventory")
     },
+    async getApplicationEntitlement() {
+      throw new Error("Unexpected application entitlement lookup")
+    },
     async listApplicationSubscriptions() {
       throw new Error("Unexpected application subscription inventory")
     },
@@ -1589,6 +1592,89 @@ test("service audits one exact guild beneficiary across configured current-appli
   }])
   assert.equal(JSON.stringify(result).includes(MEMBER_USER_ID), false)
   assert.equal(JSON.stringify(result).includes("Private supporter"), false)
+})
+
+test("service inspects one preauthorized exact entitlement after identity and SKU verification", async () => {
+  const controller = new AbortController()
+  const reads: string[] = []
+  const { service } = serviceFixture({
+    configOverrides: {
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: {
+        applicationEntitlementGuildIds: [GUILD_ID],
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID],
+      },
+    },
+    client: {
+      async listApplicationSkus(applicationId, options) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(options?.signal, controller.signal)
+        reads.push("skus")
+        return [{
+          application_id: APPLICATION_ID,
+          flags: 132,
+          id: APPLICATION_SKU_ID,
+          name: "Private supporter name",
+          slug: "private-supporter-slug",
+          type: 5,
+        }]
+      },
+      async getApplicationEntitlement(applicationId, entitlementId, options) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(entitlementId, APPLICATION_ENTITLEMENT_ID)
+        assert.equal(options?.signal, controller.signal)
+        reads.push("entitlement")
+        return {
+          application_id: APPLICATION_ID,
+          consumed: false,
+          deleted: false,
+          guild_id: GUILD_ID,
+          id: APPLICATION_ENTITLEMENT_ID,
+          sku_id: APPLICATION_SKU_ID,
+          type: 8,
+          user_id: MEMBER_USER_ID,
+        }
+      },
+    },
+  })
+
+  const result = await service.getApplicationEntitlement(
+    { guildId: GUILD_ID, type: "guild" },
+    APPLICATION_ENTITLEMENT_ID,
+    APPLICATION_SKU_ID,
+    { signal: controller.signal },
+  )
+
+  assert.deepEqual(reads, ["skus", "entitlement"])
+  assert.deepEqual(result.application, { botId: BOT_ID, id: APPLICATION_ID })
+  assert.deepEqual(result.beneficiary, { id: GUILD_ID, type: "guild" })
+  assert.equal(result.entitlement.id, APPLICATION_ENTITLEMENT_ID)
+  assert.equal(result.sku.id, APPLICATION_SKU_ID)
+  assert.equal(JSON.stringify(result).includes(MEMBER_USER_ID), false)
+  assert.equal(JSON.stringify(result).includes("Private supporter"), false)
+})
+
+test("service rejects an unscoped exact entitlement before Discord access", async () => {
+  const { calls, service } = serviceFixture({
+    configOverrides: {
+      capabilities: { applicationMonetizationAudit: true },
+      scopes: {
+        applicationEntitlementGuildIds: [GUILD_ID],
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID],
+      },
+    },
+  })
+
+  await assert.rejects(
+    service.getApplicationEntitlement(
+      { type: "user", userId: MEMBER_USER_ID },
+      APPLICATION_ENTITLEMENT_ID,
+      APPLICATION_SKU_ID,
+    ),
+    /outside the application entitlement scope/u,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
 })
 
 test("service treats exact-user subscription state as lifecycle evidence only", async () => {

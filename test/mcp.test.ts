@@ -549,6 +549,7 @@ import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-rol
 import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
 import {
   fixtureApplicationEntitlementAudit,
+  fixtureApplicationEntitlementInspection,
   fixtureApplicationSubscriptionAudit,
 } from "./application-monetization-audit-fixture.js"
 import { fixtureGuildWebhookAudit } from "./guild-webhook-audit-fixture.js"
@@ -8548,6 +8549,8 @@ function serviceFixture(overrides: {
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
   applicationEntitlementError?: Error
   applicationEntitlementResult?: ReturnType<typeof fixtureApplicationEntitlementAudit>
+  applicationEntitlementInspectionError?: Error
+  applicationEntitlementInspectionResult?: ReturnType<typeof fixtureApplicationEntitlementInspection>
   applicationSkuError?: Error
   applicationSkuResult?: ReturnType<typeof fixtureApplicationSkuAudit>
   applicationSubscriptionError?: Error
@@ -8771,6 +8774,9 @@ function serviceFixture(overrides: {
   const applicationMonetizationCalls = {
     entitlementArguments: null as Parameters<
       DiscordToolService["auditApplicationEntitlements"]
+    > | null,
+    entitlementGetArguments: null as Parameters<
+      DiscordToolService["getApplicationEntitlement"]
     > | null,
     subscriptionArguments: null as Parameters<
       DiscordToolService["auditApplicationSubscriptions"]
@@ -9257,6 +9263,24 @@ function serviceFixture(overrides: {
           botId: BOT_ID,
           entitlementId: APPLICATION_ENTITLEMENT_ID,
           skuId: arguments_[1][0] || APPLICATION_SKU_ID,
+        })
+    },
+    async getApplicationEntitlement(...arguments_) {
+      if (overrides.applicationEntitlementInspectionError) {
+        throw overrides.applicationEntitlementInspectionError
+      }
+      applicationMonetizationCalls.entitlementGetArguments = arguments_
+      const beneficiary = arguments_[0]
+      return overrides.applicationEntitlementInspectionResult
+        || fixtureApplicationEntitlementInspection({
+          applicationId: APPLICATION_ID,
+          beneficiaryId: beneficiary.type === "guild"
+            ? beneficiary.guildId
+            : beneficiary.userId,
+          beneficiaryType: beneficiary.type,
+          botId: BOT_ID,
+          entitlementId: arguments_[1],
+          skuId: arguments_[2],
         })
     },
     async auditApplicationRoleConnectionMetadata() {
@@ -13452,6 +13476,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_application_skus",
       "audit_application_entitlements",
       "audit_application_subscriptions",
+      "get_application_entitlement",
       "get_connector_status",
       "parse_discord_reference",
       "get_observability_status",
@@ -17064,7 +17089,7 @@ test("MCP application SKU audit redacts configured secrets from transient labels
   assert.match(JSON.stringify(response), /\[redacted\]/u)
 })
 
-test("MCP application monetization audits require exact bounded beneficiary queries", async (context) => {
+test("MCP application monetization reads require exact bounded beneficiary queries", async (context) => {
   const cursor = "420000000000000000"
   const { applicationMonetizationCalls, client } = await connectedFixture(context)
 
@@ -17085,11 +17110,21 @@ test("MCP application monetization audits require exact bounded beneficiary quer
     },
     name: "audit_application_subscriptions",
   })
+  const exactResponse = await client.callTool({
+    arguments: {
+      beneficiary: { guildId: GUILD_ID, type: "guild" },
+      entitlementId: APPLICATION_ENTITLEMENT_ID,
+      skuId: APPLICATION_SKU_ID,
+    },
+    name: "get_application_entitlement",
+  })
 
   assert.notEqual(entitlementResponse.isError, true)
   assert.notEqual(subscriptionResponse.isError, true)
+  assert.notEqual(exactResponse.isError, true)
   const entitlements = structuredContent(entitlementResponse)
   const subscriptions = structuredContent(subscriptionResponse)
+  const exact = structuredContent(exactResponse)
   assert.deepEqual(entitlements.beneficiary, { id: GUILD_ID, type: "guild" })
   assert.equal((entitlements.records as unknown[]).length, 1)
   assert.equal(
@@ -17097,6 +17132,10 @@ test("MCP application monetization audits require exact bounded beneficiary quer
     "entitlements-only",
   )
   assert.equal((subscriptions.records as unknown[]).length, 1)
+  assert.equal(
+    (exact.entitlement as Record<string, unknown>).id,
+    APPLICATION_ENTITLEMENT_ID,
+  )
   assert.deepEqual(applicationMonetizationCalls.entitlementArguments?.slice(0, 2), [
     { guildId: GUILD_ID, type: "guild" },
     [APPLICATION_SKU_ID],
@@ -17116,6 +17155,14 @@ test("MCP application monetization audits require exact bounded beneficiary quer
     USER_ID,
     APPLICATION_SKU_ID,
   ])
+  assert.deepEqual(applicationMonetizationCalls.entitlementGetArguments?.slice(0, 3), [
+    { guildId: GUILD_ID, type: "guild" },
+    APPLICATION_ENTITLEMENT_ID,
+    APPLICATION_SKU_ID,
+  ])
+  assert.ok(
+    applicationMonetizationCalls.entitlementGetArguments?.[3]?.signal instanceof AbortSignal,
+  )
   assert.deepEqual(
     applicationMonetizationCalls.subscriptionArguments?.[2],
     {
@@ -17147,13 +17194,23 @@ test("MCP application monetization audits require exact bounded beneficiary quer
     },
     name: "audit_application_entitlements",
   })
+  const invalidExactResponse = await client.callTool({
+    arguments: {
+      beneficiary: { userId: USER_ID, type: "user" },
+      entitlementId: "invalid",
+      skuId: APPLICATION_SKU_ID,
+    },
+    name: "get_application_entitlement",
+  })
   assert.equal(invalidCursorResponse.isError, true)
   assert.equal(invalidBeneficiaryResponse.isError, true)
+  assert.equal(invalidExactResponse.isError, true)
 
   const tools = await client.listTools()
   for (const name of [
     "audit_application_entitlements",
     "audit_application_subscriptions",
+    "get_application_entitlement",
   ]) {
     const tool = tools.tools.find((candidate) => candidate.name === name)
     assert.deepEqual(tool?.annotations, {

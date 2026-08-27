@@ -14,7 +14,7 @@ import type {
 } from "./discord-client.js"
 import { ApplicationMonetizationEvidenceError } from "./errors.js"
 import { canonicalExplicitOffsetIso8601Timestamp } from "./iso-timestamp.js"
-import type { DiscordApplication } from "./types.js"
+import type { DiscordApplication, RequestOptions } from "./types.js"
 
 export type ApplicationEntitlementTypeName =
   | "application-subscription"
@@ -55,6 +55,41 @@ export interface ApplicationEntitlementRecord {
   startsAt: string | null
   type: ApplicationEntitlementTypeName
   unknownFieldCount: number
+}
+
+export interface ApplicationEntitlementInspectionRecord extends
+  ApplicationEntitlementRecord {
+  deleted: boolean
+}
+
+export interface ApplicationEntitlementInspectionResult {
+  application: {
+    botId: string
+    id: string
+  }
+  beneficiary: {
+    id: string
+    type: "guild" | "user"
+  }
+  entitlement: ApplicationEntitlementInspectionRecord
+  evidence: {
+    projectionComplete: boolean
+    unknownFields: number
+    unknownSkuFlagBits: number
+    unknownSkuFields: number
+    unknownSkuType: boolean
+    unknownType: boolean
+  }
+  privacy: ApplicationMonetizationPrivacy
+  schemaVersion: number
+  sku: {
+    available: boolean
+    id: string
+    purchaseScope: ApplicationSkuRecord["flags"]["purchaseScope"]
+    type: ApplicationSkuRecord["type"]["name"]
+  }
+  status: "ok"
+  warnings: readonly string[]
 }
 
 export interface ApplicationEntitlementAuditResult {
@@ -136,7 +171,7 @@ export interface ApplicationMonetizationPrivacy {
 
 export interface ApplicationMonetizationAuditServiceClient extends Pick<
   DiscordClient,
-  "listApplicationEntitlements" | "listApplicationSubscriptions"
+  "getApplicationEntitlement" | "listApplicationEntitlements" | "listApplicationSubscriptions"
 > {}
 
 export interface ApplicationMonetizationAuditServiceOptions {
@@ -205,6 +240,12 @@ const SUBSCRIPTION_WARNINGS = Object.freeze([
   "Use exact beneficiary entitlement evidence to determine access to a SKU",
   "The audit contains only a bounded page filtered to one exact configured user and one configured application-owned subscription SKU",
   "The audit cannot enumerate purchasers or mutate entitlements, subscriptions, or SKUs",
+] as const)
+const INSPECTION_WARNINGS = Object.freeze([
+  "The inspection covers one exact entitlement only and is not a beneficiary inventory",
+  "Entitlement state is access evidence only for the exact configured beneficiary and current-application SKU",
+  "SKU and entitlement evidence can change after this read",
+  "The inspection cannot mutate entitlements, subscriptions, or SKUs",
 ] as const)
 
 function evidenceError(options?: ErrorOptions): ApplicationMonetizationEvidenceError {
@@ -327,7 +368,8 @@ function projectEntitlement(
   applicationId: string,
   beneficiary: ApplicationEntitlementBeneficiary,
   skuIds: ReadonlySet<string>,
-): ApplicationEntitlementRecord {
+  allowDeleted = false,
+): ApplicationEntitlementInspectionRecord {
   const input = recordValue(value, DISCORD_LIMITS.applicationEntitlementFields)
   if (
     !positiveSnowflake(input.id)
@@ -336,7 +378,8 @@ function projectEntitlement(
     || !skuIds.has(input.sku_id)
     || !Number.isSafeInteger(input.type)
     || (input.type as number) < 1
-    || input.deleted !== false
+    || typeof input.deleted !== "boolean"
+    || (!allowDeleted && input.deleted)
     || (input.consumed !== undefined && typeof input.consumed !== "boolean")
   ) throw evidenceError()
   const userId = optionalSnowflake(input.user_id)
@@ -353,6 +396,7 @@ function projectEntitlement(
   }
   return {
     consumed: input.consumed ?? null,
+    deleted: input.deleted,
     endsAt,
     id: input.id,
     skuId: input.sku_id,
@@ -461,12 +505,15 @@ export class ApplicationMonetizationAuditService {
       options,
     )
     const skuSet = new Set(skuIds)
-    const records = raw.map((value) => projectEntitlement(
-      value,
-      application.id,
-      beneficiary,
-      skuSet,
-    ))
+    const records = raw.map((value) => {
+      const { deleted: _deleted, ...record } = projectEntitlement(
+        value,
+        application.id,
+        beneficiary,
+        skuSet,
+      )
+      return record
+    })
     if (new Set(records.map((record) => record.id)).size !== records.length) {
       throw evidenceError()
     }
@@ -498,6 +545,78 @@ export class ApplicationMonetizationAuditService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
       warnings: ENTITLEMENT_WARNINGS,
+    }
+  }
+
+  async inspectEntitlement(
+    application: DiscordApplication,
+    botId: string,
+    beneficiary: ApplicationEntitlementBeneficiary,
+    entitlementId: string,
+    requestedSkuId: string,
+    skus: readonly ApplicationSkuRecord[],
+    options: RequestOptions = {},
+  ): Promise<ApplicationEntitlementInspectionResult> {
+    if (
+      !positiveSnowflake(application.id)
+      || !positiveSnowflake(botId)
+      || !positiveSnowflake(entitlementId)
+    ) throw evidenceError()
+    const skuMap = applicationSkuMap(application.id, skus)
+    const skuIds = configuredSkuIds([requestedSkuId], skuMap)
+    const skuId = skuIds[0]
+    if (!skuId) throw evidenceError()
+    const sku = skuMap.get(skuId)
+    if (!sku) throw evidenceError()
+    const entitlement = projectEntitlement(
+      await this.#client.getApplicationEntitlement(
+        application.id,
+        entitlementId,
+        options,
+      ),
+      application.id,
+      beneficiary,
+      new Set([skuId]),
+      true,
+    )
+    if (entitlement.id !== entitlementId) throw evidenceError()
+    const unknownType = entitlement.type === "unknown"
+    const unknownSkuType = sku.type.name === "unknown"
+    const projectionComplete = entitlement.unknownFieldCount === 0
+      && !unknownType
+      && sku.flags.unknownBitCount === 0
+      && sku.unknownFieldCount === 0
+      && !unknownSkuType
+    return {
+      application: { botId, id: application.id },
+      beneficiary: {
+        id: beneficiary.type === "guild" ? beneficiary.guildId : beneficiary.userId,
+        type: beneficiary.type,
+      },
+      entitlement,
+      evidence: {
+        projectionComplete,
+        unknownFields: entitlement.unknownFieldCount,
+        unknownSkuFlagBits: sku.flags.unknownBitCount,
+        unknownSkuFields: sku.unknownFieldCount,
+        unknownSkuType,
+        unknownType,
+      },
+      privacy: {
+        omitted: PRIVACY_OMISSIONS,
+        persistence: "none",
+        rawPayloads: "omitted",
+        unknownFields: "counts-only",
+      },
+      schemaVersion: SCHEMA_VERSION,
+      sku: {
+        available: sku.flags.available,
+        id: sku.id,
+        purchaseScope: sku.flags.purchaseScope,
+        type: sku.type.name,
+      },
+      status: "ok",
+      warnings: INSPECTION_WARNINGS,
     }
   }
 

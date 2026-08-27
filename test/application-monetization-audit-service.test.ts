@@ -16,6 +16,7 @@ import type {
   DiscordApplication,
   DiscordApplicationEntitlement,
   DiscordSkuSubscription,
+  RequestOptions,
 } from "../src/types.js"
 
 const APPLICATION_ID = "500000000000000001"
@@ -95,6 +96,12 @@ function subscription(
 }
 
 class FixtureClient implements ApplicationMonetizationAuditServiceClient {
+  entitlementGetCalls: Array<{
+    applicationId: string
+    entitlementId: string
+    options: RequestOptions
+  }> = []
+  entitlementGetResponse: unknown = entitlement()
   entitlementCalls: Array<{
     applicationId: string
     beneficiary: ApplicationEntitlementBeneficiary
@@ -108,6 +115,15 @@ class FixtureClient implements ApplicationMonetizationAuditServiceClient {
     userId: string
   }> = []
   subscriptionResponse: unknown = []
+
+  async getApplicationEntitlement(
+    applicationId: string,
+    entitlementId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEntitlement> {
+    this.entitlementGetCalls.push({ applicationId, entitlementId, options })
+    return this.entitlementGetResponse as DiscordApplicationEntitlement
+  }
 
   async listApplicationEntitlements(
     applicationId: string,
@@ -274,6 +290,103 @@ test("application entitlement audit rejects inconsistent or malformed evidence",
       BOT_ID,
       { type: "user", userId: USER_ID },
       [OTHER_SKU_ID],
+      [sku()],
+    ),
+    /not owned by the pinned application/u,
+  )
+})
+
+test("exact application entitlement inspection projects deleted and future evidence safely", async () => {
+  const privateFutureValue = "private-exact-entitlement-value"
+  const { client, service } = fixture()
+  client.entitlementGetResponse = entitlement({
+    deleted: true,
+    future_private_field: privateFutureValue,
+    type: 99,
+  })
+  const selectedSku = sku()
+  selectedSku.flags.unknownBitCount = 1
+  selectedSku.unknownFieldCount = 1
+  const signal = new AbortController().signal
+
+  const result = await service.inspectEntitlement(
+    application(),
+    BOT_ID,
+    { type: "user", userId: USER_ID },
+    ENTITLEMENT_ID,
+    SKU_ID,
+    [selectedSku],
+    { signal },
+  )
+
+  assert.deepEqual(result.application, { botId: BOT_ID, id: APPLICATION_ID })
+  assert.deepEqual(result.beneficiary, { id: USER_ID, type: "user" })
+  assert.deepEqual(result.entitlement, {
+    consumed: false,
+    deleted: true,
+    endsAt: "2026-09-01T00:00:00.000Z",
+    id: ENTITLEMENT_ID,
+    skuId: SKU_ID,
+    startsAt: "2026-08-01T00:00:00.000Z",
+    type: "unknown",
+    unknownFieldCount: 1,
+  })
+  assert.deepEqual(result.sku, {
+    available: true,
+    id: SKU_ID,
+    purchaseScope: "user",
+    type: "subscription",
+  })
+  assert.deepEqual(result.evidence, {
+    projectionComplete: false,
+    unknownFields: 1,
+    unknownSkuFields: 1,
+    unknownSkuFlagBits: 1,
+    unknownSkuType: false,
+    unknownType: true,
+  })
+  assert.deepEqual(client.entitlementGetCalls, [{
+    applicationId: APPLICATION_ID,
+    entitlementId: ENTITLEMENT_ID,
+    options: { signal },
+  }])
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(privateFutureValue, "u"))
+  assert.doesNotMatch(JSON.stringify(result), /99/u)
+})
+
+test("exact application entitlement inspection rejects mismatched identity and scope evidence", async () => {
+  const cases: unknown[] = [
+    entitlement({ id: "910000000000000002" }),
+    entitlement({ application_id: "500000000000000002" }),
+    entitlement({ sku_id: OTHER_SKU_ID }),
+    entitlement({ user_id: "700000000000000002" }),
+    entitlement({ deleted: "false" as never }),
+    null,
+  ]
+  for (const value of cases) {
+    const { client, service } = fixture()
+    client.entitlementGetResponse = value
+    await assert.rejects(
+      service.inspectEntitlement(
+        application(),
+        BOT_ID,
+        { type: "user", userId: USER_ID },
+        ENTITLEMENT_ID,
+        SKU_ID,
+        [sku()],
+      ),
+      ApplicationMonetizationEvidenceError,
+    )
+  }
+
+  const { service } = fixture()
+  await assert.rejects(
+    service.inspectEntitlement(
+      application(),
+      BOT_ID,
+      { type: "user", userId: USER_ID },
+      ENTITLEMENT_ID,
+      OTHER_SKU_ID,
       [sku()],
     ),
     /not owned by the pinned application/u,

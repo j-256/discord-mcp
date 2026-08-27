@@ -28,6 +28,7 @@ import {
 import {
   ApplicationMonetizationAuditService,
   type ApplicationEntitlementAuditResult,
+  type ApplicationEntitlementInspectionResult,
   type ApplicationSubscriptionAuditResult,
 } from "./application-monetization-audit-service.js"
 import type {
@@ -898,6 +899,7 @@ export interface DiscordServiceClient {
   executeWebhookMessage: DiscordClient["executeWebhookMessage"]
   getChannel: DiscordClient["getChannel"]
   getApplicationEmoji: DiscordClient["getApplicationEmoji"]
+  getApplicationEntitlement: DiscordClient["getApplicationEntitlement"]
   getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
@@ -2295,6 +2297,36 @@ export class ConnectorService {
       identity.bot.id,
       beneficiary,
       skuIds,
+      skuAudit.records,
+      options,
+    )
+  }
+
+  async getApplicationEntitlement(
+    beneficiary: ApplicationEntitlementBeneficiary,
+    entitlementId: string,
+    skuId: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEntitlementInspectionResult> {
+    const beneficiaryId = beneficiary.type === "guild"
+      ? beneficiary.guildId
+      : beneficiary.userId
+    this.#policy.assertApplicationEntitlementsAuditable(
+      { id: beneficiaryId, type: beneficiary.type },
+      [skuId],
+    )
+    const identity = await this.#verifyIdentity(options)
+    const skuAudit = await this.#applicationSkuAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      options,
+    )
+    return this.#applicationMonetizationAuditService.inspectEntitlement(
+      identity.application,
+      identity.bot.id,
+      beneficiary,
+      entitlementId,
+      skuId,
       skuAudit.records,
       options,
     )

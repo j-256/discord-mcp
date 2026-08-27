@@ -449,6 +449,7 @@ function toolService(
     addReaction: unexpected,
     auditApplicationCommands: unexpected,
     auditApplicationEntitlements: unexpected,
+    getApplicationEntitlement: unexpected,
     auditApplicationRoleConnectionMetadata: unexpected,
     auditApplicationSkus: unexpected,
     auditApplicationSubscriptions: unexpected,

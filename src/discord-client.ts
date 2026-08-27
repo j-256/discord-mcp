@@ -1592,6 +1592,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "edit_original_interaction_response",
   "follow_announcement_channel",
   "get_application_emoji",
+  "get_application_entitlement",
   "get_current_user_voice_state",
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
@@ -1616,8 +1617,10 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_integrations",
   "list_guild_webhooks",
   "list_application_emojis",
+  "list_application_entitlements",
   "list_application_role_connection_metadata",
   "list_application_skus",
+  "list_application_subscriptions",
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_global_application_commands",
@@ -8878,6 +8881,25 @@ export class DiscordClient {
         ...options,
         diagnosticRoute: "/applications/{application.id}/skus",
         maxResponseBytes: DISCORD_LIMITS.applicationSkuResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  getApplicationEntitlement(
+    applicationId: string,
+    entitlementId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEntitlement> {
+    assertSearchSnowflake(applicationId, "Discord application entitlement application ID")
+    assertSearchSnowflake(entitlementId, "Discord application entitlement ID")
+    return this.#request(
+      "get_application_entitlement",
+      "/applications/" + applicationId + "/entitlements/" + entitlementId,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/entitlements/{entitlement.id}",
+        maxResponseBytes: DISCORD_LIMITS.applicationEntitlementRecordResponseBytes,
         suppressFailureCause: true,
       },
     )

@@ -316,6 +316,7 @@ function guidanceService(options: {
       })
     },
     auditApplicationEntitlements: unexpected,
+    getApplicationEntitlement: unexpected,
     async auditApplicationRoleConnectionMetadata() {
       calls.applicationRoleConnectionMetadata += 1
       return fixtureApplicationRoleConnectionMetadataAudit({

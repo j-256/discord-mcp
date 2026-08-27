@@ -143,6 +143,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "audit", "lifecycle", "monetization", "renewal", "sku", "subscription"],
     toolset: "application-monetization",
   },
+  get_application_entitlement: {
+    keywords: ["access", "application", "beneficiary", "entitlement", "exact", "monetization", "sku"],
+    toolset: "application-monetization",
+  },
   audit_guild_webhooks: {
     keywords: ["application", "audit", "bearer", "credential", "exposure", "guild", "security", "webhook"],
     toolset: "webhooks",

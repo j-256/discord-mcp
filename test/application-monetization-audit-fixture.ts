@@ -1,5 +1,6 @@
 import type {
   ApplicationEntitlementAuditResult,
+  ApplicationEntitlementInspectionResult,
   ApplicationSubscriptionAuditResult,
 } from "../src/application-monetization-audit-service.js"
 import { SCHEMA_VERSION } from "../src/constants.js"
@@ -46,6 +47,48 @@ export function fixtureApplicationEntitlementAudit(options: {
       unknownFieldCount: 0,
     }],
     schemaVersion: SCHEMA_VERSION,
+    status: "ok",
+    warnings: [],
+  }
+}
+
+export function fixtureApplicationEntitlementInspection(options: {
+  applicationId: string
+  beneficiaryId: string
+  beneficiaryType: "guild" | "user"
+  botId: string
+  entitlementId: string
+  skuId: string
+}): ApplicationEntitlementInspectionResult {
+  return {
+    application: { botId: options.botId, id: options.applicationId },
+    beneficiary: { id: options.beneficiaryId, type: options.beneficiaryType },
+    entitlement: {
+      consumed: false,
+      deleted: false,
+      endsAt: null,
+      id: options.entitlementId,
+      skuId: options.skuId,
+      startsAt: null,
+      type: "application-subscription",
+      unknownFieldCount: 0,
+    },
+    evidence: {
+      projectionComplete: true,
+      unknownFields: 0,
+      unknownSkuFields: 0,
+      unknownSkuFlagBits: 0,
+      unknownSkuType: false,
+      unknownType: false,
+    },
+    privacy: PRIVACY,
+    schemaVersion: SCHEMA_VERSION,
+    sku: {
+      available: true,
+      id: options.skuId,
+      purchaseScope: options.beneficiaryType,
+      type: "subscription",
+    },
     status: "ok",
     warnings: [],
   }

@@ -2550,6 +2550,73 @@ test("Discord client bounds and protects current-application SKU inventories", a
   )
 })
 
+test("Discord client fetches one exact application entitlement with bounded redacted failures", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const entitlement = {
+    application_id: "100",
+    consumed: false,
+    deleted: false,
+    id: "600",
+    sku_id: "400",
+    type: 1,
+    user_id: "300",
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse(entitlement)
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.getApplicationEntitlement("100", "600"),
+    entitlement,
+  )
+  assert.deepEqual(requests, [{
+    method: "GET",
+    url: API_BASE_URL + "/applications/100/entitlements/600",
+  }])
+  assert.throws(
+    () => client.getApplicationEntitlement("invalid", "600"),
+    /application entitlement application ID/u,
+  )
+  assert.throws(
+    () => client.getApplicationEntitlement("100", "invalid"),
+    /application entitlement ID/u,
+  )
+
+  const privateMarker = "private-entitlement-evidence"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({ message: privateMarker }, 400),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    refused.getApplicationEntitlement("100", "600"),
+    (error: unknown) => (
+      error instanceof DiscordApiError
+      && error.message.includes("request failed")
+      && !error.message.includes(privateMarker)
+      && error.cause === undefined
+    ),
+  )
+
+  const oversized = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      "x".repeat(DISCORD_LIMITS.applicationEntitlementRecordResponseBytes + 1),
+      { status: 200 },
+    ),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversized.getApplicationEntitlement("100", "600"),
+    /exceeded its local response bound/u,
+  )
+})
+
 test("Discord client requests only exact filtered application entitlement pages", async () => {
   const requests: Array<{ method: string; url: string }> = []
   const entitlement = {

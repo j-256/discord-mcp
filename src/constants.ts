@@ -267,6 +267,7 @@ export const DISCORD_LIMITS = Object.freeze({
   applicationRoleConnectionMetadataResponseBytes: 524_288,
   applicationEntitlementFields: 32,
   applicationEntitlementPage: 100,
+  applicationEntitlementRecordResponseBytes: 65_536,
   applicationEntitlementResponseBytes: 2_097_152,
   applicationSkuFields: 32,
   applicationSkuNameCharacters: 80,
