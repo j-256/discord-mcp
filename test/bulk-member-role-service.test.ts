@@ -13,6 +13,7 @@ import {
   BulkMemberRoleEvidenceError,
   BulkMemberRoleExecutionError,
   BulkMemberRoleOperationConflictError,
+  BulkMemberRolePlanChangedError,
   MemberRoleExecutionError,
 } from "../src/errors.js"
 import type {
@@ -237,6 +238,7 @@ function memberPlan(
 }
 
 function fixture(options: {
+  baselineCommonEvidenceDigest?: string
   commonEvidenceByUser?: Readonly<Record<string, string>>
   driftAfterUser?: string
   failureByUser?: Readonly<Record<string, FailureMode>>
@@ -250,14 +252,19 @@ function fixture(options: {
     [USER_THREE, options.initialRoles?.[USER_THREE] ?? false],
   ])
   const executionOrder: string[] = []
+  const planningBatches: string[][] = []
   const common = digest("common-evidence")
   const memberRoleService: BulkMemberRoleServiceOptions["memberRoleService"] = {
-    async planForBulk(_authority, _applicationId, _botId, value) {
-      return memberPlan(
-        value,
-        roleState.get(value.userId) ?? false,
-        options.commonEvidenceByUser?.[value.userId] ?? common,
-      )
+    async planBatchForBulk(_authority, _applicationId, _botId, values) {
+      planningBatches.push(values.map((value) => value.userId))
+      return {
+        baselineCommonEvidenceDigest: options.baselineCommonEvidenceDigest ?? common,
+        plans: values.map((value) => memberPlan(
+          value,
+          roleState.get(value.userId) ?? false,
+          options.commonEvidenceByUser?.[value.userId] ?? common,
+        )),
+      }
     },
     async executeForBulk(
       _authority,
@@ -338,6 +345,7 @@ function fixture(options: {
   return {
     executionOrder,
     operationStore,
+    planningBatches,
     restart: () => createService(Buffer.alloc(32, 10)),
     roleState,
     service,
@@ -381,7 +389,7 @@ test("bulk member-role normalization is strict, bounded, and canonical", () => {
 })
 
 test("bulk member-role planning uses independent batch policy and coherent evidence", async () => {
-  const { service } = fixture()
+  const { planningBatches, service } = fixture()
   const plan = await service.plan(APPLICATION_ID, BOT_ID, request())
   assert.equal(plan.status, "planned")
   assert.deepEqual(plan.counts, {
@@ -393,6 +401,10 @@ test("bulk member-role planning uses independent batch policy and coherent evide
   assert.deepEqual(plan.executionFrontier.userIds, [USER_ONE, USER_TWO])
   assert.equal(plan.permission.guildManageRoles, true)
   assert.equal(plan.verificationBoundary.maximumWrites, 2)
+  assert.ok(plan.warnings.includes(
+    "Batch planning requires matching common authority evidence before and after bounded target-member reads",
+  ))
+  assert.deepEqual(planningBatches, [[USER_ONE, USER_TWO]])
 
   await assert.rejects(
     fixture({ policy: policy({ batchEnabled: false, directEnabled: true }) }).service.plan(
@@ -419,6 +431,20 @@ test("bulk member-role planning uses independent batch policy and coherent evide
     }).service.plan(APPLICATION_ID, BOT_ID, request()),
     BulkMemberRoleEvidenceError,
   )
+  await assert.rejects(
+    fixture({
+      baselineCommonEvidenceDigest: digest("baseline"),
+    }).service.plan(APPLICATION_ID, BOT_ID, request()),
+    BulkMemberRoleEvidenceError,
+  )
+  await assert.rejects(
+    fixture({ baselineCommonEvidenceDigest: "invalid" }).service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request(),
+    ),
+    BulkMemberRoleEvidenceError,
+  )
 })
 
 test("bulk member-role no-op batches do not reserve or write", async () => {
@@ -438,8 +464,20 @@ test("bulk member-role no-op batches do not reserve or write", async () => {
   assert.equal(operationStore.receipts.size, 0)
 })
 
+test("bulk member-role execution classifies common-window drift as a changed plan", async () => {
+  const options: { baselineCommonEvidenceDigest?: string } = {}
+  const target = fixture(options)
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, request())
+  options.baselineCommonEvidenceDigest = digest("later-baseline")
+  await assert.rejects(
+    target.service.execute(APPLICATION_ID, BOT_ID, request(), plan.digest),
+    BulkMemberRolePlanChangedError,
+  )
+  assert.deepEqual(target.executionOrder, [])
+})
+
 test("bulk member-role execution writes sequentially and checkpoints every target", async () => {
-  const { executionOrder, operationStore, roleState, service } = fixture()
+  const { executionOrder, operationStore, planningBatches, roleState, service } = fixture()
   const plan = await service.plan(APPLICATION_ID, BOT_ID, request())
   const result = await service.execute(
     APPLICATION_ID,
@@ -452,6 +490,11 @@ test("bulk member-role execution writes sequentially and checkpoints every targe
   assert.equal(roleState.get(USER_ONE), true)
   assert.equal(roleState.get(USER_TWO), true)
   assert.equal(result.executedTargets.length, 2)
+  assert.deepEqual(planningBatches, [
+    [USER_ONE, USER_TWO],
+    [USER_ONE, USER_TWO],
+    [USER_ONE, USER_TWO],
+  ])
   assert.equal(
     operationStore.receipts.get(
       `bulk-member-role-change\0${operationKeyHash(OPERATION_KEY)}`,

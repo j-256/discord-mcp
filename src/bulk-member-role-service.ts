@@ -171,7 +171,7 @@ export interface BulkMemberRoleResult {
 
 export interface BulkMemberRoleServiceOptions {
   clock?: () => Date
-  memberRoleService: Pick<MemberRoleService, "executeForBulk" | "planForBulk">
+  memberRoleService: Pick<MemberRoleService, "executeForBulk" | "planBatchForBulk">
   operationStore: OperationStore
   planKey?: Uint8Array
   policy: ScopePolicy
@@ -183,6 +183,13 @@ interface PlannedTarget {
   plan: MemberRoleChangePlan
   receipt: OperationReceipt | undefined
   target: BulkMemberRoleTargetPlan
+}
+
+interface PreparedTarget {
+  childRequest: MemberRoleChangeRequest
+  planningRequest: MemberRoleChangeRequest
+  receipt: OperationReceipt | undefined
+  userId: string
 }
 
 function positiveSnowflake(value: unknown): value is string {
@@ -349,24 +356,6 @@ function targetCounts(targets: readonly BulkMemberRoleTargetPlan[]) {
   }
 }
 
-async function mapInBatches<T, U>(
-  values: readonly T[],
-  concurrency: number,
-  callback: (value: T) => Promise<U>,
-): Promise<U[]> {
-  const output: U[] = []
-  for (let index = 0; index < values.length; index += concurrency) {
-    const batch = values.slice(index, index + concurrency)
-    const settled = await Promise.allSettled(batch.map(callback))
-    const failure = settled.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    )
-    if (failure) throw failure.reason
-    output.push(...settled.map((result) => (result as PromiseFulfilledResult<U>).value))
-  }
-  return output
-}
-
 async function withBatchLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
   const prior = BATCH_LOCKS.get(key) ?? Promise.resolve()
   let release: (() => void) | undefined
@@ -451,13 +440,10 @@ export class BulkMemberRoleService {
     }
   }
 
-  async #plannedTarget(
-    applicationId: string,
-    botId: string,
+  async #prepareTarget(
     request: NormalizedBulkMemberRoleRequest,
     userId: string,
-    options: RequestOptions,
-  ): Promise<PlannedTarget> {
+  ): Promise<PreparedTarget> {
     this.#policy.assertBulkMemberRoleChangeAllowed(
       request.guildId,
       userId,
@@ -472,13 +458,21 @@ export class BulkMemberRoleService {
     const planningRequest = receipt
       ? childRequest(request, userId, "inspect")
       : executionRequest
-    const plan = await this.#memberRoleService.planForBulk(
-      BULK_MEMBER_ROLE_AUTHORITY,
-      applicationId,
-      botId,
+    return {
+      childRequest: executionRequest,
       planningRequest,
-      options,
-    )
+      receipt,
+      userId,
+    }
+  }
+
+  #plannedTarget(
+    request: NormalizedBulkMemberRoleRequest,
+    prepared: PreparedTarget,
+    plan: MemberRoleChangePlan,
+  ): PlannedTarget {
+    const { childRequest, receipt, userId } = prepared
+    const childOperationKeyHash = operationKeyHash(childRequest.operationKey)
     let state: BulkMemberRoleTargetState = plan.status === "already-current"
       ? "already-current"
       : "ready"
@@ -500,7 +494,7 @@ export class BulkMemberRoleService {
       state = "completed"
     }
     return {
-      childRequest: executionRequest,
+      childRequest,
       plan,
       receipt,
       target: {
@@ -544,17 +538,40 @@ export class BulkMemberRoleService {
       request.operationKeyHash,
     )
     this.#assertTopReceipt(receipt, request, requestDigest)
-    const planned = await mapInBatches(
-      request.userIds,
-      CONNECTOR_LIMITS.bulkMemberRoleReadConcurrency,
-      (userId) => this.#plannedTarget(
-        applicationId,
-        botId,
-        request,
-        userId,
-        options,
-      ),
+    const prepared: PreparedTarget[] = []
+    for (const userId of request.userIds) {
+      prepared.push(await this.#prepareTarget(request, userId))
+    }
+    const batch = await this.#memberRoleService.planBatchForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      applicationId,
+      botId,
+      prepared.map((target) => target.planningRequest),
+      options,
     )
+    const plans = batch.plans
+    if (
+      plans.length !== prepared.length
+      || !REVIEWED_PLAN_DIGEST_PATTERN.test(batch.baselineCommonEvidenceDigest)
+    ) {
+      throw new BulkMemberRoleEvidenceError(
+        "Discord bulk member-role planning returned incomplete target evidence",
+      )
+    }
+    if (plans[0]?.commonEvidenceDigest !== batch.baselineCommonEvidenceDigest) {
+      throw new BulkMemberRoleEvidenceError(
+        "Discord guild, role, permission, or channel evidence changed while the batch was being planned",
+      )
+    }
+    const planned = prepared.map((target, index) => {
+      const plan = plans[index]
+      if (!plan) {
+        throw new BulkMemberRoleEvidenceError(
+          "Discord bulk member-role planning returned incomplete target evidence",
+        )
+      }
+      return this.#plannedTarget(request, target, plan)
+    })
     const first = planned[0]
     if (!first) {
       throw new BulkMemberRoleEvidenceError(
@@ -667,6 +684,7 @@ export class BulkMemberRoleService {
           ? [`Selected role contains high-risk permissions: ${first.plan.highRiskPermissions.join(", ")}`]
           : []),
         "Each exact target passed the complete single-member permission and hierarchy analysis",
+        "Batch planning requires matching common authority evidence before and after bounded target-member reads",
         "Permission impact covers every direct guild channel proven by continuity-stable layout evidence; active threads are outside that inventory",
         "Username and guild and role names are transient untrusted Discord content and are never persisted",
         "Targets execute sequentially by canonical user ID with one non-retried exact role endpoint and readback each",

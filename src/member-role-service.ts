@@ -206,6 +206,11 @@ export interface MemberRoleChangeResult {
   userId: string
 }
 
+export interface MemberRoleBatchPlanningResult {
+  baselineCommonEvidenceDigest: string
+  plans: MemberRoleChangePlan[]
+}
+
 export interface MemberRoleServiceOptions {
   activityStore: ActivityStore
   client: Pick<
@@ -243,6 +248,26 @@ interface MemberRoleState {
   rolePermissionsSubset: boolean
   selectedRole: NormalizedDiscordRole
   targetMember: DiscordGuildMember & { user: NonNullable<DiscordGuildMember["user"]> }
+}
+
+interface MemberRoleCommonDiscordEvidence {
+  botMember: DiscordGuildMember
+  channels: DiscordChannel[]
+  guild: DiscordGuild
+  roles: DiscordRole[]
+}
+
+interface MemberRoleCommonRawEvidence extends MemberRoleCommonDiscordEvidence {
+  channelEvidence: GuildChannelEvidenceView
+}
+
+interface MemberRoleRawEvidence extends MemberRoleCommonRawEvidence {
+  targetMember: DiscordGuildMember
+}
+
+interface MemberRoleRawEvidenceCollection {
+  baseline: MemberRoleRawEvidence[] | null
+  current: MemberRoleRawEvidence[]
 }
 
 type DirectGuildChannel = DiscordChannel & {
@@ -814,6 +839,24 @@ async function withTargetLock<T>(
   }
 }
 
+async function mapInBatches<T, U>(
+  values: readonly T[],
+  concurrency: number,
+  callback: (value: T) => Promise<U>,
+): Promise<U[]> {
+  const output: U[] = []
+  for (let index = 0; index < values.length; index += concurrency) {
+    const batch = values.slice(index, index + concurrency)
+    const settled = await Promise.allSettled(batch.map(callback))
+    const failure = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
+    if (failure) throw failure.reason
+    output.push(...settled.map((result) => (result as PromiseFulfilledResult<U>).value))
+  }
+  return output
+}
+
 function safeErrorCode(error: unknown): string {
   if (error instanceof DiscordApiError) {
     return `DiscordApiError.${error.status}.${error.code ?? "unknown"}`
@@ -909,12 +952,11 @@ export class MemberRoleService {
     this.#randomId = options.randomId || randomUUID
   }
 
-  async #state(
+  async #assertRequestAvailable(
     botId: string,
     request: NormalizedMemberRoleChangeRequest,
     authority: MemberRoleAuthority,
-    options: RequestOptions,
-  ): Promise<MemberRoleState> {
+  ): Promise<void> {
     if (authority === "bulk") {
       this.#policy.assertBulkMemberRoleChangeAllowed(
         request.guildId,
@@ -940,27 +982,73 @@ export class MemberRoleService {
     if (existingReceipt) {
       throw new MemberRoleOperationConflictError(receiptView(existingReceipt))
     }
-    let supportingEvidence: {
-      botMember: DiscordGuildMember
-      guild: DiscordGuild
-      roles: DiscordRole[]
-      targetMember: DiscordGuildMember
-    } | undefined
+  }
+
+  async #readCommonDiscordEvidence(
+    guildId: string,
+    botId: string,
+    options: RequestOptions,
+  ): Promise<MemberRoleCommonDiscordEvidence> {
+    const [guild, botMember, roles, channels] = await Promise.all([
+      this.#client.getGuild(guildId, options),
+      this.#client.getGuildMember(guildId, botId, options),
+      this.#client.getGuildRoles(guildId, options),
+      this.#client.getGuildChannels(guildId, options),
+    ])
+    return { botMember, channels, guild, roles }
+  }
+
+  async #collectRawEvidence(
+    botId: string,
+    requests: readonly NormalizedMemberRoleChangeRequest[],
+    options: RequestOptions,
+    verifyCommonContinuity = false,
+  ): Promise<MemberRoleRawEvidenceCollection> {
+    const first = requests[0]
+    if (!first || requests.some((request) => request.guildId !== first.guildId)) {
+      throw new RangeError(
+        "Discord member-role evidence requires one nonempty exact guild request set",
+      )
+    }
+    let baselineEvidence: MemberRoleCommonDiscordEvidence | undefined
+    let currentEvidence: MemberRoleCommonDiscordEvidence | undefined
+    let targetMembers: DiscordGuildMember[] | undefined
     let channelEvidence
     try {
       channelEvidence = await collectGuildChannelEvidence({
-        guildId: request.guildId,
+        guildId: first.guildId,
         layoutSource: this.#layoutSource,
         readChannels: async () => {
-          const [guild, botMember, targetMember, roles, channels] = await Promise.all([
-            this.#client.getGuild(request.guildId, options),
-            this.#client.getGuildMember(request.guildId, botId, options),
-            this.#client.getGuildMember(request.guildId, request.userId, options),
-            this.#client.getGuildRoles(request.guildId, options),
-            this.#client.getGuildChannels(request.guildId, options),
-          ])
-          supportingEvidence = { botMember, guild, roles, targetMember }
-          return channels
+          const readMembers = () => mapInBatches(
+            requests,
+            CONNECTOR_LIMITS.bulkMemberRoleReadConcurrency,
+            (request) => this.#client.getGuildMember(
+              first.guildId,
+              request.userId,
+              options,
+            ),
+          )
+          if (verifyCommonContinuity) {
+            baselineEvidence = await this.#readCommonDiscordEvidence(
+              first.guildId,
+              botId,
+              options,
+            )
+            targetMembers = await readMembers()
+            currentEvidence = await this.#readCommonDiscordEvidence(
+              first.guildId,
+              botId,
+              options,
+            )
+          } else {
+            const [common, members] = await Promise.all([
+              this.#readCommonDiscordEvidence(first.guildId, botId, options),
+              readMembers(),
+            ])
+            currentEvidence = common
+            targetMembers = members
+          }
+          return currentEvidence.channels
         },
       })
     } catch (error) {
@@ -972,7 +1060,7 @@ export class MemberRoleService {
       }
       throw error
     }
-    if (!supportingEvidence) {
+    if (!currentEvidence || !targetMembers || targetMembers.length !== requests.length) {
       throw new MemberRoleStateError("Discord member-role supporting evidence is unavailable")
     }
     if (channelEvidence.view.obfuscatedChannelCount > 0) {
@@ -980,13 +1068,38 @@ export class MemberRoleService {
         "Discord member-role changes require complete metadata for every direct guild channel",
       )
     }
+    const current: MemberRoleCommonRawEvidence = {
+      ...currentEvidence,
+      channelEvidence: channelEvidence.view,
+      channels: channelEvidence.channels,
+    }
+    const baseline: MemberRoleCommonRawEvidence | null = baselineEvidence
+      ? {
+          ...baselineEvidence,
+          channelEvidence: channelEvidence.view,
+        }
+      : null
+    return {
+      baseline: baseline
+        ? targetMembers.map((targetMember) => ({ ...baseline, targetMember }))
+        : null,
+      current: targetMembers.map((targetMember) => ({ ...current, targetMember })),
+    }
+  }
+
+  #stateFromEvidence(
+    botId: string,
+    request: NormalizedMemberRoleChangeRequest,
+    evidence: MemberRoleRawEvidence,
+    now: Date,
+  ): MemberRoleState {
     const {
       botMember: rawBotMember,
       guild: rawGuild,
       roles: rawRoles,
       targetMember: rawTargetMember,
-    } = supportingEvidence
-    const rawChannels = channelEvidence.channels
+    } = evidence
+    const rawChannels = evidence.channels
     const guild = exactGuild(rawGuild, request.guildId)
     if (request.userId === guild.owner_id) {
       throw new MemberRoleStateError(
@@ -1010,7 +1123,6 @@ export class MemberRoleService {
         "Discord member-role changes cannot target a pending membership-screening member",
       )
     }
-    const now = this.#clock()
     if (timeoutActive(targetMember, now)) {
       throw new MemberRoleStateError(
         "Discord member-role changes cannot target an actively timed-out member because permission impact is temporarily masked",
@@ -1183,7 +1295,7 @@ export class MemberRoleService {
       beforePermissions,
       botMember,
       botPermissions,
-      channelEvidence: channelEvidence.view,
+      channelEvidence: evidence.channelEvidence,
       channelOverwriteUnknownPermissionBits: channelOverwriteUnknownBits(channels),
       channels,
       guild,
@@ -1198,26 +1310,34 @@ export class MemberRoleService {
     }
   }
 
-  async #planNormalized(
-    applicationId: string,
+  async #state(
     botId: string,
     request: NormalizedMemberRoleChangeRequest,
     authority: MemberRoleAuthority,
     options: RequestOptions,
-  ): Promise<MemberRoleChangePlan> {
+  ): Promise<MemberRoleState> {
+    await this.#assertRequestAvailable(botId, request, authority)
+    const evidence = (await this.#collectRawEvidence(botId, [request], options)).current[0]
+    if (!evidence) {
+      throw new MemberRoleStateError("Discord member-role supporting evidence is unavailable")
+    }
+    return this.#stateFromEvidence(botId, request, evidence, this.#clock())
+  }
+
+  #assertPlanningIdentity(applicationId: string, botId: string): void {
     if (!positiveSnowflake(applicationId) || !positiveSnowflake(botId)) {
       throw new RangeError(
         "Discord member-role planning requires exact application and bot snowflakes",
       )
     }
-    const state = await this.#state(botId, request, authority, options)
-    const beforeRoleIds = canonicalRoleIds(state.targetMember.roles)
-    const afterRoleIds = canonicalRoleIds(state.afterMember.roles)
-    const alreadyCurrent = request.action === "add"
-      ? beforeRoleIds.includes(request.roleId)
-      : !beforeRoleIds.includes(request.roleId)
-    const action = alreadyCurrent ? "none" : request.action
-    const commonEvidence = {
+  }
+
+  #commonPlanEvidence(
+    applicationId: string,
+    botId: string,
+    state: MemberRoleState,
+  ) {
+    return {
       applicationId,
       botId,
       botMember: {
@@ -1239,10 +1359,30 @@ export class MemberRoleService {
       },
       roles: roleSnapshot(state.roles),
     }
-    const commonEvidenceDigest = reviewedPlanDigest(this.#planKey, {
+  }
+
+  #commonEvidenceDigest(commonEvidence: Record<string, unknown>): string {
+    return reviewedPlanDigest(this.#planKey, {
       ...commonEvidence,
       domain: "discord-mcp-member-role-common-evidence.v1",
     })
+  }
+
+  #planFromState(
+    applicationId: string,
+    botId: string,
+    request: NormalizedMemberRoleChangeRequest,
+    authority: MemberRoleAuthority,
+    state: MemberRoleState,
+  ): MemberRoleChangePlan {
+    const beforeRoleIds = canonicalRoleIds(state.targetMember.roles)
+    const afterRoleIds = canonicalRoleIds(state.afterMember.roles)
+    const alreadyCurrent = request.action === "add"
+      ? beforeRoleIds.includes(request.roleId)
+      : !beforeRoleIds.includes(request.roleId)
+    const action = alreadyCurrent ? "none" : request.action
+    const commonEvidence = this.#commonPlanEvidence(applicationId, botId, state)
+    const commonEvidenceDigest = this.#commonEvidenceDigest(commonEvidence)
     const digest = reviewedPlanDigest(this.#planKey, {
       action,
       authority,
@@ -1386,6 +1526,18 @@ export class MemberRoleService {
     }
   }
 
+  async #planNormalized(
+    applicationId: string,
+    botId: string,
+    request: NormalizedMemberRoleChangeRequest,
+    authority: MemberRoleAuthority,
+    options: RequestOptions,
+  ): Promise<MemberRoleChangePlan> {
+    this.#assertPlanningIdentity(applicationId, botId)
+    const state = await this.#state(botId, request, authority, options)
+    return this.#planFromState(applicationId, botId, request, authority, state)
+  }
+
   plan(
     applicationId: string,
     botId: string,
@@ -1416,6 +1568,86 @@ export class MemberRoleService {
       "bulk",
       options,
     )
+  }
+
+  async planBatchForBulk(
+    authority: BulkMemberRoleAuthority,
+    applicationId: string,
+    botId: string,
+    requests: readonly MemberRoleChangeRequest[],
+    options: RequestOptions = {},
+  ): Promise<MemberRoleBatchPlanningResult> {
+    assertBulkMemberRoleAuthority(authority)
+    this.#assertPlanningIdentity(applicationId, botId)
+    const normalized = requests.map(normalizeMemberRoleChangeRequest)
+    const first = normalized[0]
+    const orderedTargets = normalized.every((request, index) => {
+      const previous = normalized[index - 1]
+      return index === 0
+        || previous !== undefined && compareSnowflakes(previous.userId, request.userId) < 0
+    })
+    if (
+      !first
+      || normalized.length < 2
+      || normalized.length > CONNECTOR_LIMITS.bulkMemberRoleTargets
+      || normalized.some((request) => (
+        request.action !== first.action
+        || request.auditReason !== first.auditReason
+        || request.guildId !== first.guildId
+        || request.roleId !== first.roleId
+        || BigInt(request.userId).toString() !== request.userId
+      ))
+      || !orderedTargets
+      || new Set(normalized.map((request) => request.userId)).size !== normalized.length
+      || new Set(normalized.map((request) => request.operationKeyHash)).size
+        !== normalized.length
+    ) {
+      throw new RangeError(
+        `Discord bulk member-role planning requires 2-${CONNECTOR_LIMITS.bulkMemberRoleTargets} strictly ordered unique canonical targets with one exact action, reason, guild, and role`,
+      )
+    }
+    for (const request of normalized) {
+      await this.#assertRequestAvailable(botId, request, "bulk")
+    }
+    const evidence = await this.#collectRawEvidence(
+      botId,
+      normalized,
+      options,
+      true,
+    )
+    const baselineEvidence = evidence.baseline?.[0]
+    if (!baselineEvidence) {
+      throw new MemberRoleStateError(
+        "Discord member-role baseline evidence is unavailable",
+      )
+    }
+    const now = this.#clock()
+    const baselineState = this.#stateFromEvidence(
+      botId,
+      first,
+      baselineEvidence,
+      now,
+    )
+    const baselineCommonEvidenceDigest = this.#commonEvidenceDigest(
+      this.#commonPlanEvidence(applicationId, botId, baselineState),
+    )
+    const plans = normalized.map((request, index) => {
+      const targetEvidence = evidence.current[index]
+      if (!targetEvidence) {
+        throw new MemberRoleStateError(
+          "Discord member-role supporting evidence is unavailable",
+        )
+      }
+      const state = this.#stateFromEvidence(botId, request, targetEvidence, now)
+      return this.#planFromState(
+        applicationId,
+        botId,
+        request,
+        "bulk",
+        state,
+      )
+    })
+    return { baselineCommonEvidenceDigest, plans }
   }
 
   async execute(

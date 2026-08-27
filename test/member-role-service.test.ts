@@ -174,7 +174,9 @@ interface FixtureState {
   ownerId: string
   readbackError: unknown
   roles: DiscordRole[]
+  rolesAfterFirstRead: DiscordRole[] | null
   targetMember: DiscordGuildMember
+  targetMembers: Record<string, DiscordGuildMember>
 }
 
 function fixture(options: {
@@ -208,15 +210,18 @@ function fixture(options: {
         tags: { bot_id: BOT_ID },
       }),
     ],
+    rolesAfterFirstRead: null,
     targetMember: {
       roles: [],
       user: { id: USER_ID, username: "target-user" },
     },
+    targetMembers: {},
     ...options.state,
   }
   const activities: ActivityEntry[] = []
   const events: string[] = []
   let activityCalls = 0
+  let roleReads = 0
   let writes = 0
   const activityStore: ActivityStore = {
     async append(entry) {
@@ -308,11 +313,16 @@ function fixture(options: {
       events.push(`read:member:${userId}`)
       if (userId === BOT_ID) return state.botMember
       if (writes > 0 && state.readbackError) throw state.readbackError
-      return state.targetMember
+      return userId === USER_ID
+        ? state.targetMember
+        : state.targetMembers[userId] ?? state.targetMember
     },
     async getGuildRoles() {
       events.push("read:roles")
-      return state.roles
+      roleReads += 1
+      return roleReads > 1 && state.rolesAfterFirstRead
+        ? state.rolesAfterFirstRead
+        : state.roles
     },
     async removeGuildMemberRole() {
       await mutate("remove")
@@ -463,6 +473,225 @@ test("member-role batch authority uses only the independent batch policy", async
   )
   assert.equal(result.status, "completed")
   assert.equal(target.events.filter((entry) => entry === "write:add").length, 1)
+})
+
+test("member-role batch planning brackets target reads with coherent common snapshots", async () => {
+  const userIds = Array.from(
+    { length: CONNECTOR_LIMITS.bulkMemberRoleTargets },
+    (_, index) => (BigInt(USER_ID) + BigInt(index)).toString(),
+  )
+  const targetMembers = Object.fromEntries(userIds.slice(1).map((userId, index) => [
+    userId,
+    {
+      roles: [],
+      user: { id: userId, username: `target-user-${index + 2}` },
+    },
+  ]))
+  const target = fixture({
+    policy: policy({ batchEnabled: true, enabled: false }),
+    state: { targetMembers },
+  })
+  const requests = userIds.map((userId, index) => request({
+    operationKey: `member-role-batch-operation-${index + 1}`,
+    userId,
+  }))
+
+  const batch = await target.service.planBatchForBulk(
+    BULK_MEMBER_ROLE_AUTHORITY,
+    APPLICATION_ID,
+    BOT_ID,
+    requests,
+  )
+  const plans = batch.plans
+
+  assert.deepEqual(plans.map((plan) => plan.member.id), userIds)
+  assert.equal(new Set(plans.map((plan) => plan.commonEvidenceDigest)).size, 1)
+  assert.equal(batch.baselineCommonEvidenceDigest, plans[0]?.commonEvidenceDigest)
+  assert.equal(target.events.filter((entry) => entry === "read:guild").length, 2)
+  assert.equal(target.events.filter((entry) => entry === "read:channels").length, 2)
+  assert.equal(target.events.filter((entry) => entry === "read:roles").length, 2)
+  assert.equal(
+    target.events.filter((entry) => entry === `read:member:${BOT_ID}`).length,
+    2,
+  )
+  assert.deepEqual(
+    target.events
+      .filter((entry) => entry.startsWith("read:member:") && entry !== `read:member:${BOT_ID}`)
+      .map((entry) => entry.slice("read:member:".length)),
+    userIds,
+  )
+  assert.equal(
+    target.events.filter((entry) => entry.startsWith("read:")).length,
+    CONNECTOR_LIMITS.bulkMemberRoleTargets + 8,
+  )
+
+  const individualPlans = []
+  for (const childRequest of requests) {
+    individualPlans.push(await target.service.planForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      APPLICATION_ID,
+      BOT_ID,
+      childRequest,
+    ))
+  }
+  assert.deepEqual(plans, individualPlans)
+})
+
+test("member-role batch planning surfaces common role drift across target reads", async () => {
+  const secondUserId = (BigInt(USER_ID) + 1n).toString()
+  const target = fixture({
+    policy: policy({ batchEnabled: true, enabled: false }),
+    state: {
+      targetMembers: {
+        [secondUserId]: {
+          roles: [],
+          user: { id: secondUserId, username: "target-user-2" },
+        },
+      },
+    },
+  })
+  target.state.rolesAfterFirstRead = target.state.roles.map((entry) => (
+    entry.id === ROLE_ID ? { ...entry, position: entry.position + 1 } : entry
+  ))
+
+  const batch = await target.service.planBatchForBulk(
+    BULK_MEMBER_ROLE_AUTHORITY,
+    APPLICATION_ID,
+    BOT_ID,
+    [
+      request({ operationKey: "member-role-batch-common-drift-1" }),
+      request({
+        operationKey: "member-role-batch-common-drift-2",
+        userId: secondUserId,
+      }),
+    ],
+  )
+
+  assert.notEqual(
+    batch.baselineCommonEvidenceDigest,
+    batch.plans[0]?.commonEvidenceDigest,
+  )
+  assert.equal(target.events.filter((entry) => entry === "read:roles").length, 2)
+})
+
+test("member-role batch planning rejects late layout drift after every target read", async () => {
+  const secondUserId = (BigInt(USER_ID) + 1n).toString()
+  const target = fixture({
+    policy: policy({ batchEnabled: true, enabled: false }),
+    state: {
+      targetMembers: {
+        [secondUserId]: {
+          roles: [],
+          user: { id: secondUserId, username: "target-user-2" },
+        },
+      },
+    },
+  })
+  const originalLayout = target.layoutSource.getChannelLayout.bind(target.layoutSource)
+  let layoutReads = 0
+  target.layoutSource.getChannelLayout = (guildId) => {
+    const layout = originalLayout(guildId)
+    layoutReads += 1
+    return layoutReads === 2
+      ? { ...layout, revision: layout.revision + 1 }
+      : layout
+  }
+
+  await assert.rejects(
+    target.service.planBatchForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      APPLICATION_ID,
+      BOT_ID,
+      [
+        request({ operationKey: "member-role-batch-drift-1" }),
+        request({
+          operationKey: "member-role-batch-drift-2",
+          userId: secondUserId,
+        }),
+      ],
+    ),
+    /channel evidence is incomplete: Discord Gateway channel layout changed/,
+  )
+  assert.equal(layoutReads, 2)
+  assert.equal(
+    target.events.filter((entry) => entry === `read:member:${USER_ID}`).length,
+    1,
+  )
+  assert.equal(
+    target.events.filter((entry) => entry === `read:member:${secondUserId}`).length,
+    1,
+  )
+})
+
+test("member-role batch planning rejects inconsistent or protected targets before reads", async () => {
+  const secondUserId = (BigInt(USER_ID) + 1n).toString()
+  const protectedTarget = fixture({
+    policy: policy({
+      batchEnabled: true,
+      enabled: false,
+      protectedUserIds: [secondUserId],
+    }),
+    state: {
+      targetMembers: {
+        [secondUserId]: {
+          roles: [],
+          user: { id: secondUserId, username: "target-user-2" },
+        },
+      },
+    },
+  })
+  await assert.rejects(
+    protectedTarget.service.planBatchForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      APPLICATION_ID,
+      BOT_ID,
+      [
+        request({ operationKey: "member-role-batch-protected-1" }),
+        request({
+          operationKey: "member-role-batch-protected-2",
+          userId: secondUserId,
+        }),
+      ],
+    ),
+    /is protected from administration/,
+  )
+  assert.equal(protectedTarget.events.some((entry) => entry.startsWith("read:")), false)
+
+  const inconsistent = fixture({
+    policy: policy({ batchEnabled: true, enabled: false }),
+  })
+  await assert.rejects(
+    inconsistent.service.planBatchForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      APPLICATION_ID,
+      BOT_ID,
+      [
+        request({ operationKey: "member-role-batch-mixed-1" }),
+        request({
+          action: "remove",
+          operationKey: "member-role-batch-mixed-2",
+          userId: secondUserId,
+        }),
+      ],
+    ),
+    /one exact action, reason, guild, and role/,
+  )
+  await assert.rejects(
+    inconsistent.service.planBatchForBulk(
+      BULK_MEMBER_ROLE_AUTHORITY,
+      APPLICATION_ID,
+      BOT_ID,
+      [
+        request({
+          operationKey: "member-role-batch-order-2",
+          userId: secondUserId,
+        }),
+        request({ operationKey: "member-role-batch-order-1" }),
+      ],
+    ),
+    /strictly ordered unique canonical targets/,
+  )
+  assert.equal(inconsistent.events.some((entry) => entry.startsWith("read:")), false)
 })
 
 test("member-role plans and executes exact removals", async () => {
