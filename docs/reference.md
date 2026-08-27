@@ -3138,6 +3138,14 @@ npm run security:check
 
 Generate and validate an SPDX production-dependency SBOM with `npm run --silent sbom -- --output sbom.spdx.json`. The release workflow attests the verified archive with that SBOM.
 
+### Provenance, SBOM, and attestation boundaries
+
+Build provenance is a machine-readable build receipt, not a security certificate. Each platform manifest carries BuildKit `mode=max` provenance describing its source revision, builder, build platform, materials, timestamps, build arguments, low-level build definition, Dockerfile bytes, and mappings between build steps and image layers. `max` names BuildKit's most detailed recording mode; it does not assert a maximum SLSA level, byte-for-byte reproducibility, or freedom from malicious inputs. The mode exposes build-argument values, so every argument in the release Dockerfile is public base-image, version, or revision metadata and credentials must never be passed as build arguments. See [Docker's provenance-attestation documentation](https://docs.docker.com/build/metadata/attestations/slsa-provenance/).
+
+An SPDX software bill of materials is a machine-readable parts list. The digest-pinned container scanner inventories packages detected in the final runtime stage for each supported platform and attaches the statement to that platform's exact manifest. The npm SBOM instead covers the root package and exact production dependency set; validation requires its package URLs, registry origins, and SHA-512 checksums to agree with the lockfile and explicitly requires `filesAnalyzed: false` so it never claims file-by-file analysis. An SBOM enables later vulnerability and license queries as databases change, but it is not itself a vulnerability scan or legal-compliance verdict. An omitted component may reflect scanner or package-metadata limits rather than proof of absence. See [Docker's SBOM-attestation documentation](https://docs.docker.com/build/metadata/attestations/sbom/).
+
+OCI provenance and SBOM statements are records attached to the image index and platform manifests in the registry, not files added to the running container filesystem. A GitHub artifact attestation adds a signed identity-and-integrity claim tying an exact subject digest to the repository, workflow, source ref, and source commit that issued it. Successful verification establishes that binding and detects changed artifact or statement bytes under the verifier's trust in GitHub's identity and signing infrastructure. It does not independently prove that the statement is complete or true: a compromised workflow, builder, scanner, source tree, or dependency can produce a validly signed record for unsafe software. Attestations therefore do not guarantee freedom from defects, vulnerabilities, malware, license problems, scanner omissions, or irreproducibility. See [GitHub's artifact-attestation model](https://docs.github.com/en/actions/concepts/security/artifact-attestations).
+
 After building, verify the compiled CLI and selected policy without contacting Discord:
 
 ```sh
@@ -3167,6 +3175,8 @@ The npm package, OCI image, source constant, lockfile root, MCP Registry manifes
 
 Release candidates are reconstructed from the selected tag, packed twice, installed into an isolated consumer, accompanied by an SPDX SBOM, and signed through GitHub artifact attestations. Because npm does not permit staging or trusted publishing before a package exists, the first version is published from the exact attested archive by a maintainer completing an interactive passkey challenge. Every later npm release uses stage-only trusted publishing, followed by human two-factor approval. A separately approved image operation publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime before Registry publication. Existing image tags are never overwritten.
 
+After npm, OCI, and MCP Registry identities agree, an immutable GitHub Release operation reconstructs and attests the evidence under read-only authority, then delegates only draft creation and publication to a dependent protected job with `contents: write` plus read-only current-run artifact and attestation access. Its protected environment reviewer confirms repository-level Release immutability because GitHub does not expose that administrative setting to `GITHUB_TOKEN`; automation receives no standing repository-administration credential. The job installs a SHA-256-pinned GitHub CLI, requires the exact protected tag and source commit, generates deterministic notes and checksums, and allows only the npm archive, credential-free catalog evidence, canonical release notes, validated SPDX SBOM, and `SHA256SUMS`. Because GitHub permits displayed immutable-Release notes to be edited, the canonical notes are an attested, checksummed asset. The job verifies the complete draft before publication, then requires GitHub's immutable Release attestation, verifies every local asset against it, and compares every public download byte-for-byte. An exact immutable Release is a no-op; published mutable state, prereleases, mismatched evidence, or unexpected assets fail closed, and automation never deletes a Release or unexpected asset.
+
 To verify a downloaded release archive:
 
 ```sh
@@ -3191,7 +3201,7 @@ gh attestation verify oci://ghcr.io/j-256/discord-mcp:0.1.1 \
   --bundle-from-oci
 ```
 
-The [release runbook](releasing.md) covers the one-time attested first publication, protected npm staging, human approval, immutable OCI publication, registry registration, and independent verification.
+The [release runbook](releasing.md) covers the one-time attested first publication, protected npm staging, human approval, immutable OCI publication, registry registration, immutable GitHub Release publication, and independent verification.
 
 ## Expansion
 
