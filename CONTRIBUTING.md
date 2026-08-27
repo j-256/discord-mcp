@@ -50,6 +50,19 @@ npm run security:check
 
 Run `npm run container:verify` and `npm run container:index:verify` when changing container, package, release, runtime, dependency, or Registry behavior. Default tests must use injected transports and must not contact Discord.
 
+The documentation portal keeps its build dependencies outside the published server package. For a portal or canonical documentation change, install both lockfiles, build the server contract used by the generator, install the pinned browser once, and run the complete portal verifier:
+
+```sh
+npm run deps:locked
+npm --prefix site run deps:locked
+npm run build
+npm --prefix site run browser:install
+npm --prefix site run security:check
+npm --prefix site run verify
+```
+
+Run `npm --prefix site run test:evidence-links` after changing the field comparison or its external sources. Scheduled CI repeats that network-dependent check; every pull request still verifies deterministic generation, local navigation and fragments, runtime asset privacy, browser behavior, responsive layout, search, and accessibility without depending on third-party availability.
+
 Live probes are exceptional, explicit, read-only by default, and limited to a bot and guild controlled by the person running them. Do not fetch message content unless the exact probe and review require it. Never attach raw live output to a public report; summarize fixed error categories and privacy-safe counts instead.
 
 ## Pull requests

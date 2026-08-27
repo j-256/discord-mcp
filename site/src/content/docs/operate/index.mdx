@@ -1,0 +1,55 @@
+---
+title: Operate Discord MCP
+description: A deliberate path from offline inspection through read-only use and reviewed expansion
+sidebar:
+  label: Operator path
+  order: 1
+---
+
+import { Aside, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+The operator CLI is designed as an evidence ladder. Each step isolates one boundary before the next one is introduced, so a failure has a useful category instead of becoming a generic startup error.
+
+## Establish the read-only baseline
+
+<Steps>
+
+1. Inspect the credential-free catalog and recommended read-only preset.
+
+2. Generate the exact Discord bot installation plan without opening a browser or requiring a token.
+
+3. Create one strict non-secret policy while delivering the token only through a caller-owned secret source.
+
+4. Run offline validation, then online doctor, then the real stdio smoke test.
+
+5. Generate the private host activation guide and compare every launch field before editing the host.
+
+6. Complete the first structured channel inventory through the host.
+
+</Steps>
+
+The [first verified read guide](../start/getting-started/) provides the exact release-pinned commands, success criteria, and recovery order.
+
+## Expand deliberately
+
+Once the baseline works, add one outcome at a time:
+
+<CardGrid>
+  <LinkCard title="Read and discovery" href="../reference/capabilities/read-and-discovery/" description="Search, bounded inventories, privacy-safe member and ban evidence, and thread or forum context." />
+  <LinkCard title="Messages and interactions" href="../reference/capabilities/messages-and-interactions/" description="Reviewed thread, pin, crosspost, forwarding, poll, and private webhook workflows." />
+  <LinkCard title="Guild lifecycle" href="../reference/capabilities/guild-lifecycle/" description="Invites, templates, onboarding, settings, Community, incidents, expressions, events, and stages." />
+  <LinkCard title="Channels and roles" href="../reference/capabilities/channels-and-roles/" description="Permission evidence, exact metadata and ordering, additive creation, roles, blueprints, and resumable scaffolds." />
+  <LinkCard title="Publishing and members" href="../reference/capabilities/publishing-and-members/" description="Local-file and static message layouts, reactions, direct messages, deletion, member changes, moderation, and pruning." />
+</CardGrid>
+
+<Aside type="tip" title="Recipes add bounded authority">
+
+A recipe plans and applies one reviewed policy expansion. It does not bypass Discord permissions, widen exact scope implicitly, or make an immediate write path available.
+
+</Aside>
+
+## Recover and verify
+
+- Use [troubleshooting](./troubleshooting/) for setup, host initialization, policy, credential, Discord, and stdio failures
+- Use [release verification](./release-verification/) to distinguish provenance, inventories, signatures, and reproducibility from security claims they cannot make
+- Use the [exact contract explorer](../generated/contract-explorer.html) to inspect the callable release without a credential or Discord request

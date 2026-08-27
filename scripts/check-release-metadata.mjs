@@ -89,6 +89,33 @@ const EXPECTED_DEV_DEPENDENCIES = {
   tsx: "4.23.12",
   typescript: "7.0.2",
 }
+const EXPECTED_SITE_DEV_DEPENDENCIES = {
+  "@astrojs/check": "0.9.10",
+  "@astrojs/markdown-remark": "7.2.4",
+  "@astrojs/starlight": "0.41.9",
+  "@axe-core/playwright": "4.13.0",
+  astro: "7.2.9",
+  playwright: "1.62.1",
+  typescript: "6.0.3",
+}
+const EXPECTED_SITE_SCRIPTS = {
+  "browser:install": "playwright install chromium",
+  "browser:install:ci": "playwright install --with-deps chromium",
+  build: "npm run generate && astro build",
+  check: "npm run generate && astro check",
+  "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
+  dev: "npm run generate && astro dev",
+  generate: "node scripts/generate.mjs",
+  preview: "astro preview",
+  "security:check": "npm audit --audit-level=moderate && npm audit signatures",
+  test: "node --test test/*.test.mjs",
+  "test:browser": "node scripts/browser-test.mjs",
+  "test:evidence-links": "node scripts/evidence-link-test.mjs",
+  verify: "npm run check && npm run build && npm test && npm run test:browser",
+}
+const EXPECTED_SITE_PRERELEASE_DEPENDENCIES = {
+  "node_modules/get-tsconfig": "5.0.0-beta.4",
+}
 
 async function checkNeutrality() {
   const { stdout } = await run(
@@ -123,6 +150,7 @@ const EXPECTED_PACKAGE_FILES = [
   "SECURITY.md",
   "dist",
   "discord-mcp.config.schema.json",
+  "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
   "docs/reference.md",
@@ -293,6 +321,63 @@ async function checkPackageAndLock() {
   return packageJson
 }
 
+async function checkDocumentationPortal() {
+  const packageJson = await readJson(join(REPOSITORY_ROOT, "site/package.json"))
+  const lock = await readJson(join(REPOSITORY_ROOT, "site/package-lock.json"))
+  invariant(packageJson.name === "@j-256/discord-mcp-docs", "documentation package name is invalid")
+  invariant(packageJson.version === "0.0.0", "documentation package must remain non-published")
+  invariant(packageJson.private === true, "documentation package must remain private")
+  invariant(packageJson.license === "AGPL-3.0-only", "documentation package license is invalid")
+  invariant(packageJson.type === "module", "documentation package must use ESM")
+  invariant(packageJson.engines?.node === ">=22.12", "documentation package Node.js floor is invalid")
+  invariant(packageJson.dependencies === undefined, "documentation package must not add production dependencies")
+  assertEqual(packageJson.devDependencies, EXPECTED_SITE_DEV_DEPENDENCIES, "documentation dependencies changed")
+  assertEqual(packageJson.scripts, EXPECTED_SITE_SCRIPTS, "documentation scripts changed")
+  assertEqual(packageJson.allowScripts, {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.2": false,
+    "fsevents@2.3.3": false,
+  }, "documentation install-script allowlist changed")
+  assertPinnedDependencies(packageJson)
+
+  invariant(lock.name === packageJson.name, "documentation lockfile package name is out of sync")
+  invariant(lock.version === packageJson.version, "documentation lockfile package version is out of sync")
+  invariant(lock.lockfileVersion === 3, "documentation lockfile must remain npm lockfile v3")
+  invariant(lock.requires === true, "documentation lockfile must preserve dependency requirements")
+  const root = lock.packages?.[""]
+  invariant(root?.name === packageJson.name, "documentation lockfile root package name is out of sync")
+  invariant(root?.version === packageJson.version, "documentation lockfile root package version is out of sync")
+  invariant(root?.license === packageJson.license, "documentation lockfile license is out of sync")
+  assertEqual(root?.devDependencies, packageJson.devDependencies, "documentation lockfile dependencies are out of sync")
+  assertEqual(root?.engines, packageJson.engines, "documentation lockfile Node.js floor is out of sync")
+  const installScripts = Object.entries(lock.packages)
+    .filter(([, metadata]) => metadata.hasInstallScript === true)
+    .map(([path, metadata]) => `${path.replace(/^node_modules\//, "")}@${metadata.version}`)
+    .sort()
+  assertEqual(
+    installScripts,
+    ["esbuild@0.28.2", "fsevents@2.3.2", "vite/node_modules/fsevents@2.3.3"],
+    "documentation lockfile install-script packages changed",
+  )
+  const prereleaseDependencies = Object.fromEntries(
+    Object.entries(lock.packages)
+      .filter(([path, metadata]) => path && !STABLE_SEMVER.test(metadata.version))
+      .map(([path, metadata]) => [path, metadata.version]),
+  )
+  assertEqual(
+    prereleaseDependencies,
+    EXPECTED_SITE_PRERELEASE_DEPENDENCIES,
+    "documentation prerelease dependency set changed",
+  )
+  for (const [path, metadata] of Object.entries(lock.packages)) {
+    if (!path) continue
+    invariant(metadata.link !== true, `${path} must not be a linked documentation dependency`)
+    invariant(typeof metadata.resolved === "string", `${path} lacks an immutable documentation archive`)
+    invariant(metadata.resolved.startsWith(`${NPM_REGISTRY}/`), `${path} is not locked to the public npm registry`)
+    invariant(typeof metadata.integrity === "string" && metadata.integrity.startsWith("sha512-"), `${path} lacks documentation SHA-512 integrity`)
+  }
+}
+
 async function checkSourceIdentity(packageJson) {
   const source = await readFile(join(REPOSITORY_ROOT, "src/constants.ts"), "utf8")
   const connectorName = source.match(/export const CONNECTOR_NAME = "([^"]+)"/)?.[1]
@@ -360,12 +445,13 @@ async function checkDocumentation(packageJson) {
     join(REPOSITORY_ROOT, "docs/limitations.md"),
     "utf8",
   )
+  const comparison = await readFile(join(REPOSITORY_ROOT, "docs/comparison.md"), "utf8")
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
   )
-  const documentation = `${readme}\n${gettingStarted}\n${limitations}\n${reference}`
+  const documentation = `${readme}\n${gettingStarted}\n${limitations}\n${comparison}\n${reference}`
   const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
@@ -446,6 +532,41 @@ async function checkDocumentation(packageJson) {
   }
   invariant(readme.includes("[Get a verified read](docs/getting-started.md)"), "README lacks the getting-started route")
   invariant(readme.includes("[Fit and boundaries](docs/limitations.md)"), "README lacks the product-boundaries route")
+  invariant(readme.includes("[Field comparison](docs/comparison.md)"), "README lacks the field-comparison route")
+  invariant(comparison.startsWith("# Discord MCP field comparison\n"), "field comparison heading is invalid")
+  for (const required of [
+    "## How to read the matrix",
+    "## Head-to-head matrix",
+    "## Why each lead is material",
+    "## Audited releases and source limits",
+    "## Registry matches outside the scored local comparison",
+    "## Maintenance rule",
+    "Not demonstrated",
+    "Different fit",
+    "Not auditable",
+  ]) {
+    invariant(comparison.includes(required), `field comparison is missing ${required}`)
+  }
+  const comparisonMatrix = comparison
+    .split("## Head-to-head matrix\n", 2)[1]
+    ?.split("\n## Why each lead is material", 1)[0]
+  invariant(comparisonMatrix !== undefined, "field comparison matrix cannot be parsed")
+  const comparisonRows = comparisonMatrix
+    .split("\n")
+    .filter((line) => line.startsWith("| "))
+  invariant(comparisonRows.length > 2, "field comparison has no scored outcomes")
+  invariant(
+    comparisonRows[0]?.startsWith("| Operator outcome | Discord MCP |"),
+    "field comparison has an invalid header",
+  )
+  invariant(
+    /^\|(?: --- \|)+$/u.test(comparisonRows[1] ?? ""),
+    "field comparison has an invalid separator",
+  )
+  invariant(
+    comparisonRows.slice(2).every((row) => row.split("|")[2]?.trim() === "**Lead**"),
+    "field comparison contains an outcome Discord MCP does not lead",
+  )
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
   invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
@@ -858,6 +979,21 @@ async function checkAutomation() {
   )
   invariant(ci.includes("name: Hardened OCI image"), "CI must verify the hardened OCI image")
   invariant(ci.includes("cmp \"$evidence_reference\" container/catalog-evidence.json"), "CI must compare package and container contracts")
+  for (const required of [
+    "name: Documentation portal",
+    "site/package-lock.json",
+    "npm run browser:install:ci",
+    "npm run verify",
+    "npm run test:evidence-links",
+    "name: documentation-portal",
+    "DOCUMENTATION_RESULT",
+  ]) {
+    invariant(ci.includes(required), `CI documentation verification is missing ${required}`)
+  }
+  invariant(
+    /if:\s*\$\{\{\s*github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\s*\}\}\s*\n\s*run:\s*npm run test:evidence-links/u.test(ci),
+    "external documentation evidence checks must remain scheduled or explicitly dispatched",
+  )
   const codeowners = await readFile(join(REPOSITORY_ROOT, ".github/CODEOWNERS"), "utf8")
   for (const path of [
     "/.github/",
@@ -873,6 +1009,7 @@ async function checkAutomation() {
     "/server.json",
     "/scripts/",
     "/SECURITY.md",
+    "/site/",
     "/SUPPORT.md",
   ]) {
     invariant(codeowners.includes(`${path} @j-256`), `CODEOWNERS does not protect ${path}`)
@@ -880,6 +1017,7 @@ async function checkAutomation() {
 }
 
 const packageJson = await checkPackageAndLock()
+await checkDocumentationPortal()
 await checkNeutrality()
 await checkSourceIdentity(packageJson)
 await checkDocumentation(packageJson)

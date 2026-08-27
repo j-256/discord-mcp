@@ -1,0 +1,39 @@
+---
+title: Reference directory
+description: Search and navigate the complete canonical Discord MCP contract by outcome
+sidebar:
+  label: Reference directory
+  order: 1
+---
+
+import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+The complete reference is generated from the canonical repository document and split at stable section boundaries. Search reaches every generated page, while the directory below keeps common tasks from requiring a linear read through the entire contract.
+
+<CardGrid>
+  <LinkCard title="Foundations" href="./capabilities/foundations/" description="Safety, requirements, bot setup, application surfaces, installation, CLI, configuration, tools, resources, Gateway, observability, and prompts." />
+  <LinkCard title="Read and discovery" href="./capabilities/read-and-discovery/" description="Community activity, search, members, bans, threads, and forums." />
+  <LinkCard title="Messages and interactions" href="./capabilities/messages-and-interactions/" description="Thread governance, pins, crossposts, forwarding, announcements, polls, and webhooks." />
+  <LinkCard title="Guild lifecycle" href="./capabilities/guild-lifecycle/" description="Integrations, invites, templates, onboarding, settings, incidents, profiles, expressions, automation, events, and stages." />
+  <LinkCard title="Channels and roles" href="./capabilities/channels-and-roles/" description="Permission evidence, audit logs, channel and role lifecycle, declarative blueprints, and resumable scaffolds." />
+  <LinkCard title="Publishing and members" href="./capabilities/publishing-and-members/" description="Attachments, static layouts, reactions, direct messages, deletion, member administration, moderation, and pruning." />
+  <LinkCard title="Verification" href="./capabilities/verification/" description="Build evidence, release integrity, safe expansion, and licensing." />
+  <LinkCard title="Security details" href="../security/" description="Searchable sections derived from the canonical security policy." />
+</CardGrid>
+
+## Inspect what the release actually advertises
+
+The [exact contract explorer](../generated/contract-explorer.html) is generated through the production registration path in credential-free catalog mode. It includes tools, schemas, annotations, prompts, resources, completion bindings, plan-review app evidence, risk classes, and contract digests. It cannot execute a tool, contact Discord, read a token, reveal policy IDs, open the Gateway, export telemetry, or create an activity record.
+
+<Aside type="note" title="Source of truth">
+
+Generated pages link back to their canonical Markdown source. If navigation and source ever disagree, generation or validation fails rather than publishing an independent copy.
+
+</Aside>
+
+## Machine-readable entry points
+
+- [`llms.txt`](../llms.txt) is a concise route and safety index
+- [`llms-full.txt`](../llms-full.txt) compiles the canonical public documents with source labels
+- [Contract evidence JSON](../generated/contract-evidence.json) contains the deterministic credential-free catalog report
+- [Configuration JSON Schema](../generated/discord-mcp.config.schema.json) defines the strict non-secret policy document

@@ -1,0 +1,26 @@
+---
+import Default from "@astrojs/starlight/components/Footer.astro"
+import { readFile } from "node:fs/promises"
+
+const packageFile = new URL("../../../package.json", import.meta.url)
+const packageJson = JSON.parse(await readFile(packageFile, "utf8")) as { version: string }
+---
+
+<Default />
+<p class="release-context">
+  Documentation generated for <code>@j-256/discord-mcp@{packageJson.version}</code>. Canonical source and edit history remain in the public repository.
+</p>
+
+<style>
+  .release-context {
+    border-top: 1px solid var(--sl-color-gray-5);
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-xs);
+    margin: 1.5rem 0 0;
+    padding: 1rem 0;
+  }
+
+  .release-context code {
+    color: var(--sl-color-text-accent);
+  }
+</style>

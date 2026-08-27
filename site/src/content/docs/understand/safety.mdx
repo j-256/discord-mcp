@@ -1,0 +1,58 @@
+---
+title: Safety model
+description: A plain-language tour of scope, reviewed writes, privacy, and outcome evidence
+sidebar:
+  order: 1
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+Discord MCP treats every layer as a narrowing boundary. Discord permissions, local policy, negotiated tool discovery, exact identifiers, interactive approval, and operation evidence serve different purposes. One gate never substitutes for another.
+
+## The authority stack
+
+<CardGrid>
+  <Card title="1. Discord grant" icon="seti:lock">
+    The bot receives only the application scopes, guild permissions, channel visibility, role position, and privileged intents required by the selected capability.
+  </Card>
+  <Card title="2. Local policy" icon="document">
+    One strict versioned file binds the verified application and bot identities to exact guild, channel, and user scope plus selected toolsets and feature gates.
+  </Card>
+  <Card title="3. MCP discovery" icon="magnifier">
+    The server advertises only configured tools. Progressive discovery can narrow a large contract further without granting new Discord or local authority.
+  </Card>
+  <Card title="4. Request evidence" icon="approve-check-circle">
+    Exact IDs, complete permission evidence, bounded inputs, fresh state, and action-specific prerequisites must agree before a change can proceed.
+  </Card>
+</CardGrid>
+
+## Why exact IDs matter
+
+Names are display text and can collide, change, or contain untrusted content. Destructive and administrative workflows target exact Discord snowflakes. Canonical Discord links and typed mentions may be parsed locally into those IDs, but the parser does not perform name lookup or gain downstream authority.
+
+## The reviewed-write path
+
+<ol class="proof-flow" aria-label="Reviewed write flow">
+  <li><strong>Plan</strong><span>Resolve permissions, hierarchy, scope, capacity, and exact targets</span></li>
+  <li><strong>Bind</strong><span>Digest the action, parameters, evidence, policy, and freshness frontier</span></li>
+  <li><strong>Approve</strong><span>Require signed request state and the MCP host's interactive write approval</span></li>
+  <li><strong>Execute</strong><span>Reserve durably, avoid mutation retries, and stop on ambiguity</span></li>
+  <li><strong>Verify</strong><span>Read back the exact result and record a content-free outcome</span></li>
+</ol>
+
+<Aside type="caution" title="Transport failure is not proof of failure">
+
+If Discord may have accepted a mutation before the response was lost, the connector quarantines the ambiguous operation for reconciliation. It does not blindly retry and risk applying the change twice.
+
+</Aside>
+
+## What is never persisted
+
+Messages, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, channel topics, scaffold symbols, and avatars remain outside durable activity and operation records. Receipts use Discord identifiers, timestamps, numeric parameters, domain-separated hashes, plan digests, strategies, sanitized errors, and outcomes.
+
+## Where to go deeper
+
+- [Complete safety model](../project-overview/#safety-model) explains the product-level guarantees
+- [Reference foundations](../../reference/capabilities/foundations/) documents exact policy and protocol behavior
+- [Security details](../../security/) splits the security policy into searchable topics
+- [Fit and boundaries](../boundaries/) distinguishes verified properties from external constraints
