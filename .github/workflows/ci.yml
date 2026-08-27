@@ -44,7 +44,10 @@ jobs:
       - run: npm run deps:locked
       - run: npm run metadata:check
       - run: npm run typecheck
-      - run: npm test
+      - if: ${{ matrix.node != '24' }}
+        run: npm test
+      - if: ${{ matrix.node == '24' }}
+        run: npm run test:coverage
       - run: npm run build
 
   package:

@@ -672,6 +672,14 @@ async function checkAutomation() {
     invariant(release.includes(required), `release workflow is missing ${required}`)
   }
   const ci = await readFile(join(workflowsDirectory, "ci.yml"), "utf8")
+  invariant(
+    /if:\s*\$\{\{\s*matrix\.node == '24'\s*\}\}\s*\n\s*run:\s*npm run test:coverage/u.test(ci),
+    "CI must enforce coverage thresholds on Node 24",
+  )
+  invariant(
+    /if:\s*\$\{\{\s*matrix\.node != '24'\s*\}\}\s*\n\s*run:\s*npm test/u.test(ci),
+    "CI must retain ordinary compatibility tests outside Node 24",
+  )
   for (const pinnedImage of [BINFMT_IMAGE, BUILDKIT_IMAGE]) {
     invariant(release.includes(pinnedImage), `release workflow does not pin ${pinnedImage}`)
     invariant(ci.includes(pinnedImage), `CI workflow does not pin ${pinnedImage}`)
