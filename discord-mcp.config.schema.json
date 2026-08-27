@@ -31,9 +31,17 @@
           "type": "boolean",
           "description": "Enable application emoji changes policy"
         },
+        "applicationEntitlementConsumption": {
+          "type": "boolean",
+          "description": "Enable reviewed exact-user consumable entitlement fulfillment acknowledgement and consumption"
+        },
         "applicationMonetizationAudit": {
           "type": "boolean",
           "description": "Enable exact-beneficiary entitlement and exact-user subscription lifecycle audits"
+        },
+        "applicationTestEntitlementChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed subscription test-entitlement creation and receipt-proven deletion"
         },
         "applicationIntentChanges": {
           "type": "boolean",
@@ -844,6 +852,26 @@
           },
           "description": "Exact guild ID allowlist for reviewed application-command changes"
         },
+        "applicationConsumableEntitlementSkuIds": {
+          "minItems": 0,
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact current-application consumable SKU ID allowlist for reviewed entitlement consumption"
+        },
+        "applicationConsumableEntitlementUserIds": {
+          "minItems": 0,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact user beneficiary ID allowlist for reviewed entitlement consumption"
+        },
         "applicationEntitlementGuildIds": {
           "minItems": 0,
           "maxItems": 100,
@@ -872,7 +900,7 @@
             "type": "string",
             "pattern": "^[0-9]{1,20}$"
           },
-          "description": "Exact current-application SKU ID allowlist for entitlement and subscription audit"
+          "description": "Exact current-application SKU ID evidence allowlist shared by monetization audit and reviewed entitlement lifecycle changes"
         },
         "applicationSubscriptionUserIds": {
           "minItems": 0,
@@ -883,6 +911,36 @@
             "pattern": "^[0-9]{1,20}$"
           },
           "description": "Exact user ID allowlist for application subscription lifecycle audit"
+        },
+        "applicationTestEntitlementGuildIds": {
+          "minItems": 0,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact guild beneficiary ID allowlist for reviewed subscription test entitlements"
+        },
+        "applicationTestEntitlementSkuIds": {
+          "minItems": 0,
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact current-application subscription SKU ID allowlist for reviewed test entitlements"
+        },
+        "applicationTestEntitlementUserIds": {
+          "minItems": 0,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact user beneficiary ID allowlist for reviewed subscription test entitlements"
         },
         "announcementCrosspostChannelIds": {
           "minItems": 0,
@@ -1691,7 +1749,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 66,
+          "maxItems": 67,
           "type": "array",
           "items": {
             "type": "string",
@@ -1699,6 +1757,7 @@
               "activity",
               "application-commands",
               "application-emojis",
+              "application-entitlement-changes",
               "application-monetization",
               "application-security",
               "announcement-crossposts",

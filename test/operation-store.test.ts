@@ -18,12 +18,13 @@ import { OperationStoreError } from "../src/errors.js"
 import {
   FileOperationStore,
   operationKeyHash,
-  type ApplicationOperationReceipt,
+  type ApplicationEntitlementOperationReceipt,
   type AutoModerationOperationReceipt,
   type ComponentMessageOperationReceipt,
   type DirectMessageOperationReceipt,
   type EmbedMessageOperationReceipt,
   type OperationReceipt,
+  type StandardApplicationOperationReceipt,
   type StandardOperationReceipt,
 } from "../src/operation-store.js"
 
@@ -154,8 +155,8 @@ function voiceChannelStatusReceipt(
 }
 
 function applicationReceipt(
-  status: ApplicationOperationReceipt["status"] = "pending",
-): ApplicationOperationReceipt {
+  status: StandardApplicationOperationReceipt["status"] = "pending",
+): StandardApplicationOperationReceipt {
   return {
     activityId: "application-emoji-activity-0001",
     applicationId: GUILD_ID,
@@ -176,8 +177,8 @@ function applicationReceipt(
 }
 
 function applicationIntentReceipt(
-  status: ApplicationOperationReceipt["status"] = "pending",
-): ApplicationOperationReceipt {
+  status: StandardApplicationOperationReceipt["status"] = "pending",
+): StandardApplicationOperationReceipt {
   return {
     activityId: "application-intent-activity-0001",
     applicationId: GUILD_ID,
@@ -197,9 +198,52 @@ function applicationIntentReceipt(
   }
 }
 
+function applicationEntitlementReceipt(
+  action: ApplicationEntitlementOperationReceipt["action"],
+  stage: ApplicationEntitlementOperationReceipt["stage"] = "reserved",
+  status: ApplicationEntitlementOperationReceipt["status"] = stage === "terminal"
+    ? "completed"
+    : "pending",
+): ApplicationEntitlementOperationReceipt {
+  const operationKey = `application-entitlement-${action}-operation-0001`
+  const targetKnown = action !== "create-test" || stage !== "reserved"
+  const entitlementId = targetKnown ? CHANNEL_ID : null
+  return {
+    action,
+    activityId: `application-entitlement-${action}-activity-0001`,
+    applicationId: GUILD_ID,
+    beneficiaryId: DIRECT_MESSAGE_RECIPIENT_ID,
+    beneficiaryType: "user",
+    creationOperationKeyHash: action === "delete-test"
+      ? operationKeyHash("application-entitlement-create-operation-0001")
+      : null,
+    entitlementId,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    fulfillmentReferenceHash: action === "consume"
+      ? `sha256:${"f".repeat(64)}`
+      : null,
+    kind: "application-entitlement-change",
+    operationKeyHash: operationKeyHash(operationKey),
+    planDigest: PLAN_DIGEST,
+    resourceId: entitlementId,
+    schemaVersion: 2,
+    skuId: "600000000000000001",
+    stage,
+    status,
+    timestamp: stage === "reserved"
+      ? "2026-08-27T00:00:00.000Z"
+      : stage === "target-known"
+        ? "2026-08-27T00:00:01.000Z"
+        : "2026-08-27T00:00:02.000Z",
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
 function globalApplicationCommandReceipt(
-  status: ApplicationOperationReceipt["status"] = "pending",
-): ApplicationOperationReceipt {
+  status: StandardApplicationOperationReceipt["status"] = "pending",
+): StandardApplicationOperationReceipt {
   return {
     activityId: "global-command-activity-0001",
     applicationId: GUILD_ID,
@@ -723,6 +767,93 @@ test("file operation store keeps application intent receipts content-free", asyn
       verification: "drift",
     }),
     /invalid application-wide outcome evidence/,
+  )
+})
+
+test("file operation store checkpoints exact application entitlement identities", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-entitlements-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const reserved = applicationEntitlementReceipt("create-test")
+  const targetKnown = applicationEntitlementReceipt("create-test", "target-known")
+  const completed = applicationEntitlementReceipt("create-test", "terminal")
+
+  assert.deepEqual(await store.reserveApplication(reserved), {
+    created: true,
+    receipt: reserved,
+  })
+  await store.checkpointApplicationEntitlement(targetKnown)
+  await store.checkpointApplicationEntitlement(targetKnown)
+  assert.deepEqual(
+    await store.getApplication(reserved.kind, reserved.operationKeyHash),
+    targetKnown,
+  )
+  await store.finishApplication(completed)
+  await store.finishApplication(completed)
+  assert.deepEqual(
+    await store.getApplication(reserved.kind, reserved.operationKeyHash),
+    completed,
+  )
+
+  for (const action of ["consume", "delete-test"] as const) {
+    const pending = applicationEntitlementReceipt(action)
+    const terminal = applicationEntitlementReceipt(action, "terminal")
+    await store.reserveApplication(pending)
+    await store.finishApplication(terminal)
+    assert.deepEqual(
+      await store.getApplication(pending.kind, pending.operationKeyHash),
+      terminal,
+    )
+  }
+
+  const operationDirectories = await readdir(directory)
+  const text = (await Promise.all(operationDirectories.flatMap((name) => {
+    const operationDirectory = join(directory, name)
+    return [
+      readFile(join(operationDirectory, "pending.json"), "utf8"),
+      readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+    ]
+  }))).join("\n")
+  assert.match(text, /"entitlementId":"200000000000000001"/u)
+  assert.match(text, /"fulfillmentReferenceHash":"sha256:[a-f0-9]{64}"/u)
+  assert.doesNotMatch(
+    text,
+    /audit reason|fulfillment-reference-raw|product name|application-entitlement-create-operation-0001/u,
+  )
+})
+
+test("file operation store rejects unsafe application entitlement lifecycle evidence", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-entitlements-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const store = new FileOperationStore(join(root, "receipts"))
+  const reserved = applicationEntitlementReceipt("create-test")
+  await store.reserveApplication(reserved)
+
+  await assert.rejects(
+    store.finishApplication(applicationEntitlementReceipt("create-test", "terminal")),
+    /stage did not advance safely/u,
+  )
+  await assert.rejects(
+    store.checkpointApplicationEntitlement({
+      ...applicationEntitlementReceipt("create-test", "target-known"),
+      beneficiaryId: "400000000000000002",
+    }),
+    /changed reserved identity/u,
+  )
+  await assert.rejects(
+    store.reserveApplication({
+      ...applicationEntitlementReceipt("consume"),
+      fulfillmentReference: "fulfillment-reference-raw",
+    } as unknown as ApplicationEntitlementOperationReceipt),
+    /invalid shape/u,
+  )
+  await assert.rejects(
+    store.reserveApplication({
+      ...applicationEntitlementReceipt("delete-test"),
+      creationOperationKeyHash: null,
+    }),
+    /invalid action evidence/u,
   )
 })
 

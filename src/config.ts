@@ -53,8 +53,10 @@ export interface ConnectorConfig {
   allowGlobalApplicationCommandChanges: boolean
   allowApplicationEmojiAudit: boolean
   allowApplicationEmojiChanges: boolean
+  allowApplicationEntitlementConsumption: boolean
   allowApplicationIntentChanges: boolean
   allowApplicationMonetizationAudit: boolean
+  allowApplicationTestEntitlementChanges: boolean
   allowApplicationRoleConnectionMetadataChanges: boolean
   allowAnnouncementCrossposts: boolean
   allowAnnouncementSubscriptionAudit: boolean
@@ -160,10 +162,15 @@ export interface ConnectorConfig {
   allowWidgetSettingsChanges: boolean
   applicationEmojiRoots: readonly string[]
   applicationCommandGuildIds: ReadonlySet<string>
+  applicationConsumableEntitlementSkuIds: ReadonlySet<string>
+  applicationConsumableEntitlementUserIds: ReadonlySet<string>
   applicationEntitlementGuildIds: ReadonlySet<string>
   applicationEntitlementUserIds: ReadonlySet<string>
   applicationMonetizationSkuIds: ReadonlySet<string>
   applicationSubscriptionUserIds: ReadonlySet<string>
+  applicationTestEntitlementGuildIds: ReadonlySet<string>
+  applicationTestEntitlementSkuIds: ReadonlySet<string>
+  applicationTestEntitlementUserIds: ReadonlySet<string>
   auditFile: string
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
@@ -470,6 +477,16 @@ export function loadConnectorConfigDocument(
     "applicationCommandGuildIds",
     CONNECTOR_LIMITS.applicationCommandGuildAllowlist,
   )
+  const applicationConsumableEntitlementSkuIds = configScope(
+    document,
+    "applicationConsumableEntitlementSkuIds",
+    CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist,
+  )
+  const applicationConsumableEntitlementUserIds = configScope(
+    document,
+    "applicationConsumableEntitlementUserIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
   const applicationEntitlementGuildIds = configScope(
     document,
     "applicationEntitlementGuildIds",
@@ -488,6 +505,21 @@ export function loadConnectorConfigDocument(
   const applicationSubscriptionUserIds = configScope(
     document,
     "applicationSubscriptionUserIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
+  const applicationTestEntitlementGuildIds = configScope(
+    document,
+    "applicationTestEntitlementGuildIds",
+    CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
+  )
+  const applicationTestEntitlementSkuIds = configScope(
+    document,
+    "applicationTestEntitlementSkuIds",
+    CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist,
+  )
+  const applicationTestEntitlementUserIds = configScope(
+    document,
+    "applicationTestEntitlementUserIds",
     CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist,
   )
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
@@ -650,6 +682,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("adminGuildIds"), adminGuildIds],
     [configPolicyPath("applicationCommandGuildIds"), applicationCommandGuildIds],
     [configPolicyPath("applicationEntitlementGuildIds"), applicationEntitlementGuildIds],
+    [configPolicyPath("applicationTestEntitlementGuildIds"), applicationTestEntitlementGuildIds],
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
     [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
@@ -1080,6 +1113,10 @@ export function loadConnectorConfigDocument(
   }
   const allowApplicationEmojiAudit = configCapability(document, "applicationEmojiAudit")
   const allowApplicationEmojiChanges = configCapability(document, "applicationEmojiChanges")
+  const allowApplicationEntitlementConsumption = configCapability(
+    document,
+    "applicationEntitlementConsumption",
+  )
   const allowApplicationIntentChanges = configCapability(document, "applicationIntentChanges")
   const allowApplicationMonetizationAudit = configCapability(
     document,
@@ -1088,6 +1125,10 @@ export function loadConnectorConfigDocument(
   const allowApplicationRoleConnectionMetadataChanges = configCapability(
     document,
     "applicationRoleConnectionMetadataChanges",
+  )
+  const allowApplicationTestEntitlementChanges = configCapability(
+    document,
+    "applicationTestEntitlementChanges",
   )
   if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
     throw new ConfigurationError(
@@ -1109,6 +1150,45 @@ export function loadConnectorConfigDocument(
     throw new ConfigurationError(
       `${configPolicyPath("allowApplicationMonetizationAudit")} requires at least one exact `
       + "application entitlement beneficiary or subscription user",
+    )
+  }
+  for (const skuId of applicationConsumableEntitlementSkuIds) {
+    if (applicationMonetizationSkuIds.has(skuId)) continue
+    throw new ConfigurationError(
+      `${configPolicyPath("applicationConsumableEntitlementSkuIds")} must be a subset of `
+      + configPolicyPath("applicationMonetizationSkuIds"),
+    )
+  }
+  for (const skuId of applicationTestEntitlementSkuIds) {
+    if (applicationMonetizationSkuIds.has(skuId)) continue
+    throw new ConfigurationError(
+      `${configPolicyPath("applicationTestEntitlementSkuIds")} must be a subset of `
+      + configPolicyPath("applicationMonetizationSkuIds"),
+    )
+  }
+  if (
+    allowApplicationTestEntitlementChanges
+    && (
+      applicationTestEntitlementSkuIds.size === 0
+      || applicationTestEntitlementGuildIds.size === 0
+        && applicationTestEntitlementUserIds.size === 0
+    )
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowApplicationTestEntitlementChanges")} requires an exact test `
+      + "entitlement SKU allowlist and at least one exact guild or user beneficiary",
+    )
+  }
+  if (
+    allowApplicationEntitlementConsumption
+    && (
+      applicationConsumableEntitlementSkuIds.size === 0
+      || applicationConsumableEntitlementUserIds.size === 0
+    )
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowApplicationEntitlementConsumption")} requires exact consumable `
+      + "entitlement SKU and user allowlists",
     )
   }
   const allowGuildTemplateAudit = configCapability(document, "guildTemplateAudit")
@@ -1264,8 +1344,10 @@ export function loadConnectorConfigDocument(
     allowGlobalApplicationCommandChanges,
     allowApplicationEmojiAudit,
     allowApplicationEmojiChanges,
+    allowApplicationEntitlementConsumption,
     allowApplicationIntentChanges,
     allowApplicationMonetizationAudit,
+    allowApplicationTestEntitlementChanges,
     allowApplicationRoleConnectionMetadataChanges,
     announcementCrosspostChannelIds,
     announcementSubscriptionSourceChannelIds,
@@ -1380,10 +1462,15 @@ export function loadConnectorConfigDocument(
       "$.storage.applicationEmojiRoots",
     ),
     applicationCommandGuildIds,
+    applicationConsumableEntitlementSkuIds,
+    applicationConsumableEntitlementUserIds,
     applicationEntitlementGuildIds,
     applicationEntitlementUserIds,
     applicationMonetizationSkuIds,
     applicationSubscriptionUserIds,
+    applicationTestEntitlementGuildIds,
+    applicationTestEntitlementSkuIds,
+    applicationTestEntitlementUserIds,
     auditFile: resolveConnectorConfigDocumentAuditFile(document, environment, options),
     attachmentChannelIds,
     attachmentMaxBytes: configLimit(

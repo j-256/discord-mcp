@@ -26,11 +26,13 @@ import { OperationStoreError } from "./errors.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
 
 export const OPERATION_KEY_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+export const ENTITLEMENT_FULFILLMENT_REFERENCE_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 export const OPERATION_KINDS = [
   "announcement-crosspost",
   "announcement-subscription",
   "application-emoji-change",
+  "application-entitlement-change",
   "application-intent-enablement",
   "application-role-connection-metadata-change",
   "attachment-message",
@@ -97,6 +99,7 @@ export const OPERATION_KINDS = [
 export type OperationKind = typeof OPERATION_KINDS[number]
 export type ApplicationOperationKind =
   | "application-emoji-change"
+  | "application-entitlement-change"
   | "application-intent-enablement"
   | "application-role-connection-metadata-change"
   | "global-application-command-change"
@@ -153,19 +156,61 @@ export type OperationReceipt =
   | EmbedMessageOperationReceipt
   | StandardOperationReceipt
 
-export interface ApplicationOperationReceipt {
+interface ApplicationOperationReceiptFields {
   activityId: string
   applicationId: string
   error: string | null
-  kind: ApplicationOperationKind
   operationKeyHash: string
   planDigest: string
   resourceId: string | null
-  schemaVersion: 1
   status: OperationReceiptStatus
   timestamp: string
   verification: OperationVerification
 }
+
+export type StandardApplicationOperationKind = Exclude<
+  ApplicationOperationKind,
+  "application-entitlement-change"
+>
+
+export interface StandardApplicationOperationReceipt extends
+  ApplicationOperationReceiptFields {
+  kind: StandardApplicationOperationKind
+  schemaVersion: 1
+}
+
+export const APPLICATION_ENTITLEMENT_OPERATION_ACTIONS = [
+  "consume",
+  "create-test",
+  "delete-test",
+] as const
+
+export type ApplicationEntitlementOperationAction =
+  typeof APPLICATION_ENTITLEMENT_OPERATION_ACTIONS[number]
+export type ApplicationEntitlementOperationStage =
+  | "reserved"
+  | "target-known"
+  | "terminal"
+
+export interface ApplicationEntitlementOperationReceipt extends
+  ApplicationOperationReceiptFields {
+  action: ApplicationEntitlementOperationAction
+  beneficiaryId: string
+  beneficiaryType: "guild" | "user"
+  creationOperationKeyHash: string | null
+  entitlementId: string | null
+  fulfillmentReferenceHash: string | null
+  kind: "application-entitlement-change"
+  resourceId: string | null
+  schemaVersion: 2
+  skuId: string
+  stage: ApplicationEntitlementOperationStage
+  verification: "match" | null
+}
+
+export type ApplicationOperationReceipt =
+  | ApplicationEntitlementOperationReceipt
+  | StandardApplicationOperationReceipt
 
 export const DIRECT_MESSAGE_ACTIONS = [
   "delete",
@@ -216,6 +261,9 @@ export interface OperationReservation {
 export interface OperationStore {
   finish(receipt: OperationReceipt): Promise<void>
   finishApplication?(receipt: ApplicationOperationReceipt): Promise<void>
+  checkpointApplicationEntitlement?(
+    receipt: ApplicationEntitlementOperationReceipt,
+  ): Promise<void>
   checkpointDirectMessage?(receipt: DirectMessageOperationReceipt): Promise<void>
   finishDirectMessage?(receipt: DirectMessageOperationReceipt): Promise<void>
   get(kind: GuildOperationKind, operationKeyHash: string): Promise<OperationReceipt | undefined>
@@ -257,6 +305,12 @@ export interface ApplicationOperationStore extends OperationStore {
   ): Promise<ApplicationOperationReservation>
 }
 
+export interface ApplicationEntitlementOperationStore extends ApplicationOperationStore {
+  checkpointApplicationEntitlement(
+    receipt: ApplicationEntitlementOperationReceipt,
+  ): Promise<void>
+}
+
 export interface DirectMessageOperationStore extends OperationStore {
   checkpointDirectMessage(receipt: DirectMessageOperationReceipt): Promise<void>
   finishDirectMessage(receipt: DirectMessageOperationReceipt): Promise<void>
@@ -271,6 +325,7 @@ export interface DirectMessageOperationStore extends OperationStore {
 
 const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
   "application-emoji-change",
+  "application-entitlement-change",
   "application-intent-enablement",
   "application-role-connection-metadata-change",
   "global-application-command-change",
@@ -323,6 +378,28 @@ const APPLICATION_RECEIPT_KEYS = [
   "planDigest",
   "resourceId",
   "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+] as const
+
+const APPLICATION_ENTITLEMENT_RECEIPT_KEYS = [
+  "action",
+  "activityId",
+  "applicationId",
+  "beneficiaryId",
+  "beneficiaryType",
+  "creationOperationKeyHash",
+  "entitlementId",
+  "error",
+  "fulfillmentReferenceHash",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "resourceId",
+  "schemaVersion",
+  "skuId",
+  "stage",
   "status",
   "timestamp",
   "verification",
@@ -486,11 +563,141 @@ function parseReceipt(value: unknown): OperationReceipt {
   }
 }
 
+function parseApplicationEntitlementReceipt(
+  value: unknown,
+): ApplicationEntitlementOperationReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new OperationStoreError(
+      "Discord application entitlement operation receipt is not an object",
+    )
+  }
+  const record = value as Record<string, unknown>
+  const action = record.action as ApplicationEntitlementOperationAction
+  const stage = record.stage as ApplicationEntitlementOperationStage
+  const status = record.status as OperationReceiptStatus
+  if (
+    Object.keys(record).sort().join("\0")
+      !== [...APPLICATION_ENTITLEMENT_RECEIPT_KEYS].sort().join("\0")
+    || record.schemaVersion !== REQUEST_BOUND_RECEIPT_SCHEMA_VERSION
+    || record.kind !== "application-entitlement-change"
+    || !(APPLICATION_ENTITLEMENT_OPERATION_ACTIONS as readonly unknown[]).includes(action)
+    || !["reserved", "target-known", "terminal"].includes(String(stage))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(status))
+    || typeof record.activityId !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.activityId)
+    || !validSnowflake(record.applicationId)
+    || !validSnowflake(record.beneficiaryId)
+    || !["guild", "user"].includes(String(record.beneficiaryType))
+    || !validSnowflake(record.skuId)
+    || !nullableSnowflake(record.entitlementId)
+    || record.resourceId !== record.entitlementId
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || !(record.creationOperationKeyHash === null || (
+      typeof record.creationOperationKeyHash === "string"
+      && OPERATION_KEY_HASH_PATTERN.test(record.creationOperationKeyHash)
+    ))
+    || !(record.fulfillmentReferenceHash === null || (
+      typeof record.fulfillmentReferenceHash === "string"
+      && ENTITLEMENT_FULFILLMENT_REFERENCE_HASH_PATTERN.test(
+        record.fulfillmentReferenceHash,
+      )
+    ))
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || !validTimestamp(record.timestamp)
+  ) {
+    throw new OperationStoreError(
+      "Discord application entitlement operation receipt has an invalid shape",
+    )
+  }
+  const beneficiaryType = record.beneficiaryType as "guild" | "user"
+  const entitlementId = record.entitlementId as string | null
+  const creationOperationKeyHash = record.creationOperationKeyHash as string | null
+  const fulfillmentReferenceHash = record.fulfillmentReferenceHash as string | null
+  if (
+    (action === "create-test" && (
+      creationOperationKeyHash !== null
+      || fulfillmentReferenceHash !== null
+    ))
+    || (action === "delete-test" && (
+      creationOperationKeyHash === null
+      || creationOperationKeyHash === record.operationKeyHash
+      || fulfillmentReferenceHash !== null
+    ))
+    || (action === "consume" && (
+      beneficiaryType !== "user"
+      || creationOperationKeyHash !== null
+      || fulfillmentReferenceHash === null
+    ))
+  ) {
+    throw new OperationStoreError(
+      "Discord application entitlement receipt has invalid action evidence",
+    )
+  }
+  if (
+    (stage === "terminal") !== (status !== "pending")
+    || (stage === "reserved" && action === "create-test" && entitlementId !== null)
+    || (stage === "reserved" && action !== "create-test" && entitlementId === null)
+    || (stage === "target-known" && (
+      action !== "create-test"
+      || status !== "pending"
+      || entitlementId === null
+    ))
+    || (status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || entitlementId === null
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    throw new OperationStoreError(
+      "Discord application entitlement receipt has invalid lifecycle state",
+    )
+  }
+  return {
+    action,
+    activityId: record.activityId,
+    applicationId: record.applicationId as string,
+    beneficiaryId: record.beneficiaryId as string,
+    beneficiaryType,
+    creationOperationKeyHash,
+    entitlementId,
+    error: record.error as string | null,
+    fulfillmentReferenceHash,
+    kind: "application-entitlement-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    resourceId: entitlementId,
+    schemaVersion: REQUEST_BOUND_RECEIPT_SCHEMA_VERSION,
+    skuId: record.skuId as string,
+    stage,
+    status,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new OperationStoreError("Discord application operation receipt is not an object")
   }
   const record = value as Record<string, unknown>
+  if (record.kind === "application-entitlement-change") {
+    return parseApplicationEntitlementReceipt(record)
+  }
   if (
     Object.keys(record).sort().join("\0")
       !== [...APPLICATION_RECEIPT_KEYS].sort().join("\0")
@@ -573,7 +780,7 @@ function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
     activityId: record.activityId,
     applicationId: record.applicationId,
     error: record.error,
-    kind: record.kind as ApplicationOperationKind,
+    kind: record.kind as StandardApplicationOperationKind,
     operationKeyHash: record.operationKeyHash,
     planDigest: record.planDigest,
     resourceId: record.resourceId,
@@ -797,24 +1004,74 @@ function sameTerminal(left: OperationReceipt, right: OperationReceipt): boolean 
     ))
 }
 
-function assertApplicationIdentity(
+function assertApplicationBaseIdentity(
   pending: ApplicationOperationReceipt,
-  terminal: ApplicationOperationReceipt,
+  next: ApplicationOperationReceipt,
 ): void {
   if (
-    pending.activityId !== terminal.activityId
-    || pending.applicationId !== terminal.applicationId
-    || pending.kind !== terminal.kind
-    || pending.operationKeyHash !== terminal.operationKeyHash
-    || pending.planDigest !== terminal.planDigest
+    pending.activityId !== next.activityId
+    || pending.applicationId !== next.applicationId
+    || pending.kind !== next.kind
+    || pending.operationKeyHash !== next.operationKeyHash
+    || pending.planDigest !== next.planDigest
+    || pending.schemaVersion !== next.schemaVersion
+    || (pending.kind === "application-entitlement-change" && (
+      next.kind !== "application-entitlement-change"
+      || pending.action !== next.action
+      || pending.beneficiaryId !== next.beneficiaryId
+      || pending.beneficiaryType !== next.beneficiaryType
+      || pending.creationOperationKeyHash !== next.creationOperationKeyHash
+      || pending.fulfillmentReferenceHash !== next.fulfillmentReferenceHash
+      || pending.skuId !== next.skuId
+      || (
+        pending.entitlementId !== null
+        && pending.entitlementId !== next.entitlementId
+      )
+    ))
   ) {
     throw new OperationStoreError(
       "Discord application operation terminal receipt changed reserved identity",
     )
   }
+}
+
+function assertApplicationIdentity(
+  pending: ApplicationOperationReceipt,
+  terminal: ApplicationOperationReceipt,
+): void {
+  assertApplicationBaseIdentity(pending, terminal)
   if (terminal.status === "pending") {
     throw new OperationStoreError(
       "Discord application operation terminal receipt is still pending",
+    )
+  }
+}
+
+const APPLICATION_ENTITLEMENT_STAGE_ORDER: Readonly<Record<
+  ApplicationEntitlementOperationStage,
+  number
+>> = Object.freeze({
+  reserved: 0,
+  "target-known": 1,
+  terminal: 2,
+})
+
+function assertApplicationEntitlementAdvance(
+  current: ApplicationEntitlementOperationReceipt,
+  next: ApplicationEntitlementOperationReceipt,
+): void {
+  assertApplicationBaseIdentity(current, next)
+  if (
+    APPLICATION_ENTITLEMENT_STAGE_ORDER[next.stage]
+      <= APPLICATION_ENTITLEMENT_STAGE_ORDER[current.stage]
+    || (
+      next.status === "completed"
+      && next.action === "create-test"
+      && current.stage !== "target-known"
+    )
+  ) {
+    throw new OperationStoreError(
+      "Discord application entitlement receipt stage did not advance safely",
     )
   }
 }
@@ -832,6 +1089,26 @@ function sameApplicationTerminal(
     && left.resourceId === right.resourceId
     && left.status === right.status
     && left.verification === right.verification
+    && left.schemaVersion === right.schemaVersion
+    && (left.kind !== "application-entitlement-change" || (
+      right.kind === "application-entitlement-change"
+      && left.action === right.action
+      && left.beneficiaryId === right.beneficiaryId
+      && left.beneficiaryType === right.beneficiaryType
+      && left.creationOperationKeyHash === right.creationOperationKeyHash
+      && left.entitlementId === right.entitlementId
+      && left.fulfillmentReferenceHash === right.fulfillmentReferenceHash
+      && left.skuId === right.skuId
+      && left.stage === right.stage
+    ))
+}
+
+function sameApplicationEntitlementReceipt(
+  left: ApplicationEntitlementOperationReceipt,
+  right: ApplicationEntitlementOperationReceipt,
+): boolean {
+  return sameApplicationTerminal(left, right)
+    && left.timestamp === right.timestamp
 }
 
 const DIRECT_MESSAGE_STAGE_ORDER: Readonly<Record<
@@ -1153,6 +1430,7 @@ async function readTerminalReceipt<T = OperationReceipt>(
 
 export class FileOperationStore implements
   ApplicationOperationStore,
+  ApplicationEntitlementOperationStore,
   DirectMessageOperationStore {
   readonly #directory: string
 
@@ -1443,8 +1721,15 @@ export class FileOperationStore implements
     if (!await this.#assertDirectory(false)) return undefined
     const paths = this.#paths(kind, hash)
     if (!await assertPrivateDirectory(paths.operation, true)) return undefined
-    const [pending, terminal] = await Promise.all([
+    const [pending, targetKnown, terminal] = await Promise.all([
       readReceiptFile(paths.pending, parseApplicationReceipt),
+      kind === "application-entitlement-change"
+        ? readTerminalReceipt(
+          join(paths.operation, "target-known"),
+          "receipt.json",
+          parseApplicationEntitlementReceipt,
+        )
+        : Promise.resolve(undefined),
       readTerminalReceipt(
         paths.terminalDirectory,
         "receipt.json",
@@ -1461,6 +1746,34 @@ export class FileOperationStore implements
         "Discord application operation reservation is not pending",
       )
     }
+    if (kind === "application-entitlement-change") {
+      if (
+        pending.kind !== "application-entitlement-change"
+        || pending.stage !== "reserved"
+      ) {
+        throw new OperationStoreError(
+          "Discord application entitlement operation has no valid reservation",
+        )
+      }
+      let current = pending
+      if (targetKnown) {
+        assertApplicationEntitlementAdvance(current, targetKnown)
+        current = targetKnown
+      }
+      if (!terminal) return current
+      if (terminal.kind !== "application-entitlement-change") {
+        throw new OperationStoreError(
+          "Discord application entitlement operation has an invalid terminal receipt",
+        )
+      }
+      assertApplicationEntitlementAdvance(current, terminal)
+      return terminal
+    }
+    if (targetKnown) {
+      throw new OperationStoreError(
+        "Discord application operation has an unexpected entitlement checkpoint",
+      )
+    }
     if (!terminal) return pending
     assertApplicationIdentity(pending, terminal)
     return terminal
@@ -1470,7 +1783,11 @@ export class FileOperationStore implements
     receipt: ApplicationOperationReceipt,
   ): Promise<ApplicationOperationReservation> {
     const normalized = parseApplicationReceipt(receipt)
-    if (normalized.status !== "pending") {
+    if (
+      normalized.status !== "pending"
+      || normalized.kind === "application-entitlement-change"
+        && normalized.stage !== "reserved"
+    ) {
       throw new OperationStoreError(
         "Discord application operation reservation must be pending",
       )
@@ -1496,6 +1813,59 @@ export class FileOperationStore implements
     return { created: false, receipt: existing }
   }
 
+  async checkpointApplicationEntitlement(
+    receipt: ApplicationEntitlementOperationReceipt,
+  ): Promise<void> {
+    const normalized = parseApplicationEntitlementReceipt(receipt)
+    if (normalized.status !== "pending" || normalized.stage !== "target-known") {
+      throw new OperationStoreError(
+        "Discord application entitlement checkpoint must be pending with an exact target",
+      )
+    }
+    await this.#assertDirectory(true)
+    const paths = this.#paths(normalized.kind, normalized.operationKeyHash)
+    const current = await this.getApplication(
+      normalized.kind,
+      normalized.operationKeyHash,
+    )
+    if (!current || current.kind !== "application-entitlement-change") {
+      throw new OperationStoreError(
+        "Discord application entitlement checkpoint has no reservation",
+      )
+    }
+    if (current.stage === "terminal") {
+      throw new OperationStoreError(
+        "Discord application entitlement operation is already terminal",
+      )
+    }
+    if (current.stage === normalized.stage) {
+      if (!sameApplicationEntitlementReceipt(current, normalized)) {
+        throw new OperationStoreError(
+          "Discord application entitlement checkpoint already has different evidence",
+        )
+      }
+      return
+    }
+    assertApplicationEntitlementAdvance(current, normalized)
+    const target = join(paths.operation, normalized.stage)
+    if (await publishReceiptDirectory(
+      paths.operation,
+      target,
+      "receipt.json",
+      normalized,
+    )) return
+    const existing = await readTerminalReceipt(
+      target,
+      "receipt.json",
+      parseApplicationEntitlementReceipt,
+    )
+    if (!existing || !sameApplicationEntitlementReceipt(existing, normalized)) {
+      throw new OperationStoreError(
+        "Discord application entitlement checkpoint already has different evidence",
+      )
+    }
+  }
+
   async finishApplication(receipt: ApplicationOperationReceipt): Promise<void> {
     const normalized = parseApplicationReceipt(receipt)
     if (normalized.status === "pending") {
@@ -1510,16 +1880,33 @@ export class FileOperationStore implements
         "Discord application operation has no reservation",
       )
     }
-    const pending = await readReceiptFile(
-      paths.pending,
-      parseApplicationReceipt,
+    const current = await this.getApplication(
+      normalized.kind,
+      normalized.operationKeyHash,
     )
-    if (!pending) {
+    if (!current) {
       throw new OperationStoreError(
         "Discord application operation has no reservation",
       )
     }
-    assertApplicationIdentity(pending, normalized)
+    if (current.status !== "pending") {
+      if (!sameApplicationTerminal(current, normalized)) {
+        throw new OperationStoreError(
+          "Discord application operation already has a different terminal receipt",
+        )
+      }
+      return
+    }
+    if (normalized.kind === "application-entitlement-change") {
+      if (current.kind !== "application-entitlement-change") {
+        throw new OperationStoreError(
+          "Discord application entitlement operation has an invalid reservation",
+        )
+      }
+      assertApplicationEntitlementAdvance(current, normalized)
+    } else {
+      assertApplicationIdentity(current, normalized)
+    }
     if (await publishReceiptDirectory(
       paths.operation,
       paths.terminalDirectory,
@@ -1536,7 +1923,7 @@ export class FileOperationStore implements
         "Discord application operation terminal receipt disappeared",
       )
     }
-    assertApplicationIdentity(pending, existing)
+    assertApplicationIdentity(current, existing)
     if (!sameApplicationTerminal(existing, normalized)) {
       throw new OperationStoreError(
         "Discord application operation already has a different terminal receipt",

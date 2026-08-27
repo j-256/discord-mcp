@@ -213,12 +213,19 @@ function status(
       applicationEmojiChangesEnabled: false,
       applicationEmojiCreationEnabled: false,
       applicationEmojiRootCount: 0,
+      applicationConsumableEntitlementSkuIds: [],
+      applicationConsumableEntitlementUserIds: [],
+      applicationEntitlementConsumptionEnabled: false,
       applicationIntentChangesEnabled: false,
       applicationEntitlementGuildIds: [],
       applicationEntitlementUserIds: [],
       applicationMonetizationAuditEnabled: false,
       applicationMonetizationSkuIds: [],
       applicationSubscriptionUserIds: [],
+      applicationTestEntitlementChangesEnabled: false,
+      applicationTestEntitlementGuildIds: [],
+      applicationTestEntitlementSkuIds: [],
+      applicationTestEntitlementUserIds: [],
       applicationRoleConnectionMetadataChangesEnabled: false,
       announcementCrosspostChannelIds: [],
       announcementCrosspostsEnabled: false,
@@ -469,8 +476,10 @@ function toolService(
     executeAnnouncementCrosspost: unexpected,
     executeAnnouncementSubscription: unexpected,
     executeApplicationEmojiChange: unexpected,
+    executeApplicationEntitlementConsumption: unexpected,
     executeApplicationIntentEnablement: unexpected,
     executeApplicationRoleConnectionMetadataChange: unexpected,
+    executeApplicationTestEntitlementChange: unexpected,
     executeMessageForward: unexpected,
     executeNativeInteractionCommand: unexpected,
     executeGuildApplicationCommandChange: unexpected,
@@ -570,8 +579,10 @@ function toolService(
     planGuildProfileChange: unexpected,
     planGuildExpressionChange: unexpected,
     planApplicationEmojiChange: unexpected,
+    planApplicationEntitlementConsumption: unexpected,
     planApplicationIntentEnablement: unexpected,
     planApplicationRoleConnectionMetadataChange: unexpected,
+    planApplicationTestEntitlementChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
     planSoundboardChange: unexpected,
@@ -3290,6 +3301,70 @@ test("doctor and setup explain exact-beneficiary application monetization audit"
   )
 })
 
+test("doctor and setup explain independently scoped application entitlement changes", async () => {
+  const skuId = "610000000000000001"
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      applicationEntitlementConsumption: true,
+      applicationTestEntitlementChanges: true,
+    },
+    scopes: {
+      applicationConsumableEntitlementSkuIds: [skuId],
+      applicationConsumableEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [skuId],
+      applicationTestEntitlementGuildIds: [GUILD_ID],
+      applicationTestEntitlementSkuIds: [skuId],
+      applicationTestEntitlementUserIds: [USER_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const disabled = await diagnoseConnector({
+    configOverrides: fixturePolicy(),
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: { toolsets: ["connector"] },
+    },
+    service: statusProvider(),
+  })
+
+  const testChanges = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationTestEntitlementChangePolicy,
+  )
+  assert.equal(testChanges?.status, "pass")
+  assert.match(testChanges?.summary || "", /exact current-application subscription SKUs/u)
+  assert.match(testChanges?.summary || "", /receipt-proven deletion/u)
+  assert.match(testChanges?.summary || "", /content-free checkpoints/u)
+  const consumption = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.applicationEntitlementConsumptionPolicy,
+  )
+  assert.equal(consumption?.status, "pass")
+  assert.match(consumption?.summary || "", /external-fulfillment acknowledgement/u)
+  assert.match(consumption?.summary || "", /hashed fulfillment references/u)
+  assert.match(consumption?.summary || "", /exact consumed-state readback/u)
+  assert.match(
+    omitted.warnings.join("\n"),
+    /application-entitlement-changes toolset/u,
+  )
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.applicationTestEntitlementChangePolicy,
+    )?.summary || "",
+    /disabled/u,
+  )
+  assert.match(
+    disabled.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.applicationEntitlementConsumptionPolicy,
+    )?.summary || "",
+    /disabled/u,
+  )
+})
+
 test("doctor and setup explain reviewed guild application-command scope", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5868,11 +5943,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_announcement_subscription",
     "review_application_commands",
     "review_application_emoji_change",
+    "review_application_entitlement_consumption",
     "review_application_intent_enablement",
     "review_application_monetization",
     "review_application_role_connection_metadata",
     "review_application_role_connection_metadata_change",
     "review_application_skus",
+    "review_application_test_entitlement_change",
     "review_attachment_message",
     "review_automod_change",
     "review_bulk_guild_ban",
@@ -6000,8 +6077,10 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_announcement_crosspost",
     "execute_announcement_subscription",
     "execute_application_emoji_change",
+    "execute_application_entitlement_consumption",
     "execute_application_intent_enablement",
     "execute_application_role_connection_metadata_change",
+    "execute_application_test_entitlement_change",
     "execute_automod_change",
     "execute_bulk_guild_ban",
     "execute_bulk_member_role_change",

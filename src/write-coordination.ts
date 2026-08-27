@@ -68,6 +68,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
 
 export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
   "emojis",
+  "entitlements",
   "global-application-commands",
   "privileged-intents",
   "role-connection-metadata",
@@ -448,6 +449,15 @@ function normalizeTargets(
   ) {
     throw new WriteCoordinationStateError(
       "Discord application emoji coordination requires the emoji collection target",
+    )
+  }
+  if (
+    kind === "application-entitlement-change"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "entitlements"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord application entitlement coordination requires the entitlement collection target",
     )
   }
   if (

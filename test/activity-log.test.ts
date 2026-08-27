@@ -15,6 +15,7 @@ import {
   type AnnouncementCrosspostActivity,
   type AnnouncementSubscriptionActivity,
   type ApplicationEmojiActivity,
+  type ApplicationEntitlementActivity,
   type ApplicationIntentActivity,
   type ApplicationRoleConnectionMetadataActivity,
   type AttachmentMessageActivity,
@@ -1492,6 +1493,41 @@ function applicationEmoji(
       : status === "completed-with-drift"
         ? "drift"
         : null,
+  }
+}
+
+function applicationEntitlement(
+  id: string,
+  action: ApplicationEntitlementActivity["action"],
+  stage: ApplicationEntitlementActivity["stage"],
+  status: ApplicationEntitlementActivity["status"],
+): ApplicationEntitlementActivity {
+  const targetKnown = action !== "create-test" || stage !== "reserved"
+  return {
+    action,
+    applicationId: "100",
+    beneficiaryId: "200",
+    beneficiaryType: "user",
+    creationOperationKeyHash: action === "delete-test"
+      ? `sha256:${"c".repeat(64)}`
+      : null,
+    entitlementId: targetKnown ? "300" : null,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    fulfillmentReferenceHash: action === "consume"
+      ? `sha256:${"f".repeat(64)}`
+      : null,
+    id,
+    kind: "application-entitlement-change",
+    operationKeyHash: `sha256:${"d".repeat(64)}`,
+    planDigest: `hmac-sha256:${"e".repeat(64)}`,
+    schemaVersion: 1,
+    skuId: "400",
+    stage,
+    status,
+    timestamp: `2026-08-27T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
   }
 }
 
@@ -4560,6 +4596,80 @@ test("JSONL activity log keeps application emoji evidence content-free", async (
   )
   for (const value of privateValues) {
     assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps application entitlement lifecycle evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-audit-reason",
+    "private-fulfillment-reference",
+    "private-operation-key",
+    "private-product-name",
+  ] as const
+
+  await store.append(applicationEntitlement("1", "create-test", "reserved", "pending"))
+  await store.append(applicationEntitlement("2", "create-test", "target-known", "pending"))
+  await store.append(applicationEntitlement("3", "create-test", "terminal", "completed"))
+  await store.append(applicationEntitlement("4", "consume", "terminal", "completed"))
+  for (const [field, value] of [
+    ["auditReason", privateValues[0]],
+    ["fulfillmentReference", privateValues[1]],
+    ["operationKey", privateValues[2]],
+    ["productName", privateValues[3]],
+  ] as const) {
+    await assert.rejects(
+      store.append({
+        ...applicationEntitlement("5", "consume", "terminal", "completed"),
+        [field]: value,
+      } as unknown as ApplicationEntitlementActivity),
+      /invalid content-free shape/u,
+    )
+  }
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...applicationEntitlement("6", "consume", "terminal", "completed"),
+      fulfillmentReference: privateValues[1],
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["4", "3", "2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "action",
+      "applicationId",
+      "beneficiaryId",
+      "beneficiaryType",
+      "creationOperationKeyHash",
+      "entitlementId",
+      "error",
+      "fulfillmentReferenceHash",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "skuId",
+      "stage",
+      "status",
+      "timestamp",
+      "verification",
+    ],
+  )
+  assert.equal(JSON.stringify(result).includes(privateValues[1]), false)
+  for (const value of privateValues) {
+    if (value === privateValues[1]) continue
     assert.equal(persisted.includes(value), false)
   }
 })

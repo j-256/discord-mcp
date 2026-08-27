@@ -32,6 +32,19 @@ import {
   type ApplicationSubscriptionAuditResult,
 } from "./application-monetization-audit-service.js"
 import type {
+  ApplicationEntitlementChangeResult,
+  ApplicationEntitlementConsumptionPlan,
+  ApplicationEntitlementConsumptionRequest,
+  ApplicationEntitlementServiceOptions,
+  ApplicationTestEntitlementChangeRequest,
+  ApplicationTestEntitlementPlan,
+} from "./application-entitlement-service.js"
+import {
+  ApplicationEntitlementService,
+  normalizeApplicationEntitlementConsumptionRequest,
+  normalizeApplicationTestEntitlementChangeRequest,
+} from "./application-entitlement-service.js"
+import type {
   ApplicationEmojiChangeRequest,
   ApplicationEmojiInventoryResult,
   ApplicationEmojiLookupResult,
@@ -834,7 +847,9 @@ export interface DiscordServiceClient {
   bulkDeleteMessages: DiscordClient["bulkDeleteMessages"]
   bulkGuildBan: DiscordClient["bulkGuildBan"]
   beginGuildPrune: DiscordClient["beginGuildPrune"]
+  consumeApplicationEntitlement: DiscordClient["consumeApplicationEntitlement"]
   createApplicationEmoji: DiscordClient["createApplicationEmoji"]
+  createApplicationTestEntitlement: DiscordClient["createApplicationTestEntitlement"]
   crosspostMessage: DiscordClient["crosspostMessage"]
   createGuildBan: DiscordClient["createGuildBan"]
   createGuildAutoModerationRule: DiscordClient["createGuildAutoModerationRule"]
@@ -847,6 +862,7 @@ export interface DiscordServiceClient {
   editGlobalApplicationCommand: DiscordClient["editGlobalApplicationCommand"]
   deleteGlobalApplicationCommand: DiscordClient["deleteGlobalApplicationCommand"]
   deleteApplicationEmoji: DiscordClient["deleteApplicationEmoji"]
+  deleteApplicationTestEntitlement: DiscordClient["deleteApplicationTestEntitlement"]
   createGuildEmoji: DiscordClient["createGuildEmoji"]
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
@@ -1043,6 +1059,10 @@ export interface ConnectorServiceOptions {
   activityStore?: ActivityStore
   applicationEmojiOptions?: Pick<
     ApplicationEmojiServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  applicationEntitlementOptions?: Pick<
+    ApplicationEntitlementServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   applicationIntentOptions?: Pick<
@@ -1461,6 +1481,7 @@ export class ConnectorService {
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
+  readonly #applicationEntitlementService: ApplicationEntitlementService
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
   readonly #guildApplicationCommandService: GuildApplicationCommandService
   readonly #globalApplicationCommandService: GlobalApplicationCommandService
@@ -1633,6 +1654,14 @@ export class ConnectorService {
     })
     this.#applicationMonetizationAuditService = new ApplicationMonetizationAuditService({
       client: this.#client,
+    })
+    this.#applicationEntitlementService = new ApplicationEntitlementService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      monetizationAuditService: this.#applicationMonetizationAuditService,
+      operationStore,
+      policy: this.#policy,
+      ...options.applicationEntitlementOptions,
     })
     this.#guildWebhookAuditService = new GuildWebhookAuditService({
       client: this.#client,
@@ -3924,6 +3953,57 @@ export class ConnectorService {
     return this.#applicationEmojiService.plan(
       identity.application.id,
       identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planApplicationTestEntitlementChange(
+    request: ApplicationTestEntitlementChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationTestEntitlementPlan> {
+    const normalized = normalizeApplicationTestEntitlementChangeRequest(request)
+    const beneficiary = normalized.beneficiary.type === "guild"
+      ? { id: normalized.beneficiary.guildId, type: "guild" as const }
+      : { id: normalized.beneficiary.userId, type: "user" as const }
+    this.#policy.assertApplicationTestEntitlementChangeAllowed(
+      beneficiary,
+      normalized.skuId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    const skuAudit = await this.#applicationSkuAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      options,
+    )
+    return this.#applicationEntitlementService.planTestEntitlementChange(
+      identity.application,
+      identity.bot.id,
+      skuAudit,
+      request,
+      options,
+    )
+  }
+
+  async planApplicationEntitlementConsumption(
+    request: ApplicationEntitlementConsumptionRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEntitlementConsumptionPlan> {
+    const normalized = normalizeApplicationEntitlementConsumptionRequest(request)
+    this.#policy.assertApplicationEntitlementConsumptionAllowed(
+      normalized.userId,
+      normalized.skuId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    const skuAudit = await this.#applicationSkuAuditService.audit(
+      identity.application,
+      identity.bot.id,
+      options,
+    )
+    return this.#applicationEntitlementService.planEntitlementConsumption(
+      identity.application,
+      identity.bot.id,
+      skuAudit,
       request,
       options,
     )
@@ -6418,6 +6498,83 @@ export class ConnectorService {
         planDigest,
         options,
       ),
+    )
+  }
+
+  async executeApplicationTestEntitlementChange(
+    request: ApplicationTestEntitlementChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEntitlementChangeResult> {
+    const normalized = normalizeApplicationTestEntitlementChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord application test entitlement plan digest is invalid")
+    }
+    const beneficiary = normalized.beneficiary.type === "guild"
+      ? { id: normalized.beneficiary.guildId, type: "guild" as const }
+      : { id: normalized.beneficiary.userId, type: "user" as const }
+    this.#policy.assertApplicationTestEntitlementChangeAllowed(
+      beneficiary,
+      normalized.skuId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "application-entitlement-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget("entitlements", identity.application.id)],
+      async () => {
+        const skuAudit = await this.#applicationSkuAuditService.audit(
+          identity.application,
+          identity.bot.id,
+          options,
+        )
+        return this.#applicationEntitlementService.executeTestEntitlementChange(
+          identity.application,
+          identity.bot.id,
+          skuAudit,
+          request,
+          planDigest,
+          options,
+        )
+      },
+    )
+  }
+
+  async executeApplicationEntitlementConsumption(
+    request: ApplicationEntitlementConsumptionRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ApplicationEntitlementChangeResult> {
+    const normalized = normalizeApplicationEntitlementConsumptionRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord application entitlement consumption plan digest is invalid")
+    }
+    this.#policy.assertApplicationEntitlementConsumptionAllowed(
+      normalized.userId,
+      normalized.skuId,
+    )
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "application-entitlement-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget("entitlements", identity.application.id)],
+      async () => {
+        const skuAudit = await this.#applicationSkuAuditService.audit(
+          identity.application,
+          identity.bot.id,
+          options,
+        )
+        return this.#applicationEntitlementService.executeEntitlementConsumption(
+          identity.application,
+          identity.bot.id,
+          skuAudit,
+          request,
+          planDigest,
+          options,
+        )
+      },
     )
   }
 

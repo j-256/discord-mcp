@@ -205,12 +205,19 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationConsumableEntitlementSkuIds: [],
+    applicationConsumableEntitlementUserIds: [],
+    applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
     applicationMonetizationSkuIds: [],
     applicationSubscriptionUserIds: [],
+    applicationTestEntitlementChangesEnabled: false,
+    applicationTestEntitlementGuildIds: [],
+    applicationTestEntitlementSkuIds: [],
+    applicationTestEntitlementUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -572,6 +579,141 @@ test("configuration and policy isolate exact-beneficiary application monetizatio
       },
     }, { homeDirectory: "/test/home" }),
     /applicationEntitlementGuildIds.*subset/,
+  )
+})
+
+test("configuration and policy isolate application entitlement write authority", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      applicationEntitlementConsumption: true,
+      applicationTestEntitlementChanges: true,
+    },
+    readScope: {
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      applicationConsumableEntitlementSkuIds: [SKU_ID],
+      applicationConsumableEntitlementUserIds: [USER_ID],
+      applicationMonetizationSkuIds: [SKU_ID],
+      applicationTestEntitlementGuildIds: [GUILD_ID],
+      applicationTestEntitlementSkuIds: [SKU_ID],
+      applicationTestEntitlementUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const policy = new ScopePolicy(config)
+
+  assert.equal(config.allowApplicationEntitlementConsumption, true)
+  assert.equal(config.allowApplicationTestEntitlementChanges, true)
+  assert.equal(config.allowApplicationMonetizationAudit, false)
+  assert.deepEqual([...config.applicationConsumableEntitlementSkuIds], [SKU_ID])
+  assert.deepEqual([...config.applicationConsumableEntitlementUserIds], [USER_ID])
+  assert.deepEqual([...config.applicationTestEntitlementGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.applicationTestEntitlementSkuIds], [SKU_ID])
+  assert.deepEqual([...config.applicationTestEntitlementUserIds], [USER_ID])
+  policy.assertApplicationEntitlementConsumptionAllowed(USER_ID, SKU_ID)
+  policy.assertApplicationTestEntitlementChangeAllowed(
+    { id: GUILD_ID, type: "guild" },
+    SKU_ID,
+  )
+  policy.assertApplicationTestEntitlementChangeAllowed(
+    { id: USER_ID, type: "user" },
+    SKU_ID,
+  )
+  assert.deepEqual(
+    {
+      applicationConsumableEntitlementSkuIds:
+        policy.describe().applicationConsumableEntitlementSkuIds,
+      applicationConsumableEntitlementUserIds:
+        policy.describe().applicationConsumableEntitlementUserIds,
+      applicationEntitlementConsumptionEnabled:
+        policy.describe().applicationEntitlementConsumptionEnabled,
+      applicationTestEntitlementChangesEnabled:
+        policy.describe().applicationTestEntitlementChangesEnabled,
+      applicationTestEntitlementGuildIds:
+        policy.describe().applicationTestEntitlementGuildIds,
+      applicationTestEntitlementSkuIds:
+        policy.describe().applicationTestEntitlementSkuIds,
+      applicationTestEntitlementUserIds:
+        policy.describe().applicationTestEntitlementUserIds,
+    },
+    {
+      applicationConsumableEntitlementSkuIds: [SKU_ID],
+      applicationConsumableEntitlementUserIds: [USER_ID],
+      applicationEntitlementConsumptionEnabled: true,
+      applicationTestEntitlementChangesEnabled: true,
+      applicationTestEntitlementGuildIds: [GUILD_ID],
+      applicationTestEntitlementSkuIds: [SKU_ID],
+      applicationTestEntitlementUserIds: [USER_ID],
+    },
+  )
+
+  assert.throws(
+    () => policy.assertApplicationEntitlementConsumptionAllowed(
+      OTHER_USER_ID,
+      SKU_ID,
+    ),
+    /outside the application entitlement consumption scope/u,
+  )
+  assert.throws(
+    () => policy.assertApplicationTestEntitlementChangeAllowed(
+      { id: USER_ID, type: "user" },
+      OTHER_SKU_ID,
+    ),
+    /outside the application test entitlement scope/u,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertApplicationEntitlementConsumptionAllowed(USER_ID, SKU_ID),
+    /consumption is disabled/u,
+  )
+  assert.throws(
+    () => disabled.assertApplicationTestEntitlementChangeAllowed(
+      { id: USER_ID, type: "user" },
+      SKU_ID,
+    ),
+    /changes are disabled/u,
+  )
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationEntitlementConsumption: true },
+      scopes: { applicationMonetizationSkuIds: [SKU_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires exact consumable entitlement SKU and user allowlists/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { applicationTestEntitlementChanges: true },
+      scopes: { applicationMonetizationSkuIds: [SKU_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires an exact test entitlement SKU allowlist/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      scopes: {
+        applicationMonetizationSkuIds: [SKU_ID],
+        applicationTestEntitlementSkuIds: [OTHER_SKU_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /applicationTestEntitlementSkuIds.*subset/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: {
+        applicationMonetizationSkuIds: [SKU_ID],
+        applicationTestEntitlementGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /applicationTestEntitlementGuildIds.*subset/u,
   )
 })
 
@@ -1511,12 +1653,19 @@ test("configuration and policy require an exact administration guild and protect
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationConsumableEntitlementSkuIds: [],
+    applicationConsumableEntitlementUserIds: [],
+    applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
     applicationMonetizationSkuIds: [],
     applicationSubscriptionUserIds: [],
+    applicationTestEntitlementChangesEnabled: false,
+    applicationTestEntitlementGuildIds: [],
+    applicationTestEntitlementSkuIds: [],
+    applicationTestEntitlementUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -5452,12 +5601,19 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationConsumableEntitlementSkuIds: [],
+    applicationConsumableEntitlementUserIds: [],
+    applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
     applicationMonetizationSkuIds: [],
     applicationSubscriptionUserIds: [],
+    applicationTestEntitlementChangesEnabled: false,
+    applicationTestEntitlementGuildIds: [],
+    applicationTestEntitlementSkuIds: [],
+    applicationTestEntitlementUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,

@@ -1122,6 +1122,11 @@ export type ApplicationEntitlementBeneficiary =
   | { guildId: string; type: "guild" }
   | { type: "user"; userId: string }
 
+export interface CreateApplicationTestEntitlementInput {
+  beneficiary: ApplicationEntitlementBeneficiary
+  skuId: string
+}
+
 export type DiscordAllowedMentions =
   | {
     parse: readonly []
@@ -1472,6 +1477,7 @@ interface RequestParameters extends RequestOptions {
   expectedSuccessStatus?: number
   maxResponseBytes?: number
   multipartBody?: FormData
+  requireEmptySuccessBody?: boolean
   responseFormat?: "json" | "text"
   suppressFailureCause?: boolean
 }
@@ -1591,6 +1597,9 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "edit_guild_application_command",
   "edit_original_interaction_response",
   "follow_announcement_channel",
+  "consume_application_entitlement",
+  "create_application_test_entitlement",
+  "delete_application_test_entitlement",
   "get_application_emoji",
   "get_application_entitlement",
   "get_current_user_voice_state",
@@ -8723,6 +8732,12 @@ export class DiscordClient {
             "discord-client-error",
           )
         }
+        if (parameters.requireEmptySuccessBody && responseText.length !== 0) {
+          throw new DiscordTransportError(
+            `Discord API ${method} ${diagnosticRoute} returned an unexpected success body`,
+            "discord-client-error",
+          )
+        }
 
         return (parameters.responseFormat === "text"
           ? responseText
@@ -8900,6 +8915,123 @@ export class DiscordClient {
         ...options,
         diagnosticRoute: "/applications/{application.id}/entitlements/{entitlement.id}",
         maxResponseBytes: DISCORD_LIMITS.applicationEntitlementRecordResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  createApplicationTestEntitlement(
+    applicationId: string,
+    input: CreateApplicationTestEntitlementInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationEntitlement> {
+    assertSearchSnowflake(applicationId, "Discord application test entitlement application ID")
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new RangeError("Discord application test entitlement input is invalid")
+    }
+    const keys = Object.keys(input).sort()
+    if (keys.length !== 2 || keys[0] !== "beneficiary" || keys[1] !== "skuId") {
+      throw new RangeError("Discord application test entitlement input is invalid")
+    }
+    assertSearchSnowflake(input.skuId, "Discord application test entitlement SKU ID")
+    if (
+      !input.beneficiary
+      || typeof input.beneficiary !== "object"
+      || Array.isArray(input.beneficiary)
+    ) {
+      throw new RangeError("Discord application test entitlement beneficiary is invalid")
+    }
+    const beneficiaryKeys = Object.keys(input.beneficiary).sort()
+    let ownerId: string
+    let ownerType: 1 | 2
+    if (input.beneficiary.type === "guild") {
+      if (
+        beneficiaryKeys.length !== 2
+        || beneficiaryKeys[0] !== "guildId"
+        || beneficiaryKeys[1] !== "type"
+      ) {
+        throw new RangeError("Discord application test entitlement beneficiary is invalid")
+      }
+      assertSearchSnowflake(
+        input.beneficiary.guildId,
+        "Discord application test entitlement guild ID",
+      )
+      ownerId = input.beneficiary.guildId
+      ownerType = 1
+    } else if (input.beneficiary.type === "user") {
+      if (
+        beneficiaryKeys.length !== 2
+        || beneficiaryKeys[0] !== "type"
+        || beneficiaryKeys[1] !== "userId"
+      ) {
+        throw new RangeError("Discord application test entitlement beneficiary is invalid")
+      }
+      assertSearchSnowflake(
+        input.beneficiary.userId,
+        "Discord application test entitlement user ID",
+      )
+      ownerId = input.beneficiary.userId
+      ownerType = 2
+    } else {
+      throw new RangeError("Discord application test entitlement beneficiary type is invalid")
+    }
+    return this.#request(
+      "create_application_test_entitlement",
+      `/applications/${applicationId}/entitlements`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          owner_id: ownerId,
+          owner_type: ownerType,
+          sku_id: input.skuId,
+        },
+        diagnosticRoute: "/applications/{application.id}/entitlements",
+        maxResponseBytes: DISCORD_LIMITS.applicationEntitlementRecordResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async deleteApplicationTestEntitlement(
+    applicationId: string,
+    entitlementId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(applicationId, "Discord application test entitlement application ID")
+    assertSearchSnowflake(entitlementId, "Discord application test entitlement ID")
+    await this.#request<void>(
+      "delete_application_test_entitlement",
+      `/applications/${applicationId}/entitlements/${entitlementId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/applications/{application.id}/entitlements/{entitlement.id}",
+        expectedSuccessStatus: 204,
+        maxResponseBytes: DISCORD_LIMITS.applicationEntitlementRecordResponseBytes,
+        requireEmptySuccessBody: true,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async consumeApplicationEntitlement(
+    applicationId: string,
+    entitlementId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertSearchSnowflake(applicationId, "Discord consumable entitlement application ID")
+    assertSearchSnowflake(entitlementId, "Discord consumable entitlement ID")
+    await this.#request<void>(
+      "consume_application_entitlement",
+      `/applications/${applicationId}/entitlements/${entitlementId}/consume`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/applications/{application.id}/entitlements/{entitlement.id}/consume",
+        expectedSuccessStatus: 204,
+        maxResponseBytes: DISCORD_LIMITS.applicationEntitlementRecordResponseBytes,
+        requireEmptySuccessBody: true,
         suppressFailureCause: true,
       },
     )

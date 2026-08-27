@@ -2617,6 +2617,154 @@ test("Discord client fetches one exact application entitlement with bounded reda
   )
 })
 
+test("Discord client sends exact non-retried application entitlement lifecycle writes", async () => {
+  const entitlement = {
+    application_id: "100",
+    consumed: false,
+    deleted: false,
+    id: "600",
+    sku_id: "400",
+    type: 4,
+    user_id: "300",
+  }
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: init?.method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (String(input).endsWith("/entitlements")) return jsonResponse(entitlement)
+      return new Response(null, { status: 204 })
+    },
+    maxRetries: 3,
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.createApplicationTestEntitlement("100", {
+    beneficiary: { type: "user", userId: "300" },
+    skuId: "400",
+  }), entitlement)
+  await client.deleteApplicationTestEntitlement("100", "600")
+  await client.consumeApplicationEntitlement("100", "600")
+
+  assert.deepEqual(requests, [{
+    body: { owner_id: "300", owner_type: 2, sku_id: "400" },
+    method: "POST",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/entitlements`,
+  }, {
+    body: null,
+    method: "DELETE",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/entitlements/600`,
+  }, {
+    body: null,
+    method: "POST",
+    reason: null,
+    url: `${API_BASE_URL}/applications/100/entitlements/600/consume`,
+  }])
+
+  assert.throws(
+    () => client.createApplicationTestEntitlement("100", {
+      beneficiary: {
+        type: "guild",
+        guildId: "200",
+        userId: "private-extra-identity",
+      } as never,
+      skuId: "400",
+    }),
+    /beneficiary is invalid/u,
+  )
+  assert.throws(
+    () => client.createApplicationTestEntitlement("100", {
+      beneficiary: { type: "user", userId: "300" },
+      privateProduct: "private-product-text",
+      skuId: "400",
+    } as never),
+    /input is invalid/u,
+  )
+  await assert.rejects(
+    client.deleteApplicationTestEntitlement("100", "invalid"),
+    /test entitlement ID/u,
+  )
+  await assert.rejects(
+    client.consumeApplicationEntitlement("invalid", "600"),
+    /consumable entitlement application ID/u,
+  )
+
+  for (const operation of [
+    (target: DiscordClient) => target.createApplicationTestEntitlement("100", {
+      beneficiary: { type: "guild", guildId: "200" },
+      skuId: "400",
+    }),
+    (target: DiscordClient) => target.deleteApplicationTestEntitlement("100", "600"),
+    (target: DiscordClient) => target.consumeApplicationEntitlement("100", "600"),
+  ]) {
+    const privateMarker = "private-entitlement-write-detail"
+    let attempts = 0
+    const refused = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => {
+        attempts += 1
+        return jsonResponse({ message: privateMarker, retry_after: 0 }, 429)
+      },
+      maxRetries: 3,
+      sleep: async () => undefined,
+      token: TOKEN,
+    })
+    await assert.rejects(
+      operation(refused),
+      (error: unknown) => (
+        error instanceof DiscordApiError
+        && error.status === 429
+        && error.cause === undefined
+        && !error.message.includes(privateMarker)
+      ),
+    )
+    assert.equal(attempts, 1)
+  }
+
+  for (const operation of [
+    (target: DiscordClient) => target.deleteApplicationTestEntitlement("100", "600"),
+    (target: DiscordClient) => target.consumeApplicationEntitlement("100", "600"),
+  ]) {
+    const wrongStatus = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => new Response(null, { status: 200 }),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      operation(wrongStatus),
+      /unexpected success status/u,
+    )
+  }
+
+  const nonemptySuccess = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => ({
+      headers: new Headers(),
+      ok: true,
+      status: 204,
+      statusText: "",
+      text: async () => "unexpected-success-body",
+    }) as Response,
+    token: TOKEN,
+  })
+  await assert.rejects(
+    nonemptySuccess.consumeApplicationEntitlement("100", "600"),
+    /unexpected success body/u,
+  )
+})
+
 test("Discord client requests only exact filtered application entitlement pages", async () => {
   const requests: Array<{ method: string; url: string }> = []
   const entitlement = {

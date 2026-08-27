@@ -60,6 +60,7 @@ import type {
 } from "../src/gateway-voice-channel-status.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import type {
+  ApplicationEntitlementOperationReceipt,
   ApplicationOperationReceipt,
   ApplicationOperationReservation,
   ApplicationOperationStore,
@@ -188,6 +189,12 @@ class MemoryApplicationOperationStore
   extends MemoryOperationStore
   implements ApplicationOperationStore {
   applicationReceipt: ApplicationOperationReceipt | undefined
+
+  async checkpointApplicationEntitlement(
+    receipt: ApplicationEntitlementOperationReceipt,
+  ): Promise<void> {
+    this.applicationReceipt = receipt
+  }
 
   async finishApplication(receipt: ApplicationOperationReceipt): Promise<void> {
     this.applicationReceipt = receipt
@@ -336,6 +343,7 @@ function role(
 function serviceFixture(overrides: {
   application?: DiscordApplication
   applicationEmojiOptions?: ConnectorServiceOptions["applicationEmojiOptions"]
+  applicationEntitlementOptions?: ConnectorServiceOptions["applicationEntitlementOptions"]
   applicationIntentOptions?: ConnectorServiceOptions["applicationIntentOptions"]
   applicationRoleConnectionMetadataOptions?:
     ConnectorServiceOptions["applicationRoleConnectionMetadataOptions"]
@@ -432,6 +440,9 @@ function serviceFixture(overrides: {
     async beginGuildPrune() {
       throw new Error("Unexpected guild prune")
     },
+    async consumeApplicationEntitlement() {
+      throw new Error("Unexpected application entitlement consumption")
+    },
     async crosspostMessage() {
       throw new Error("unexpected")
     },
@@ -447,6 +458,9 @@ function serviceFixture(overrides: {
     },
     async createApplicationEmoji() {
       throw new Error("Unexpected application emoji creation")
+    },
+    async createApplicationTestEntitlement() {
+      throw new Error("Unexpected application test entitlement creation")
     },
     async createForumPost() {
       calls.createForumPost += 1
@@ -575,6 +589,9 @@ function serviceFixture(overrides: {
     },
     async deleteApplicationEmoji() {
       throw new Error("Unexpected application emoji deletion")
+    },
+    async deleteApplicationTestEntitlement() {
+      throw new Error("Unexpected application test entitlement deletion")
     },
     async deleteChannelPermissionOverwrite() {},
     async deleteGuildChannel() {
@@ -1097,6 +1114,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.applicationEmojiOptions
         ? { applicationEmojiOptions: overrides.applicationEmojiOptions }
+        : {}),
+      ...(overrides.applicationEntitlementOptions
+        ? { applicationEntitlementOptions: overrides.applicationEntitlementOptions }
         : {}),
       ...(overrides.applicationIntentOptions
         ? { applicationIntentOptions: overrides.applicationIntentOptions }
@@ -1889,6 +1909,74 @@ test("service rejects application intent policy before identity access", async (
   )
   assert.equal(unjustified.calls.application, 0)
   assert.equal(unjustified.calls.user, 0)
+})
+
+test("service rejects application entitlement write policy before identity or SKU access", async () => {
+  const testRequest = {
+    action: "create" as const,
+    auditReason: "Reviewed test access",
+    beneficiary: { guildId: GUILD_ID, type: "guild" as const },
+    operationKey: "application-test-entitlement-preflight-0001",
+    skuId: APPLICATION_SKU_ID,
+  }
+  const consumptionRequest = {
+    acknowledgeExternalFulfillment: true as const,
+    auditReason: "Reviewed fulfilled purchase",
+    entitlementId: APPLICATION_ENTITLEMENT_ID,
+    fulfillmentReference: "fulfilled-order-preflight-0001",
+    operationKey: "application-entitlement-consume-preflight-0001",
+    skuId: APPLICATION_SKU_ID,
+    userId: MEMBER_USER_ID,
+  }
+  const disabled = serviceFixture()
+  await assert.rejects(
+    () => disabled.service.planApplicationTestEntitlementChange(testRequest),
+    /test entitlement changes are disabled/u,
+  )
+  await assert.rejects(
+    () => disabled.service.planApplicationEntitlementConsumption(
+      consumptionRequest,
+    ),
+    /entitlement consumption is disabled/u,
+  )
+  assert.equal(disabled.calls.application, 0)
+  assert.equal(disabled.calls.user, 0)
+
+  const outsideScope = serviceFixture({
+    client: {
+      async listApplicationSkus() {
+        throw new Error("SKU access must follow policy")
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        applicationEntitlementConsumption: true,
+        applicationTestEntitlementChanges: true,
+      },
+      scopes: {
+        applicationConsumableEntitlementSkuIds: [APPLICATION_SUBSCRIPTION_ID],
+        applicationConsumableEntitlementUserIds: [MEMBER_USER_ID],
+        applicationMonetizationSkuIds: [
+          APPLICATION_SKU_ID,
+          APPLICATION_SUBSCRIPTION_ID,
+        ],
+        applicationTestEntitlementGuildIds: [GUILD_ID],
+        applicationTestEntitlementSkuIds: [APPLICATION_SUBSCRIPTION_ID],
+      },
+    },
+  })
+  await assert.rejects(
+    () => outsideScope.service.planApplicationTestEntitlementChange(testRequest),
+    /outside the application test entitlement scope/u,
+  )
+  await assert.rejects(
+    () => outsideScope.service.planApplicationEntitlementConsumption(
+      consumptionRequest,
+    ),
+    /outside the application entitlement consumption scope/u,
+  )
+  assert.equal(outsideScope.calls.application, 0)
+  assert.equal(outsideScope.calls.user, 0)
 })
 
 test("service requires private attachment client support only when its gate is enabled", async (context) => {
@@ -5487,6 +5575,127 @@ test("service pins application emoji scope to verified identity and coordinates 
   assert.equal(operationStore.applicationReceipt?.kind, "application-emoji-change")
   assert.equal(operationStore.applicationReceipt?.applicationId, APPLICATION_ID)
   assert.equal(operationStore.applicationReceipt?.resourceId, emojiId)
+})
+
+test("service refreshes exact SKU and entitlement evidence and coordinates consumption application-wide", async () => {
+  const operationStore = new MemoryApplicationOperationStore()
+  const coordinationIntents: WriteCoordinationIntent[] = []
+  let consumed = false
+  let consumeCalls = 0
+  let entitlementReads = 0
+  let skuReads = 0
+  let skuReadsWhenClaimed = -1
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      coordinationIntents.push(intent)
+      skuReadsWhenClaimed = skuReads
+      return operation()
+    },
+  }
+  const { calls, service } = serviceFixture({
+    applicationEntitlementOptions: {
+      clock: () => new Date("2026-08-27T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(61),
+      randomId: () => "activity-application-entitlement-consume",
+    },
+    client: {
+      async consumeApplicationEntitlement(applicationId, entitlementId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(entitlementId, APPLICATION_ENTITLEMENT_ID)
+        consumeCalls += 1
+        consumed = true
+      },
+      async getApplicationEntitlement(applicationId, entitlementId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        assert.equal(entitlementId, APPLICATION_ENTITLEMENT_ID)
+        entitlementReads += 1
+        return {
+          application_id: APPLICATION_ID,
+          consumed,
+          deleted: false,
+          ends_at: null,
+          guild_id: null,
+          id: APPLICATION_ENTITLEMENT_ID,
+          sku_id: APPLICATION_SKU_ID,
+          starts_at: null,
+          type: 1,
+          user_id: MEMBER_USER_ID,
+        }
+      },
+      async listApplicationSkus(applicationId) {
+        assert.equal(applicationId, APPLICATION_ID)
+        skuReads += 1
+        return [{
+          application_id: APPLICATION_ID,
+          flags: 1 << 2,
+          id: APPLICATION_SKU_ID,
+          name: "Private fulfilled consumable",
+          slug: "private-fulfilled-consumable",
+          type: 3,
+        }]
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        applicationEntitlementConsumption: true,
+      },
+      scopes: {
+        applicationConsumableEntitlementSkuIds: [APPLICATION_SKU_ID],
+        applicationConsumableEntitlementUserIds: [MEMBER_USER_ID],
+        applicationMonetizationSkuIds: [APPLICATION_SKU_ID],
+      },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeExternalFulfillment: true as const,
+    auditReason: "Private reviewed fulfillment reason",
+    entitlementId: APPLICATION_ENTITLEMENT_ID,
+    fulfillmentReference: "private-fulfilled-order-0001",
+    operationKey: "application-entitlement-consume-service-0001",
+    skuId: APPLICATION_SKU_ID,
+    userId: MEMBER_USER_ID,
+  }
+
+  const plan = await service.planApplicationEntitlementConsumption(request)
+  const result = await service.executeApplicationEntitlementConsumption(
+    request,
+    plan.digest,
+  )
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(plan.current.consumed, false)
+  assert.equal(result.status, "completed")
+  assert.equal(result.verification, "match")
+  assert.equal(consumeCalls, 1)
+  assert.equal(skuReads, 2)
+  assert.equal(skuReadsWhenClaimed, 1)
+  assert.equal(entitlementReads, 3)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(coordinationIntents, [{
+    kind: "application-entitlement-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{
+      applicationId: APPLICATION_ID,
+      collection: "entitlements",
+      kind: "application-collection",
+    }],
+  }])
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify(calls.activityEntries),
+    /Private|private-fulfilled|consumable|service-0001/u,
+  )
+  assert.equal(
+    operationStore.applicationReceipt?.kind,
+    "application-entitlement-change",
+  )
+  assert.equal(operationStore.applicationReceipt?.resourceId, APPLICATION_ENTITLEMENT_ID)
 })
 
 test("service coordinates reviewed complete linked-role metadata replacement", async () => {

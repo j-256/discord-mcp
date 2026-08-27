@@ -95,7 +95,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 32
+export const OPERATOR_REPORT_SCHEMA_VERSION = 33
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -133,10 +133,14 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   announcementSubscriptionChangePolicy: "announcement-subscription-change-policy",
   applicationEmojiAuditPolicy: "application-emoji-audit-policy",
   applicationEmojiChangePolicy: "application-emoji-change-policy",
+  applicationEntitlementConsumptionPolicy:
+    "application-entitlement-consumption-policy",
   applicationCommandChangePolicy: "application-command-change-policy",
   globalApplicationCommandChangePolicy: "global-application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
   applicationMonetizationAuditPolicy: "application-monetization-audit-policy",
+  applicationTestEntitlementChangePolicy:
+    "application-test-entitlement-change-policy",
   applicationRoleConnectionMetadataChangePolicy:
     "application-role-connection-metadata-change-policy",
   applicationBotVisibility: "application-bot-visibility",
@@ -932,6 +936,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationMonetizationAudit,
       "application-monetization",
       "Exact-beneficiary application monetization audit",
+    ],
+    [
+      config.allowApplicationEntitlementConsumption
+        || config.allowApplicationTestEntitlementChanges,
+      "application-entitlement-changes",
+      "Reviewed application entitlement lifecycle changes",
     ],
     [
       config.allowApplicationRoleConnectionMetadataChanges,
@@ -3207,6 +3217,28 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.applicationMonetizationAuditPolicy,
         "pass",
         "Exact-beneficiary application monetization audit is disabled",
+      ))
+    checks.push(config.allowApplicationTestEntitlementChanges
+      ? check(
+        DOCTOR_CHECK_IDS.applicationTestEntitlementChangePolicy,
+        "pass",
+        `Reviewed test-entitlement changes are constrained to ${config.applicationTestEntitlementSkuIds.size} exact current-application subscription SKUs, ${config.applicationTestEntitlementGuildIds.size} exact guild beneficiaries, and ${config.applicationTestEntitlementUserIds.size} exact user beneficiaries with receipt-proven deletion, signed approval, application-wide coordination, one non-retried mutation, content-free checkpoints, and exact readback`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.applicationTestEntitlementChangePolicy,
+        "pass",
+        "Reviewed application test-entitlement changes are disabled",
+      ))
+    checks.push(config.allowApplicationEntitlementConsumption
+      ? check(
+        DOCTOR_CHECK_IDS.applicationEntitlementConsumptionPolicy,
+        "pass",
+        `Reviewed consumable-entitlement consumption is constrained to ${config.applicationConsumableEntitlementSkuIds.size} exact current-application consumable SKUs and ${config.applicationConsumableEntitlementUserIds.size} exact users with external-fulfillment acknowledgement, hashed fulfillment references, signed approval, application-wide coordination, one non-retried mutation, content-free checkpoints, and exact consumed-state readback`,
+      )
+      : check(
+        DOCTOR_CHECK_IDS.applicationEntitlementConsumptionPolicy,
+        "pass",
+        "Reviewed application entitlement consumption is disabled",
       ))
     checks.push(config.allowApplicationCommandChanges
       ? check(

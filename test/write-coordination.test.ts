@@ -207,6 +207,10 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
     "global-application-commands",
     APPLICATION_ID,
   )
+  const applicationEntitlements = writeApplicationCollectionTarget(
+    "entitlements",
+    APPLICATION_ID,
+  )
 
   assert.deepEqual(channel, { id: CHANNEL_ID, kind: "channel" })
   assert.deepEqual(collection, {
@@ -243,6 +247,11 @@ test("write targets are strict, domain-hashed, and collection-aware", () => {
   assert.deepEqual(globalApplicationCommands, {
     applicationId: APPLICATION_ID,
     collection: "global-application-commands",
+    kind: "application-collection",
+  })
+  assert.deepEqual(applicationEntitlements, {
+    applicationId: APPLICATION_ID,
+    collection: "entitlements",
     kind: "application-collection",
   })
   assert.match(writeCoordinationTargetHash(channel), /^[a-f0-9]{64}$/)
@@ -358,6 +367,14 @@ test("coordination rejects invalid construction and intent identities", async (c
       kind: "application-intent-enablement",
     }), async () => "unsafe"),
     /privileged-intents collection target/,
+  )
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ], {
+      kind: "application-entitlement-change",
+    }), async () => "unsafe"),
+    /entitlement collection target/u,
   )
 })
 
@@ -560,6 +577,62 @@ test("global command claims use the exact application-wide command target", asyn
   })
 
   assert.equal(result, "global-commands")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ),
+  )
+})
+
+test("application entitlement claims use one exact application-wide lifecycle target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-entitlement-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget("entitlements", APPLICATION_ID)
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+  const common = {
+    action: "consume" as const,
+    activityId: "application-entitlement-activity-0001",
+    applicationId: APPLICATION_ID,
+    beneficiaryId: "400000000000000001",
+    beneficiaryType: "user" as const,
+    creationOperationKeyHash: null,
+    entitlementId: MESSAGE_ID,
+    error: null,
+    fulfillmentReferenceHash: `sha256:${"f".repeat(64)}`,
+    kind: "application-entitlement-change" as const,
+    operationKeyHash: operationKeyHashValue,
+    planDigest: PLAN_DIGEST,
+    resourceId: MESSAGE_ID,
+    schemaVersion: 2 as const,
+    skuId: "600000000000000001",
+  }
+
+  const result = await coordinator.run(intent([target], {
+    kind: "application-entitlement-change",
+  }), async () => {
+    await operationStore.reserveApplication({
+      ...common,
+      stage: "reserved",
+      status: "pending",
+      timestamp: "2026-08-27T00:00:00.000Z",
+      verification: null,
+    })
+    await operationStore.finishApplication({
+      ...common,
+      stage: "terminal",
+      status: "completed",
+      timestamp: "2026-08-27T00:00:01.000Z",
+      verification: "match",
+    })
+    return "application-entitlements"
+  })
+
+  assert.equal(result, "application-entitlements")
   assert.deepEqual(await claimFiles(directory), [])
   assert.notEqual(
     writeCoordinationTargetHash(target),

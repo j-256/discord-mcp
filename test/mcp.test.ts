@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { Buffer } from "node:buffer"
 import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
@@ -80,6 +81,13 @@ import type {
   ApplicationEmojiPrivacyProjection,
   ProjectedApplicationEmoji,
 } from "../src/application-emoji-service.js"
+import {
+  fulfillmentReferenceHash,
+  type ApplicationEntitlementConsumptionPlan,
+  type ApplicationEntitlementConsumptionRequest,
+  type ApplicationTestEntitlementChangeRequest,
+  type ApplicationTestEntitlementPlan,
+} from "../src/application-entitlement-service.js"
 import type {
   ApplicationIntentEnablementPlan,
   ApplicationIntentEnablementRequest,
@@ -353,6 +361,8 @@ import {
   AnnouncementSubscriptionOperationConflictError,
   ApplicationEmojiExecutionError,
   ApplicationEmojiOperationConflictError,
+  ApplicationEntitlementExecutionError,
+  ApplicationEntitlementOperationConflictError,
   ApplicationIntentExecutionError,
   ApplicationIntentOperationConflictError,
   ApplicationRoleConnectionMetadataExecutionError,
@@ -826,6 +836,14 @@ const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
 const APPLICATION_EMOJI_ID = "381000000000000001"
 const APPLICATION_EMOJI_OPERATION_KEY = "application-emoji-attempt-0001"
 const APPLICATION_EMOJI_PATH = "/test/discord-mcp/reviewed-application-emoji.png"
+const APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY =
+  "application-test-entitlement-attempt-0001"
+const APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY =
+  "application-test-entitlement-create-0001"
+const APPLICATION_ENTITLEMENT_CONSUMPTION_OPERATION_KEY =
+  "application-entitlement-consume-0001"
+const APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE =
+  "purchase-order-fulfilled-0001"
 const APPLICATION_INTENT_OPERATION_KEY = "application-intent-attempt-0001"
 const APPLICATION_INTENT_REVIEW_REASON = "Enable the schema-v2 member directory"
 const APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY =
@@ -870,6 +888,44 @@ const EMBED_LAYOUT: EmbedLayoutInput[] = [{
 const OPERATION_KEY_HASH = `sha256:${"c".repeat(64)}`
 const DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const DIFFERENT_DIGEST = `hmac-sha256:${"b".repeat(64)}`
+
+function applicationTestEntitlementCreateToolInput(planDigest?: string) {
+  return {
+    action: "create" as const,
+    auditReason: AUDIT_REASON,
+    beneficiary: { guildId: GUILD_ID, type: "guild" as const },
+    operationKey: APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    skuId: APPLICATION_SKU_ID,
+  }
+}
+
+function applicationTestEntitlementDeleteToolInput(planDigest?: string) {
+  return {
+    acknowledgeIrreversibleDeletion: true as const,
+    action: "delete" as const,
+    auditReason: AUDIT_REASON,
+    beneficiary: { guildId: GUILD_ID, type: "guild" as const },
+    creationOperationKey: APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY,
+    entitlementId: APPLICATION_ENTITLEMENT_ID,
+    operationKey: APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    skuId: APPLICATION_SKU_ID,
+  }
+}
+
+function applicationEntitlementConsumptionToolInput(planDigest?: string) {
+  return {
+    acknowledgeExternalFulfillment: true as const,
+    auditReason: AUDIT_REASON,
+    entitlementId: APPLICATION_ENTITLEMENT_ID,
+    fulfillmentReference: APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE,
+    operationKey: APPLICATION_ENTITLEMENT_CONSUMPTION_OPERATION_KEY,
+    ...(planDigest === undefined ? {} : { planDigest }),
+    skuId: APPLICATION_SKU_ID,
+    userId: USER_ID,
+  }
+}
 
 function rawChannel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   return {
@@ -4350,6 +4406,147 @@ function applicationEmojiPlan(
       metadataReadback: "exact-application-emoji",
     },
     warnings: ["Application emoji metadata and paths are untrusted data"],
+    writeRequired: effect === "change",
+  }
+}
+
+function applicationTestEntitlementPlan(
+  request: ApplicationTestEntitlementChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ApplicationTestEntitlementPlan {
+  const beneficiary = request.beneficiary.type === "guild"
+    ? { id: request.beneficiary.guildId, type: "guild" as const }
+    : { id: request.beneficiary.userId, type: "user" as const }
+  const entitlement = {
+    consumed: false,
+    deleted: false,
+    endsAt: null,
+    id: APPLICATION_ENTITLEMENT_ID,
+    skuId: request.skuId,
+    startsAt: null,
+    type: "application-subscription" as const,
+    unknownFieldCount: 0,
+  }
+  const current = request.action === "create"
+    ? effect === "none" ? [entitlement] : []
+    : effect === "none" ? [] : [entitlement]
+  return {
+    acknowledgeIrreversibleDeletion: request.action === "delete",
+    action: request.action === "create" ? "create-test" : "delete-test",
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    beneficiary,
+    botId: BOT_ID,
+    createdAt: "2026-08-27T00:00:00.000Z",
+    creationReceipt: request.action === "delete"
+      ? {
+          activityId: "activity-application-test-entitlement-create",
+          creationOperationKeyHash: operationKeyHash(request.creationOperationKey),
+          entitlementId: request.entitlementId,
+          verified: true,
+        }
+      : null,
+    current,
+    digest,
+    effect,
+    entitlementId: request.action === "delete"
+      ? request.entitlementId
+      : effect === "none" ? APPLICATION_ENTITLEMENT_ID : null,
+    inventory: {
+      complete: true,
+      digest: `hmac-sha256:${"d".repeat(64)}`,
+      returned: current.length,
+      safetyLimit: 100,
+    },
+    operationKeyHash: operationKeyHash(request.operationKey),
+    privacy: {
+      auditReason: "digest-bound-not-persisted",
+      fulfillmentReference: "hash-only",
+      persistence: "content-free-records-only",
+      productText: "omitted",
+      rawOperationKeys: "hash-only",
+      rawPayloads: "omitted",
+    },
+    risks: ["Application-wide exact entitlement mutation"],
+    schemaVersion: 1,
+    sku: {
+      available: true,
+      catalogDigest: `hmac-sha256:${"e".repeat(64)}`,
+      catalogRecords: 1,
+      id: request.skuId,
+      purchaseScope: beneficiary.type,
+      type: "subscription",
+    },
+    status: effect === "change"
+      ? "planned"
+      : request.action === "create" ? "already-entitled" : "already-absent",
+    verification: {
+      automaticRetry: false,
+      exactReadback: true,
+      rollback: "none",
+    },
+    warnings: ["Test entitlement lifecycle evidence is transient untrusted data"],
+    writeRequired: effect === "change",
+  }
+}
+
+function applicationEntitlementConsumptionPlan(
+  request: ApplicationEntitlementConsumptionRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): ApplicationEntitlementConsumptionPlan {
+  return {
+    acknowledgeExternalFulfillment: true,
+    action: "consume",
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    beneficiary: { id: request.userId, type: "user" },
+    botId: BOT_ID,
+    createdAt: "2026-08-27T00:00:00.000Z",
+    current: {
+      consumed: effect === "none",
+      deleted: false,
+      endsAt: null,
+      id: request.entitlementId,
+      skuId: request.skuId,
+      startsAt: null,
+      type: "purchase",
+      unknownFieldCount: 0,
+    },
+    digest,
+    effect,
+    entitlementId: request.entitlementId,
+    fulfillmentReferenceHash: fulfillmentReferenceHash(
+      request.fulfillmentReference,
+    ),
+    operationKeyHash: operationKeyHash(request.operationKey),
+    privacy: {
+      auditReason: "digest-bound-not-persisted",
+      fulfillmentReference: "hash-only",
+      persistence: "content-free-records-only",
+      productText: "omitted",
+      rawOperationKeys: "hash-only",
+      rawPayloads: "omitted",
+    },
+    risks: ["Irreversible application-wide entitlement consumption"],
+    schemaVersion: 1,
+    sku: {
+      available: true,
+      catalogDigest: `hmac-sha256:${"f".repeat(64)}`,
+      catalogRecords: 1,
+      id: request.skuId,
+      purchaseScope: "unspecified",
+      type: "consumable",
+    },
+    status: effect === "none" ? "already-consumed" : "planned",
+    verification: {
+      automaticRetry: false,
+      exactReadback: true,
+      externalFulfillmentVerifiedByConnector: false,
+      rollback: "none",
+    },
+    warnings: ["External fulfillment is caller-verified"],
     writeRequired: effect === "change",
   }
 }
@@ -8290,12 +8487,19 @@ function fixturePolicy(): PolicyDescription {
     applicationEmojiChangesEnabled: false,
     applicationEmojiCreationEnabled: false,
     applicationEmojiRootCount: 0,
+    applicationConsumableEntitlementSkuIds: [],
+    applicationConsumableEntitlementUserIds: [],
+    applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
     applicationMonetizationSkuIds: [],
     applicationSubscriptionUserIds: [],
+    applicationTestEntitlementChangesEnabled: false,
+    applicationTestEntitlementGuildIds: [],
+    applicationTestEntitlementSkuIds: [],
+    applicationTestEntitlementUserIds: [],
     applicationRoleConnectionMetadataChangesEnabled: false,
     announcementCrosspostChannelIds: [],
     announcementCrosspostsEnabled: false,
@@ -8539,6 +8743,9 @@ function serviceFixture(overrides: {
   applicationEmojiEffect?: "change" | "none"
   applicationEmojiError?: Error
   applicationEmojiPlanDigest?: string
+  applicationEntitlementConsumptionEffect?: "change" | "none"
+  applicationEntitlementConsumptionError?: Error
+  applicationEntitlementConsumptionPlanDigest?: string
   applicationIntentEffect?: "change" | "none"
   applicationIntentError?: Error
   applicationIntentPlanDigest?: string
@@ -8555,6 +8762,9 @@ function serviceFixture(overrides: {
   applicationSkuResult?: ReturnType<typeof fixtureApplicationSkuAudit>
   applicationSubscriptionError?: Error
   applicationSubscriptionResult?: ReturnType<typeof fixtureApplicationSubscriptionAudit>
+  applicationTestEntitlementEffect?: "change" | "none"
+  applicationTestEntitlementError?: Error
+  applicationTestEntitlementPlanDigest?: string
   guildWebhookError?: Error
   guildWebhookResult?: ReturnType<typeof fixtureGuildWebhookAudit>
   attachmentError?: Error
@@ -8809,10 +9019,14 @@ function serviceFixture(overrides: {
     applicationEmojiGet: 0,
     applicationEmojiList: 0,
     applicationEmojiPlan: 0,
+    applicationEntitlementConsumptionExecute: 0,
+    applicationEntitlementConsumptionPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
     applicationRoleConnectionMetadataExecute: 0,
     applicationRoleConnectionMetadataPlan: 0,
+    applicationTestEntitlementExecute: 0,
+    applicationTestEntitlementPlan: 0,
     autoModerationExecute: 0,
     autoModerationGet: 0,
     autoModerationList: 0,
@@ -9538,6 +9752,32 @@ function serviceFixture(overrides: {
           : "completed",
       }
     },
+    async executeApplicationEntitlementConsumption(request, planDigest) {
+      if (overrides.applicationEntitlementConsumptionError) {
+        throw overrides.applicationEntitlementConsumptionError
+      }
+      calls.applicationEntitlementConsumptionExecute += 1
+      const planned = applicationEntitlementConsumptionPlan(
+        request,
+        planDigest,
+        overrides.applicationEntitlementConsumptionEffect,
+      )
+      return {
+        action: "consume" as const,
+        activityId: planned.effect === "none"
+          ? null
+          : "activity-application-entitlement-consume",
+        applicationId: APPLICATION_ID,
+        beneficiary: planned.beneficiary,
+        entitlementId: request.entitlementId,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        skuId: request.skuId,
+        status: planned.effect === "none" ? "already-consumed" as const : "completed" as const,
+        verification: planned.effect === "none" ? "not-required" as const : "match" as const,
+      }
+    },
     async executeApplicationIntentEnablement(request, planDigest) {
       if (overrides.applicationIntentError) throw overrides.applicationIntentError
       calls.applicationIntentExecute += 1
@@ -9562,6 +9802,36 @@ function serviceFixture(overrides: {
         planDigest,
         schemaVersion: 1,
         status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
+    async executeApplicationTestEntitlementChange(request, planDigest) {
+      if (overrides.applicationTestEntitlementError) {
+        throw overrides.applicationTestEntitlementError
+      }
+      calls.applicationTestEntitlementExecute += 1
+      const planned = applicationTestEntitlementPlan(
+        request,
+        planDigest,
+        overrides.applicationTestEntitlementEffect,
+      )
+      return {
+        action: planned.action,
+        activityId: planned.effect === "none"
+          ? null
+          : "activity-application-test-entitlement",
+        applicationId: APPLICATION_ID,
+        beneficiary: planned.beneficiary,
+        entitlementId: request.action === "delete"
+          ? request.entitlementId
+          : APPLICATION_ENTITLEMENT_ID,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        skuId: request.skuId,
+        status: planned.effect === "none"
+          ? request.action === "create" ? "already-entitled" as const : "already-absent" as const
+          : "completed" as const,
+        verification: planned.effect === "none" ? "not-required" as const : "match" as const,
       }
     },
     async executeApplicationRoleConnectionMetadataChange(request, planDigest) {
@@ -9624,6 +9894,14 @@ function serviceFixture(overrides: {
         overrides.applicationEmojiEffect,
       )
     },
+    async planApplicationEntitlementConsumption(request) {
+      calls.applicationEntitlementConsumptionPlan += 1
+      return applicationEntitlementConsumptionPlan(
+        request,
+        overrides.applicationEntitlementConsumptionPlanDigest || DIGEST,
+        overrides.applicationEntitlementConsumptionEffect,
+      )
+    },
     async planApplicationIntentEnablement(request) {
       calls.applicationIntentPlan += 1
       return applicationIntentPlan(
@@ -9638,6 +9916,14 @@ function serviceFixture(overrides: {
         request,
         overrides.applicationRoleConnectionMetadataChangePlanDigest || DIGEST,
         overrides.applicationRoleConnectionMetadataChangeEffect,
+      )
+    },
+    async planApplicationTestEntitlementChange(request) {
+      calls.applicationTestEntitlementPlan += 1
+      return applicationTestEntitlementPlan(
+        request,
+        overrides.applicationTestEntitlementPlanDigest || DIGEST,
+        overrides.applicationTestEntitlementEffect,
       )
     },
     async auditChannelOrder(guildId) {
@@ -13269,6 +13555,19 @@ function structuredContent(result: { structuredContent?: unknown }): Record<stri
   return result.structuredContent as Record<string, unknown>
 }
 
+function signedRequestStatePayload(requestState: string): Record<string, unknown> {
+  const [version, body, signature, ...extra] = requestState.split(".")
+  assert.equal(version, "v1")
+  assert.ok(body)
+  assert.ok(signature)
+  assert.deepEqual(extra, [])
+  const envelope = JSON.parse(
+    Buffer.from(body, "base64url").toString("utf8"),
+  ) as Record<string, unknown>
+  assert.ok(envelope.p)
+  return envelope.p as Record<string, unknown>
+}
+
 function assertContentFreeToolReceipt(result: {
   content?: Array<{ text?: string; type: string }>
   structuredContent?: unknown
@@ -13617,6 +13916,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_guild_expression_change",
       "plan_application_emoji_change",
       "execute_application_emoji_change",
+      "plan_application_test_entitlement_change",
+      "execute_application_test_entitlement_change",
+      "plan_application_entitlement_consumption",
+      "execute_application_entitlement_consumption",
       "plan_application_intent_enablement",
       "execute_application_intent_enablement",
       "plan_application_role_connection_metadata_change",
@@ -13768,6 +14071,12 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const applicationRoleConnectionMetadata = result.tools.find((tool) => (
     tool.name === "execute_application_role_connection_metadata_change"
   ))
+  const applicationTestEntitlement = result.tools.find((tool) => (
+    tool.name === "execute_application_test_entitlement_change"
+  ))
+  const applicationEntitlementConsumption = result.tools.find((tool) => (
+    tool.name === "execute_application_entitlement_consumption"
+  ))
   const soundboard = result.tools.find((tool) => (
     tool.name === "execute_guild_soundboard_change"
   ))
@@ -13851,6 +14160,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     applicationEmoji,
     applicationIntent,
     applicationRoleConnectionMetadata,
+    applicationTestEntitlement,
+    applicationEntitlementConsumption,
     soundboard,
     scheduledEvent,
     channelMetadata,
@@ -14104,6 +14415,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_application_emoji_change",
     "plan_application_intent_enablement",
     "plan_application_role_connection_metadata_change",
+    "plan_application_test_entitlement_change",
+    "plan_application_entitlement_consumption",
     "plan_guild_soundboard_change",
     "plan_scheduled_event_change",
     "plan_role_configuration",
@@ -16227,10 +16540,14 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     applicationEmojiGet: 0,
     applicationEmojiList: 0,
     applicationEmojiPlan: 0,
+    applicationEntitlementConsumptionExecute: 0,
+    applicationEntitlementConsumptionPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
     applicationRoleConnectionMetadataExecute: 0,
     applicationRoleConnectionMetadataPlan: 0,
+    applicationTestEntitlementExecute: 0,
+    applicationTestEntitlementPlan: 0,
     archived: 1,
     attachmentExecute: 0,
     attachmentPlan: 0,
@@ -26280,6 +26597,406 @@ test("MCP application emoji execution exposes uncertain and one-shot conflict ou
     JSON.stringify(conflictResult),
     new RegExp(APPLICATION_EMOJI_OPERATION_KEY),
   )
+})
+
+test("MCP entitlement lifecycle planners enforce exact acknowledged inputs and privacy boundaries", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const createRequest = applicationTestEntitlementCreateToolInput()
+  const deleteRequest = applicationTestEntitlementDeleteToolInput()
+  const consumeRequest = applicationEntitlementConsumptionToolInput()
+
+  const create = await client.callTool({
+    arguments: createRequest,
+    name: "plan_application_test_entitlement_change",
+  })
+  const deletion = await client.callTool({
+    arguments: deleteRequest,
+    name: "plan_application_test_entitlement_change",
+  })
+  const consumption = await client.callTool({
+    arguments: consumeRequest,
+    name: "plan_application_entitlement_consumption",
+  })
+
+  assert.equal(structuredContent(create).status, "planned")
+  assert.equal(structuredContent(create).action, "create-test")
+  assert.equal(structuredContent(deletion).status, "planned")
+  assert.equal(structuredContent(deletion).action, "delete-test")
+  assert.equal(structuredContent(consumption).status, "planned")
+  assert.equal(structuredContent(consumption).action, "consume")
+  assert.equal(
+    structuredContent(consumption).fulfillmentReferenceHash,
+    fulfillmentReferenceHash(APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE),
+  )
+  for (const result of [create, deletion, consumption]) {
+    const serialized = JSON.stringify(result)
+    assert.doesNotMatch(serialized, new RegExp(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY))
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY),
+    )
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(APPLICATION_ENTITLEMENT_CONSUMPTION_OPERATION_KEY),
+    )
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE),
+    )
+  }
+
+  const invalidTestRequests: unknown[] = [
+    { ...createRequest, applicationId: APPLICATION_ID },
+    {
+      ...createRequest,
+      beneficiary: { guildId: GUILD_ID, type: "guild", userId: USER_ID },
+    },
+    { ...deleteRequest, acknowledgeIrreversibleDeletion: false },
+    (() => {
+      const { acknowledgeIrreversibleDeletion: _acknowledgement, ...request } =
+        deleteRequest
+      return request
+    })(),
+    { ...deleteRequest, entitlementId: "0" },
+  ]
+  for (const request of invalidTestRequests) {
+    const result = await client.callTool({
+      arguments: request as Record<string, unknown>,
+      name: "plan_application_test_entitlement_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  const invalidConsumptionRequests: unknown[] = [
+    { ...consumeRequest, acknowledgeExternalFulfillment: false },
+    { ...consumeRequest, applicationId: APPLICATION_ID },
+    { ...consumeRequest, fulfillmentReference: "too-short" },
+    { ...consumeRequest, userId: "0" },
+  ]
+  for (const request of invalidConsumptionRequests) {
+    const result = await client.callTool({
+      arguments: request as Record<string, unknown>,
+      name: "plan_application_entitlement_consumption",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.applicationTestEntitlementPlan, 2)
+  assert.equal(calls.applicationEntitlementConsumptionPlan, 1)
+  assert.equal(calls.applicationTestEntitlementExecute, 0)
+  assert.equal(calls.applicationEntitlementConsumptionExecute, 0)
+})
+
+test("MCP entitlement lifecycle execution binds signed approval to exact lifecycle evidence", async (context) => {
+  const confirmationMessages: string[] = []
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessages.push(request.params.message)
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+
+  const creation = await client.callTool({
+    arguments: applicationTestEntitlementCreateToolInput(DIGEST),
+    name: "execute_application_test_entitlement_change",
+  })
+  const consumption = await client.callTool({
+    arguments: applicationEntitlementConsumptionToolInput(DIGEST),
+    name: "execute_application_entitlement_consumption",
+  })
+
+  assert.equal(structuredContent(creation).status, "completed")
+  assert.equal(structuredContent(creation).entitlementId, APPLICATION_ENTITLEMENT_ID)
+  assert.equal(structuredContent(consumption).status, "completed")
+  assert.equal(calls.applicationTestEntitlementPlan, 1)
+  assert.equal(calls.applicationTestEntitlementExecute, 1)
+  assert.equal(calls.applicationEntitlementConsumptionPlan, 1)
+  assert.equal(calls.applicationEntitlementConsumptionExecute, 1)
+  assert.equal(confirmationMessages.length, 2)
+  for (const message of confirmationMessages) {
+    for (const value of [APPLICATION_ID, BOT_ID, APPLICATION_SKU_ID, DIGEST]) {
+      assert.match(message, new RegExp(value))
+    }
+    assert.match(message, new RegExp(AUDIT_REASON))
+    assert.match(message, /content-free/u)
+    assert.match(message, /non-retried/u)
+    assert.match(message, /untrusted data/u)
+    assert.doesNotMatch(
+      message,
+      new RegExp(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY),
+    )
+    assert.doesNotMatch(
+      message,
+      new RegExp(APPLICATION_ENTITLEMENT_CONSUMPTION_OPERATION_KEY),
+    )
+  }
+  assert.match(
+    confirmationMessages[1] || "",
+    new RegExp(APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE),
+  )
+  assert.match(
+    confirmationMessages[1] || "",
+    new RegExp(fulfillmentReferenceHash(APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE)),
+  )
+  const serializedServerMessages = JSON.stringify(serverMessages)
+  assert.doesNotMatch(
+    serializedServerMessages,
+    new RegExp(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    serializedServerMessages,
+    new RegExp(APPLICATION_ENTITLEMENT_CONSUMPTION_OPERATION_KEY),
+  )
+})
+
+test("MCP entitlement lifecycle execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      applicationEntitlementConsumptionEffect: "none",
+      applicationTestEntitlementEffect: "none",
+    },
+  })
+  const noOpCreation = await noOp.client.callTool({
+    arguments: applicationTestEntitlementCreateToolInput(DIGEST),
+    name: "execute_application_test_entitlement_change",
+  })
+  const noOpConsumption = await noOp.client.callTool({
+    arguments: applicationEntitlementConsumptionToolInput(DIGEST),
+    name: "execute_application_entitlement_consumption",
+  })
+  assert.equal(structuredContent(noOpCreation).status, "already-entitled")
+  assert.equal(structuredContent(noOpConsumption).status, "already-consumed")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.applicationTestEntitlementExecute, 1)
+  assert.equal(noOp.calls.applicationEntitlementConsumptionExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: applicationTestEntitlementDeleteToolInput(DIGEST),
+    name: "execute_application_test_entitlement_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.applicationTestEntitlementExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      applicationEntitlementConsumptionPlanDigest: DIFFERENT_DIGEST,
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: applicationEntitlementConsumptionToolInput(DIGEST),
+    name: "execute_application_entitlement_consumption",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.applicationEntitlementConsumptionExecute, 0)
+})
+
+test("MCP entitlement lifecycle signed state contains only exact IDs and hashes and rejects tampering", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const createRequest = applicationTestEntitlementCreateToolInput(DIGEST)
+  const createInitial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: createRequest,
+      name: "execute_application_test_entitlement_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(createInitial.resultType, "input_required")
+  const createRequestState = createInitial.requestState
+  assert.ok(typeof createRequestState === "string")
+  const createState = signedRequestStatePayload(createRequestState)
+  assert.deepEqual(Object.keys(createState).sort(), [
+    "acknowledgeIrreversibleDeletion",
+    "action",
+    "applicationId",
+    "beneficiaryId",
+    "beneficiaryType",
+    "creationOperationKeyHash",
+    "entitlementId",
+    "operationKeyHash",
+    "planDigest",
+    "skuId",
+  ])
+  assert.equal(createState.acknowledgeIrreversibleDeletion, false)
+  assert.equal(
+    createState.operationKeyHash,
+    operationKeyHash(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY),
+  )
+  assert.equal(Object.hasOwn(createState, "auditReason"), false)
+  assert.equal(Object.hasOwn(createState, "operationKey"), false)
+
+  const deleteInitial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: applicationTestEntitlementDeleteToolInput(DIGEST),
+      name: "execute_application_test_entitlement_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(deleteInitial.resultType, "input_required")
+  assert.ok(typeof deleteInitial.requestState === "string")
+  assert.equal(
+    signedRequestStatePayload(deleteInitial.requestState)
+      .acknowledgeIrreversibleDeletion,
+    true,
+  )
+
+  const tamperedCreate = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...createRequest, skuId: APPLICATION_SUBSCRIPTION_ID },
+      inputResponses: {
+        confirm_application_test_entitlement_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_application_test_entitlement_change",
+      requestState: createRequestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(tamperedCreate).status, "confirmation-invalid")
+
+  const consumeRequest = applicationEntitlementConsumptionToolInput(DIGEST)
+  const consumeInitial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: consumeRequest,
+      name: "execute_application_entitlement_consumption",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+  assert.equal(consumeInitial.resultType, "input_required")
+  const consumeRequestState = consumeInitial.requestState
+  assert.ok(typeof consumeRequestState === "string")
+  const consumeState = signedRequestStatePayload(consumeRequestState)
+  assert.deepEqual(Object.keys(consumeState).sort(), [
+    "acknowledgeExternalFulfillment",
+    "applicationId",
+    "entitlementId",
+    "fulfillmentReferenceHash",
+    "operationKeyHash",
+    "planDigest",
+    "skuId",
+    "userId",
+  ])
+  assert.equal(
+    consumeState.fulfillmentReferenceHash,
+    fulfillmentReferenceHash(APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE),
+  )
+  assert.equal(Object.hasOwn(consumeState, "auditReason"), false)
+  assert.equal(Object.hasOwn(consumeState, "fulfillmentReference"), false)
+  assert.equal(Object.hasOwn(consumeState, "operationKey"), false)
+
+  const tamperedConsumption = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...consumeRequest,
+        fulfillmentReference: "purchase-order-fulfilled-0002",
+      },
+      inputResponses: {
+        confirm_application_entitlement_consumption: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_application_entitlement_consumption",
+      requestState: consumeRequestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(
+    structuredContent(tamperedConsumption).status,
+    "confirmation-invalid",
+  )
+  assert.equal(fixture.calls.applicationTestEntitlementExecute, 0)
+  assert.equal(fixture.calls.applicationEntitlementConsumptionExecute, 0)
+})
+
+test("MCP entitlement lifecycle execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationEntitlementConsumptionError: new ApplicationEntitlementExecutionError(
+        `Discord application entitlement outcome is uncertain: ${TOKEN}`,
+        { error: TOKEN, status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: applicationEntitlementConsumptionToolInput(DIGEST),
+    name: "execute_application_entitlement_consumption",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const receipt = {
+    action: "delete-test" as const,
+    activityId: "activity-application-test-entitlement",
+    applicationId: APPLICATION_ID,
+    beneficiaryId: GUILD_ID,
+    beneficiaryType: "guild" as const,
+    creationOperationKeyHash: operationKeyHash(
+      APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY,
+    ),
+    entitlementId: APPLICATION_ENTITLEMENT_ID,
+    error: null,
+    fulfillmentReferenceHash: null,
+    operationKeyHash: operationKeyHash(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY),
+    skuId: APPLICATION_SKU_ID,
+    stage: "terminal" as const,
+    status: "completed" as const,
+    timestamp: "2026-08-27T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      applicationTestEntitlementError:
+        new ApplicationEntitlementOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: applicationTestEntitlementDeleteToolInput(DIGEST),
+    name: "execute_application_test_entitlement_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  const serializedConflict = JSON.stringify(conflictResult)
+  assert.doesNotMatch(
+    serializedConflict,
+    new RegExp(APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    serializedConflict,
+    new RegExp(APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(serializedConflict, new RegExp(AUDIT_REASON))
 })
 
 test("MCP application intent planning accepts only exact acknowledged policy targets", async (context) => {

@@ -20,12 +20,19 @@ export interface PolicyDescription {
   applicationEmojiChangesEnabled: boolean
   applicationEmojiCreationEnabled: boolean
   applicationEmojiRootCount: number
+  applicationEntitlementConsumptionEnabled: boolean
+  applicationConsumableEntitlementSkuIds: string[]
+  applicationConsumableEntitlementUserIds: string[]
   applicationIntentChangesEnabled: boolean
   applicationEntitlementGuildIds: string[]
   applicationEntitlementUserIds: string[]
   applicationMonetizationAuditEnabled: boolean
   applicationMonetizationSkuIds: string[]
   applicationSubscriptionUserIds: string[]
+  applicationTestEntitlementChangesEnabled: boolean
+  applicationTestEntitlementGuildIds: string[]
+  applicationTestEntitlementSkuIds: string[]
+  applicationTestEntitlementUserIds: string[]
   applicationRoleConnectionMetadataChangesEnabled: boolean
   announcementCrosspostChannelIds: string[]
   announcementCrosspostsEnabled: boolean
@@ -248,8 +255,10 @@ export class ScopePolicy {
   readonly #allowGlobalApplicationCommandChanges: boolean
   readonly #allowApplicationEmojiAudit: boolean
   readonly #allowApplicationEmojiChanges: boolean
+  readonly #allowApplicationEntitlementConsumption: boolean
   readonly #allowApplicationIntentChanges: boolean
   readonly #allowApplicationMonetizationAudit: boolean
+  readonly #allowApplicationTestEntitlementChanges: boolean
   readonly #allowApplicationRoleConnectionMetadataChanges: boolean
   readonly #allowAnnouncementCrossposts: boolean
   readonly #allowAnnouncementSubscriptionAudit: boolean
@@ -364,10 +373,15 @@ export class ScopePolicy {
   readonly #attachmentRoots: readonly string[]
   readonly #applicationEmojiRoots: readonly string[]
   readonly #applicationCommandGuildIds: ReadonlySet<string>
+  readonly #applicationConsumableEntitlementSkuIds: ReadonlySet<string>
+  readonly #applicationConsumableEntitlementUserIds: ReadonlySet<string>
   readonly #applicationEntitlementGuildIds: ReadonlySet<string>
   readonly #applicationEntitlementUserIds: ReadonlySet<string>
   readonly #applicationMonetizationSkuIds: ReadonlySet<string>
   readonly #applicationSubscriptionUserIds: ReadonlySet<string>
+  readonly #applicationTestEntitlementGuildIds: ReadonlySet<string>
+  readonly #applicationTestEntitlementSkuIds: ReadonlySet<string>
+  readonly #applicationTestEntitlementUserIds: ReadonlySet<string>
   readonly #automodAlertChannelIds: ReadonlySet<string>
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
@@ -474,8 +488,10 @@ export class ScopePolicy {
     | "allowEmbedMessages"
     | "allowApplicationEmojiAudit"
     | "allowApplicationEmojiChanges"
+    | "allowApplicationEntitlementConsumption"
     | "allowApplicationIntentChanges"
     | "allowApplicationMonetizationAudit"
+    | "allowApplicationTestEntitlementChanges"
     | "allowApplicationRoleConnectionMetadataChanges"
     | "allowAnnouncementSubscriptionAudit"
     | "allowAnnouncementSubscriptionChanges"
@@ -586,10 +602,15 @@ export class ScopePolicy {
     | "attachmentRoots"
     | "applicationEmojiRoots"
     | "applicationCommandGuildIds"
+    | "applicationConsumableEntitlementSkuIds"
+    | "applicationConsumableEntitlementUserIds"
     | "applicationEntitlementGuildIds"
     | "applicationEntitlementUserIds"
     | "applicationMonetizationSkuIds"
     | "applicationSubscriptionUserIds"
+    | "applicationTestEntitlementGuildIds"
+    | "applicationTestEntitlementSkuIds"
+    | "applicationTestEntitlementUserIds"
     | "automodAlertChannelIds"
     | "automodGuildIds"
     | "banAuditGuildIds"
@@ -667,8 +688,12 @@ export class ScopePolicy {
       config.allowGlobalApplicationCommandChanges ?? false
     this.#allowApplicationEmojiAudit = config.allowApplicationEmojiAudit ?? false
     this.#allowApplicationEmojiChanges = config.allowApplicationEmojiChanges ?? false
+    this.#allowApplicationEntitlementConsumption =
+      config.allowApplicationEntitlementConsumption ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
     this.#allowApplicationMonetizationAudit = config.allowApplicationMonetizationAudit ?? false
+    this.#allowApplicationTestEntitlementChanges =
+      config.allowApplicationTestEntitlementChanges ?? false
     this.#allowApplicationRoleConnectionMetadataChanges =
       config.allowApplicationRoleConnectionMetadataChanges ?? false
     this.#allowAnnouncementCrossposts = config.allowAnnouncementCrossposts ?? false
@@ -789,10 +814,20 @@ export class ScopePolicy {
     this.#attachmentRoots = config.attachmentRoots ?? []
     this.#applicationEmojiRoots = config.applicationEmojiRoots ?? []
     this.#applicationCommandGuildIds = config.applicationCommandGuildIds ?? new Set()
+    this.#applicationConsumableEntitlementSkuIds =
+      config.applicationConsumableEntitlementSkuIds ?? new Set()
+    this.#applicationConsumableEntitlementUserIds =
+      config.applicationConsumableEntitlementUserIds ?? new Set()
     this.#applicationEntitlementGuildIds = config.applicationEntitlementGuildIds ?? new Set()
     this.#applicationEntitlementUserIds = config.applicationEntitlementUserIds ?? new Set()
     this.#applicationMonetizationSkuIds = config.applicationMonetizationSkuIds ?? new Set()
     this.#applicationSubscriptionUserIds = config.applicationSubscriptionUserIds ?? new Set()
+    this.#applicationTestEntitlementGuildIds =
+      config.applicationTestEntitlementGuildIds ?? new Set()
+    this.#applicationTestEntitlementSkuIds =
+      config.applicationTestEntitlementSkuIds ?? new Set()
+    this.#applicationTestEntitlementUserIds =
+      config.applicationTestEntitlementUserIds ?? new Set()
     this.#automodAlertChannelIds = config.automodAlertChannelIds ?? new Set()
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
@@ -890,6 +925,16 @@ export class ScopePolicy {
         && this.#allowApplicationEmojiChanges
         && this.#applicationEmojiRoots.length > 0,
       applicationEmojiRootCount: this.#applicationEmojiRoots.length,
+      applicationConsumableEntitlementSkuIds: [
+        ...this.#applicationConsumableEntitlementSkuIds,
+      ].sort(),
+      applicationConsumableEntitlementUserIds: [
+        ...this.#applicationConsumableEntitlementUserIds,
+      ].sort(),
+      applicationEntitlementConsumptionEnabled:
+        this.#allowApplicationEntitlementConsumption
+        && this.#applicationConsumableEntitlementSkuIds.size > 0
+        && this.#applicationConsumableEntitlementUserIds.size > 0,
       applicationIntentChangesEnabled: this.#allowApplicationIntentChanges,
       applicationEntitlementGuildIds: [...this.#applicationEntitlementGuildIds].sort(),
       applicationEntitlementUserIds: [...this.#applicationEntitlementUserIds].sort(),
@@ -902,6 +947,20 @@ export class ScopePolicy {
         ),
       applicationMonetizationSkuIds: [...this.#applicationMonetizationSkuIds].sort(),
       applicationSubscriptionUserIds: [...this.#applicationSubscriptionUserIds].sort(),
+      applicationTestEntitlementChangesEnabled:
+        this.#allowApplicationTestEntitlementChanges
+        && this.#applicationTestEntitlementSkuIds.size > 0
+        && (
+          this.#applicationTestEntitlementGuildIds.size > 0
+          || this.#applicationTestEntitlementUserIds.size > 0
+        ),
+      applicationTestEntitlementGuildIds: [
+        ...this.#applicationTestEntitlementGuildIds,
+      ].sort(),
+      applicationTestEntitlementSkuIds: [...this.#applicationTestEntitlementSkuIds].sort(),
+      applicationTestEntitlementUserIds: [
+        ...this.#applicationTestEntitlementUserIds,
+      ].sort(),
       applicationRoleConnectionMetadataChangesEnabled:
         this.#allowApplicationRoleConnectionMetadataChanges,
       announcementCrosspostChannelIds: [...this.#announcementCrosspostChannelIds].sort(),
@@ -2127,6 +2186,65 @@ export class ScopePolicy {
       )
     }
     this.#assertApplicationMonetizationSkuIdsAuditable([skuId])
+  }
+
+  assertApplicationTestEntitlementChangeAllowed(
+    beneficiary: Readonly<{ id: string; type: "guild" | "user" }>,
+    skuId: string,
+  ): void {
+    if (!this.#allowApplicationTestEntitlementChanges) {
+      throw new PolicyError(
+        "Discord application test entitlement changes are disabled by connector configuration",
+      )
+    }
+    if (!this.#applicationTestEntitlementSkuIds.has(skuId)) {
+      throw new PolicyError(
+        `Discord SKU ${skuId} is outside the application test entitlement scope`,
+      )
+    }
+    if (!this.#applicationMonetizationSkuIds.has(skuId)) {
+      throw new PolicyError(
+        `Discord SKU ${skuId} lacks the required application monetization evidence scope`,
+      )
+    }
+    if (beneficiary.type === "guild") {
+      this.assertGuildAllowed(beneficiary.id)
+      if (!this.#applicationTestEntitlementGuildIds.has(beneficiary.id)) {
+        throw new PolicyError(
+          `Discord guild ${beneficiary.id} is outside the application test entitlement scope`,
+        )
+      }
+    } else if (!this.#applicationTestEntitlementUserIds.has(beneficiary.id)) {
+      throw new PolicyError(
+        `Discord user ${beneficiary.id} is outside the application test entitlement scope`,
+      )
+    }
+  }
+
+  assertApplicationEntitlementConsumptionAllowed(
+    userId: string,
+    skuId: string,
+  ): void {
+    if (!this.#allowApplicationEntitlementConsumption) {
+      throw new PolicyError(
+        "Discord application entitlement consumption is disabled by connector configuration",
+      )
+    }
+    if (!this.#applicationConsumableEntitlementUserIds.has(userId)) {
+      throw new PolicyError(
+        `Discord user ${userId} is outside the application entitlement consumption scope`,
+      )
+    }
+    if (!this.#applicationConsumableEntitlementSkuIds.has(skuId)) {
+      throw new PolicyError(
+        `Discord SKU ${skuId} is outside the application entitlement consumption scope`,
+      )
+    }
+    if (!this.#applicationMonetizationSkuIds.has(skuId)) {
+      throw new PolicyError(
+        `Discord SKU ${skuId} lacks the required application monetization evidence scope`,
+      )
+    }
   }
 
   #assertApplicationMonetizationAuditEnabled(): void {

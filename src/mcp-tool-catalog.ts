@@ -40,8 +40,10 @@ type McpToolWorkflow =
   | "announcement-crosspost"
   | "announcement-subscription"
   | "application-emoji-change"
+  | "application-entitlement-consumption"
   | "application-intent-enablement"
   | "application-role-connection-metadata-change"
+  | "application-test-entitlement-change"
   | "attachment-message"
   | "automod-change"
   | "bulk-guild-ban"
@@ -229,6 +231,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "application-emojis",
     workflow: "application-emoji-change",
   },
+  execute_application_entitlement_consumption: {
+    keywords: ["application", "consume", "consumable", "entitlement", "execute", "fulfillment", "monetization", "purchase", "sku"],
+    toolset: "application-entitlement-changes",
+    workflow: "application-entitlement-consumption",
+  },
   execute_application_intent_enablement: {
     keywords: ["application", "enable", "execute", "guild members", "intent", "message content", "privileged"],
     toolset: "application-security",
@@ -238,6 +245,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "clear", "execute", "linked", "metadata", "replace", "role", "schema"],
     toolset: "linked-roles",
     workflow: "application-role-connection-metadata-change",
+  },
+  execute_application_test_entitlement_change: {
+    keywords: ["application", "create", "delete", "entitlement", "execute", "monetization", "sku", "subscription", "test"],
+    toolset: "application-entitlement-changes",
+    workflow: "application-test-entitlement-change",
   },
   execute_message_forward: {
     keywords: ["copy", "execute", "forward", "message", "snapshot"],
@@ -894,6 +906,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "application-emojis",
     workflow: "application-emoji-change",
   },
+  plan_application_entitlement_consumption: {
+    keywords: ["application", "consume", "consumable", "entitlement", "fulfillment", "monetization", "plan", "purchase", "review", "sku"],
+    toolset: "application-entitlement-changes",
+    workflow: "application-entitlement-consumption",
+  },
   plan_application_intent_enablement: {
     keywords: ["application", "enable", "guild members", "intent", "message content", "plan", "privileged", "review"],
     toolset: "application-security",
@@ -903,6 +920,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "clear", "linked", "metadata", "plan", "replace", "review", "role", "schema"],
     toolset: "linked-roles",
     workflow: "application-role-connection-metadata-change",
+  },
+  plan_application_test_entitlement_change: {
+    keywords: ["application", "create", "delete", "entitlement", "monetization", "plan", "review", "sku", "subscription", "test"],
+    toolset: "application-entitlement-changes",
+    workflow: "application-test-entitlement-change",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

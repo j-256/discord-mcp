@@ -647,6 +647,42 @@ export class ApplicationMonetizationEvidenceError extends Error {
   override name = "ApplicationMonetizationEvidenceError"
 }
 
+export class ApplicationEntitlementEvidenceError extends Error {
+  override name = "ApplicationEntitlementEvidenceError"
+}
+
+export class ApplicationEntitlementPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord application entitlement evidence does not match the reviewed plan")
+    this.name = "ApplicationEntitlementPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ApplicationEntitlementOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord application entitlement operation key has already been reserved")
+    this.name = "ApplicationEntitlementOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ApplicationEntitlementExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ApplicationEntitlementExecutionError"
+    this.result = result
+  }
+}
+
 export class ChannelDeletionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

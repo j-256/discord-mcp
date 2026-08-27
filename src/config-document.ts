@@ -133,7 +133,9 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "globalApplicationCommandChanges",
   "applicationEmojiAudit",
   "applicationEmojiChanges",
+  "applicationEntitlementConsumption",
   "applicationMonetizationAudit",
+  "applicationTestEntitlementChanges",
   "applicationIntentChanges",
   "applicationRoleConnectionMetadataChanges",
   "announcementCrossposts",
@@ -242,10 +244,15 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
 export const CONFIG_SCOPE_NAMES = Object.freeze([
   "adminGuildIds",
   "applicationCommandGuildIds",
+  "applicationConsumableEntitlementSkuIds",
+  "applicationConsumableEntitlementUserIds",
   "applicationEntitlementGuildIds",
   "applicationEntitlementUserIds",
   "applicationMonetizationSkuIds",
   "applicationSubscriptionUserIds",
+  "applicationTestEntitlementGuildIds",
+  "applicationTestEntitlementSkuIds",
+  "applicationTestEntitlementUserIds",
   "announcementCrosspostChannelIds",
   "announcementSubscriptionSourceChannelIds",
   "announcementSubscriptionTargetChannelIds",
@@ -465,10 +472,17 @@ const DIRECT_MESSAGE_USER_SCOPE_DESCRIPTION = "Exact ordinary Discord user ID al
 const EMBED_MESSAGE_CAPABILITY_DESCRIPTION = "Enable reviewed remote-free static rich-embed message creation and exact bot-owned replacement"
 const EMBED_MESSAGE_SCOPE_DESCRIPTION = "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages"
 const APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION = "Enable exact-beneficiary entitlement and exact-user subscription lifecycle audits"
+const APPLICATION_ENTITLEMENT_CONSUMPTION_CAPABILITY_DESCRIPTION = "Enable reviewed exact-user consumable entitlement fulfillment acknowledgement and consumption"
+const APPLICATION_TEST_ENTITLEMENT_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed subscription test-entitlement creation and receipt-proven deletion"
+const APPLICATION_CONSUMABLE_ENTITLEMENT_SKU_SCOPE_DESCRIPTION = "Exact current-application consumable SKU ID allowlist for reviewed entitlement consumption"
+const APPLICATION_CONSUMABLE_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user beneficiary ID allowlist for reviewed entitlement consumption"
 const APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION = "Exact guild beneficiary ID allowlist for application entitlement audit"
 const APPLICATION_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user beneficiary ID allowlist for application entitlement audit"
-const APPLICATION_MONETIZATION_SKU_SCOPE_DESCRIPTION = "Exact current-application SKU ID allowlist for entitlement and subscription audit"
+const APPLICATION_MONETIZATION_SKU_SCOPE_DESCRIPTION = "Exact current-application SKU ID evidence allowlist shared by monetization audit and reviewed entitlement lifecycle changes"
 const APPLICATION_SUBSCRIPTION_USER_SCOPE_DESCRIPTION = "Exact user ID allowlist for application subscription lifecycle audit"
+const APPLICATION_TEST_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION = "Exact guild beneficiary ID allowlist for reviewed subscription test entitlements"
+const APPLICATION_TEST_ENTITLEMENT_SKU_SCOPE_DESCRIPTION = "Exact current-application subscription SKU ID allowlist for reviewed test entitlements"
+const APPLICATION_TEST_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user beneficiary ID allowlist for reviewed subscription test entitlements"
 const GUILD_COMMUNITY_AUDIT_CAPABILITY_DESCRIPTION = "Enable privacy-minimized Discord Community routing and authority audits"
 const GUILD_COMMUNITY_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed monotonic Community enablement and exact routing changes"
 const GUILD_COMMUNITY_SCOPE_DESCRIPTION = "Exact guild ID allowlist for Discord Community audit and reviewed changes"
@@ -484,6 +498,12 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "applicationMonetizationAudit") {
     return APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "applicationEntitlementConsumption") {
+    return APPLICATION_ENTITLEMENT_CONSUMPTION_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "applicationTestEntitlementChanges") {
+    return APPLICATION_TEST_ENTITLEMENT_CHANGES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "applicationCommandChanges") {
     return APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION
@@ -573,6 +593,21 @@ function scopeDescription(documentKey: string): string {
   if (documentKey === "applicationSubscriptionUserIds") {
     return APPLICATION_SUBSCRIPTION_USER_SCOPE_DESCRIPTION
   }
+  if (documentKey === "applicationConsumableEntitlementSkuIds") {
+    return APPLICATION_CONSUMABLE_ENTITLEMENT_SKU_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationConsumableEntitlementUserIds") {
+    return APPLICATION_CONSUMABLE_ENTITLEMENT_USER_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationTestEntitlementGuildIds") {
+    return APPLICATION_TEST_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationTestEntitlementSkuIds") {
+    return APPLICATION_TEST_ENTITLEMENT_SKU_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "applicationTestEntitlementUserIds") {
+    return APPLICATION_TEST_ENTITLEMENT_USER_SCOPE_DESCRIPTION
+  }
   if (documentKey === "applicationCommandGuildIds") {
     return APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION
   }
@@ -647,8 +682,13 @@ const scopeShape = Object.fromEntries(
         : name === "applicationEntitlementGuildIds"
           || name === "applicationEntitlementUserIds"
           || name === "applicationSubscriptionUserIds"
+          || name === "applicationConsumableEntitlementUserIds"
+          || name === "applicationTestEntitlementGuildIds"
+          || name === "applicationTestEntitlementUserIds"
           ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
           : name === "applicationMonetizationSkuIds"
+            || name === "applicationConsumableEntitlementSkuIds"
+            || name === "applicationTestEntitlementSkuIds"
             ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
             : name === "memberRoleIds" || name === "bulkMemberRoleIds"
               ? CONNECTOR_LIMITS.memberRoleAllowlist

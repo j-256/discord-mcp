@@ -55,8 +55,10 @@ import {
   type GlobalApplicationCommandType,
 } from "./global-application-command-definition.js"
 import {
+  APPLICATION_ENTITLEMENT_OPERATION_ACTIONS,
   DIRECT_MESSAGE_ACTIONS,
   DIRECT_MESSAGE_FORMATS,
+  ENTITLEMENT_FULFILLMENT_REFERENCE_HASH_PATTERN,
   OPERATION_KEY_HASH_PATTERN,
   type DirectMessageAction,
   type DirectMessageFormat,
@@ -1212,6 +1214,33 @@ export interface ApplicationEmojiActivity {
   verification: "drift" | "match" | null
 }
 
+export type ApplicationEntitlementActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ApplicationEntitlementActivity {
+  action: "consume" | "create-test" | "delete-test"
+  applicationId: string
+  beneficiaryId: string
+  beneficiaryType: "guild" | "user"
+  creationOperationKeyHash: string | null
+  entitlementId: string | null
+  error: string | null
+  fulfillmentReferenceHash: string | null
+  id: string
+  kind: "application-entitlement-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  skuId: string
+  stage: "reserved" | "target-known" | "terminal"
+  status: ApplicationEntitlementActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type ApplicationIntentActivityStatus =
   | "completed"
   | "failed"
@@ -1652,6 +1681,7 @@ export interface ReactionModerationActivity {
 
 export type ActivityEntry =
   | AnnouncementCrosspostActivity
+  | ApplicationEntitlementActivity
   | AnnouncementSubscriptionActivity
   | ApplicationEmojiActivity
   | ApplicationIntentActivity
@@ -5113,6 +5143,143 @@ function parseApplicationEmojiActivity(
   }
 }
 
+const APPLICATION_ENTITLEMENT_ACTIVITY_KEYS = [
+  "action",
+  "applicationId",
+  "beneficiaryId",
+  "beneficiaryType",
+  "creationOperationKeyHash",
+  "entitlementId",
+  "error",
+  "fulfillmentReferenceHash",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "schemaVersion",
+  "skuId",
+  "stage",
+  "status",
+  "timestamp",
+  "verification",
+] as const
+
+function parseApplicationEntitlementActivity(
+  value: unknown,
+): ApplicationEntitlementActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  const expectedKeys = [...APPLICATION_ENTITLEMENT_ACTIVITY_KEYS].sort()
+  const action = record.action as ApplicationEntitlementActivity["action"]
+  const stage = record.stage as ApplicationEntitlementActivity["stage"]
+  const status = record.status as ApplicationEntitlementActivityStatus
+  if (
+    keys.length !== expectedKeys.length
+    || keys.some((key, index) => key !== expectedKeys[index])
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "application-entitlement-change"
+    || !(APPLICATION_ENTITLEMENT_OPERATION_ACTIONS as readonly unknown[]).includes(action)
+    || !["reserved", "target-known", "terminal"].includes(String(stage))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(status))
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.beneficiaryId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.beneficiaryId)
+    || !["guild", "user"].includes(String(record.beneficiaryType))
+    || typeof record.skuId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.skuId)
+    || !(record.entitlementId === null || (
+      typeof record.entitlementId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.entitlementId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || !(record.creationOperationKeyHash === null || (
+      typeof record.creationOperationKeyHash === "string"
+      && OPERATION_KEY_HASH_PATTERN.test(record.creationOperationKeyHash)
+    ))
+    || !(record.fulfillmentReferenceHash === null || (
+      typeof record.fulfillmentReferenceHash === "string"
+      && ENTITLEMENT_FULFILLMENT_REFERENCE_HASH_PATTERN.test(
+        record.fulfillmentReferenceHash,
+      )
+    ))
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+  ) return undefined
+  const entitlementId = record.entitlementId as string | null
+  const beneficiaryType = record.beneficiaryType as "guild" | "user"
+  const creationOperationKeyHash = record.creationOperationKeyHash as string | null
+  const fulfillmentReferenceHash = record.fulfillmentReferenceHash as string | null
+  if (
+    (action === "create-test" && (
+      creationOperationKeyHash !== null
+      || fulfillmentReferenceHash !== null
+    ))
+    || (action === "delete-test" && (
+      creationOperationKeyHash === null
+      || creationOperationKeyHash === record.operationKeyHash
+      || fulfillmentReferenceHash !== null
+    ))
+    || (action === "consume" && (
+      beneficiaryType !== "user"
+      || creationOperationKeyHash !== null
+      || fulfillmentReferenceHash === null
+    ))
+    || (stage === "terminal") !== (status !== "pending")
+    || (stage === "reserved" && action === "create-test" && entitlementId !== null)
+    || (stage === "reserved" && action !== "create-test" && entitlementId === null)
+    || (stage === "target-known" && (
+      action !== "create-test"
+      || status !== "pending"
+      || entitlementId === null
+    ))
+    || (status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+      || entitlementId === null
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    action,
+    applicationId: record.applicationId,
+    beneficiaryId: record.beneficiaryId,
+    beneficiaryType,
+    creationOperationKeyHash,
+    entitlementId,
+    error: record.error as string | null,
+    fulfillmentReferenceHash,
+    id: record.id,
+    kind: "application-entitlement-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    skuId: record.skuId,
+    stage,
+    status,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseApplicationIntentActivity(
   value: unknown,
 ): ApplicationIntentActivity | undefined {
@@ -6525,6 +6692,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
     || parseMessagePinActivity(value)
+    || parseApplicationEntitlementActivity(value)
     || parseApplicationEmojiActivity(value)
     || parseApplicationIntentActivity(value)
     || parseApplicationRoleConnectionMetadataActivity(value)
