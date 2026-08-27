@@ -1,0 +1,119 @@
+name: Verified outcome
+description: Share coarse setup or workflow evidence without Discord data or product telemetry
+title: "[Outcome] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share only a coarse voluntary outcome from a bot, application, and test guild you control. No Discord IDs, names, content, or other data belong in this form. Do not paste tokens, credentials, policy files, raw output, logs, screenshots, recordings, exported evidence, or local paths. Voluntary outcome reports never authorize maintainers to access an operator's systems or Discord resources.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy and ownership check
+      options:
+        - label: I removed credentials, Discord data and IDs, private identifiers, local paths, configuration, raw output, and files
+          required: true
+        - label: I used an application, bot, host, and test guild that I control
+          required: true
+        - label: This is not a support request, active incident, or undisclosed security vulnerability
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Exact public package version, image tag, or source revision
+      placeholder: MAJOR.MINOR.PATCH
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation
+      options:
+        - npm package
+        - OCI image
+        - Source checkout
+    validations:
+      required: true
+  - type: dropdown
+    id: host_family
+    attributes:
+      label: Host family
+      description: Select only the general harness category
+      options:
+        - Desktop MCP host
+        - IDE or editor MCP host
+        - CLI or terminal MCP host
+        - Custom MCP host
+        - Operator CLI without an MCP host
+    validations:
+      required: true
+  - type: dropdown
+    id: journey
+    attributes:
+      label: Furthest verified journey
+      options:
+        - Credential-free catalog inspection
+        - Offline configuration validation
+        - Online doctor or MCP smoke
+        - Read-only Discord workflow
+        - Reviewed write plan without execution
+        - Reviewed write with verified outcome
+        - Recovery from an uncertain or blocked outcome
+    validations:
+      required: true
+  - type: dropdown
+    id: completion_time
+    attributes:
+      label: Setup-to-outcome time band
+      options:
+        - Under 10 minutes
+        - 10 through 30 minutes
+        - 31 through 60 minutes
+        - More than 60 minutes
+        - Did not complete
+    validations:
+      required: true
+  - type: dropdown
+    id: repeat_intent
+    attributes:
+      label: Repeat-use intent
+      options:
+        - One-time verification only
+        - Less than monthly
+        - Monthly
+        - Weekly
+        - Daily or more often
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Coarse outcome
+      description: Describe only the operator result and public preset, recipe, tool, or command names; omit all Discord data and exact counts
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: First friction point
+      description: State the first unclear or blocked step using public documentation names, fixed error categories, sanitized ranges, and synthetic examples only; if there was none, say no friction occurred before the verified outcome
+    validations:
+      required: true
+  - type: textarea
+    id: next_workflow
+    attributes:
+      label: Next useful workflow
+      description: Describe the recurring operator outcome that would make the connector more useful without guild details or private examples
+    validations:
+      required: true
+  - type: checkboxes
+    id: offline_checks
+    attributes:
+      label: Credential-safe checks completed
+      options:
+        - label: Catalog inspection
+        - label: Configuration validation
+        - label: Offline doctor
+        - label: Spawned MCP smoke
