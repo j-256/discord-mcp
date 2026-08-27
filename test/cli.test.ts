@@ -34,6 +34,12 @@ import {
   type DiscordOnboardingHtmlExportReport,
 } from "../src/onboarding-html.js"
 import {
+  HOST_ACTIVATION_HTML_FORMAT,
+  HOST_ACTIVATION_HTML_SCHEMA_VERSION,
+  type DiscordHostActivationHtmlExportReport,
+} from "../src/host-activation-html.js"
+import type { HostActivationPlan } from "../src/host-activation.js"
+import {
   applyConfigChange,
   planConfigChange,
 } from "../src/config-review.js"
@@ -413,6 +419,34 @@ function configWorkbenchHtmlReport(
   }
 }
 
+function hostActivationHtmlReport(
+  file = "/output/discord-mcp-host-activation.html",
+): DiscordHostActivationHtmlExportReport {
+  return {
+    activationDigest: `sha256:${"a".repeat(64)}`,
+    automaticNetwork: "disabled",
+    browserOpened: false,
+    bytes: 87654,
+    credentialValuesEmbedded: false,
+    credentialValuesRead: false,
+    discordContacted: false,
+    externalNavigationOrigins: [],
+    file,
+    format: HOST_ACTIVATION_HTML_FORMAT,
+    hostConfigurationChanged: false,
+    hostDiscovered: false,
+    htmlDigest: `sha256:${"b".repeat(64)}`,
+    identifiersEmbedded: true,
+    localPathsEmbedded: true,
+    outputFileCreated: true,
+    processStarted: false,
+    runtimeCredentialsRequired: true,
+    schemaVersion: HOST_ACTIVATION_HTML_SCHEMA_VERSION,
+    statePersistence: "disabled",
+    status: "ok",
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -489,6 +523,12 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async exportConfigWorkbenchHtml(_activeFile, outputFile) {
       return configWorkbenchHtmlReport(outputFile)
+    },
+    async exportHostActivationHtml(file, plan) {
+      return {
+        ...hostActivationHtmlReport(file),
+        activationDigest: plan.activationDigest,
+      }
     },
     async exportOnboardingHtml(file) {
       return onboardingHtmlReport(file)
@@ -822,6 +862,38 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     serverName: undefined,
   })
   assert.deepEqual(parseCliArguments([
+    "host",
+    "--config",
+    "/configuration/discord.json",
+    "--name",
+    "team-discord",
+    "--command",
+    "/usr/local/bin/discord-mcp",
+    "--html",
+    "./host-activation.html",
+    "--json",
+  ]), {
+    command: "host",
+    configFile: "/configuration/discord.json",
+    htmlFile: "./host-activation.html",
+    json: true,
+    launcherCommand: "/usr/local/bin/discord-mcp",
+    serverName: "team-discord",
+  })
+  assert.deepEqual(parseCliArguments([
+    "host",
+    "--profile",
+    "support-bot",
+    "--npx",
+  ]), {
+    command: "host",
+    json: false,
+    launcherCommand: undefined,
+    packageLaunch: true,
+    profileName: "support-bot",
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments([
     "setup",
     "--config",
     "/configuration/discord.json",
@@ -1028,6 +1100,51 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "/usr/local/bin/discord-mcp",
     ]),
     /--npx and --command are mutually exclusive/,
+  )
+  assert.throws(
+    () => parseCliArguments(["host", "--json"]),
+    /requires --config FILE or --profile NAME/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "--config",
+      "/configuration/discord.json",
+      "--profile",
+      "support-bot",
+    ]),
+    /mutually exclusive/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "--profile",
+      "support-bot",
+      "--npx",
+      "--command",
+      "/usr/local/bin/discord-mcp",
+    ]),
+    /--npx and --command are mutually exclusive/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "--profile",
+      "support-bot",
+      "--html",
+      "first.html",
+      "--html",
+      "second.html",
+    ]),
+    /Option --html may be provided only once/,
+  )
+  assert.throws(
+    () => parseCliArguments(["host", "--profile"]),
+    /Option --profile requires a value/,
+  )
+  assert.throws(
+    () => parseCliArguments(["host", "--profile", "support-bot", "--client", "legacy"]),
+    /Unknown option --client/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -1919,6 +2036,179 @@ test("CLI preserves long-running startup failure status with recovery text", asy
   assert.match(stderr.value(), /Operator command failed/)
   assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
+})
+
+test("CLI generates an exact host activation plan without reading ambient credentials", async () => {
+  const stdout = outputStream()
+  let loadedFile: string | undefined
+  const environment = new Proxy<NodeJS.ProcessEnv>({
+    [TOKEN_ALIAS]: TOKEN,
+  }, {
+    ownKeys() {
+      throw new Error("Host activation enumerated ambient credentials")
+    },
+  })
+  const exitCode = await runCli({
+    args: ["host", "--config", CONFIG_FILE, "--json"],
+    dependencies: dependencies({
+      loadConfigDocument(file) {
+        loadedFile = file
+        return connectorProfile()
+      },
+    }),
+    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    environment,
+    executablePath: "/usr/bin/node",
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.equal(loadedFile, CONFIG_FILE)
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.format, "discord-mcp.host-activation.v1")
+  assert.match(report.activationDigest, /^sha256:[a-f0-9]{64}$/)
+  assert.deepEqual(report.policy.source, { file: CONFIG_FILE, kind: "config" })
+  assert.deepEqual(report.launch, {
+    args: [
+      "/srv/discord-mcp/dist/cli.js",
+      "serve",
+      "--config",
+      CONFIG_FILE,
+    ],
+    command: "/usr/bin/node",
+    environment: {
+      forward: [TOKEN_ALIAS],
+      set: {},
+    },
+    requirements: {
+      elicitation: "required-for-reviewed-writes",
+      requiredServer: true,
+      toolApproval: "writes",
+    },
+    secrets: {
+      environmentVariables: [TOKEN_ALIAS],
+      files: [],
+    },
+    serverName: "discord",
+    timeouts: {
+      startupSeconds: 30,
+      toolSeconds: 180,
+    },
+    transport: "stdio",
+  })
+  assert.equal(report.privacy.credentialValuesRead, false)
+  assert.equal(report.privacy.discordContacted, false)
+  assert.equal(report.privacy.hostConfigurationChanged, false)
+  assert.equal(report.privacy.processStarted, false)
+  assert.match(report.verification.prompt, new RegExp(APPLICATION_ID))
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI exports a pinned package host guide from a profile", async () => {
+  const stdout = outputStream()
+  const htmlFile = "/output/private-host-activation.html"
+  let exportedPlan: HostActivationPlan | undefined
+  let loadedProfile: string | undefined
+  const exitCode = await runCli({
+    args: [
+      "host",
+      "--profile",
+      "support-bot",
+      "--name",
+      "team-discord",
+      "--npx",
+      "--html",
+      htmlFile,
+      "--json",
+    ],
+    dependencies: dependencies({
+      async exportHostActivationHtml(file, plan) {
+        assert.equal(file, htmlFile)
+        exportedPlan = plan
+        return {
+          ...hostActivationHtmlReport(file),
+          activationDigest: plan.activationDigest,
+        }
+      },
+      async loadProfile(name) {
+        loadedProfile = name
+        return connectorProfile()
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.equal(loadedProfile, "support-bot")
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.policy.source.kind, "profile")
+  assert.equal(report.launch.serverName, "team-discord")
+  assert.equal(report.launch.command, "npx")
+  assert.deepEqual(report.launch.args, [
+    "--yes",
+    `${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`,
+    "serve",
+    "--profile",
+    "support-bot",
+  ])
+  assert.equal(report.guide.file, htmlFile)
+  assert.equal(report.guide.activationDigest, report.activationDigest)
+  assert.equal(exportedPlan?.activationDigest, report.activationDigest)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI renders custom-command host activation and private-guide boundaries", async () => {
+  const stdout = outputStream()
+  const exitCode = await runCli({
+    args: [
+      "host",
+      "--config",
+      CONFIG_FILE,
+      "--command",
+      "/usr/local/bin/discord-mcp",
+      "--html",
+      "/output/activation.html",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.match(stdout.value(), /Discord MCP host activation: ok/)
+  assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/discord-mcp"/)
+  assert.match(stdout.value(), /Read-only host verification request:/)
+  assert.match(stdout.value(), /Discord MCP host activation guide: ok/)
+  assert.match(stdout.value(), /private mode-0600 standalone HTML/)
+  assert.match(stdout.value(), /must not be shared or committed/)
+  assert.match(stdout.value(), /No credential value was read/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI reports host parse failures without enumerating ambient credentials", async () => {
+  const stdout = outputStream()
+  const environment = new Proxy<NodeJS.ProcessEnv>({
+    [TOKEN_ALIAS]: TOKEN,
+  }, {
+    ownKeys() {
+      throw new Error("Host error rendering enumerated ambient credentials")
+    },
+  })
+
+  const exitCode = await runCli({
+    args: ["host", "--json"],
+    dependencies: dependencies(),
+    environment,
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 2)
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.error.category, "usage")
+  assert.equal(report.error.message, "Invalid command usage")
+  assert.match(report.error.recovery.action, /discord-mcp help host/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
 test("CLI redacts setup output and forwards setup options", async () => {
@@ -2983,6 +3273,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const activityHelpOutput = outputStream()
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
+  const hostHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
   const setupHelpOutput = outputStream()
   const smokeHelpOutput = outputStream()
@@ -3017,6 +3308,11 @@ test("CLI renders smoke, help, and version output", async () => {
     args: ["recipe", "--help"],
     dependencies: dependencies(),
     stdout: recipeHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["host", "--help"],
+    dependencies: dependencies(),
+    stdout: hostHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
     args: ["setup", "--help"],
@@ -3059,6 +3355,11 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /plan NAME FILE/)
   assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
+  assert.match(hostHelpOutput.value(), /host \(--config FILE \| --profile NAME\)/)
+  assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
+  assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
+  assert.match(hostHelpOutput.value(), /reads no credential value/)
+  assert.match(hostHelpOutput.value(), /discovers no host/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)

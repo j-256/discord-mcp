@@ -61,7 +61,9 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(html, /Leave privileged intent toggles off/)
   assert.match(html, /This first policy is read-only/)
   assert.match(html, /Cannot configure an MCP host/)
-  assert.match(html, /portable stdio launch descriptor/)
+  assert.match(html, /exact private host handoff/)
+  assert.match(html, /command, ordered arguments, external secret references/)
+  assert.match(html, /must not be shared or committed/)
   assert.match(html, /stable exact-version package launch/)
   assert.match(html, /canonical process-owned private directory/)
   assert.ok(html.includes(escaped(observer.postInstall.firstRead.prompt)))
@@ -106,6 +108,8 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(verificationCommands, / config validate /)
   assert.match(verificationCommands, / doctor /)
   assert.match(verificationCommands, / smoke /)
+  assert.match(verificationCommands, / host /)
+  assert.match(verificationCommands, /--html \.\/discord-mcp-host-activation\.html/)
   assert.match(verificationCommands, /npx --yes @j-256\/discord-mcp@/)
 
   const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]

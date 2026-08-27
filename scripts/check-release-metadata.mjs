@@ -387,6 +387,7 @@ async function checkDocumentation(packageJson) {
     "catalog --check --json",
     "config validate ./discord-mcp.json",
     "doctor --config ./discord-mcp.json --online",
+    "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
     "incident-response",
     "recipe list",
     "recipe plan guild-builder",
@@ -427,6 +428,7 @@ async function checkDocumentation(packageJson) {
     "Shared bot, multi-tenant relay, public HTTP listener, or hosted control plane",
     "These are architectural boundaries, not a backlog promise",
     "strong contract evidence",
+    "private interactive field-mapping guide",
   ]) {
     invariant(limitations.includes(required), `limitations guide is missing ${required}`)
   }
@@ -438,6 +440,7 @@ async function checkDocumentation(packageJson) {
     "## Recovery ladder",
     "dist/index.js",
     "environment.forward",
+    "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
   ]) {
     invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
   }
@@ -445,6 +448,7 @@ async function checkDocumentation(packageJson) {
   invariant(readme.includes("[Fit and boundaries](docs/limitations.md)"), "README lacks the product-boundaries route")
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
+  invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
@@ -547,6 +551,7 @@ async function checkCommunityFiles() {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }
   invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
+  invariant(support.includes("discord-mcp host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
   for (const [name, form] of [
     ["bug report", bugReport],
     ["feature proposal", featureRequest],
