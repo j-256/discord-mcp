@@ -135,6 +135,10 @@ import {
   componentMessageVerificationKey,
   ComponentMessageService,
 } from "./component-message-service.js"
+import {
+  CommunityActivityService,
+  type CommunityActivityRequest,
+} from "./community-activity-service.js"
 import type {
   EmbedMessagePlan,
   EmbedMessageRequest,
@@ -1491,6 +1495,7 @@ export class ConnectorService {
   readonly #applicationMonetizationAuditService: ApplicationMonetizationAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #componentMessageService: ComponentMessageService
+  readonly #communityActivityService: CommunityActivityService
   readonly #embedMessageService: EmbedMessageService
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
@@ -1622,6 +1627,10 @@ export class ConnectorService {
       ...options.applicationEmojiOptions,
     })
     this.#applicationCommandAuditService = new ApplicationCommandAuditService({
+      client: this.#client,
+      policy: this.#policy,
+    })
+    this.#communityActivityService = new CommunityActivityService({
       client: this.#client,
       policy: this.#policy,
     })
@@ -2874,6 +2883,14 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async analyzeCommunityActivity(
+    request: CommunityActivityRequest,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#communityActivityService.analyze(request, options)
   }
 
   async getMessage(

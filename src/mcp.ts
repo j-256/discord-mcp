@@ -1193,6 +1193,47 @@ const messagePageInputSchema = z.strictObject({
   ({ after, around, before }) => [after, around, before].filter(Boolean).length <= 1,
   { message: "after, around, and before are mutually exclusive" },
 )
+const communityActivityChannelInputSchema = z.strictObject({
+  beforeMessageId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional exact channel message cursor; analysis starts before this message"),
+  channelId: positiveSnowflakeSchema
+    .describe("Exact permitted guild channel or thread ID"),
+})
+const communityActivityInputSchema = z.strictObject({
+  channels: z.array(communityActivityChannelInputSchema)
+    .min(1)
+    .max(CONNECTOR_LIMITS.communityActivityChannels)
+    .describe("Unique exact channel selections; each may retain its own continuation cursor"),
+  guildId: positiveSnowflakeSchema
+    .describe("Exact permitted guild ID shared by every selected channel"),
+  maxMessagesPerChannel: z.number().int().min(1)
+    .max(CONNECTOR_LIMITS.communityActivityMessagesPerChannel)
+    .default(CONNECTOR_LIMITS.communityActivityMessagesDefault)
+    .describe(`Transient metadata sample per channel; the complete request may not exceed ${CONNECTOR_LIMITS.communityActivityMessagesTotal} messages`),
+}).superRefine((input, context) => {
+  const seen = new Set<string>()
+  input.channels.forEach((selection, index) => {
+    if (seen.has(selection.channelId)) {
+      context.addIssue({
+        code: "custom",
+        message: "Community activity channel selections must be unique",
+        path: ["channels", index, "channelId"],
+      })
+    }
+    seen.add(selection.channelId)
+  })
+  if (
+    input.channels.length * input.maxMessagesPerChannel
+    > CONNECTOR_LIMITS.communityActivityMessagesTotal
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: `Community activity may inspect at most ${CONNECTOR_LIMITS.communityActivityMessagesTotal} messages`,
+      path: ["maxMessagesPerChannel"],
+    })
+  }
+})
 const messageInputSchema = z.strictObject({
   channelId: snowflakeSchema,
   messageId: snowflakeSchema,
@@ -9263,6 +9304,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  analyzeCommunityActivity: ConnectorService["analyzeCommunityActivity"]
   auditApplicationCommands: ConnectorService["auditApplicationCommands"]
   auditApplicationEntitlements: ConnectorService["auditApplicationEntitlements"]
   auditApplicationRoleConnectionMetadata: ConnectorService["auditApplicationRoleConnectionMetadata"]
@@ -20044,6 +20086,38 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord evaluated ${result.page.totalRoles} roles for ${result.requestedActions.length} actions in channel ${input.channelId} and returned ${result.roles.length}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("analyze_community_activity", server.registerTool(
+    "analyze_community_activity",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Analyze a bounded transient metadata sample from exact permitted guild channels. Returns aggregate participation, concentration, explicit-reply latency, reciprocity, UTC timing, and honest pagination coverage without using message content or returning participant identities, names, profiles, or per-message evidence. Nothing is persisted.",
+      inputSchema: communityActivityInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Analyze Discord community activity",
+    },
+    safeToolHandler("analyze_community_activity", async (
+      input: z.infer<typeof communityActivityInputSchema>,
+      context,
+    ) => {
+      const result = await service.analyzeCommunityActivity({
+        channels: input.channels.map((selection) => ({
+          ...(selection.beforeMessageId
+            ? { beforeMessageId: selection.beforeMessageId }
+            : {}),
+          channelId: selection.channelId,
+        })),
+        guildId: input.guildId,
+        maxMessagesPerChannel: input.maxMessagesPerChannel,
+      }, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord sampled ${result.activity.messagesFetched} messages across ${result.coverage.channelsRequested} channels and observed ${result.activity.humanParticipants} human participants`,
       )
     }, secrets, observability),
   ))

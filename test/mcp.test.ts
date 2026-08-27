@@ -113,6 +113,7 @@ import type {
   ComponentMessagePlan,
   ComponentMessageRequest,
 } from "../src/component-message-service.js"
+import type { CommunityActivityService } from "../src/community-activity-service.js"
 import {
   reviewEmbedPresentation,
   type EmbedLayoutInput,
@@ -8719,6 +8720,27 @@ function fixtureApplicationPosture(
   })
 }
 
+function fixtureCommunityActivityResult(): Awaited<
+  ReturnType<CommunityActivityService["analyze"]>
+> {
+  return {
+    activity: {
+      humanParticipants: 3,
+      messagesFetched: 12,
+    },
+    coverage: {
+      channelsRequested: 2,
+    },
+    guildId: GUILD_ID,
+    privacy: {
+      content: "not-used",
+      persistence: "none",
+    },
+    schemaVersion: 1,
+    status: "ok",
+  } as Awaited<ReturnType<CommunityActivityService["analyze"]>>
+}
+
 function serviceFixture(overrides: {
   administrationDrift?: boolean
   administrationError?: Error
@@ -8798,6 +8820,8 @@ function serviceFixture(overrides: {
   componentMessageVerificationError?: Error
   componentMessageVerificationStatus?: "blocked" | "drifted" | "not-found" | "verified"
   componentMessageWriteRequired?: boolean
+  communityActivityError?: Error
+  communityActivityResult?: Awaited<ReturnType<CommunityActivityService["analyze"]>>
   embedMessageError?: Error
   embedMessagePlanDigest?: string
   embedMessageVerificationError?: Error
@@ -8990,6 +9014,11 @@ function serviceFixture(overrides: {
     > | null,
     subscriptionArguments: null as Parameters<
       DiscordToolService["auditApplicationSubscriptions"]
+    > | null,
+  }
+  const communityActivityCalls = {
+    arguments: null as Parameters<
+      DiscordToolService["analyzeCommunityActivity"]
     > | null,
   }
   const calls = {
@@ -9453,6 +9482,13 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async analyzeCommunityActivity(...arguments_) {
+      if (overrides.communityActivityError) {
+        throw overrides.communityActivityError
+      }
+      communityActivityCalls.arguments = arguments_
+      return overrides.communityActivityResult ?? fixtureCommunityActivityResult()
+    },
     async auditApplicationCommands(guildId) {
       calls.applicationCommandAudit += 1
       return fixtureApplicationCommandAudit({
@@ -13341,6 +13377,7 @@ function serviceFixture(overrides: {
   return {
     applicationMonetizationCalls,
     calls,
+    communityActivityCalls,
     guildBlueprintCaptureCalls,
     guildCommunityCalls,
     guildIncidentCalls,
@@ -13819,6 +13856,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "explain_channel_access",
       "explain_principal_permissions",
       "audit_channel_role_access",
+      "analyze_community_activity",
       "read_messages",
       "search_messages",
       "get_message",
@@ -15010,6 +15048,7 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
     first?: string
     query: string
   }> = [
+    { expected: ["analyze_community_activity"], first: "analyze_community_activity", query: "analyze community participation and response time" },
     { expected: ["read_messages"], first: "read_messages", query: "summarize recent channel messages" },
     { expected: ["search_messages"], first: "search_messages", query: "search guild messages about an incident" },
     { expected: ["explain_channel_access"], first: "explain_channel_access", query: "who can view this channel" },
@@ -16420,6 +16459,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "audit_application_skus",
       "get_connector_status",
       "parse_discord_reference",
+      "analyze_community_activity",
       "read_messages",
       "search_messages",
       "get_message",
@@ -16452,6 +16492,62 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     () => client.callTool({ arguments: {}, name: "list_guilds" }),
     /not found|not registered|unknown/i,
   )
+})
+
+test("MCP community activity analysis forwards exact bounded metadata scope", async (context) => {
+  const { client, communityActivityCalls } = await connectedFixture(context)
+
+  const valid = await client.callTool({
+    arguments: {
+      channels: [
+        { channelId: CHANNEL_ID },
+        {
+          beforeMessageId: MESSAGE_ID,
+          channelId: THREAD_ID,
+        },
+      ],
+      guildId: GUILD_ID,
+      maxMessagesPerChannel: 200,
+    },
+    name: "analyze_community_activity",
+  })
+  const invalidDuplicate = await client.callTool({
+    arguments: {
+      channels: [
+        { channelId: CHANNEL_ID },
+        { channelId: CHANNEL_ID },
+      ],
+      guildId: GUILD_ID,
+    },
+    name: "analyze_community_activity",
+  })
+  const invalidBudget = await client.callTool({
+    arguments: {
+      channels: Array.from({ length: 5 }, (_, index) => ({
+        channelId: (300_000_000_000_000_001n + BigInt(index)).toString(),
+      })),
+      guildId: GUILD_ID,
+      maxMessagesPerChannel: 500,
+    },
+    name: "analyze_community_activity",
+  })
+
+  assert.equal(structuredContent(valid).status, "ok")
+  assert.match(valid.content[0]?.type === "text" ? valid.content[0].text : "", /sampled 12 messages across 2 channels/u)
+  assert.deepEqual(communityActivityCalls.arguments?.[0], {
+    channels: [
+      { channelId: CHANNEL_ID },
+      {
+        beforeMessageId: MESSAGE_ID,
+        channelId: THREAD_ID,
+      },
+    ],
+    guildId: GUILD_ID,
+    maxMessagesPerChannel: 200,
+  })
+  assert.equal(communityActivityCalls.arguments?.[1]?.signal instanceof AbortSignal, true)
+  assert.equal(invalidDuplicate.isError, true)
+  assert.equal(invalidBudget.isError, true)
 })
 
 test("MCP message search requires a substantive filter and forwards bounded input", async (context) => {

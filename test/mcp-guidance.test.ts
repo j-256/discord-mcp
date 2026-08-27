@@ -306,6 +306,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    analyzeCommunityActivity: unexpected,
     async auditApplicationCommands(guildId) {
       calls.applicationCommands += 1
       calls.lastGuildId = guildId

@@ -10230,6 +10230,42 @@ test("service normalizes channel messages after enforcing guild scope", async ()
   )
 })
 
+test("service verifies identity before privacy-safe community activity analysis", async () => {
+  let observedOptions: Parameters<DiscordServiceClient["listMessages"]>[1]
+  const { calls, service } = serviceFixture({
+    client: {
+      async listMessages(_channelId, options) {
+        observedOptions = options
+        return [message({
+          attachments: [{
+            filename: "private.txt",
+            id: "700000000000000001",
+            size: 1,
+            url: "https://cdn.discordapp.com/private",
+          }],
+          content: "private-community-content",
+        })]
+      },
+    },
+  })
+  const signal = new AbortController().signal
+
+  const result = await service.analyzeCommunityActivity({
+    channels: [{ channelId: CHANNEL_ID }],
+    guildId: GUILD_ID,
+    maxMessagesPerChannel: 1,
+  }, { signal })
+
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(observedOptions, { limit: 1, signal })
+  assert.equal(result.activity.humanMessages, 1)
+  assert.equal(result.activity.humanParticipants, 1)
+  assert.equal(result.coverage.channels[0]?.nextBeforeMessageId, MESSAGE_ID)
+  assert.equal(result.privacy.content, "not-used")
+  assert.doesNotMatch(JSON.stringify(result), /private-community-content|private\.txt/u)
+})
+
 test("service rejects Discord message responses outside the exact requested route", async () => {
   const historyService = serviceFixture({
     client: {

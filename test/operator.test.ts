@@ -454,6 +454,7 @@ function toolService(
   }
   return {
     addReaction: unexpected,
+    analyzeCommunityActivity: unexpected,
     auditApplicationCommands: unexpected,
     auditApplicationEntitlements: unexpected,
     getApplicationEntitlement: unexpected,
@@ -6305,7 +6306,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 5)
+  assert.equal(report.toolCount, 6)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
     "route_discord_goal",
@@ -6313,6 +6314,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "summarize_channel",
   ])
   assert.deepEqual(report.readOnlyTools, [
+    "analyze_community_activity",
     "discover_discord_tools",
     "get_message",
     "list_activity",

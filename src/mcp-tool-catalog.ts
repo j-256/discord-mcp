@@ -121,6 +121,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["emoji", "react", "reaction"],
     toolset: "interactions",
   },
+  analyze_community_activity: {
+    keywords: ["activity", "analytics", "community", "concentration", "participation", "reciprocity", "reply", "response time"],
+    toolset: "messages",
+  },
   audit_application_commands: {
     keywords: ["application", "audit", "command", "context", "exposure", "install", "permission", "security", "slash"],
     toolset: "connector",

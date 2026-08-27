@@ -34,6 +34,10 @@ export class BanAuditEvidenceError extends ConfigurationError {
   override name = "BanAuditEvidenceError"
 }
 
+export class CommunityActivityEvidenceError extends ConfigurationError {
+  override name = "CommunityActivityEvidenceError"
+}
+
 export class BulkGuildBanEvidenceError extends Error {
   override name = "BulkGuildBanEvidenceError"
 }
