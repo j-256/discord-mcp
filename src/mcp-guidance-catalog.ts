@@ -130,6 +130,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   authorGuildBlueprint: "author_guild_blueprint",
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
+  routeDiscordGoal: "route_discord_goal",
   reviewApplicationCommands: "review_application_commands",
   reviewApplicationRoleConnectionMetadata: "review_application_role_connection_metadata",
   reviewApplicationRoleConnectionMetadataChange:
@@ -201,6 +202,11 @@ export type McpPromptName = typeof MCP_PROMPT_NAMES[
   keyof typeof MCP_PROMPT_NAMES
 ]
 
+type ToolsetBoundMcpPromptName = Exclude<
+  McpPromptName,
+  typeof MCP_PROMPT_NAMES.routeDiscordGoal
+>
+
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.authorGuildBlueprint]: "guild-blueprints",
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
@@ -269,11 +275,15 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewWebhookMessageDeletion]: "webhooks",
   [MCP_PROMPT_NAMES.searchGuildMessages]: "messages",
   [MCP_PROMPT_NAMES.summarizeChannel]: "messages",
-} satisfies Record<McpPromptName, McpToolsetName>)
+} satisfies Record<ToolsetBoundMcpPromptName, McpToolsetName>)
 
 export function selectedMcpPromptNames(
   toolsets: ReadonlySet<McpToolsetName>,
 ): McpPromptName[] {
   return (Object.values(MCP_PROMPT_NAMES) as McpPromptName[])
-    .filter((name) => toolsets.has(MCP_PROMPT_TOOLSETS[name]))
+    .filter((name) => {
+      if (toolsets.size === 0) return false
+      if (name === MCP_PROMPT_NAMES.routeDiscordGoal) return true
+      return toolsets.has(MCP_PROMPT_TOOLSETS[name])
+    })
 }

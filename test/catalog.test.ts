@@ -125,17 +125,28 @@ function restoreEnvironment(
   }
 }
 
-test("guild-blueprint prompts share one explicit toolset boundary", () => {
+test("domain prompts retain toolset boundaries while goal routing spans configured toolsets", () => {
   assert.deepEqual(
     selectedMcpPromptNames(new Set(["guild-blueprints"])).sort(),
     [
       MCP_PROMPT_NAMES.authorGuildBlueprint,
       MCP_PROMPT_NAMES.reviewGuildBlueprint,
+      MCP_PROMPT_NAMES.routeDiscordGoal,
     ].sort(),
   )
   assert.equal(
     selectedMcpPromptNames(new Set(["messages"]))
       .includes(MCP_PROMPT_NAMES.authorGuildBlueprint),
+    false,
+  )
+  assert.equal(
+    selectedMcpPromptNames(new Set(["messages"]))
+      .includes(MCP_PROMPT_NAMES.routeDiscordGoal),
+    true,
+  )
+  assert.equal(
+    selectedMcpPromptNames(new Set())
+      .includes(MCP_PROMPT_NAMES.routeDiscordGoal),
     false,
   )
 })

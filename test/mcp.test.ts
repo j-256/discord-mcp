@@ -15632,6 +15632,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
   assert.deepEqual(
     (await client.listPrompts()).prompts.map(({ name }) => name),
     [
+      "route_discord_goal",
       "review_application_commands",
       "review_application_role_connection_metadata",
       "review_application_skus",

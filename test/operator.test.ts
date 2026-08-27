@@ -5824,6 +5824,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_webhook_message_deletion",
     "review_welcome_screen_change",
     "review_widget_settings_change",
+    "route_discord_goal",
     "search_guild_messages",
     "summarize_channel",
   ])
@@ -6122,6 +6123,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.toolCount, 5)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
+    "route_discord_goal",
     "search_guild_messages",
     "summarize_channel",
   ])
