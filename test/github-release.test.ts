@@ -54,7 +54,7 @@ interface GitHubReleaseModule {
 
 const modulePath = pathToFileURL(resolve("scripts/github-release.mjs")).href
 const githubRelease = await import(modulePath) as GitHubReleaseModule
-const VERSION = "0.1.1"
+const VERSION = "0.1.2"
 const REVISION = "a".repeat(40)
 const OCI_DIGEST = `sha256:${"b".repeat(64)}`
 const ARCHIVE_NAME = `j-256-discord-mcp-${VERSION}.tgz`
@@ -151,9 +151,9 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, new RegExp(`Discord MCP ${VERSION}`, "u"))
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
-  assert.match(notes, /gh release verify v0\.1\.1/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.1 j-256-discord-mcp-0\.1\.1\.tgz/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.1 release-notes\.md/u)
+  assert.match(notes, /gh release verify v0\.1\.2/u)
+  assert.match(notes, /gh release verify-asset v0\.1\.2 j-256-discord-mcp-0\.1\.2\.tgz/u)
+  assert.match(notes, /gh release verify-asset v0\.1\.2 release-notes\.md/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)
   assert.equal(notes.endsWith("\n"), true)
@@ -221,7 +221,7 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
     { catalog: validCatalog({ gateway: "enabled" }), label: "Gateway" },
     { catalog: validCatalog({ observabilityExport: "enabled" }), label: "telemetry" },
     { catalog: validCatalog({ activityRecordsCreated: true }), label: "activity" },
-    { label: "SBOM", sbom: validSbom({ name: "other-package@0.1.1" }) },
+    { label: "SBOM", sbom: validSbom({ name: "other-package@0.1.2" }) },
   ]
   for (const [index, entry] of cases.entries()) {
     const directory = join(root, `case-${index}`)

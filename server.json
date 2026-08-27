@@ -8,11 +8,11 @@
     "source": "github",
     "id": "1334461127"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://j-256.github.io/discord-mcp",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.1/assets/discord-mcp-icon.png",
+      "src": "https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.2/assets/discord-mcp-icon.png",
       "mimeType": "image/png",
       "sizes": [
         "1254x1254"
@@ -24,7 +24,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@j-256/discord-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -59,7 +59,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/j-256/discord-mcp:0.1.1",
+      "identifier": "ghcr.io/j-256/discord-mcp:0.1.2",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"

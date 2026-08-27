@@ -1,6 +1,6 @@
 export const CONNECTOR_NAME = "discord-mcp"
 export const CONNECTOR_TITLE = "Discord MCP"
-export const CONNECTOR_VERSION = "0.1.1"
+export const CONNECTOR_VERSION = "0.1.2"
 export const CONNECTOR_NPM_PACKAGE = "@j-256/discord-mcp"
 export const CONNECTOR_NPX_COMMAND = "npx"
 export const CONNECTOR_NPX_ARGUMENTS = Object.freeze([

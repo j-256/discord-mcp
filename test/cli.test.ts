@@ -208,7 +208,7 @@ function smokeReport(): SmokeReport {
     resourceUris: ["discord://connector/safety"],
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: "discord-mcp",
-    serverVersion: "0.1.1",
+    serverVersion: "0.1.2",
     status: "ok",
     toolCount: 12,
     toolsets: ["connector", "messages"],
@@ -280,7 +280,7 @@ function catalogReport(): DiscordCatalogCheckReport {
     safetyResourceDigest: `sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     serverName: "discord-mcp",
-    serverVersion: "0.1.1",
+    serverVersion: "0.1.2",
     status: "ok",
     toolCount: 3,
     toolAccessResourceDigest: `sha256:${"e".repeat(64)}`,
@@ -3344,7 +3344,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
-  assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.1/)
+  assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.2/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
@@ -3374,7 +3374,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
-  assert.match(versionOutput.value(), /0\.1\.1/)
+  assert.match(versionOutput.value(), /0\.1\.2/)
 })
 
 test("CLI converts unknown failures into bounded diagnostics", async () => {

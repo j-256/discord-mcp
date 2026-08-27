@@ -59,7 +59,7 @@ The bot user ID is different from the Application ID. Verified setup discovers b
 Replace the two public placeholders and run:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.1 preset install server-observer \
+npx --yes @j-256/discord-mcp@0.1.2 preset install server-observer \
   --application-id YOUR_APPLICATION_ID \
   --guild-id YOUR_GUILD_ID \
   --html ./discord-mcp-onboarding.html
@@ -112,7 +112,7 @@ A runtime that projects secrets as files can instead pass `--token-file /absolut
 Run the exact setup command printed by the installation plan. For the recommended preset it is:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.1 setup \
+npx --yes @j-256/discord-mcp@0.1.2 setup \
   --npx \
   --config ./discord-mcp.json \
   --preset server-observer \
@@ -128,9 +128,9 @@ The policy file is the complete non-secret authority boundary. The token remains
 Run these in order with the same secret available to the process:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.1 config validate ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json --online
-npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 config validate ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
+npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
 ```
 
 | Check | What success means | What it does not prove |
@@ -146,7 +146,7 @@ Stop here and use the recovery ladder below if any check fails. Do not weaken po
 After smoke passes, generate an exact host-neutral handoff. This command does not read the token or another credential value, contact Discord or the network, start the server, discover a host, edit a policy or host configuration, or open a browser:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.1 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
 ```
 
 The command prints the complete activation plan and exclusively creates the requested mode-0600 standalone guide. The file contains public application and bot IDs, private guild and channel IDs, the exact policy selector, and local command or secret-file paths, but no credential value. Keep it private and do not commit it, attach it to an issue, or include it in a screenshot.
@@ -158,7 +158,7 @@ The guide presents typed launch data similar to this shape:
   "command": "npx",
   "args": [
     "--yes",
-    "@j-256/discord-mcp@0.1.1",
+    "@j-256/discord-mcp@0.1.2",
     "serve",
     "--config",
     "/absolute/path/to/discord-mcp.json"
@@ -201,14 +201,14 @@ After the host is working, remove a temporary terminal secret with `unset DISCOR
 Run the narrowest relevant layer first and continue only after it passes:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.1 config validate ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json --online
-npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.1 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+npx --yes @j-256/discord-mcp@0.1.2 config validate ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
+npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
 ```
 
-- If a bare `discord-mcp` command is not found, use the pinned `npx --yes @j-256/discord-mcp@0.1.1` prefix or install the package globally before using the bare executable.
+- If a bare `discord-mcp` command is not found, use the pinned `npx --yes @j-256/discord-mcp@0.1.2` prefix or install the package globally before using the bare executable.
 - If policy creation rejects the directory, apply the exact platform-specific directory requirements above. A missing, symlinked, noncanonical, wrongly owned, or broadly writable location produces a condition-specific error.
 - If offline doctor reports the credential unavailable, make the exact referenced environment variable or file available to that process. The connector has no fallback token source.
 - If online doctor fails identity or guild access, verify the token belongs to the intended application, reinstall the exact generated grant in the intended guild, and inspect role or channel overrides. Do not broaden to `Administrator`.
