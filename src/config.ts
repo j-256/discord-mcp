@@ -65,6 +65,7 @@ export interface ConnectorConfig {
   allowBanAudit: boolean
   allowBulkBanAudit: boolean
   allowBulkBans: boolean
+  allowBulkMemberRoleChanges: boolean
   allowChannelCloneAudit: boolean
   allowChannelCloning: boolean
   allowChannelCreation: boolean
@@ -170,6 +171,8 @@ export interface ConnectorConfig {
   automodGuildIds: ReadonlySet<string>
   banAuditGuildIds: ReadonlySet<string>
   bulkBanGuildIds: ReadonlySet<string>
+  bulkMemberRoleGuildIds: ReadonlySet<string>
+  bulkMemberRoleIds: ReadonlySet<string>
   channelCloneGuildIds: ReadonlySet<string>
   channelCloneSourceIds: ReadonlySet<string>
   channelCreationGuildIds: ReadonlySet<string>
@@ -487,6 +490,12 @@ export function loadConnectorConfigDocument(
   )
   const banAuditGuildIds = configScope(document, "banAuditGuildIds")
   const bulkBanGuildIds = configScope(document, "bulkBanGuildIds")
+  const bulkMemberRoleGuildIds = configScope(document, "bulkMemberRoleGuildIds")
+  const bulkMemberRoleIds = configScope(
+    document,
+    "bulkMemberRoleIds",
+    CONNECTOR_LIMITS.memberRoleAllowlist,
+  )
   const guildPruneGuildIds = configScope(document, "guildPruneGuildIds")
   const guildPruneIncludeRoleIds = configScope(
     document,
@@ -641,6 +650,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("automodGuildIds"), automodGuildIds],
     [configPolicyPath("banAuditGuildIds"), banAuditGuildIds],
     [configPolicyPath("bulkBanGuildIds"), bulkBanGuildIds],
+    [configPolicyPath("bulkMemberRoleGuildIds"), bulkMemberRoleGuildIds],
     [configPolicyPath("guildPruneGuildIds"), guildPruneGuildIds],
     [configPolicyPath("channelCreationGuildIds"), channelCreationGuildIds],
     [configPolicyPath("channelCloneGuildIds"), channelCloneGuildIds],
@@ -1029,6 +1039,18 @@ export function loadConnectorConfigDocument(
     )
   }
   const allowMemberRoleChanges = configCapability(document, "memberRoleChanges")
+  const allowBulkMemberRoleChanges = configCapability(
+    document,
+    "bulkMemberRoleChanges",
+  )
+  if (
+    allowBulkMemberRoleChanges
+    && (bulkMemberRoleGuildIds.size === 0 || bulkMemberRoleIds.size === 0)
+  ) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowBulkMemberRoleChanges")} requires exact batch guild and role allowlists`,
+    )
+  }
   const allowNicknameChanges = configCapability(document, "nicknameChanges")
   const allowOtherMemberNicknameChanges = configCapability(document, "otherMemberNicknameChanges")
   if (allowOtherMemberNicknameChanges && !allowNicknameChanges) {
@@ -1248,6 +1270,7 @@ export function loadConnectorConfigDocument(
     allowBanAudit: configCapability(document, "banAudit"),
     allowBulkBanAudit,
     allowBulkBans,
+    allowBulkMemberRoleChanges,
     allowChannelCloneAudit,
     allowChannelCloning,
     allowChannelCreation: configCapability(document, "channelCreation"),
@@ -1364,6 +1387,8 @@ export function loadConnectorConfigDocument(
     automodGuildIds,
     banAuditGuildIds,
     bulkBanGuildIds,
+    bulkMemberRoleGuildIds,
+    bulkMemberRoleIds,
     channelCloneGuildIds,
     channelCloneSourceIds,
     channelCreationGuildIds,

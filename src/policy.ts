@@ -48,6 +48,9 @@ export interface PolicyDescription {
   bulkBanAuditEnabled: boolean
   bulkBanGuildIds: string[]
   bulkBansEnabled: boolean
+  bulkMemberRoleChangesEnabled: boolean
+  bulkMemberRoleGuildIds: string[]
+  bulkMemberRoleCount: number
   channelCloneAuditEnabled: boolean
   channelCloneGuildIds: string[]
   channelCloneSourceIds: string[]
@@ -279,6 +282,7 @@ export class ScopePolicy {
   readonly #allowNicknameChanges: boolean
   readonly #allowOtherMemberNicknameChanges: boolean
   readonly #allowMemberRoleChanges: boolean
+  readonly #allowBulkMemberRoleChanges: boolean
   readonly #allowMemberVoiceAudit: boolean
   readonly #allowMemberVoiceChanges: boolean
   readonly #allowCrossGuildMessageForwarding: boolean
@@ -365,6 +369,8 @@ export class ScopePolicy {
   readonly #automodGuildIds: ReadonlySet<string>
   readonly #banAuditGuildIds: ReadonlySet<string>
   readonly #bulkBanGuildIds: ReadonlySet<string>
+  readonly #bulkMemberRoleGuildIds: ReadonlySet<string>
+  readonly #bulkMemberRoleIds: ReadonlySet<string>
   readonly #channelCloneGuildIds: ReadonlySet<string>
   readonly #channelCloneSourceIds: ReadonlySet<string>
   readonly #channelCreationGuildIds: ReadonlySet<string>
@@ -475,6 +481,7 @@ export class ScopePolicy {
     | "allowBanAudit"
     | "allowBulkBanAudit"
     | "allowBulkBans"
+    | "allowBulkMemberRoleChanges"
     | "allowChannelCloneAudit"
     | "allowChannelCloning"
     | "allowChannelDeletionAudit"
@@ -582,6 +589,8 @@ export class ScopePolicy {
     | "automodGuildIds"
     | "banAuditGuildIds"
     | "bulkBanGuildIds"
+    | "bulkMemberRoleGuildIds"
+    | "bulkMemberRoleIds"
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
     | "guildCommunityGuildIds"
@@ -667,6 +676,7 @@ export class ScopePolicy {
     this.#allowBanAudit = config.allowBanAudit ?? false
     this.#allowBulkBanAudit = config.allowBulkBanAudit ?? false
     this.#allowBulkBans = config.allowBulkBans ?? false
+    this.#allowBulkMemberRoleChanges = config.allowBulkMemberRoleChanges ?? false
     this.#allowChannelCloneAudit = config.allowChannelCloneAudit ?? false
     this.#allowChannelCloning = config.allowChannelCloning ?? false
     this.#allowChannelCreation = config.allowChannelCreation ?? false
@@ -780,6 +790,8 @@ export class ScopePolicy {
     this.#automodGuildIds = config.automodGuildIds ?? new Set()
     this.#banAuditGuildIds = config.banAuditGuildIds ?? new Set()
     this.#bulkBanGuildIds = config.bulkBanGuildIds ?? new Set()
+    this.#bulkMemberRoleGuildIds = config.bulkMemberRoleGuildIds ?? new Set()
+    this.#bulkMemberRoleIds = config.bulkMemberRoleIds ?? new Set()
     this.#channelCloneGuildIds = config.channelCloneGuildIds ?? new Set()
     this.#channelCloneSourceIds = config.channelCloneSourceIds ?? new Set()
     this.#channelCreationGuildIds = config.channelCreationGuildIds ?? new Set()
@@ -920,6 +932,11 @@ export class ScopePolicy {
       bulkBansEnabled: this.#allowBulkBanAudit
         && this.#allowBulkBans
         && this.#bulkBanGuildIds.size > 0,
+      bulkMemberRoleChangesEnabled: this.#allowBulkMemberRoleChanges
+        && this.#bulkMemberRoleGuildIds.size > 0
+        && this.#bulkMemberRoleIds.size > 0,
+      bulkMemberRoleGuildIds: [...this.#bulkMemberRoleGuildIds].sort(),
+      bulkMemberRoleCount: this.#bulkMemberRoleIds.size,
       channelCloneAuditEnabled: this.#allowChannelCloneAudit
         && this.#channelCloneGuildIds.size > 0
         && this.#channelCloneSourceIds.size > 0,
@@ -1767,6 +1784,40 @@ export class ScopePolicy {
     }
     if (!this.#memberRoleIds.has(roleId)) {
       throw new PolicyError(`Discord role ${roleId} is outside the member-role scope`)
+    }
+    this.assertUserNotProtected(userId)
+  }
+
+  assertBulkMemberRoleChangeAllowed(
+    guildId: string,
+    userId: string,
+    roleId: string,
+  ): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowBulkMemberRoleChanges) {
+      throw new PolicyError(
+        "Discord bulk member-role changes are disabled by connector configuration",
+      )
+    }
+    if (this.#bulkMemberRoleGuildIds.size === 0) {
+      throw new PolicyError(
+        "Discord bulk member-role changes require an explicit guild allowlist",
+      )
+    }
+    if (!this.#bulkMemberRoleGuildIds.has(guildId)) {
+      throw new PolicyError(
+        `Discord guild ${guildId} is outside the bulk member-role scope`,
+      )
+    }
+    if (this.#bulkMemberRoleIds.size === 0) {
+      throw new PolicyError(
+        "Discord bulk member-role changes require an exact role allowlist",
+      )
+    }
+    if (!this.#bulkMemberRoleIds.has(roleId)) {
+      throw new PolicyError(
+        `Discord role ${roleId} is outside the bulk member-role scope`,
+      )
     }
     this.assertUserNotProtected(userId)
   }

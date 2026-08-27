@@ -104,7 +104,7 @@ export interface WriteCoordinationIntent {
 }
 
 export interface WriteCoordinationRunOptions {
-  releasePendingScaffoldOnVerifiedPause?: boolean
+  releasePendingOnVerifiedPause?: boolean
 }
 
 export interface WriteCoordinator {
@@ -196,6 +196,7 @@ const MAX_RESOLUTION_BYTES = 32_768
 const MAX_TARGETS = 8
 const MAX_DELETION_TARGETS = 100
 const MAX_BULK_GUILD_BAN_TARGETS = DISCORD_LIMITS.bulkGuildBanUsers + 1
+const MAX_BULK_MEMBER_ROLE_TARGETS = CONNECTOR_LIMITS.bulkMemberRoleTargets + 2
 const MAX_ROLE_DELETION_TARGETS = 10
 const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
@@ -334,6 +335,8 @@ function normalizeTargets(
     ? MAX_DELETION_TARGETS
     : kind === "bulk-guild-ban"
       ? MAX_BULK_GUILD_BAN_TARGETS
+      : kind === "bulk-member-role-change"
+        ? MAX_BULK_MEMBER_ROLE_TARGETS
       : kind === "guild-prune"
         ? CONNECTOR_LIMITS.guildPruneIncludeRoles + 2
         : kind === "role-deletion"
@@ -341,6 +344,8 @@ function normalizeTargets(
           : MAX_TARGETS
   const minimum = kind === "bulk-guild-ban"
     ? 3
+    : kind === "bulk-member-role-change"
+      ? 4
     : kind === "guild-prune"
       ? 2
       : 1
@@ -387,6 +392,26 @@ function normalizeTargets(
     ) {
       throw new WriteCoordinationStateError(
         "Discord bulk guild ban coordination requires one member collection and unique exact members",
+      )
+    }
+  }
+  if (kind === "bulk-member-role-change") {
+    const targets = [...byDescriptor.values()]
+    const memberTargets = targets.filter((target) => target.kind === "member")
+    const roleTargets = targets.filter((target) => target.kind === "role")
+    const collectionTargets = targets.filter((target) => (
+      target.kind === "guild-collection" && target.collection === "members"
+    ))
+    if (
+      byDescriptor.size !== values.length
+      || memberTargets.length < 2
+      || roleTargets.length !== 1
+      || collectionTargets.length !== 1
+      || memberTargets.length + roleTargets.length + collectionTargets.length
+        !== targets.length
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord bulk member-role coordination requires one member collection, one exact role, and unique exact members",
       )
     }
   }
@@ -557,7 +582,7 @@ function normalizeIntent(intent: WriteCoordinationIntent): WriteCoordinationInte
   }
 }
 
-function releasePendingScaffoldOnVerifiedPause(
+function releasePendingOnVerifiedPause(
   intent: WriteCoordinationIntent,
   options: WriteCoordinationRunOptions | undefined,
 ): boolean {
@@ -567,11 +592,11 @@ function releasePendingScaffoldOnVerifiedPause(
       typeof options !== "object"
       || Array.isArray(options)
       || Object.keys(options).some(
-        (key) => key !== "releasePendingScaffoldOnVerifiedPause",
+        (key) => key !== "releasePendingOnVerifiedPause",
       )
       || (
-        options.releasePendingScaffoldOnVerifiedPause !== undefined
-        && typeof options.releasePendingScaffoldOnVerifiedPause !== "boolean"
+        options.releasePendingOnVerifiedPause !== undefined
+        && typeof options.releasePendingOnVerifiedPause !== "boolean"
       )
     )
   ) {
@@ -579,16 +604,19 @@ function releasePendingScaffoldOnVerifiedPause(
       "Discord write coordination run options are invalid",
     )
   }
-  const release = options?.releasePendingScaffoldOnVerifiedPause === true
-  if (release && intent.kind !== "guild-scaffold") {
+  const release = options?.releasePendingOnVerifiedPause === true
+  if (
+    release
+    && !["bulk-member-role-change", "guild-scaffold"].includes(intent.kind)
+  ) {
     throw new WriteCoordinationStateError(
-      "Only Discord guild scaffolds may release a pending receipt after successful execution",
+      "Only resumable Discord frontier workflows may release a pending receipt after a verified pause",
     )
   }
   return release
 }
 
-function isVerifiedScaffoldPause(value: unknown): boolean {
+function isVerifiedPause(value: unknown): boolean {
   return typeof value === "object"
     && value !== null
     && !Array.isArray(value)
@@ -1482,7 +1510,7 @@ export class FileWriteCoordinator implements WriteCoordinator {
       throw new TypeError("Discord write coordination operation must be a function")
     }
     const intent = normalizeIntent(intentValue)
-    const releasePendingScaffold = releasePendingScaffoldOnVerifiedPause(
+    const releasePending = releasePendingOnVerifiedPause(
       intent,
       options,
     )
@@ -1531,9 +1559,9 @@ export class FileWriteCoordinator implements WriteCoordinator {
       if (
         !safeRecoveryEvidence(evidence)
         && !(
-          releasePendingScaffold
+          releasePending
           && evidence === "pending"
-          && isVerifiedScaffoldPause(result)
+          && isVerifiedPause(result)
         )
       ) {
         throw new WriteCoordinationQuarantinedError(record.claimId)

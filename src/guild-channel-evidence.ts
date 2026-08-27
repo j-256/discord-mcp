@@ -290,6 +290,7 @@ export function guildChannelLayoutGuildIds(
     ConnectorConfig,
     | "allowChannelCloneAudit"
     | "allowChannelOrderingAudit"
+    | "allowBulkMemberRoleChanges"
     | "allowGuildTemplateAudit"
     | "allowGuildCommunityAudit"
     | "allowGuildSettingsAudit"
@@ -297,6 +298,7 @@ export function guildChannelLayoutGuildIds(
     | "allowOnboardingAudit"
     | "channelCloneGuildIds"
     | "channelOrderingGuildIds"
+    | "bulkMemberRoleGuildIds"
     | "guildTemplateGuildIds"
     | "guildCommunityGuildIds"
     | "guildSettingsGuildIds"
@@ -312,6 +314,10 @@ export function guildChannelLayoutGuildIds(
   add(config.allowGateway, config.allowedGuildIds)
   add(config.allowChannelCloneAudit === true, config.channelCloneGuildIds ?? new Set())
   add(config.allowChannelOrderingAudit === true, config.channelOrderingGuildIds ?? new Set())
+  add(
+    config.allowBulkMemberRoleChanges === true,
+    config.bulkMemberRoleGuildIds ?? new Set(),
+  )
   add(config.allowGuildTemplateAudit === true, config.guildTemplateGuildIds ?? new Set())
   add(config.allowGuildCommunityAudit === true, config.guildCommunityGuildIds ?? new Set())
   add(config.allowGuildSettingsAudit === true, config.guildSettingsGuildIds ?? new Set())

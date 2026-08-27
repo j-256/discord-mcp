@@ -743,6 +743,7 @@ function guidanceService(options: {
     executeGuildApplicationCommandChange: unexpected,
     executeGlobalApplicationCommandChange: unexpected,
     executeMemberRoleChange: unexpected,
+    executeBulkMemberRoleChange: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
@@ -1842,6 +1843,7 @@ function guidanceService(options: {
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
     planMemberRoleChange: unexpected,
+    planBulkMemberRoleChange: unexpected,
     planMemberNicknameChange: unexpected,
     planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
@@ -2153,6 +2155,9 @@ function guidanceService(options: {
         bulkBanAuditEnabled: false,
         bulkBanGuildIds: [],
         bulkBansEnabled: false,
+        bulkMemberRoleChangesEnabled: false,
+        bulkMemberRoleGuildIds: [],
+        bulkMemberRoleCount: 0,
         channelCloneAuditEnabled: false,
         channelCloneGuildIds: [],
         channelCloneSourceIds: [],
@@ -6208,6 +6213,31 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(memberRole, /before-and-after guild permissions/)
   assert.match(memberRole, /unknown-bit evidence/)
 
+  const bulkMemberRole = promptText(await client.getPrompt({
+    arguments: {
+      action: "remove",
+      auditReason: "Reviewed bulk member role",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: `${SECOND_USER_ID},${USER_ID}`,
+    },
+    name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
+  }))
+  assert.deepEqual(JSON.parse(bulkMemberRole.split("\n")[1] || ""), {
+    action: "remove",
+    auditReason: "Reviewed bulk member role",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    roleId: ROLE_ID,
+    userIds: [SECOND_USER_ID, USER_ID],
+  })
+  assert.match(bulkMemberRole, /Call only plan_bulk_member_role_change/)
+  assert.match(bulkMemberRole, /Do not call execute_bulk_member_role_change/)
+  assert.match(bulkMemberRole, /common evidence and target-set digests/)
+  assert.match(bulkMemberRole, /first failed, uncertain, drifting, or incomplete target/)
+  assert.match(bulkMemberRole, /fresh plan and approval before resumption/)
+
   const memberVoice = promptText(await client.getPrompt({
     arguments: {
       action: "move",
@@ -6702,6 +6732,61 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         userId: USER_ID,
       },
       name: MCP_PROMPT_NAMES.reviewMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "replace",
+        auditReason: "Reviewed bulk member role",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        roleId: ROLE_ID,
+        userIds: `${USER_ID},${SECOND_USER_ID}`,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "add",
+        auditReason: "Reviewed bulk member role",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        roleId: ROLE_ID,
+        userIds: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "remove",
+        auditReason: "Reviewed bulk member role",
+        guildId: `0${GUILD_ID}`,
+        operationKey: OPERATION_KEY,
+        roleId: ROLE_ID,
+        userIds: `${USER_ID},${SECOND_USER_ID}`,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "remove",
+        auditReason: "Reviewed bulk member role",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        roleId: `0${ROLE_ID}`,
+        userIds: `${USER_ID},${SECOND_USER_ID}`,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
+    },
+    {
+      arguments: {
+        action: "remove",
+        auditReason: "Reviewed bulk member role",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        roleId: ROLE_ID,
+        userIds: `${USER_ID},${USER_ID}`,
+      },
+      name: MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,
     },
     {
       arguments: {

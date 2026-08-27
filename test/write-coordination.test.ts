@@ -673,6 +673,60 @@ test("coordination requires two through 200 unique member targets for bulk guild
   )
 })
 
+test("coordination bounds bulk member-role changes to one role and exact members", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const memberCollection = writeGuildCollectionTarget("members", GUILD_ID)
+  const roleTarget = writeResourceTarget("role", MESSAGE_ID)
+  const memberTargets = Array.from(
+    { length: 25 },
+    (_, index) => writeResourceTarget(
+      "member",
+      (500_000_000_000_000_001n + BigInt(index)).toString(),
+    ),
+  )
+  const publishedTargets = await coordinator.run({
+    kind: "bulk-member-role-change",
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    planDigest: PLAN_DIGEST,
+    targets: [memberCollection, roleTarget, ...memberTargets],
+  }, async () => (await claimFiles(directory)).length)
+  assert.equal(publishedTargets, 27)
+  assert.deepEqual(await claimFiles(directory), [])
+
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-member-role-change",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberCollection, roleTarget, memberTargets[0]!],
+    }, async () => "unsafe"),
+    /requires 4-27 targets for bulk-member-role-change/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-member-role-change",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [memberCollection, roleTarget, memberTargets[0]!, memberTargets[0]!],
+    }, async () => "unsafe"),
+    /one member collection, one exact role, and unique exact members/,
+  )
+  await assert.rejects(
+    () => coordinator.run({
+      kind: "bulk-member-role-change",
+      operationKeyHash: operationKeyHash(OTHER_OPERATION_KEY),
+      planDigest: PLAN_DIGEST,
+      targets: [
+        memberCollection,
+        roleTarget,
+        writeResourceTarget("role", "300000000000000002"),
+        memberTargets[0]!,
+      ],
+    }, async () => "unsafe"),
+    /one member collection, one exact role, and unique exact members/,
+  )
+})
+
 test("coordination requires one member collection and one through six unique roles for guild prune", async (context) => {
   const { coordinator, directory } = await fixture(context)
   const memberCollection = writeGuildCollectionTarget("members", GUILD_ID)
@@ -1174,7 +1228,7 @@ test("callback outcomes release settled claims and retain ambiguous claims", asy
   assert.equal((await coordinator.list()).claims[0]?.receiptState, "pending")
 })
 
-test("only a normally paused guild scaffold may release a matching pending receipt", async (context) => {
+test("only a verified resumable frontier pause may release a matching pending receipt", async (context) => {
   const normal = await fixture(context)
   const scaffoldIntent = intent([
     writeGuildCollectionTarget("channels", GUILD_ID),
@@ -1188,7 +1242,7 @@ test("only a normally paused guild scaffold may release a matching pending recei
       }))
       return { status: "paused" as const }
     },
-    { releasePendingScaffoldOnVerifiedPause: true },
+    { releasePendingOnVerifiedPause: true },
   )
   assert.equal(result.status, "paused")
   assert.deepEqual(await claimFiles(normal.directory), [])
@@ -1199,6 +1253,26 @@ test("only a normally paused guild scaffold may release a matching pending recei
     "pending",
   )
 
+  const bulk = await fixture(context)
+  const bulkIntent = intent([
+    writeGuildCollectionTarget("members", GUILD_ID),
+    writeResourceTarget("role", MESSAGE_ID),
+    writeResourceTarget("member", "500000000000000001"),
+    writeResourceTarget("member", "500000000000000002"),
+  ], { kind: "bulk-member-role-change" })
+  const bulkResult = await bulk.coordinator.run(
+    bulkIntent,
+    async () => {
+      await bulk.operationStore.reserve(receipt("pending", {
+        kind: "bulk-member-role-change",
+      }))
+      return { status: "paused" as const }
+    },
+    { releasePendingOnVerifiedPause: true },
+  )
+  assert.equal(bulkResult.status, "paused")
+  assert.deepEqual(await claimFiles(bulk.directory), [])
+
   const unsupported = await fixture(context)
   let called = false
   await assert.rejects(
@@ -1208,9 +1282,9 @@ test("only a normally paused guild scaffold may release a matching pending recei
         called = true
         return "unsafe"
       },
-      { releasePendingScaffoldOnVerifiedPause: true },
+      { releasePendingOnVerifiedPause: true },
     ),
-    /Only Discord guild scaffolds/,
+    /Only resumable Discord frontier workflows/,
   )
   assert.equal(called, false)
   assert.deepEqual(await claimFiles(unsupported.directory), [])
@@ -1225,7 +1299,7 @@ test("only a normally paused guild scaffold may release a matching pending recei
         }))
         return { status: "completed" as const }
       },
-      { releasePendingScaffoldOnVerifiedPause: true },
+      { releasePendingOnVerifiedPause: true },
     ),
     WriteCoordinationQuarantinedError,
   )
@@ -1244,7 +1318,7 @@ test("only a normally paused guild scaffold may release a matching pending recei
         }))
         throw new Error("interrupted")
       },
-      { releasePendingScaffoldOnVerifiedPause: true },
+      { releasePendingOnVerifiedPause: true },
     ),
     WriteCoordinationQuarantinedError,
   )

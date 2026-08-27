@@ -785,6 +785,10 @@ test("file operation store isolates every durable write operation-key domain", a
   const component = componentReceipt()
   const automod = automodReceipt()
   const bulkGuildBan = { ...receipt(), kind: "bulk-guild-ban" as const }
+  const bulkMemberRole = {
+    ...receipt(),
+    kind: "bulk-member-role-change" as const,
+  }
   const overwrite = { ...receipt(), kind: "channel-permission-overwrite" as const }
   const forum = { ...receipt(), kind: "forum-post" as const }
   const forumTag = { ...receipt(), kind: "forum-tag-change" as const }
@@ -826,6 +830,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(component)).created, true)
   assert.equal((await store.reserve(automod)).created, true)
   assert.equal((await store.reserve(bulkGuildBan)).created, true)
+  assert.equal((await store.reserve(bulkMemberRole)).created, true)
   assert.equal((await store.reserve(overwrite)).created, true)
   assert.equal((await store.reserve(forum)).created, true)
   assert.equal((await store.reserve(forumTag)).created, true)
@@ -875,6 +880,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("bulk-guild-ban", bulkGuildBan.operationKeyHash),
     bulkGuildBan,
+  )
+  assert.deepEqual(
+    await store.get("bulk-member-role-change", bulkMemberRole.operationKeyHash),
+    bulkMemberRole,
   )
   assert.deepEqual(
     await store.get("channel-creation", channel.operationKeyHash),

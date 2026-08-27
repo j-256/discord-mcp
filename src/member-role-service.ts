@@ -6,6 +6,10 @@ import type {
   MemberRoleActivityStatus,
 } from "./activity-log.js"
 import {
+  assertBulkMemberRoleAuthority,
+  type BulkMemberRoleAuthority,
+} from "./bulk-member-role-authority.js"
+import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
@@ -139,6 +143,7 @@ export interface MemberRoleChangePlan {
   auditReason: string
   botId: string
   channelEvidence: GuildChannelEvidenceView
+  commonEvidenceDigest: string
   createdAt: string
   digest: string
   guild: {
@@ -246,6 +251,7 @@ type DirectGuildChannel = DiscordChannel & {
 }
 
 type MemberRoleTargetOutcome = "settled" | "uncertain"
+type MemberRoleAuthority = "bulk" | "direct"
 
 class MemberRoleStateError extends Error {
   override name = "MemberRoleStateError"
@@ -906,13 +912,22 @@ export class MemberRoleService {
   async #state(
     botId: string,
     request: NormalizedMemberRoleChangeRequest,
+    authority: MemberRoleAuthority,
     options: RequestOptions,
   ): Promise<MemberRoleState> {
-    this.#policy.assertMemberRoleChangeAllowed(
-      request.guildId,
-      request.userId,
-      request.roleId,
-    )
+    if (authority === "bulk") {
+      this.#policy.assertBulkMemberRoleChangeAllowed(
+        request.guildId,
+        request.userId,
+        request.roleId,
+      )
+    } else {
+      this.#policy.assertMemberRoleChangeAllowed(
+        request.guildId,
+        request.userId,
+        request.roleId,
+      )
+    }
     if (request.userId === botId) {
       throw new MemberRoleStateError(
         "Discord member-role changes cannot target the connector bot",
@@ -1187,6 +1202,7 @@ export class MemberRoleService {
     applicationId: string,
     botId: string,
     request: NormalizedMemberRoleChangeRequest,
+    authority: MemberRoleAuthority,
     options: RequestOptions,
   ): Promise<MemberRoleChangePlan> {
     if (!positiveSnowflake(applicationId) || !positiveSnowflake(botId)) {
@@ -1194,15 +1210,14 @@ export class MemberRoleService {
         "Discord member-role planning requires exact application and bot snowflakes",
       )
     }
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(botId, request, authority, options)
     const beforeRoleIds = canonicalRoleIds(state.targetMember.roles)
     const afterRoleIds = canonicalRoleIds(state.afterMember.roles)
     const alreadyCurrent = request.action === "add"
       ? beforeRoleIds.includes(request.roleId)
       : !beforeRoleIds.includes(request.roleId)
     const action = alreadyCurrent ? "none" : request.action
-    const digest = reviewedPlanDigest(this.#planKey, {
-      action,
+    const commonEvidence = {
       applicationId,
       botId,
       botMember: {
@@ -1222,8 +1237,20 @@ export class MemberRoleService {
         name: state.guild.name,
         ownerId: state.guild.owner_id,
       },
+      roles: roleSnapshot(state.roles),
+    }
+    const commonEvidenceDigest = reviewedPlanDigest(this.#planKey, {
+      ...commonEvidence,
+      domain: "discord-mcp-member-role-common-evidence.v1",
+    })
+    const digest = reviewedPlanDigest(this.#planKey, {
+      action,
+      authority,
+      commonEvidence,
+      commonEvidenceDigest,
       impact: state.impact,
       localPolicy: {
+        authority,
         featureEnabled: true,
         guildAllowed: request.guildId,
         roleAllowed: request.roleId,
@@ -1237,7 +1264,6 @@ export class MemberRoleService {
         roleId: request.roleId,
         userId: request.userId,
       },
-      roles: roleSnapshot(state.roles),
       targetMember: {
         communicationDisabledUntil:
           state.targetMember.communication_disabled_until ?? null,
@@ -1270,6 +1296,7 @@ export class MemberRoleService {
       auditReason: request.auditReason,
       botId,
       channelEvidence: state.channelEvidence,
+      commonEvidenceDigest,
       createdAt: this.#clock().toISOString(),
       digest,
       guild: {
@@ -1369,6 +1396,24 @@ export class MemberRoleService {
       applicationId,
       botId,
       normalizeMemberRoleChangeRequest(request),
+      "direct",
+      options,
+    )
+  }
+
+  async planForBulk(
+    authority: BulkMemberRoleAuthority,
+    applicationId: string,
+    botId: string,
+    request: MemberRoleChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberRoleChangePlan> {
+    assertBulkMemberRoleAuthority(authority)
+    return this.#planNormalized(
+      applicationId,
+      botId,
+      normalizeMemberRoleChangeRequest(request),
+      "bulk",
       options,
     )
   }
@@ -1391,10 +1436,50 @@ export class MemberRoleService {
         botId,
         normalized,
         expectedDigest,
+        "direct",
         options,
       ),
       () => new MemberRoleExecutionError(
         "Discord member-role change was blocked because a prior same-member operation ended with an uncertain outcome",
+        {
+          action: normalized.action,
+          guildId: normalized.guildId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          roleId: normalized.roleId,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+          userId: normalized.userId,
+        },
+      ),
+    )
+  }
+
+  async executeForBulk(
+    authority: BulkMemberRoleAuthority,
+    applicationId: string,
+    botId: string,
+    request: MemberRoleChangeRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberRoleChangeResult> {
+    assertBulkMemberRoleAuthority(authority)
+    const normalized = normalizeMemberRoleChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord member-role plan digest is invalid")
+    }
+    return withTargetLock(
+      targetLockKey(normalized),
+      () => this.#executeNormalized(
+        applicationId,
+        botId,
+        normalized,
+        expectedDigest,
+        "bulk",
+        options,
+      ),
+      () => new MemberRoleExecutionError(
+        "Discord bulk member-role change was blocked because a prior same-member operation ended with an uncertain outcome",
         {
           action: normalized.action,
           guildId: normalized.guildId,
@@ -1414,11 +1499,18 @@ export class MemberRoleService {
     botId: string,
     request: NormalizedMemberRoleChangeRequest,
     expectedDigest: string,
+    authority: MemberRoleAuthority,
     options: RequestOptions,
   ): Promise<MemberRoleChangeResult> {
     let plan: MemberRoleChangePlan
     try {
-      plan = await this.#planNormalized(applicationId, botId, request, options)
+      plan = await this.#planNormalized(
+        applicationId,
+        botId,
+        request,
+        authority,
+        options,
+      )
     } catch (error) {
       if (
         error instanceof MemberRoleStateError

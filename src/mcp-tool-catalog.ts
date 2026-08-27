@@ -45,6 +45,7 @@ type McpToolWorkflow =
   | "attachment-message"
   | "automod-change"
   | "bulk-guild-ban"
+  | "bulk-member-role-change"
   | "channel-cloning"
   | "channel-creation"
   | "channel-deletion"
@@ -389,14 +390,19 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "reaction-moderation",
   },
   execute_member_moderation: {
-    keywords: ["ban", "execute", "kick", "moderate", "timeout", "unban"],
+    keywords: ["ban", "execute", "kick", "moderate", "one member", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
   },
   execute_bulk_guild_ban: {
-    keywords: ["ban", "batch", "bulk", "execute", "guild", "moderate", "users"],
+    keywords: ["ban", "ban members", "batch", "bulk", "execute", "guild", "many members", "moderate", "users"],
     toolset: "bulk-bans",
     workflow: "bulk-guild-ban",
+  },
+  execute_bulk_member_role_change: {
+    keywords: ["add", "assign", "batch", "bulk", "execute", "members", "remove", "role"],
+    toolset: "member-roles",
+    workflow: "bulk-member-role-change",
   },
   execute_guild_prune: {
     keywords: ["cohort", "execute", "guild", "inactive", "inactive members", "members", "prune"],
@@ -409,7 +415,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "member-nickname-change",
   },
   execute_member_role_change: {
-    keywords: ["add", "assign", "execute", "member", "permission", "remove", "role"],
+    keywords: ["add", "assign", "assign role", "execute", "member", "permission", "remove", "role"],
     toolset: "member-roles",
     workflow: "member-role-change",
   },
@@ -754,14 +760,19 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "announcement-subscriptions",
   },
   plan_member_moderation: {
-    keywords: ["ban", "kick", "moderate", "plan", "review", "timeout", "unban"],
+    keywords: ["ban", "kick", "moderate", "one member", "plan", "review", "timeout", "unban"],
     toolset: "moderation",
     workflow: "member-moderation",
   },
   plan_bulk_guild_ban: {
-    keywords: ["ban", "batch", "bulk", "guild", "plan", "review", "users"],
+    keywords: ["ban", "ban members", "batch", "bulk", "guild", "many members", "plan", "review", "users"],
     toolset: "bulk-bans",
     workflow: "bulk-guild-ban",
+  },
+  plan_bulk_member_role_change: {
+    keywords: ["add", "assign", "batch", "bulk", "members", "plan", "remove", "review", "role"],
+    toolset: "member-roles",
+    workflow: "bulk-member-role-change",
   },
   plan_guild_prune: {
     keywords: ["cohort", "estimate", "guild", "inactive", "inactive members", "members", "plan", "prune", "review"],
@@ -774,7 +785,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "member-nickname-change",
   },
   plan_member_role_change: {
-    keywords: ["add", "assign", "member", "permission", "plan", "remove", "review", "role"],
+    keywords: ["add", "assign", "assign role", "member", "permission", "plan", "remove", "review", "role"],
     toolset: "member-roles",
     workflow: "member-role-change",
   },

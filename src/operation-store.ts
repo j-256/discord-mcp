@@ -36,6 +36,7 @@ export const OPERATION_KINDS = [
   "attachment-message",
   "automod-change",
   "bulk-guild-ban",
+  "bulk-member-role-change",
   "channel-clone",
   "channel-creation",
   "channel-deletion",

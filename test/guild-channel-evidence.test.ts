@@ -223,6 +223,7 @@ test("guildChannelLayoutGuildIds unions only enabled exact scopes", () => {
     allowedGuildIds: new Set([GUILD_ID]),
     allowChannelCloneAudit: true,
     allowChannelOrderingAudit: true,
+    allowBulkMemberRoleChanges: true,
     allowGateway: false,
     allowGuildTemplateAudit: true,
     allowGuildSettingsAudit: true,
@@ -230,6 +231,7 @@ test("guildChannelLayoutGuildIds unions only enabled exact scopes", () => {
     allowOnboardingAudit: true,
     channelCloneGuildIds: new Set([CLONE_GUILD_ID]),
     channelOrderingGuildIds: new Set([GUILD_ID]),
+    bulkMemberRoleGuildIds: new Set(["100000000000000005"]),
     guildTemplateGuildIds: new Set([SECOND_GUILD_ID]),
     guildSettingsGuildIds: new Set(["100000000000000004"]),
     memberRoleGuildIds: new Set(["100000000000000003"]),
@@ -239,6 +241,7 @@ test("guildChannelLayoutGuildIds unions only enabled exact scopes", () => {
   assert.deepEqual([...ids], [
     CLONE_GUILD_ID,
     GUILD_ID,
+    "100000000000000005",
     SECOND_GUILD_ID,
     "100000000000000004",
   ])

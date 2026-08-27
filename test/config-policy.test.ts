@@ -157,6 +157,9 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.allowOtherMemberNicknameChanges, false)
   assert.deepEqual([...config.nicknameGuildIds], [])
   assert.equal(config.allowMemberRoleChanges, false)
+  assert.equal(config.allowBulkMemberRoleChanges, false)
+  assert.deepEqual([...config.bulkMemberRoleGuildIds], [])
+  assert.deepEqual([...config.bulkMemberRoleIds], [])
   assert.deepEqual([...config.memberRoleGuildIds], [])
   assert.deepEqual([...config.memberRoleIds], [])
   assert.equal(config.allowPermissionOverwrites, true)
@@ -230,6 +233,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     bulkBanAuditEnabled: false,
     bulkBanGuildIds: [],
     bulkBansEnabled: false,
+    bulkMemberRoleChangesEnabled: false,
+    bulkMemberRoleGuildIds: [],
+    bulkMemberRoleCount: 0,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -1531,6 +1537,9 @@ test("configuration and policy require an exact administration guild and protect
     bulkBanAuditEnabled: false,
     bulkBanGuildIds: [],
     bulkBansEnabled: false,
+    bulkMemberRoleChangesEnabled: false,
+    bulkMemberRoleGuildIds: [],
+    bulkMemberRoleCount: 0,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -3281,6 +3290,83 @@ test("configuration and policy isolate exact member-role authority", () => {
     }, { homeDirectory: "/test/home" }),
     /must contain at most 100 unique IDs/,
   )
+})
+
+test("configuration and policy isolate exact bulk member-role authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: {
+        bulkMemberRoleGuildIds: [OTHER_GUILD_ID],
+        bulkMemberRoleIds: [ROLE_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.bulkMemberRoleGuildIds must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { bulkMemberRoleChanges: true },
+      scopes: { bulkMemberRoleGuildIds: [GUILD_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /requires exact batch guild and role allowlists/,
+  )
+
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { bulkMemberRoleChanges: true },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: { guildIds: [GUILD_ID, OTHER_GUILD_ID] },
+    scopes: {
+      bulkMemberRoleGuildIds: [GUILD_ID],
+      bulkMemberRoleIds: [ROLE_ID, OTHER_ROLE_ID],
+      protectedUserIds: [USER_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  assert.equal(config.allowBulkMemberRoleChanges, true)
+  assert.deepEqual([...config.bulkMemberRoleGuildIds], [GUILD_ID])
+  assert.deepEqual([...config.bulkMemberRoleIds], [ROLE_ID, OTHER_ROLE_ID])
+  const batchPolicy = new ScopePolicy(config)
+  batchPolicy.assertBulkMemberRoleChangeAllowed(
+    GUILD_ID,
+    "400000000000000002",
+    ROLE_ID,
+  )
+  assert.throws(
+    () => batchPolicy.assertMemberRoleChangeAllowed(
+      GUILD_ID,
+      "400000000000000002",
+      ROLE_ID,
+    ),
+    /member-role changes are disabled/,
+  )
+  assert.throws(
+    () => batchPolicy.assertBulkMemberRoleChangeAllowed(
+      OTHER_GUILD_ID,
+      "400000000000000002",
+      ROLE_ID,
+    ),
+    /outside the bulk member-role scope/,
+  )
+  assert.throws(
+    () => batchPolicy.assertBulkMemberRoleChangeAllowed(
+      GUILD_ID,
+      "400000000000000002",
+      "300000000000000003",
+    ),
+    /outside the bulk member-role scope/,
+  )
+  assert.throws(
+    () => batchPolicy.assertBulkMemberRoleChangeAllowed(GUILD_ID, USER_ID, ROLE_ID),
+    /protected from administration/,
+  )
+  assert.equal(batchPolicy.describe().bulkMemberRoleChangesEnabled, true)
+  assert.deepEqual(batchPolicy.describe().bulkMemberRoleGuildIds, [GUILD_ID])
+  assert.equal(batchPolicy.describe().bulkMemberRoleCount, 2)
 })
 
 test("configuration and policy isolate exact member voice audit and changes", () => {
@@ -5315,6 +5401,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     bulkBanAuditEnabled: false,
     bulkBanGuildIds: [],
     bulkBansEnabled: false,
+    bulkMemberRoleChangesEnabled: false,
+    bulkMemberRoleGuildIds: [],
+    bulkMemberRoleCount: 0,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],

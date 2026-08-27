@@ -145,6 +145,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "banAudit",
   "bulkBanAudit",
   "bulkBans",
+  "bulkMemberRoleChanges",
   "channelCreation",
   "channelDeletionAudit",
   "channelDeletions",
@@ -252,6 +253,8 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "automodGuildIds",
   "banAuditGuildIds",
   "bulkBanGuildIds",
+  "bulkMemberRoleGuildIds",
+  "bulkMemberRoleIds",
   "channelCreationGuildIds",
   "channelDeletionIds",
   "channelCloneGuildIds",
@@ -385,7 +388,7 @@ const absolutePathSchema = z.string()
 function snowflakeArraySchema(minimum: number, maximum: number): z.ZodType<string[]> {
   return z.array(snowflakeSchema)
     .min(minimum)
-    .max(maximum)
+    .max(maximum, `must contain at most ${maximum} unique IDs`)
     .refine((values) => canonicalArray(values), "must contain unique sorted Discord snowflakes")
 }
 
@@ -438,7 +441,10 @@ const APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist fo
 const APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed complete current-application linked-role metadata replacement and clearance"
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
 const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
+const BULK_MEMBER_ROLE_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target bulk member-role changes"
 const BULK_BAN_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
+const BULK_MEMBER_ROLE_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed bulk member-role changes"
+const BULK_MEMBER_ROLE_ROLE_SCOPE_DESCRIPTION = "Exact role ID allowlist for reviewed bulk member-role changes"
 const GUILD_PRUNE_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guild prune planning"
 const GUILD_PRUNES_CAPABILITY_DESCRIPTION = "Enable reviewed non-exact guild prune execution"
 const GUILD_PRUNE_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed guild prune planning and execution"
@@ -495,6 +501,9 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "bulkBans") {
     return BULK_BANS_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "bulkMemberRoleChanges") {
+    return BULK_MEMBER_ROLE_CHANGES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "inviteCreation") {
     return INVITE_CREATION_CAPABILITY_DESCRIPTION
@@ -572,6 +581,12 @@ function scopeDescription(documentKey: string): string {
   if (documentKey === "bulkBanGuildIds") {
     return BULK_BAN_SCOPE_DESCRIPTION
   }
+  if (documentKey === "bulkMemberRoleGuildIds") {
+    return BULK_MEMBER_ROLE_GUILD_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "bulkMemberRoleIds") {
+    return BULK_MEMBER_ROLE_ROLE_SCOPE_DESCRIPTION
+  }
   if (documentKey === "guildPruneGuildIds") {
     return GUILD_PRUNE_GUILD_SCOPE_DESCRIPTION
   }
@@ -625,7 +640,9 @@ const scopeShape = Object.fromEntries(
           ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
           : name === "applicationMonetizationSkuIds"
             ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
-            : CONFIG_SCOPE_ENTRIES,
+            : name === "memberRoleIds" || name === "bulkMemberRoleIds"
+              ? CONNECTOR_LIMITS.memberRoleAllowlist
+              : CONFIG_SCOPE_ENTRIES,
     )
       .describe(scopeDescription(name))
       .optional(),

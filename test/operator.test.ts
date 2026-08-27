@@ -241,6 +241,9 @@ function status(
       bulkBanAuditEnabled: false,
       bulkBanGuildIds: [],
       bulkBansEnabled: false,
+      bulkMemberRoleChangesEnabled: false,
+      bulkMemberRoleGuildIds: [],
+      bulkMemberRoleCount: 0,
       channelCloneAuditEnabled: false,
       channelCloneGuildIds: [],
       channelCloneSourceIds: [],
@@ -472,6 +475,7 @@ function toolService(
     executeRoleOrder: unexpected,
     executeMemberNicknameChange: unexpected,
     executeMemberRoleChange: unexpected,
+    executeBulkMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
@@ -570,6 +574,7 @@ function toolService(
     planAutoModerationChange: unexpected,
     planMemberNicknameChange: unexpected,
     planMemberRoleChange: unexpected,
+    planBulkMemberRoleChange: unexpected,
     planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
     planStageInstanceChange: unexpected,
@@ -4306,6 +4311,50 @@ test("doctor and setup explain reviewed member-role scope without Discord writes
   assert.match(omitted.warnings.join("\n"), /member-roles toolset/)
 })
 
+test("doctor and setup explain independent reviewed bulk member-role scope", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      bulkMemberRoleChanges: true,
+    },
+    scopes: {
+      bulkMemberRoleGuildIds: [GUILD_ID],
+      bulkMemberRoleIds: [ROLE_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const warningPolicy = fixturePolicy({
+    capabilities: {
+      bulkMemberRoleChanges: true,
+    },
+  })
+  assert.throws(
+    () => loadFixtureConfig(warningPolicy),
+    /requires exact batch guild and role allowlists/,
+  )
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const batch = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.bulkMemberRolePolicy,
+  )
+  assert.equal(batch?.status, "pass")
+  assert.match(batch?.summary || "", /1 exact guilds and 1 exact roles/)
+  assert.match(batch?.summary || "", /complete per-target permission review/)
+  assert.match(batch?.summary || "", /sequential non-retried writes/)
+  assert.match(batch?.summary || "", /restart-safe verified checkpoints/)
+  assert.match(omitted.warnings.join("\n"), /member-roles toolset/)
+})
+
 test("doctor and setup explain reviewed member nickname scope without Discord writes", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5774,6 +5823,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_attachment_message",
     "review_automod_change",
     "review_bulk_guild_ban",
+    "review_bulk_member_role_change",
     "review_channel_clone",
     "review_channel_creation",
     "review_channel_deletion",
@@ -5900,6 +5950,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_application_role_connection_metadata_change",
     "execute_automod_change",
     "execute_bulk_guild_ban",
+    "execute_bulk_member_role_change",
     "execute_channel_clone",
     "execute_channel_deletion",
     "execute_channel_metadata_change",

@@ -152,6 +152,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   banAuditPolicy: "ban-audit-policy",
   bulkBanAuditPolicy: "bulk-ban-audit-policy",
   bulkBanChangePolicy: "bulk-ban-change-policy",
+  bulkMemberRolePolicy: "bulk-member-role-policy",
   guildPruneAuditPolicy: "guild-prune-audit-policy",
   guildPruneChangePolicy: "guild-prune-change-policy",
   botIdentity: "bot-identity",
@@ -772,6 +773,15 @@ function policyWarnings(config: ConnectorConfig): string[] {
     warnings.push("The member-role toggle is enabled but changes remain blocked because exact guild and role allowlists are both required")
   }
   if (
+    config.allowBulkMemberRoleChanges
+    && (
+      config.bulkMemberRoleGuildIds.size === 0
+      || config.bulkMemberRoleIds.size === 0
+    )
+  ) {
+    warnings.push("The bulk member-role toggle is enabled but changes remain blocked because independent exact guild and role allowlists are both required")
+  }
+  if (
     config.allowMemberVoiceAudit
     && (config.memberVoiceGuildIds.size === 0 || config.memberVoiceChannelIds.size === 0)
   ) {
@@ -1032,7 +1042,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowNicknameChanges, "member-nicknames", "Reviewed member nickname changes"],
-    [config.allowMemberRoleChanges, "member-roles", "Member role changes"],
+    [
+      config.allowMemberRoleChanges || config.allowBulkMemberRoleChanges,
+      "member-roles",
+      "Single-member and reviewed bulk member-role changes",
+    ],
     [
       config.allowMemberVoiceAudit || config.allowMemberVoiceChanges,
       "voice-moderation",
@@ -2798,6 +2812,28 @@ export async function diagnoseConnector(
         `Reviewed member-role changes are constrained to ${config.memberRoleGuildIds.size} exact guilds and ${config.memberRoleIds.size} exact roles with bounded permission-impact review and one-shot execution`,
       ))
     }
+    if (!config.allowBulkMemberRoleChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkMemberRolePolicy,
+        "pass",
+        "Reviewed bulk member-role changes are disabled",
+      ))
+    } else if (
+      config.bulkMemberRoleGuildIds.size === 0
+      || config.bulkMemberRoleIds.size === 0
+    ) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkMemberRolePolicy,
+        "warn",
+        "Bulk member-role changes are enabled, but independent exact guild and role allowlists are both required",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.bulkMemberRolePolicy,
+        "pass",
+        `Reviewed bulk member-role changes are constrained to ${config.bulkMemberRoleGuildIds.size} exact guilds and ${config.bulkMemberRoleIds.size} exact roles with complete per-target permission review, signed frontier approval, sequential non-retried writes, and restart-safe verified checkpoints`,
+      ))
+    }
     if (!config.allowNicknameChanges) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberNicknamePolicy,
@@ -4249,6 +4285,7 @@ async function inspectSmokeClient(
   for (const name of [
     "delete_messages",
     "execute_bulk_guild_ban",
+    "execute_bulk_member_role_change",
     "execute_member_moderation",
     "execute_poll_end",
   ] as const) {

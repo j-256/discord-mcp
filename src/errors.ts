@@ -70,6 +70,44 @@ export class BulkGuildBanExecutionError extends Error {
   }
 }
 
+export class BulkMemberRoleEvidenceError extends Error {
+  override name = "BulkMemberRoleEvidenceError"
+}
+
+export class BulkMemberRolePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord bulk member-role evidence does not match the reviewed plan")
+    this.name = "BulkMemberRolePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class BulkMemberRoleOperationConflictError extends Error {
+  readonly receipt: unknown
+  readonly userId: string | null
+
+  constructor(message: string, receipt: unknown, userId: string | null = null) {
+    super(message)
+    this.name = "BulkMemberRoleOperationConflictError"
+    this.receipt = receipt
+    this.userId = userId
+  }
+}
+
+export class BulkMemberRoleExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "BulkMemberRoleExecutionError"
+    this.result = result
+  }
+}
+
 export class GuildPruneEvidenceError extends Error {
   override name = "GuildPruneEvidenceError"
 }

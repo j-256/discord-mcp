@@ -31,6 +31,7 @@ import {
   CONNECTOR_ICON_MIME_TYPE,
   CONNECTOR_ICON_SIZES,
   CONNECTOR_ICON_URL,
+  CONNECTOR_LIMITS,
   CONNECTOR_NAME,
   CONNECTOR_TITLE,
   CONNECTOR_VERSION,
@@ -53,6 +54,11 @@ import {
   type BulkGuildBanPlan,
   type BulkGuildBanRequest,
 } from "../src/bulk-guild-ban-service.js"
+import {
+  normalizeBulkMemberRoleRequest,
+  type BulkMemberRolePlan,
+  type BulkMemberRoleRequest,
+} from "../src/bulk-member-role-service.js"
 import {
   normalizeGuildPruneRequest,
   type GuildPrunePlan,
@@ -332,6 +338,9 @@ import {
   AdministrationOperationConflictError,
   BulkGuildBanExecutionError,
   BulkGuildBanOperationConflictError,
+  BulkMemberRoleExecutionError,
+  BulkMemberRoleOperationConflictError,
+  BulkMemberRolePlanChangedError,
   GuildPruneExecutionError,
   GuildPruneOperationConflictError,
   AnnouncementCrosspostExecutionError,
@@ -750,6 +759,7 @@ const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
 const MEMBER_NICKNAME = "Reviewed nickname"
 const MEMBER_MODERATION_OPERATION_KEY = "member-moderation-attempt-0001"
 const BULK_GUILD_BAN_OPERATION_KEY = "bulk-guild-ban-attempt-0001"
+const BULK_MEMBER_ROLE_OPERATION_KEY = "bulk-member-role-attempt-0001"
 const GUILD_PRUNE_OPERATION_KEY = "guild-prune-attempt-0001"
 const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
@@ -6952,6 +6962,7 @@ function memberRolePlan(
       obfuscatedChannelCount: 0,
       trustedMetadataCount: 1,
     },
+    commonEvidenceDigest: "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     createdAt: "2026-08-21T00:00:00.000Z",
     digest,
     guild: {
@@ -7036,6 +7047,110 @@ function memberRolePlan(
     schemaVersion: 1,
     status: action === "none" ? "already-current" : "planned",
     warnings: ["Threads are outside the direct-channel impact proof"],
+  }
+}
+
+function bulkMemberRolePlan(
+  request: BulkMemberRoleRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): BulkMemberRolePlan {
+  const normalized = normalizeBulkMemberRoleRequest(request)
+  const targets = normalized.userIds.map((userId, index) => {
+    const childPlan = memberRolePlan({
+      action: normalized.action,
+      auditReason: normalized.auditReason,
+      guildId: normalized.guildId,
+      operationKey: `${normalized.operationKey}-child-${index + 1}`,
+      roleId: normalized.roleId,
+      userId,
+    }, digest, writeRequired ? normalized.action : "none")
+    return {
+      checkpoint: null,
+      childOperationKeyHash: operationKeyHash(
+        `${normalized.operationKey}-child-${index + 1}`,
+      ),
+      highRiskPermissionGains: childPlan.highRiskPermissionGains,
+      impact: childPlan.impact,
+      inspectionPlanDigest: childPlan.digest,
+      member: childPlan.member,
+      permission: {
+        targetBelowBot: childPlan.permission.targetBelowBot,
+        targetHighestRoleIds: childPlan.permission.targetHighestRoleIds,
+        targetHighestRolePosition: childPlan.permission.targetHighestRolePosition,
+      },
+      state: writeRequired ? "ready" as const : "already-current" as const,
+      userId,
+    }
+  })
+  const first = memberRolePlan({
+    action: normalized.action,
+    auditReason: normalized.auditReason,
+    guildId: normalized.guildId,
+    operationKey: `${normalized.operationKey}-evidence`,
+    roleId: normalized.roleId,
+    userId: normalized.userIds[0] as string,
+  }, digest, writeRequired ? normalized.action : "none")
+  const ready = writeRequired ? targets.length : 0
+  return {
+    action: normalized.action,
+    applicationId: APPLICATION_ID,
+    auditReason: normalized.auditReason,
+    botId: BOT_ID,
+    channelEvidence: first.channelEvidence,
+    commonEvidenceDigest: first.commonEvidenceDigest,
+    counts: {
+      alreadyCurrent: writeRequired ? 0 : targets.length,
+      completed: 0,
+      ready,
+      total: targets.length,
+    },
+    createdAt: "2026-08-27T00:00:00.000Z",
+    digest,
+    executionFrontier: {
+      userIds: writeRequired ? [...normalized.userIds] : [],
+    },
+    guild: first.guild,
+    highRiskPermissions: first.highRiskPermissions,
+    operation: {
+      operationKeyHash: normalized.operationKeyHash,
+      requestDigest: `hmac-sha256:${"d".repeat(64)}`,
+      status: "unreserved",
+    },
+    permission: {
+      botAdministrator: first.permission.botAdministrator,
+      botEffectivePermissionNames: first.permission.botEffectivePermissionNames,
+      botEffectivePermissions: first.permission.botEffectivePermissions,
+      botHighestRoleIds: first.permission.botHighestRoleIds,
+      botHighestRolePosition: first.permission.botHighestRolePosition,
+      channelOverwriteUnknownPermissionBits:
+        first.permission.channelOverwriteUnknownPermissionBits,
+      guildManageRoles: first.permission.guildManageRoles,
+      guildRoleUnknownPermissionBits:
+        first.permission.guildRoleUnknownPermissionBits,
+      roleBelowBot: first.permission.roleBelowBot,
+      roleOverwriteUnknownPermissionBits:
+        first.permission.roleOverwriteUnknownPermissionBits,
+      rolePermissionsSubset: first.permission.rolePermissionsSubset,
+    },
+    role: first.role,
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    targetCount: targets.length,
+    targetSetDigest: normalized.targetSetDigest,
+    targets,
+    verificationBoundary: {
+      automaticRetry: false,
+      exactReadbackPerWrite: true,
+      maximumWrites: ready,
+      rollback: "never",
+      sequence: "canonical-user-id",
+      stopOnUnsettledTarget: true,
+    },
+    warnings: [
+      "Each exact target passed complete role and channel evidence review",
+      "Writes stop on the first unsettled target and are never retried or rolled back",
+    ],
   }
 }
 
@@ -8129,6 +8244,9 @@ function fixturePolicy(): PolicyDescription {
     bulkBanAuditEnabled: false,
     bulkBanGuildIds: [],
     bulkBansEnabled: false,
+    bulkMemberRoleChangesEnabled: false,
+    bulkMemberRoleGuildIds: [],
+    bulkMemberRoleCount: 0,
     channelCloneAuditEnabled: false,
     channelCloneGuildIds: [],
     channelCloneSourceIds: [],
@@ -8327,6 +8445,10 @@ function serviceFixture(overrides: {
   bulkGuildBanDrift?: boolean
   bulkGuildBanError?: Error
   bulkGuildBanPlanDigest?: string
+  bulkMemberRoleError?: Error
+  bulkMemberRolePlanDigest?: string
+  bulkMemberRoleResultStatus?: "already-current" | "completed" | "paused"
+  bulkMemberRoleWriteRequired?: boolean
   guildPruneDrift?: boolean
   guildPruneError?: Error
   guildPrunePlanDigest?: string
@@ -8587,6 +8709,8 @@ function serviceFixture(overrides: {
     administrationPlan: 0,
     bulkGuildBanExecute: 0,
     bulkGuildBanPlan: 0,
+    bulkMemberRoleExecute: 0,
+    bulkMemberRolePlan: 0,
     guildPruneExecute: 0,
     guildPrunePlan: 0,
     attachmentExecute: 0,
@@ -11509,6 +11633,42 @@ function serviceFixture(overrides: {
         userId: request.userId,
       }
     },
+    async executeBulkMemberRoleChange(request, planDigest) {
+      if (overrides.bulkMemberRoleError) throw overrides.bulkMemberRoleError
+      calls.bulkMemberRoleExecute += 1
+      const writeRequired = overrides.bulkMemberRoleWriteRequired ?? true
+      const planned = bulkMemberRolePlan(request, planDigest, writeRequired)
+      const status = overrides.bulkMemberRoleResultStatus
+        ?? (writeRequired ? "completed" as const : "already-current" as const)
+      const executedUserIds = status === "completed"
+        ? planned.executionFrontier.userIds
+        : status === "paused"
+          ? planned.executionFrontier.userIds.slice(0, 1)
+          : []
+      const remainingUserIds = status === "paused"
+        ? planned.executionFrontier.userIds.slice(1)
+        : []
+      return {
+        action: planned.action,
+        activityId: status === "already-current"
+          ? null
+          : "activity-bulk-member-role",
+        executedTargets: executedUserIds.map((userId) => ({
+          activityId: `activity-member-role-${userId}`,
+          status: "completed" as const,
+          userId,
+        })),
+        guildId: planned.guild.id,
+        operationKeyHash: planned.operation.operationKeyHash,
+        planDigest,
+        remainingUserIds,
+        requestDigest: planned.operation.requestDigest,
+        roleId: planned.role.id,
+        schemaVersion: 1,
+        status,
+        targetSetDigest: planned.targetSetDigest,
+      }
+    },
     async executeMemberNicknameChange(request, planDigest) {
       if (overrides.memberNicknameError) throw overrides.memberNicknameError
       calls.memberNicknameExecute += 1
@@ -12507,6 +12667,14 @@ function serviceFixture(overrides: {
         overrides.memberRoleAction,
       )
     },
+    async planBulkMemberRoleChange(request) {
+      calls.bulkMemberRolePlan += 1
+      return bulkMemberRolePlan(
+        request,
+        overrides.bulkMemberRolePlanDigest || DIGEST,
+        overrides.bulkMemberRoleWriteRequired ?? true,
+      )
+    },
     async planMemberNicknameChange(request) {
       calls.memberNicknamePlan += 1
       return memberNicknamePlan(
@@ -13353,6 +13521,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_member_nickname_change",
       "plan_member_role_change",
       "execute_member_role_change",
+      "plan_bulk_member_role_change",
+      "execute_bulk_member_role_change",
       "plan_member_voice_change",
       "execute_member_voice_change",
       "plan_thread_change",
@@ -13478,6 +13648,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const memberRole = result.tools.find((tool) => (
     tool.name === "execute_member_role_change"
   ))
+  const bulkMemberRole = result.tools.find((tool) => (
+    tool.name === "execute_bulk_member_role_change"
+  ))
   const memberNickname = result.tools.find((tool) => (
     tool.name === "execute_member_nickname_change"
   ))
@@ -13540,6 +13713,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     guildPrune,
     memberNickname,
     memberRole,
+    bulkMemberRole,
     memberVoice,
     threadChange,
     roleConfiguration,
@@ -13686,6 +13860,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   assert.deepEqual(
     listedTool(result.tools, "plan_bulk_guild_ban").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "plan_bulk_member_role_change").annotations,
     {
       destructiveHint: false,
       idempotentHint: true,
@@ -14383,6 +14566,7 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
     { expected: ["plan_guild_prune"], first: "plan_guild_prune", query: "remove inactive members" },
     { expected: ["plan_member_nickname_change"], first: "plan_member_nickname_change", query: "change a member nickname" },
     { expected: ["plan_member_role_change"], first: "plan_member_role_change", query: "assign a role to a member" },
+    { expected: ["plan_bulk_member_role_change"], first: "plan_bulk_member_role_change", query: "assign a role to many members" },
     { expected: ["plan_member_voice_change"], first: "plan_member_voice_change", query: "move a member to another voice channel" },
     { expected: ["plan_channel_creation"], first: "plan_channel_creation", query: "create a channel" },
     { expected: ["plan_channel_metadata_change"], first: "plan_channel_metadata_change", query: "change a channel topic" },
@@ -14959,6 +15143,30 @@ test("progressive discovery enables the complete reviewed member-role workflow",
     [
       "plan_member_role_change",
       "execute_member_role_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
+test("progressive discovery enables the complete reviewed bulk member-role workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_bulk_member_role_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_bulk_member_role_change",
+    "plan_bulk_member_role_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_bulk_member_role_change",
+      "execute_bulk_member_role_change",
       "discover_discord_tools",
     ],
   )
@@ -15835,6 +16043,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     administrationPlan: 0,
     bulkGuildBanExecute: 0,
     bulkGuildBanPlan: 0,
+    bulkMemberRoleExecute: 0,
+    bulkMemberRolePlan: 0,
     guildPruneExecute: 0,
     guildPrunePlan: 0,
     announcementCrosspostExecute: 0,
@@ -31171,6 +31381,391 @@ test("MCP member-role changes expose uncertain, rate-limited, and conflict outco
     { status: "unavailable" },
   )
   assert.doesNotMatch(JSON.stringify(unsafeResult), new RegExp(MEMBER_ROLE_OPERATION_KEY))
+})
+
+test("MCP bulk member-role planning validates and canonicalizes the complete exact target set", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const planned = await client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: [OTHER_USER_ID, USER_ID],
+    },
+    name: "plan_bulk_member_role_change",
+  })
+  const invalidRequests = [
+    {
+      action: "replace",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: [USER_ID, OTHER_USER_ID],
+    },
+    {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: [USER_ID],
+    },
+    {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: [USER_ID, USER_ID],
+    },
+    {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: [USER_ID, `0${USER_ID}`],
+    },
+    {
+      action: "remove",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      roleId: ROLE_ID,
+      userIds: Array.from(
+        { length: CONNECTOR_LIMITS.bulkMemberRoleTargets + 1 },
+        (_, index) => `${500000000000000000n + BigInt(index)}`,
+      ),
+    },
+  ]
+  const rejected = await Promise.all(invalidRequests.map((arguments_) => (
+    client.callTool({ arguments: arguments_, name: "plan_bulk_member_role_change" })
+  )))
+
+  const structured = structuredContent(planned)
+  assert.equal(structured.status, "planned")
+  assert.equal(structured.targetCount, 2)
+  assert.deepEqual(
+    (structured.executionFrontier as { userIds: string[] }).userIds,
+    [USER_ID, OTHER_USER_ID],
+  )
+  assert.deepEqual(
+    (structured.targets as Array<{ userId: string }>).map(({ userId }) => userId),
+    [USER_ID, OTHER_USER_ID],
+  )
+  assert.match(String(structured.targetSetDigest), /^sha256:[0-9a-f]{64}$/)
+  assert.equal(rejected.every((result) => result.isError === true), true)
+  assert.equal(calls.bulkMemberRolePlan, 1)
+})
+
+test("MCP bulk member-role changes bind approval to every target and checkpoint boundary", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "add",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+      planDigest: DIGEST,
+      roleId: ROLE_ID,
+      userIds: [OTHER_USER_ID, USER_ID],
+    },
+    name: "execute_bulk_member_role_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.bulkMemberRolePlan, 1)
+  assert.equal(calls.bulkMemberRoleExecute, 1)
+  assert.match(confirmationMessage, /2 of 2 reviewed members/)
+  assert.match(confirmationMessage, /Requested action: add/)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(ROLE_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, new RegExp(OTHER_USER_ID))
+  assert.match(confirmationMessage, /Target-set digest: sha256:/)
+  assert.match(confirmationMessage, /Common evidence digest: hmac-sha256:/)
+  assert.match(confirmationMessage, /Guild permissions added: SEND_MESSAGES/)
+  assert.match(confirmationMessage, /Derived child operation key hash: sha256:/)
+  assert.match(confirmationMessage, /Fresh child inspection plan digest: hmac-sha256:/)
+  assert.match(confirmationMessage, /Child checkpoint: none/)
+  assert.match(confirmationMessage, /Selected role unknown permission bits: 0/)
+  assert.match(confirmationMessage, /Guild role inventory unknown permission bits: 0/)
+  assert.match(confirmationMessage, /Direct-channel overwrite unknown permission bits: 0/)
+  assert.match(confirmationMessage, /Selected-role overwrite unknown permission bits: 0/)
+  assert.match(confirmationMessage, /sequentially in canonical user-ID order/)
+  assert.match(confirmationMessage, /never retries or rolls back/)
+  assert.match(confirmationMessage, /fresh plan and approval/)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(
+    confirmationMessage,
+    new RegExp(operationKeyHash(BULK_MEMBER_ROLE_OPERATION_KEY)),
+  )
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(BULK_MEMBER_ROLE_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(BULK_MEMBER_ROLE_OPERATION_KEY),
+  )
+})
+
+test("MCP bulk member-role signed state rejects changed intent and accepts target reordering", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    action: "add" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+    planDigest: DIGEST,
+    roleId: ROLE_ID,
+    userIds: [OTHER_USER_ID, USER_ID],
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_bulk_member_role_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, action: "remove" },
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, operationKey: "bulk-member-role-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, roleId: ROLE_ORDERING_ANCHOR_ID },
+    { ...request, userIds: [USER_ID, GUILD_OWNER_ID] },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_bulk_member_role_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_bulk_member_role_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  const reordered = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: { ...request, userIds: [USER_ID, OTHER_USER_ID] },
+      inputResponses: {
+        confirm_bulk_member_role_change: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_bulk_member_role_change",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+  assert.equal(structuredContent(reordered).status, "completed")
+  assert.equal(fixture.calls.bulkMemberRoleExecute, 1)
+})
+
+test("MCP bulk member-role changes skip no-op approval and stop on refusal or fresh drift", async (context) => {
+  const request = {
+    action: "remove" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+    planDigest: DIGEST,
+    roleId: ROLE_ID,
+    userIds: [USER_ID, OTHER_USER_ID],
+  }
+  let currentConfirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      currentConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { bulkMemberRoleWriteRequired: false },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(currentConfirmations, 0)
+  assert.equal(current.calls.bulkMemberRoleExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.bulkMemberRoleExecute, 0)
+
+  let driftConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      driftConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { bulkMemberRolePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(driftConfirmations, 0)
+  assert.equal(changed.calls.bulkMemberRoleExecute, 0)
+})
+
+test("MCP bulk member-role changes expose safe pause, uncertainty, rate-limit, and conflict outcomes", async (context) => {
+  const request = {
+    action: "add" as const,
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: BULK_MEMBER_ROLE_OPERATION_KEY,
+    planDigest: DIGEST,
+    roleId: ROLE_ID,
+    userIds: [USER_ID, OTHER_USER_ID],
+  }
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const paused = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: { bulkMemberRoleResultStatus: "paused" },
+  })
+  const pausedResult = await paused.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(pausedResult).status, "paused")
+  assert.deepEqual(structuredContent(pausedResult).remainingUserIds, [OTHER_USER_ID])
+  assert.equal(pausedResult.isError, undefined)
+
+  const changed = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      bulkMemberRoleError: new BulkMemberRolePlanChangedError(
+        DIGEST,
+        DIFFERENT_DIGEST,
+      ),
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      bulkMemberRoleError: new BulkMemberRoleExecutionError(
+        "Discord bulk member-role outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PUT",
+    retryAfterMs: 2_500,
+    route: `/guilds/${GUILD_ID}/members/${USER_ID}/roles/${ROLE_ID}`,
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      bulkMemberRoleError: new BulkMemberRoleExecutionError(
+        "Discord bulk member-role change was rate limited",
+        { status: "uncertain" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(limitedResult).status, "rate-limited")
+  assert.equal(
+    ((structuredContent(limitedResult).error as Record<string, unknown>).retryAfterMs),
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-bulk-member-role",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(BULK_MEMBER_ROLE_OPERATION_KEY),
+    planDigest: DIGEST,
+    resourceId: ROLE_ID,
+    status: "completed",
+    timestamp: "2026-08-27T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      bulkMemberRoleError: new BulkMemberRoleOperationConflictError(
+        "Discord bulk member-role operation is already complete",
+        receipt,
+      ),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: request,
+    name: "execute_bulk_member_role_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(BULK_MEMBER_ROLE_OPERATION_KEY),
+  )
 })
 
 test("MCP member voice tools audit exact state and reject unsafe action shapes", async (context) => {

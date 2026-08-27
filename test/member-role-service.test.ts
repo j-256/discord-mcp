@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
+import { BULK_MEMBER_ROLE_AUTHORITY } from "../src/bulk-member-role-authority.js"
 import { CONNECTOR_LIMITS, SCHEMA_VERSION } from "../src/constants.js"
 import {
   DiscordApiError,
@@ -103,6 +104,9 @@ function request(
 }
 
 function policy(options: {
+  batchEnabled?: boolean
+  batchGuildIds?: readonly string[]
+  batchRoleIds?: readonly string[]
   enabled?: boolean
   guildIds?: readonly string[]
   protectedUserIds?: readonly string[]
@@ -113,9 +117,12 @@ function policy(options: {
     allowedChannelIds: new Set(),
     allowedGuildIds: new Set([GUILD_ID]),
     allowAdministration: false,
+    allowBulkMemberRoleChanges: options.batchEnabled ?? false,
     allowDeletions: false,
     allowInteractions: false,
     allowMemberRoleChanges: options.enabled ?? true,
+    bulkMemberRoleGuildIds: new Set(options.batchGuildIds || [GUILD_ID]),
+    bulkMemberRoleIds: new Set(options.batchRoleIds || [ROLE_ID]),
     deleteChannelIds: new Set(),
     interactionChannelIds: new Set(),
     interactionMaxWritesPerMinute: 10,
@@ -432,6 +439,30 @@ test("member-role planning reports exact direct-channel impact and executes one 
   assert.doesNotMatch(durable, /Private Guild Name|Support|target-user/)
   assert.doesNotMatch(durable, /Reviewed support role assignment/)
   assert.doesNotMatch(durable, new RegExp(OPERATION_KEY))
+})
+
+test("member-role batch authority uses only the independent batch policy", async () => {
+  const target = fixture({ policy: policy({ batchEnabled: true, enabled: false }) })
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, request()),
+    /member-role changes are disabled/,
+  )
+  const plan = await target.service.planForBulk(
+    BULK_MEMBER_ROLE_AUTHORITY,
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+  assert.match(plan.commonEvidenceDigest, /^hmac-sha256:[a-f0-9]{64}$/)
+  const result = await target.service.executeForBulk(
+    BULK_MEMBER_ROLE_AUTHORITY,
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+    plan.digest,
+  )
+  assert.equal(result.status, "completed")
+  assert.equal(target.events.filter((entry) => entry === "write:add").length, 1)
 })
 
 test("member-role plans and executes exact removals", async () => {

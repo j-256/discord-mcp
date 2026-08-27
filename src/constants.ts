@@ -511,6 +511,8 @@ export const CONNECTOR_LIMITS = Object.freeze({
   applicationMonetizationSubjectAllowlist: 100,
   attachmentPathCharacters: 4_096,
   bulkGuildBanReadConcurrency: 4,
+  bulkMemberRoleReadConcurrency: 4,
+  bulkMemberRoleTargets: 25,
   contentPreviewCharacters: 240,
   gatewayChannelMappings: 10_000,
   gatewayCursorCharacters: 128,

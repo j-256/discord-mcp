@@ -6809,6 +6809,110 @@ test("service coordinates one reviewed bulk guild ban over every exact member ta
   }])
 })
 
+test("service coordinates one reviewed bulk member-role frontier over every exact target", async () => {
+  const targetA = "700000000000000021"
+  const targetB = "700000000000000022"
+  const botRoleId = "800000000000000021"
+  const selectedRoleId = "800000000000000022"
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const operationStore = new KeyedMemoryOperationStore()
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildChannels() {
+        return [channel()]
+      },
+      async getGuildMember(_guildId, userId) {
+        if (userId === BOT_ID) return { roles: [botRoleId], user: bot() }
+        return {
+          pending: false,
+          roles: [],
+          user: {
+            id: userId,
+            username: userId === targetA ? "target-a" : "target-b",
+          },
+        }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "@everyone"),
+          {
+            ...role(
+              botRoleId,
+              DISCORD_PERMISSIONS.MANAGE_ROLES
+                | DISCORD_PERMISSIONS.VIEW_CHANNEL
+                | DISCORD_PERMISSIONS.SEND_MESSAGES,
+              "connector",
+            ),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+          {
+            ...role(
+              selectedRoleId,
+              DISCORD_PERMISSIONS.SEND_MESSAGES,
+              "reviewer",
+            ),
+            position: 2,
+          },
+        ]
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        bulkMemberRoleChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        bulkMemberRoleGuildIds: [GUILD_ID],
+        bulkMemberRoleIds: [selectedRoleId],
+      },
+    },
+    gateway: completeChannelGateway(),
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    action: "add" as const,
+    auditReason: "Reviewed exact batch role assignment",
+    guildId: GUILD_ID,
+    operationKey: "bulk-member-role-attempt-0001",
+    roleId: selectedRoleId,
+    userIds: [targetB, targetA],
+  }
+
+  const plan = await service.planBulkMemberRoleChange(request)
+  await assert.rejects(
+    () => service.executeBulkMemberRoleChange(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.deepEqual(plan.targets.map((target) => target.userId), [targetA, targetB])
+  assert.equal(plan.status, "planned")
+  assert.notEqual(plan.operation.requestDigest, plan.digest)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "bulk-member-role-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.operation.requestDigest,
+    targets: [
+      { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+      { id: selectedRoleId, kind: "role" },
+      { id: targetA, kind: "member" },
+      { id: targetB, kind: "member" },
+    ],
+  }])
+  assert.deepEqual(writeCoordinator.options, [{
+    releasePendingOnVerifiedPause: true,
+  }])
+})
+
 test("service coordinates one reviewed guild prune across member and exact role domains", async () => {
   const includeRoleId = "700000000000000021"
   const shieldRoleId = "700000000000000022"
@@ -7616,7 +7720,7 @@ test("service durably coordinates active guild scaffolds by request identity", a
     ],
   }])
   assert.deepEqual(writeCoordinator.options, [{
-    releasePendingScaffoldOnVerifiedPause: true,
+    releasePendingOnVerifiedPause: true,
   }])
   assert.notEqual(plan.operation.requestDigest, plan.digest)
   assert.equal(calls.createChannel, 0)

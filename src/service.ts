@@ -175,6 +175,16 @@ import {
   normalizeBulkGuildBanRequest,
 } from "./bulk-guild-ban-service.js"
 import type {
+  BulkMemberRolePlan,
+  BulkMemberRoleRequest,
+  BulkMemberRoleResult,
+  BulkMemberRoleServiceOptions,
+} from "./bulk-member-role-service.js"
+import {
+  BulkMemberRoleService,
+  normalizeBulkMemberRoleRequest,
+} from "./bulk-member-role-service.js"
+import type {
   GuildPrunePlan,
   GuildPruneRequest,
   GuildPruneResult,
@@ -295,6 +305,7 @@ import type {
 import { DiscordClient } from "./discord-client.js"
 import {
   AnnouncementSubscriptionPlanChangedError,
+  BulkMemberRolePlanChangedError,
   ChannelClonePlanChangedError,
   ChannelDeletionPlanChangedError,
   ChannelOrderingPlanChangedError,
@@ -1065,6 +1076,10 @@ export interface ConnectorServiceOptions {
     BulkGuildBanServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  bulkMemberRoleOptions?: Pick<
+    BulkMemberRoleServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
   guildPruneOptions?: Pick<
     GuildPruneServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1442,6 +1457,7 @@ export class ConnectorService {
   readonly #automodService: AutoModerationService
   readonly #banAuditService: BanAuditService
   readonly #bulkGuildBanService: BulkGuildBanService
+  readonly #bulkMemberRoleService: BulkMemberRoleService
   readonly #guildPruneService: GuildPruneService
   readonly #channelAdministrationService: ChannelAdministrationService
   readonly #channelCloneService: ChannelCloneService
@@ -1924,6 +1940,12 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.memberRoleOptions,
+    })
+    this.#bulkMemberRoleService = new BulkMemberRoleService({
+      memberRoleService: this.#memberRoleService,
+      operationStore,
+      policy: this.#policy,
+      ...options.bulkMemberRoleOptions,
     })
     this.#memberVoiceService = new MemberVoiceService({
       activityStore: this.#activityStore,
@@ -4069,6 +4091,20 @@ export class ConnectorService {
     )
   }
 
+  async planBulkMemberRoleChange(
+    request: BulkMemberRoleRequest,
+    options: RequestOptions = {},
+  ): Promise<BulkMemberRolePlan> {
+    normalizeBulkMemberRoleRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#bulkMemberRoleService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberNicknameChange(
     request: MemberNicknameChangeRequest,
     options: RequestOptions = {},
@@ -4870,6 +4906,56 @@ export class ConnectorService {
     )
   }
 
+  async executeBulkMemberRoleChange(
+    request: BulkMemberRoleRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<BulkMemberRoleResult> {
+    const normalized = normalizeBulkMemberRoleRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord bulk member-role plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#bulkMemberRoleService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new BulkMemberRolePlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    const execute = () => this.#bulkMemberRoleService.execute(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+    if (
+      coordinationPlan.status === "completed"
+      || (
+        coordinationPlan.status === "already-current"
+        && coordinationPlan.operation.status === "unreserved"
+      )
+    ) return execute()
+    return this.#coordinateWrite(
+      "bulk-member-role-change",
+      normalized.operationKey,
+      coordinationPlan.operation.requestDigest,
+      [
+        writeGuildCollectionTarget("members", normalized.guildId),
+        writeResourceTarget("role", normalized.roleId),
+        ...normalized.userIds.map((userId) => writeResourceTarget("member", userId)),
+      ],
+      execute,
+      { releasePendingOnVerifiedPause: true },
+    )
+  }
+
   async executeMemberNicknameChange(
     request: MemberNicknameChangeRequest,
     planDigest: string,
@@ -5011,7 +5097,7 @@ export class ConnectorService {
         writeGuildCollectionTarget("roles", normalized.guildId),
       ],
       execute,
-      { releasePendingScaffoldOnVerifiedPause: true },
+      { releasePendingOnVerifiedPause: true },
     )
   }
 

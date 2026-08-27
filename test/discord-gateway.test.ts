@@ -30,6 +30,7 @@ const ONBOARDING_GUILD_ID = "200000000000000004"
 const TEMPLATE_GUILD_ID = "200000000000000005"
 const CLONE_GUILD_ID = "200000000000000006"
 const SETTINGS_GUILD_ID = "200000000000000007"
+const BULK_MEMBER_ROLE_GUILD_ID = "200000000000000008"
 const CHANNEL_ID = "300000000000000001"
 const SECOND_CHANNEL_ID = "300000000000000002"
 const MESSAGE_ID = "400000000000000001"
@@ -1312,6 +1313,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", a
     ONBOARDING_GUILD_ID,
     SETTINGS_GUILD_ID,
     TEMPLATE_GUILD_ID,
+    BULK_MEMBER_ROLE_GUILD_ID,
   ]
   const gateway = new DiscordGateway({
     applicationId: APPLICATION_ID,
@@ -1321,6 +1323,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", a
       allowedGuildIds: new Set([GUILD_ID]),
       allowChannelCloneAudit: true,
       allowChannelOrderingAudit: true,
+      allowBulkMemberRoleChanges: true,
       allowGateway: true,
       allowGuildSettingsAudit: true,
       allowGuildTemplateAudit: true,
@@ -1328,6 +1331,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", a
       allowOnboardingAudit: true,
       channelCloneGuildIds: new Set([CLONE_GUILD_ID]),
       channelOrderingGuildIds: new Set([ORDERING_GUILD_ID]),
+      bulkMemberRoleGuildIds: new Set([BULK_MEMBER_ROLE_GUILD_ID]),
       expectedBotId: BOT_ID,
       gatewayEventBufferSize: 10,
       guildSettingsGuildIds: new Set([SETTINGS_GUILD_ID]),
@@ -1353,7 +1357,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", a
     },
   })
 
-  assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 7)
+  assert.equal(gateway.getChannelLayoutStatus().guilds.scoped, 8)
   assert.equal(gateway.getChannelLayout(CLONE_GUILD_ID).state, "pending")
   assert.equal(gateway.getChannelLayout(GUILD_ID).state, "pending")
   assert.equal(gateway.getChannelLayout(ORDERING_GUILD_ID).state, "pending")
@@ -1361,6 +1365,7 @@ test("Gateway layout scope unions every enabled channel-completeness feature", a
   assert.equal(gateway.getChannelLayout(ONBOARDING_GUILD_ID).state, "pending")
   assert.equal(gateway.getChannelLayout(SETTINGS_GUILD_ID).state, "pending")
   assert.equal(gateway.getChannelLayout(TEMPLATE_GUILD_ID).state, "pending")
+  assert.equal(gateway.getChannelLayout(BULK_MEMBER_ROLE_GUILD_ID).state, "pending")
   await gateway.start()
   const activeShardCount = new Set(
     layoutGuildIds.map((guildId) => calculateGatewayShardId(guildId, 8)),
