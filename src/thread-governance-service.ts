@@ -123,6 +123,8 @@ interface ThreadChangeRequestBase {
 export type ThreadChangeRequest = ThreadChangeRequestBase & (
   | { action: "add-member"; userId: string }
   | { action: "archive" }
+  | { action: "join" }
+  | { action: "leave" }
   | { action: "lock" }
   | { action: "remove-member"; userId: string }
   | { action: "rename"; name: string }
@@ -144,6 +146,8 @@ interface NormalizedThreadChangeRequestBase {
 export type NormalizedThreadChangeRequest = NormalizedThreadChangeRequestBase & (
   | { action: "add-member"; userId: string }
   | { action: "archive" }
+  | { action: "join" }
+  | { action: "leave" }
   | { action: "lock" }
   | { action: "remove-member"; userId: string }
   | { action: "rename"; name: string }
@@ -221,7 +225,7 @@ export interface ThreadMembershipAuditResult extends ThreadStateAuditResult {
 export interface ThreadChangePlan extends Omit<ThreadStateAuditResult, "status"> {
   action: ThreadChangeAction
   auditReason: string
-  authorizationBasis: "already-current" | "connector-owner" | "manage-threads" | "member-send"
+  authorizationBasis: "already-current" | "connector-owner" | "manage-threads" | "member-send" | "self-membership"
   createdAt: string
   desired: {
     field: "archived" | "autoArchiveDuration" | "invitable" | "locked" | "membership" | "name" | "rateLimitPerUser"
@@ -273,6 +277,8 @@ export interface ThreadGovernanceServiceOptions {
     | "getGuildRoles"
     | "getThreadMember"
     | "getThreadState"
+    | "joinThread"
+    | "leaveThread"
     | "modifyThreadState"
     | "removeThreadMember"
   >
@@ -833,6 +839,18 @@ function targetUserId(request: NormalizedThreadChangeRequest): string | null {
   return "userId" in request ? request.userId : null
 }
 
+function selfMembershipAction(request: NormalizedThreadChangeRequest): boolean {
+  return request.action === "join" || request.action === "leave"
+}
+
+function membershipUserId(
+  request: NormalizedThreadChangeRequest,
+  botId: string,
+): string | null {
+  if ("userId" in request) return request.userId
+  return selfMembershipAction(request) ? botId : null
+}
+
 function desiredState(request: NormalizedThreadChangeRequest): ThreadChangePlan["desired"] {
   if (request.action === "rename") return { field: "name", value: request.name }
   if (request.action === "archive") return { field: "archived", value: true }
@@ -848,7 +866,10 @@ function desiredState(request: NormalizedThreadChangeRequest): ThreadChangePlan[
   if (request.action === "set-invitable") {
     return { field: "invitable", value: request.enabled }
   }
-  return { field: "membership", value: request.action === "add-member" }
+  return {
+    field: "membership",
+    value: request.action === "add-member" || request.action === "join",
+  }
 }
 
 function writeRequired(
@@ -868,7 +889,9 @@ function writeRequired(
     return thread.rateLimitPerUser !== request.rateLimitPerUser
   }
   if (request.action === "set-invitable") return thread.invitable !== request.enabled
-  if (request.action === "add-member") return membership === null
+  if (request.action === "add-member" || request.action === "join") {
+    return membership === null
+  }
   return membership !== null
 }
 
@@ -884,6 +907,17 @@ function authorizationBasis(
   const canSend = hasPermission(state.connectorPermission, "SEND_MESSAGES_IN_THREADS")
   if (request.action !== "unarchive" && state.thread.archived) {
     throw evidenceError("Discord thread must be active before this change")
+  }
+  if (request.action === "join" || request.action === "leave") {
+    if (
+      state.thread.type === DISCORD_CHANNEL_TYPES.privateThread
+      && !managesThreads
+    ) {
+      throw evidenceError(
+        "Discord private-thread self-membership changes require MANAGE_THREADS for complete access and readback evidence",
+      )
+    }
+    return managesThreads ? "manage-threads" : "self-membership"
   }
   if (
     (request.action === "add-member" || request.action === "remove-member")
@@ -960,8 +994,14 @@ function actionWarnings(
     ...(state.targetMembership && (state.targetMembership.unknown_field_count ?? 0) > 0
       ? ["Discord target membership contains unknown fields whose values were discarded"]
       : []),
-    ...(request.action === "add-member" || request.action === "remove-member"
+    ...(request.action === "add-member"
+      || request.action === "join"
+      || request.action === "leave"
+      || request.action === "remove-member"
       ? ["Discord does not document an audit-log reason header for thread-member endpoints; the reviewed reason is recorded only in the transient plan"]
+      : []),
+    ...(request.action === "leave" && state.thread.type === DISCORD_CHANNEL_TYPES.privateThread
+      ? ["Leaving removes the connector's explicit private-thread membership; MANAGE_THREADS is required so exact post-write evidence remains available"]
       : []),
     "Same-thread serialization and uncertainty quarantine are process-local",
     "The operation key is one-shot and cannot be retried after reservation",
@@ -976,17 +1016,21 @@ function actionRisks(
   if (!write) return []
   const effect = request.action === "add-member"
     ? "The exact member will gain access to and notifications from the reviewed thread"
-    : request.action === "remove-member"
-      ? "The exact member will lose explicit membership in the reviewed thread"
-      : request.action === "archive"
-        ? "The reviewed thread will become archived and ordinary activity will stop"
-        : request.action === "unarchive"
-          ? "The reviewed thread will become active and resume ordinary activity"
-          : request.action === "lock"
-            ? "The reviewed thread will restrict non-moderator activity"
-            : request.action === "unlock"
-              ? "The reviewed thread will permit ordinary member activity again"
-              : "One reviewed thread metadata field will change immediately"
+    : request.action === "join"
+      ? "The connector bot will gain explicit membership in the reviewed thread"
+      : request.action === "leave"
+        ? "The connector bot will lose explicit membership in the reviewed thread and may receive fewer thread notifications"
+        : request.action === "remove-member"
+          ? "The exact member will lose explicit membership in the reviewed thread"
+          : request.action === "archive"
+            ? "The reviewed thread will become archived and ordinary activity will stop"
+            : request.action === "unarchive"
+              ? "The reviewed thread will become active and resume ordinary activity"
+              : request.action === "lock"
+                ? "The reviewed thread will restrict non-moderator activity"
+                : request.action === "unlock"
+                  ? "The reviewed thread will permit ordinary member activity again"
+                  : "One reviewed thread metadata field will change immediately"
   return [
     effect,
     "A transport or readback failure after dispatch creates an uncertain outcome that blocks later same-thread changes in this process",
@@ -1406,7 +1450,9 @@ export class ThreadGovernanceService {
     }
     const membership = request.action === "add-member" || request.action === "remove-member"
       ? state.targetMembership
-      : null
+      : selfMembershipAction(request)
+        ? state.connectorMembership
+        : null
     const requiresWrite = writeRequired(request, state.thread, membership)
     if (requiresWrite && request.action === "add-member") {
       if (!state.targetMember || !state.targetPermission) {
@@ -1440,8 +1486,9 @@ export class ThreadGovernanceService {
     const desired = desiredState(request)
     const privacy = privacyProjection()
     const currentThread = threadView(state.thread)
-    const currentMembership = "userId" in request
-      ? membershipView(request.userId, state.targetMembership)
+    const controlledMembershipUserId = membershipUserId(request, botId)
+    const currentMembership = controlledMembershipUserId
+      ? membershipView(controlledMembershipUserId, membership)
       : null
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
@@ -1692,6 +1739,12 @@ export class ThreadGovernanceService {
       } else if (request.action === "add-member") {
         await this.#client.addThreadMember(request.threadId, request.userId, options)
         mutationReturned = true
+      } else if (request.action === "join") {
+        await this.#client.joinThread(request.threadId, options)
+        mutationReturned = true
+      } else if (request.action === "leave") {
+        await this.#client.leaveThread(request.threadId, options)
+        mutationReturned = true
       } else if (request.action === "remove-member") {
         await this.#client.removeThreadMember(request.threadId, request.userId, options)
         mutationReturned = true
@@ -1717,16 +1770,19 @@ export class ThreadGovernanceService {
         ...driftFields,
         ...threadDrift(before, observedThread, request),
       ])]
-      if (request.action === "add-member" || request.action === "remove-member") {
+      const readbackUserId = membershipUserId(request, botId)
+      if (readbackUserId) {
         observedMembership = await optionalThreadMember(
           this.#client,
           request.threadId,
-          request.userId,
+          readbackUserId,
           options,
         )
         if (
-          (request.action === "add-member" && observedMembership === null)
-          || (request.action === "remove-member" && observedMembership !== null)
+          ((request.action === "add-member" || request.action === "join")
+            && observedMembership === null)
+          || ((request.action === "leave" || request.action === "remove-member")
+            && observedMembership !== null)
         ) {
           throw evidenceError("Discord thread membership readback did not match the controlled state")
         }
@@ -1791,12 +1847,13 @@ export class ThreadGovernanceService {
     }
     const verification = driftFields.length > 0 ? "drift" : "match"
     const status = verification === "match" ? "completed" : "completed-with-drift"
+    const observedMembershipUserId = membershipUserId(request, botId)
     const result: ThreadChangeResult = {
       ...baseResult,
       activityId,
       driftFields,
-      observedMembership: "userId" in request
-        ? membershipView(request.userId, observedMembership)
+      observedMembership: observedMembershipUserId
+        ? membershipView(observedMembershipUserId, observedMembership)
         : null,
       observedThread: threadView(observedThread),
       status,

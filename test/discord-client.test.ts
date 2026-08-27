@@ -3971,6 +3971,8 @@ test("Discord client projects exact thread state and membership with one-field w
     "Reviewed thread / case 42",
   )).name, "incident-review-renamed")
   await client.addThreadMember("200", "500")
+  await client.joinThread("200")
+  await client.leaveThread("200")
   await client.removeThreadMember("200", "500")
 
   assert.deepEqual(requests, [
@@ -3997,6 +3999,18 @@ test("Discord client projects exact thread state and membership with one-field w
       method: "PUT",
       reason: null,
       url: `${API_BASE_URL}/channels/200/thread-members/500`,
+    },
+    {
+      body: null,
+      method: "PUT",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200/thread-members/@me`,
+    },
+    {
+      body: null,
+      method: "DELETE",
+      reason: null,
+      url: `${API_BASE_URL}/channels/200/thread-members/@me`,
     },
     {
       body: null,
@@ -4095,7 +4109,25 @@ test("Discord client rejects malformed thread evidence and never retries governa
       return true
     },
   )
-  assert.equal(requests, 1)
+  await assert.rejects(
+    rateLimited.joinThread("200"),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes("private thread failure"), false)
+      return true
+    },
+  )
+  await assert.rejects(
+    rateLimited.leaveThread("200"),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes("private thread failure"), false)
+      return true
+    },
+  )
+  assert.equal(requests, 3)
   assert.equal(sleeps, 0)
 })
 

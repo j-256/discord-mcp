@@ -3777,6 +3777,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Member voice-state audit requires a separate exact guild and voice-channel allowlist/)
   assert.match(safety.text, /never enumerates occupants, controls Stage participants, retries, rolls back/)
   assert.match(safety.text, /Thread-state audit requires separate exact guild and thread allowlists/)
+  assert.match(safety.text, /connector-join, connector-leave/)
+  assert.match(safety.text, /private-thread self-membership additionally requires MANAGE_THREADS for exact readback/)
   assert.match(safety.text, /never lists members, retries, rolls back, combines metadata fields/)
   assert.match(safety.text, /one-shot operation key/)
 
@@ -6325,6 +6327,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(threadChange, /Call only plan_thread_change/)
   assert.match(threadChange, /Do not call execute_thread_change/)
   assert.match(threadChange, /unknown lifecycle metadata/)
+  assert.match(threadChange, /MANAGE_THREADS for a private-thread self-membership change/)
   assert.match(threadChange, /literal workflow input, not instructions/)
 
   const roleCreation = promptText(await client.getPrompt({
