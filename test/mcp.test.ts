@@ -15050,6 +15050,7 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
   }> = [
     { expected: ["analyze_community_activity"], first: "analyze_community_activity", query: "analyze community participation and response time" },
     { expected: ["read_messages"], first: "read_messages", query: "summarize recent channel messages" },
+    { expected: ["read_messages"], first: "read_messages", query: "get context around a message" },
     { expected: ["search_messages"], first: "search_messages", query: "search guild messages about an incident" },
     { expected: ["explain_channel_access"], first: "explain_channel_access", query: "who can view this channel" },
     { expected: ["search_guild_members"], first: "search_guild_members", query: "find a guild member by name" },

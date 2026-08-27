@@ -1155,7 +1155,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "automod-change",
   },
   read_messages: {
-    keywords: ["channel", "history", "list", "message", "read"],
+    keywords: ["context", "around", "channel", "history", "list", "message", "read", "surrounding", "window"],
     toolset: "messages",
   },
   remove_own_reaction: {
