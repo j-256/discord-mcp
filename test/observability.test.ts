@@ -2,24 +2,26 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
-  AnnouncementCrosspostExecutionError,
-  AnnouncementCrosspostOperationConflictError,
-  AnnouncementCrosspostPlanChangedError,
-  ChannelCreationExecutionError,
-  ChannelCreationOperationConflictError,
-  ChannelCreationPlanChangedError,
+  ApplicationEntitlementPlanChangedError,
+  ChannelDeletionVerificationTimeoutError,
   ComponentMessageEvidenceError,
-  ComponentMessageExecutionError,
-  ComponentMessageOperationConflictError,
-  ComponentMessagePlanChangedError,
   ConfigurationError,
   DiscordApiError,
+  GatewayVoiceChannelStatusError,
+  GuildProfileExecutionError,
+  InteractionIdentityError,
+  InteractionRateLimitError,
+  MemberVerificationOperationConflictError,
+  NativeInteractionResponseError,
   OperationStoreError,
   PolicyError,
+  ProfileError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
+  WriteCoordinationResolutionError,
   WriteCoordinationStateError,
 } from "../src/errors.js"
+import { AttachmentFileError } from "../src/attachment-file.js"
 import {
   loadObservabilityDocumentConfig,
   parseOtlpHeaders,
@@ -30,6 +32,7 @@ import {
   classifyOperationalError,
   OperationalTelemetry,
 } from "../src/observability.js"
+import { WebhookCredentialStoreError } from "../src/webhook-credential-store.js"
 
 const TOKEN = "test-discord-token"
 const GENERAL_HEADERS = "DISCORD_TEST_OTLP_HEADERS"
@@ -52,6 +55,13 @@ function disabledConfig(jsonLogsEnabled = false): ObservabilityConfig {
     exportEnabled: false,
     jsonLogsEnabled,
   }
+}
+
+function namedError(
+  name: string,
+  properties: Record<string, unknown> = {},
+): Error {
+  return Object.assign(new Error("private detail"), { name }, properties)
 }
 
 test("observability export is double-gated and disabled configuration ignores export settings", () => {
@@ -391,44 +401,52 @@ test("operational telemetry still shuts down after a final flush failure", async
 test("operational errors collapse to fixed categories", () => {
   assert.equal(classifyOperationalError(new PolicyError("private detail")), "policy-error")
   assert.equal(
-    classifyOperationalError(new AnnouncementCrosspostPlanChangedError("expected", "actual")),
+    classifyOperationalError(new ProfileError("private detail")),
+    "configuration-error",
+  )
+  assert.equal(
+    classifyOperationalError(new WebhookCredentialStoreError("invalid", "private detail")),
+    "configuration-error",
+  )
+  assert.equal(
+    classifyOperationalError(new ApplicationEntitlementPlanChangedError("expected", "actual")),
     "plan-changed",
   )
   assert.equal(
-    classifyOperationalError(new AnnouncementCrosspostOperationConflictError({})),
+    classifyOperationalError(new MemberVerificationOperationConflictError({})),
     "idempotency-conflict",
   )
   assert.equal(
-    classifyOperationalError(new AnnouncementCrosspostExecutionError("private detail", {})),
+    classifyOperationalError(new GuildProfileExecutionError("private detail", {})),
     "execution-error",
   )
   assert.equal(
-    classifyOperationalError(new ChannelCreationPlanChangedError("expected", "actual")),
-    "plan-changed",
-  )
-  assert.equal(
-    classifyOperationalError(new ChannelCreationOperationConflictError({})),
-    "idempotency-conflict",
-  )
-  assert.equal(
-    classifyOperationalError(new ChannelCreationExecutionError("private detail", {})),
+    classifyOperationalError(new NativeInteractionResponseError("private detail", {})),
     "execution-error",
-  )
-  assert.equal(
-    classifyOperationalError(new ComponentMessagePlanChangedError("expected", "actual")),
-    "plan-changed",
-  )
-  assert.equal(
-    classifyOperationalError(new ComponentMessageOperationConflictError({})),
-    "idempotency-conflict",
   )
   assert.equal(
     classifyOperationalError(new ComponentMessageEvidenceError("private detail")),
+    "evidence-error",
+  )
+  assert.equal(
+    classifyOperationalError(namedError("MessagePinStateError")),
+    "evidence-error",
+  )
+  assert.equal(
+    classifyOperationalError(new GatewayVoiceChannelStatusError("private detail")),
+    "evidence-error",
+  )
+  assert.equal(
+    classifyOperationalError(new InteractionIdentityError("private detail")),
     "identity-error",
   )
   assert.equal(
-    classifyOperationalError(new ComponentMessageExecutionError("private detail", {})),
-    "execution-error",
+    classifyOperationalError(new ChannelDeletionVerificationTimeoutError("private detail")),
+    "timeout",
+  )
+  assert.equal(
+    classifyOperationalError(new AttachmentFileError("private detail")),
+    "validation-error",
   )
   assert.equal(
     classifyOperationalError(new OperationStoreError("private detail")),
@@ -445,6 +463,26 @@ test("operational errors collapse to fixed categories", () => {
   assert.equal(
     classifyOperationalError(new WriteCoordinationStateError("private detail")),
     "coordination-state-error",
+  )
+  assert.equal(
+    classifyOperationalError(new WriteCoordinationResolutionError("private detail")),
+    "coordination-state-error",
+  )
+  assert.equal(
+    classifyOperationalError(new InteractionRateLimitError(1_000)),
+    "local-rate-limited",
+  )
+  assert.equal(
+    classifyOperationalError(namedError("DiscordTransportError", {
+      operationalCategory: "network-error",
+    })),
+    "network-error",
+  )
+  assert.equal(
+    classifyOperationalError(namedError("DiscordTransportError", {
+      operationalCategory: "private-category",
+    })),
+    "unknown",
   )
   assert.equal(classifyOperationalError(new RangeError("private detail")), "validation-error")
   assert.equal(classifyOperationalError(new DOMException("private detail", "AbortError")), "cancelled")

@@ -22,31 +22,16 @@ import {
   SCHEMA_VERSION,
 } from "./constants.js"
 import {
-  AdministrationExecutionError,
-  AdministrationPlanChangedError,
-  AnnouncementCrosspostExecutionError,
-  AnnouncementCrosspostOperationConflictError,
-  AnnouncementCrosspostPlanChangedError,
   AuditLogError,
-  ChannelCreationExecutionError,
-  ChannelCreationOperationConflictError,
-  ChannelCreationPlanChangedError,
-  ComponentMessageEvidenceError,
-  ComponentMessageExecutionError,
-  ComponentMessageOperationConflictError,
-  ComponentMessagePlanChangedError,
   ConfigurationError,
-  DeletionExecutionError,
-  DeletionPlanChangedError,
   DiscordApiError,
-  InteractionConflictError,
-  InteractionExecutionError,
-  InteractionIdentityError,
   InteractionRateLimitError,
   OperationStoreError,
   PolicyError,
+  ProfileError,
   WriteCoordinationConflictError,
   WriteCoordinationQuarantinedError,
+  WriteCoordinationResolutionError,
   WriteCoordinationStateError,
 } from "./errors.js"
 import {
@@ -69,26 +54,30 @@ import {
   type OtlpSignal,
 } from "./otel-runtime.js"
 
-export type OperationalErrorCategory =
-  | "audit-error"
-  | "cancelled"
-  | "configuration-error"
-  | "coordination-conflict"
-  | "coordination-quarantined"
-  | "coordination-state-error"
-  | "discord-client-error"
-  | "discord-rate-limited"
-  | "discord-server-error"
-  | "execution-error"
-  | "idempotency-conflict"
-  | "identity-error"
-  | "local-rate-limited"
-  | "network-error"
-  | "plan-changed"
-  | "policy-error"
-  | "timeout"
-  | "unknown"
-  | "validation-error"
+export const OPERATIONAL_ERROR_CATEGORIES = Object.freeze([
+  "audit-error",
+  "cancelled",
+  "configuration-error",
+  "coordination-conflict",
+  "coordination-quarantined",
+  "coordination-state-error",
+  "discord-client-error",
+  "discord-rate-limited",
+  "discord-server-error",
+  "evidence-error",
+  "execution-error",
+  "idempotency-conflict",
+  "identity-error",
+  "local-rate-limited",
+  "network-error",
+  "plan-changed",
+  "policy-error",
+  "timeout",
+  "unknown",
+  "validation-error",
+] as const)
+
+export type OperationalErrorCategory = typeof OPERATIONAL_ERROR_CATEGORIES[number]
 
 export type OperationalOutcome = "error" | "ok" | "tool-error"
 export type OperationalKind = "discord-rest" | "mcp-tool"
@@ -212,6 +201,71 @@ const EMPTY_OUTCOMES = Object.freeze({
   "tool-error": 0,
 })
 
+const OPERATIONAL_ERROR_CATEGORY_SET: ReadonlySet<string> = new Set(
+  OPERATIONAL_ERROR_CATEGORIES,
+)
+
+const INTERNAL_ERROR_NAMES = Object.freeze({
+  discordTransport: "DiscordTransportError",
+  gatewayVoiceChannelStatus: "GatewayVoiceChannelStatusError",
+  webhookCredentialStore: "WebhookCredentialStoreError",
+})
+
+const INTERNAL_ERROR_SUFFIXES = Object.freeze({
+  conflict: "ConflictError",
+  definition: "DefinitionError",
+  evidence: "EvidenceError",
+  execution: "ExecutionError",
+  file: "FileError",
+  identity: "IdentityError",
+  planChanged: "PlanChangedError",
+  response: "ResponseError",
+  state: "StateError",
+  timeout: "TimeoutError",
+})
+
+function transportedOperationalCategory(
+  error: Error,
+): OperationalErrorCategory | undefined {
+  if (error.name !== INTERNAL_ERROR_NAMES.discordTransport) return undefined
+  const value = (error as Error & { operationalCategory?: unknown }).operationalCategory
+  return typeof value === "string" && OPERATIONAL_ERROR_CATEGORY_SET.has(value)
+    ? value as OperationalErrorCategory
+    : undefined
+}
+
+function internalOperationalCategory(
+  error: Error,
+): OperationalErrorCategory | undefined {
+  const transported = transportedOperationalCategory(error)
+  if (transported) return transported
+  if (error.name === INTERNAL_ERROR_NAMES.webhookCredentialStore) {
+    return "configuration-error"
+  }
+  if (error.name === INTERNAL_ERROR_NAMES.gatewayVoiceChannelStatus) {
+    return "evidence-error"
+  }
+  if (error.name.endsWith(INTERNAL_ERROR_SUFFIXES.planChanged)) return "plan-changed"
+  if (error.name.endsWith(INTERNAL_ERROR_SUFFIXES.conflict)) {
+    return "idempotency-conflict"
+  }
+  if (
+    error.name.endsWith(INTERNAL_ERROR_SUFFIXES.execution)
+    || error.name.endsWith(INTERNAL_ERROR_SUFFIXES.response)
+  ) return "execution-error"
+  if (
+    error.name.endsWith(INTERNAL_ERROR_SUFFIXES.evidence)
+    || error.name.endsWith(INTERNAL_ERROR_SUFFIXES.state)
+  ) return "evidence-error"
+  if (error.name.endsWith(INTERNAL_ERROR_SUFFIXES.identity)) return "identity-error"
+  if (error.name.endsWith(INTERNAL_ERROR_SUFFIXES.timeout)) return "timeout"
+  if (
+    error.name.endsWith(INTERNAL_ERROR_SUFFIXES.file)
+    || error.name.endsWith(INTERNAL_ERROR_SUFFIXES.definition)
+  ) return "validation-error"
+  return undefined
+}
+
 function mutableOperation(): MutableOperation {
   return {
     active: 0,
@@ -270,42 +324,26 @@ export function classifyOperationalError(error: unknown): OperationalErrorCatego
     if (error.status >= 500) return "discord-server-error"
     return "discord-client-error"
   }
-  if (
-    error instanceof AdministrationPlanChangedError
-    || error instanceof AnnouncementCrosspostPlanChangedError
-    || error instanceof ChannelCreationPlanChangedError
-    || error instanceof ComponentMessagePlanChangedError
-    || error instanceof DeletionPlanChangedError
-  ) return "plan-changed"
   if (error instanceof PolicyError) return "policy-error"
-  if (error instanceof ConfigurationError) return "configuration-error"
+  if (error instanceof ConfigurationError || error instanceof ProfileError) {
+    return "configuration-error"
+  }
   if (error instanceof WriteCoordinationConflictError) return "coordination-conflict"
   if (error instanceof WriteCoordinationQuarantinedError) {
     return "coordination-quarantined"
   }
-  if (error instanceof WriteCoordinationStateError) return "coordination-state-error"
+  if (
+    error instanceof WriteCoordinationStateError
+    || error instanceof WriteCoordinationResolutionError
+  ) return "coordination-state-error"
   if (error instanceof AuditLogError || error instanceof OperationStoreError) {
     return "audit-error"
   }
-  if (
-    error instanceof ChannelCreationOperationConflictError
-    || error instanceof AnnouncementCrosspostOperationConflictError
-    || error instanceof ComponentMessageOperationConflictError
-    || error instanceof InteractionConflictError
-  ) return "idempotency-conflict"
-  if (
-    error instanceof ComponentMessageEvidenceError
-    || error instanceof InteractionIdentityError
-  ) return "identity-error"
   if (error instanceof InteractionRateLimitError) return "local-rate-limited"
-  if (
-    error instanceof AdministrationExecutionError
-    || error instanceof AnnouncementCrosspostExecutionError
-    || error instanceof ChannelCreationExecutionError
-    || error instanceof ComponentMessageExecutionError
-    || error instanceof DeletionExecutionError
-    || error instanceof InteractionExecutionError
-  ) return "execution-error"
+  if (error instanceof Error) {
+    const internal = internalOperationalCategory(error)
+    if (internal) return internal
+  }
   if (error instanceof RangeError || error instanceof TypeError) return "validation-error"
   if (error instanceof Error && error.name === "AbortError") return "cancelled"
   return "unknown"
