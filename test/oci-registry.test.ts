@@ -4,6 +4,17 @@ import test from "node:test"
 import { pathToFileURL } from "node:url"
 
 interface OciRegistryModule {
+  followGitHubOciBlobRedirect(
+    response: Response,
+    options: { accept: string; expectedDigest: string },
+  ): Promise<Response>
+  requestGitHubOciBlob(options: {
+    accept: string
+    expectedDigest: string
+    repository: string
+    token: string
+    url: string
+  }): Promise<{ response: Response; token: string }>
   inspectAuthenticatedOciTag(input: {
     reference: string
     token: string
@@ -26,7 +37,7 @@ interface OciRegistryModule {
     configFormat: string
     layerDigests: string[]
   }
-  validateInTotoStatement(statement: unknown, expectedPredicateType: string): {
+  validateInTotoStatement(statement: unknown, expectedPredicateType: string, expectedSubject?: unknown[]): {
     predicateType: string
     statementType: string
   }
@@ -45,6 +56,8 @@ const modulePath = pathToFileURL(resolve("scripts/oci-registry.mjs")).href
 const oci = await import(modulePath) as OciRegistryModule
 const VERSION = "0.1.0"
 const REVISION = "a".repeat(40)
+const IMAGE_CONFIG_MEDIA_TYPE = "application/vnd.oci.image.config.v1+json"
+const GHCR_BLOB_CDN_ORIGIN = "https://pkg-containers.githubusercontent.com"
 
 function digest(character: string): string {
   return `sha256:${character.repeat(64)}`
@@ -338,6 +351,113 @@ test("rejects an oversized registry token response while streaming", async () =>
   }
 })
 
+test("requests a GHCR blob with manual redirect handling and strips registry credentials from the CDN hop", async () => {
+  const expectedDigest = digest("e")
+  const registryUrl = `https://ghcr.io/v2/j-256/discord-mcp/blobs/${expectedDigest}`
+  const redirectUrl = `${GHCR_BLOB_CDN_ORIGIN}/ghcr1/blobs/${expectedDigest}?signature=opaque`
+  const originalFetch = globalThis.fetch
+  let requestCount = 0
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    requestCount += 1
+    const headers = new Headers(init?.headers)
+    assert.equal(headers.get("accept"), IMAGE_CONFIG_MEDIA_TYPE)
+    if (requestCount === 1) {
+      assert.equal(String(input), registryUrl)
+      assert.equal(init?.redirect, "manual")
+      assert.equal(headers.get("authorization"), "Bearer registry-bearer")
+      return new Response(null, {
+        headers: { location: redirectUrl },
+        status: 307,
+      })
+    }
+    assert.equal(String(input), redirectUrl)
+    assert.equal(init?.redirect, "error")
+    assert.equal(headers.get("authorization"), null)
+    return Response.json({ verified: true })
+  }) as typeof fetch
+  try {
+    const result = await oci.requestGitHubOciBlob({
+      accept: IMAGE_CONFIG_MEDIA_TYPE,
+      expectedDigest,
+      repository: "j-256/discord-mcp",
+      token: "registry-bearer",
+      url: registryUrl,
+    })
+    assert.equal(result.response.status, 200)
+    assert.equal(result.token, "registry-bearer")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(requestCount, 2)
+})
+
+test("rejects unsafe GHCR blob redirect targets before fetching", async () => {
+  const expectedDigest = digest("e")
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new Error("unsafe redirect must not be fetched")
+  }) as typeof fetch
+  const unsafeTargets = [
+    `https://example.invalid/ghcrblobs11/blobs/${expectedDigest}`,
+    `${GHCR_BLOB_CDN_ORIGIN}/unexpected/blobs/${expectedDigest}`,
+    `${GHCR_BLOB_CDN_ORIGIN}/ghcrblobs11/blobs/${digest("f")}`,
+    `https://user@pkg-containers.githubusercontent.com/ghcrblobs11/blobs/${expectedDigest}`,
+  ]
+  try {
+    for (const location of unsafeTargets) {
+      await assert.rejects(
+        oci.followGitHubOciBlobRedirect(new Response(null, {
+          headers: { location },
+          status: 307,
+        }), {
+          accept: IMAGE_CONFIG_MEDIA_TYPE,
+          expectedDigest,
+        }),
+      )
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("does not follow other redirect statuses or a second CDN redirect", async () => {
+  const expectedDigest = digest("e")
+  const redirectUrl = `${GHCR_BLOB_CDN_ORIGIN}/ghcrblobs11/blobs/${expectedDigest}?signature=opaque`
+  const originalFetch = globalThis.fetch
+  let requestCount = 0
+  globalThis.fetch = (async () => {
+    requestCount += 1
+    return new Response(null, {
+      headers: { location: `${GHCR_BLOB_CDN_ORIGIN}/unexpected` },
+      status: 307,
+    })
+  }) as typeof fetch
+  try {
+    const unhandled = new Response(null, {
+      headers: { location: redirectUrl },
+      status: 302,
+    })
+    assert.equal(await oci.followGitHubOciBlobRedirect(unhandled, {
+      accept: IMAGE_CONFIG_MEDIA_TYPE,
+      expectedDigest,
+    }), unhandled)
+    assert.equal(requestCount, 0)
+    await assert.rejects(
+      oci.followGitHubOciBlobRedirect(new Response(null, {
+        headers: { location: redirectUrl },
+        status: 307,
+      }), {
+        accept: IMAGE_CONFIG_MEDIA_TYPE,
+        expectedDigest,
+      }),
+      /another redirect/u,
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(requestCount, 1)
+})
+
 test("requires two release platforms with one bound attestation each", () => {
   const result = oci.validateOciIndex(validIndex())
   assert.deepEqual(result.platforms, ["linux/amd64", "linux/arm64"])
@@ -477,6 +597,21 @@ test("requires ordinary image layers and both BuildKit evidence predicates", () 
   assert.equal(
     oci.validateInTotoStatement(validSpdxStatement(), "https://spdx.dev/Document").predicateType,
     "https://spdx.dev/Document",
+  )
+
+  const publishedSubject = [{
+    digest: { sha256: "d".repeat(64) },
+    name: `pkg:docker/ghcr.io/j-256/discord-mcp@${VERSION}?platform=linux%2Famd64`,
+  }]
+  const boundStatement = validProvenanceStatement() as { subject: unknown[] }
+  boundStatement.subject = structuredClone(publishedSubject)
+  assert.equal(
+    oci.validateInTotoStatement(
+      boundStatement,
+      "https://slsa.dev/provenance/v1",
+      publishedSubject,
+    ).statementType,
+    "https://in-toto.io/Statement/v1",
   )
 
   const mismatchedPredicate = validSpdxStatement() as { predicateType: string }

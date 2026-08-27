@@ -17,6 +17,9 @@ const EMPTY_CONFIG_SIZE = 2
 const ARTIFACT_ATTESTATION_CONFIG = "artifact"
 const LEGACY_ATTESTATION_CONFIG = "legacy"
 const GITHUB_API_VERSION = "2026-03-10"
+const GHCR_BLOB_CDN_ORIGIN = "https://pkg-containers.githubusercontent.com"
+const GHCR_BLOB_REDIRECT_STATUS = 307
+const GHCR_BLOB_CDN_PATH_PATTERN = /^\/ghcr(?:blobs)?[0-9]+\/blobs\/(sha256:[a-f0-9]{64})$/u
 export const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 export const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
 export const IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
@@ -222,12 +225,12 @@ export function validateOciAttestationConfig(
   }
 }
 
-export function validateInTotoStatement(statement, expectedPredicateType) {
+export function validateInTotoStatement(statement, expectedPredicateType, expectedSubject = []) {
   invariant(BUILDKIT_PREDICATE_TYPES.includes(expectedPredicateType), "OCI evidence predicate type is unsupported")
   assert.deepEqual(Object.keys(statement || {}).sort(), ["_type", "predicate", "predicateType", "subject"])
   invariant(statement._type === IN_TOTO_STATEMENT_TYPE, "OCI evidence uses an unsupported in-toto statement version")
   invariant(statement.predicateType === expectedPredicateType, "OCI evidence predicate does not match its descriptor")
-  assert.deepEqual(statement.subject, [])
+  assert.deepEqual(statement.subject, expectedSubject)
   invariant(statement.predicate && typeof statement.predicate === "object" && !Array.isArray(statement.predicate), "OCI evidence predicate is invalid")
   const predicate = statement.predicate
   if (expectedPredicateType === "https://slsa.dev/provenance/v1") {
@@ -370,12 +373,38 @@ async function responseJson(response, label, expectedDigest, byteLimit = RESPONS
   }
 }
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, redirect = "error") {
   return fetch(url, {
     ...options,
-    redirect: "error",
+    redirect,
     signal: AbortSignal.timeout(15_000),
   })
+}
+
+export async function followGitHubOciBlobRedirect(response, { accept, expectedDigest }) {
+  if (response.status !== GHCR_BLOB_REDIRECT_STATUS) return response
+  invariant(SHA256_DIGEST_PATTERN.test(expectedDigest), "OCI blob redirect expected digest is invalid")
+  invariant(typeof accept === "string" && accept.length > 0, "OCI blob redirect media type is invalid")
+  const location = response.headers.get("location")
+  invariant(location, "OCI blob redirect omitted its target")
+  let target
+  try {
+    target = new URL(location)
+  } catch {
+    throw new Error("OCI blob redirect target is invalid")
+  }
+  invariant(target.origin === GHCR_BLOB_CDN_ORIGIN, "OCI blob redirect target has an unexpected origin")
+  invariant(target.username === "" && target.password === "" && target.hash === "", "OCI blob redirect target has unexpected URL state")
+  const pathMatch = target.pathname.match(GHCR_BLOB_CDN_PATH_PATTERN)
+  invariant(pathMatch?.[1] === expectedDigest, "OCI blob redirect target does not preserve the descriptor digest")
+  const redirected = await fetchWithTimeout(target, {
+    headers: { accept },
+  })
+  invariant(
+    redirected.status < 300 || redirected.status >= 400,
+    "OCI blob CDN returned another redirect",
+  )
+  return redirected
 }
 
 async function registryToken(repository, challenge, credentials) {
@@ -399,19 +428,27 @@ async function registryToken(repository, challenge, credentials) {
   return token
 }
 
-async function registryRequest(url, repository, accept, token, credentials) {
+async function registryRequest(url, repository, accept, token, credentials, redirect = "error") {
   let response = await fetchWithTimeout(url, {
     headers: {
       accept,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
-  })
+  }, redirect)
   if (response.status !== 401 || token) return { response, token }
   const nextToken = await registryToken(repository, response.headers.get("www-authenticate"), credentials)
   response = await fetchWithTimeout(url, {
     headers: { accept, authorization: `Bearer ${nextToken}` },
-  })
+  }, redirect)
   return { response, token: nextToken }
+}
+
+export async function requestGitHubOciBlob({ url, repository, accept, token, expectedDigest }) {
+  const result = await registryRequest(url, repository, accept, token, undefined, "manual")
+  return {
+    ...result,
+    response: await followGitHubOciBlobRedirect(result.response, { accept, expectedDigest }),
+  }
 }
 
 export async function inspectGitHubOciTag({ reference, token }) {
@@ -511,12 +548,13 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
     assertResponseDigest(manifestResult.response, descriptor.digest)
     const manifest = await responseJson(manifestResult.response, `OCI ${platform} manifest`, descriptor.digest)
     const validatedManifest = validateOciImageManifest(manifest, `OCI ${platform} manifest`)
-    const configResult = await registryRequest(
-      `${baseUrl}/blobs/${validatedManifest.configDescriptor.digest}`,
-      parsed.repository,
-      IMAGE_CONFIG_MEDIA_TYPE,
-      initial.token,
-    )
+    const configResult = await requestGitHubOciBlob({
+      accept: IMAGE_CONFIG_MEDIA_TYPE,
+      expectedDigest: validatedManifest.configDescriptor.digest,
+      repository: parsed.repository,
+      token: initial.token,
+      url: `${baseUrl}/blobs/${validatedManifest.configDescriptor.digest}`,
+    })
     invariant(configResult.response.ok, `OCI registry returned HTTP ${configResult.response.status} for ${platform} configuration`)
     const config = await responseJson(
       configResult.response,
@@ -544,13 +582,18 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
     const manifest = await responseJson(attestationResult.response, "OCI attestation manifest", descriptor.digest)
     const subjectDescriptor = validated.platformDescriptors.find(({ digest }) => digest === subjectDigest)
     invariant(subjectDescriptor, "OCI image evidence subject is missing")
+    const expectedStatementSubject = [{
+      digest: { sha256: subjectDigest.slice("sha256:".length) },
+      name: `pkg:docker/${IMAGE_NAME}@${version}?platform=${encodeURIComponent(platformName(subjectDescriptor))}`,
+    }]
     const validatedManifest = validateOciAttestationManifest(manifest, subjectDescriptor)
-    const attestationConfigResult = await registryRequest(
-      `${baseUrl}/blobs/${validatedManifest.configDescriptor.digest}`,
-      parsed.repository,
-      validatedManifest.configDescriptor.mediaType,
-      initial.token,
-    )
+    const attestationConfigResult = await requestGitHubOciBlob({
+      accept: validatedManifest.configDescriptor.mediaType,
+      expectedDigest: validatedManifest.configDescriptor.digest,
+      repository: parsed.repository,
+      token: initial.token,
+      url: `${baseUrl}/blobs/${validatedManifest.configDescriptor.digest}`,
+    })
     invariant(
       attestationConfigResult.response.ok,
       `OCI registry returned HTTP ${attestationConfigResult.response.status} for platform evidence configuration`,
@@ -567,12 +610,13 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
     )
     for (const layer of validatedManifest.layerDescriptors) {
       invariant(layer.size <= EVIDENCE_RESPONSE_BYTE_LIMIT, "OCI evidence exceeds the response limit")
-      const evidenceResult = await registryRequest(
-        `${baseUrl}/blobs/${layer.digest}`,
-        parsed.repository,
-        IN_TOTO_MEDIA_TYPE,
-        initial.token,
-      )
+      const evidenceResult = await requestGitHubOciBlob({
+        accept: IN_TOTO_MEDIA_TYPE,
+        expectedDigest: layer.digest,
+        repository: parsed.repository,
+        token: initial.token,
+        url: `${baseUrl}/blobs/${layer.digest}`,
+      })
       invariant(evidenceResult.response.ok, `OCI registry returned HTTP ${evidenceResult.response.status} for platform evidence payload`)
       const statement = await responseJson(
         evidenceResult.response,
@@ -580,7 +624,11 @@ export async function inspectPublicOciImage({ githubToken, reference, revision, 
         layer.digest,
         EVIDENCE_RESPONSE_BYTE_LIMIT,
       )
-      validateInTotoStatement(statement, layer.annotations["in-toto.io/predicate-type"])
+      validateInTotoStatement(
+        statement,
+        layer.annotations["in-toto.io/predicate-type"],
+        expectedStatementSubject,
+      )
     }
     buildkitPredicateTypes[subjectDigest] = validatedManifest.predicateTypes
   }
