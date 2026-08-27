@@ -4,7 +4,7 @@ Discord MCP is self-hosted local stdio software. Its maintainers do not operate 
 
 ## Start with offline evidence
 
-Read the [quick start](README.md#quick-start) and [complete reference](docs/reference.md), then search existing issues. Prefer credential-free checks before opening a report:
+Follow the [first verified read and recovery guide](docs/getting-started.md), then search existing issues. Use the [complete reference](docs/reference.md) when the problem involves a specific policy or workflow. Prefer credential-free checks before opening a report:
 
 ```sh
 discord-mcp config validate FILE
@@ -12,7 +12,7 @@ discord-mcp doctor --config FILE
 discord-mcp catalog --check --json
 ```
 
-If an MCP host reports that the connection closed during initialization, inspect the exact command it launched. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/cli.js serve --config FILE`, while an installed package should run `discord-mcp serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output.
+If an MCP host reports that the connection closed during initialization, compare its command and arguments field by field with `setup --npx --config FILE --json`. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/cli.js serve --config FILE`, while a pinned published launch uses `npx --yes @j-256/discord-mcp@VERSION serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output. The [ordered recovery ladder](docs/getting-started.md#recovery-ladder) separates policy, credential, Discord, stdio, and host failures.
 
 Run `doctor --online` or another live probe only with a bot and guild you control and only when its documented Discord reads are acceptable. Do not publish raw probe output.
 

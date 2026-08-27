@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -151,6 +152,22 @@ test("configuration publication respects directory safety and another writer's l
     () => writeConnectorConfigDocumentFile(`${file}\nspoofed`, document()),
     /control characters/,
   )
+  await assert.rejects(
+    () => writeConnectorConfigDocumentFile(
+      join(root, "missing", "discord-mcp.json"),
+      document(),
+    ),
+    /directory was not found; create a canonical process-owned private directory/,
+  )
+  const notDirectory = join(root, "not-a-directory")
+  await writeFile(notDirectory, "not a directory\n", { mode: 0o600 })
+  await assert.rejects(
+    () => writeConnectorConfigDocumentFile(
+      join(notDirectory, "discord-mcp.json"),
+      document(),
+    ),
+    /parent must be a directory/,
+  )
   const lock = join(root, ".discord-mcp.json.lock")
   await writeFile(lock, "active\n", { mode: 0o600 })
   await assert.rejects(
@@ -161,10 +178,19 @@ test("configuration publication respects directory safety and another writer's l
 
   await rm(lock)
   if (process.platform !== "win32") {
+    const linkedDirectory = join(root, "linked-directory")
+    await symlink(root, linkedDirectory)
+    await assert.rejects(
+      () => writeConnectorConfigDocumentFile(
+        join(linkedDirectory, "discord-mcp.json"),
+        document(),
+      ),
+      /directory must not be a symbolic link/,
+    )
     await chmod(root, 0o722)
     await assert.rejects(
       () => writeConnectorConfigDocumentFile(file, document()),
-      /not group or world writable/,
+      /must not be group or world writable/,
     )
     await chmod(root, 0o700)
   }

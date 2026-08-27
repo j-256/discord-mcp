@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Trust and verification](#trust-and-verification) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Get a verified read](docs/getting-started.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -21,9 +21,11 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 | Plan review | Every plan tool returns complete text and structured evidence and can add display-only, authority-free review in MCP Apps hosts |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
 
-The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
+Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and known limitation.
 
 ## Quick start
+
+The fastest supported outcome is an operator-owned read-only bot, one non-secret policy file, a stable pinned package launch, and a successful host-side channel inventory. Follow the [complete getting-started guide](docs/getting-started.md) if this is your first installation; the commands below are the condensed operator path.
 
 Requirements:
 
@@ -37,7 +39,7 @@ Each deployment uses a Discord application and bot controlled by that operator. 
 
 Do not grant the bot `Administrator`. Generate the exact initial permission grant from a read-only preset, then narrow the installed bot role with category or channel overrides. The [bot setup guide](docs/reference.md#discord-bot-setup) explains bot ownership, optional intents, and later feature-specific permissions.
 
-### Inspect before connecting
+### Optional preflight: inspect without credentials
 
 For an exact published version, inspect the real production contract and the recommended read-only preset without a token or Discord request:
 
@@ -47,21 +49,7 @@ npx --yes @j-256/discord-mcp@0.1.1 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.1 preset show server-observer
 ```
 
-`catalog --check` launches a credential-free, execution-disabled MCP server, negotiates its real tools, prompts, resources, templates, completion capability, and optional plan-review MCP App, verifies every policy-completion route with zero returned identifiers, fingerprints the app's exact HTML and authority boundary, and verifies that every tool call is blocked by the catalog-only guard.
-
-`catalog --html FILE` writes a deterministic standalone explorer for that same negotiated contract. Open it locally to search and filter every tool, inspect exact input and output schemas, review prompts, resources, policy-completion routes, and the complete plan-review app source, and compare the embedded contract, safety, and app digests. The export contains no credential or identifier completion value, uses no external asset, makes no network request, and refuses to replace an existing file.
-
-The exact release image exposes the same safe catalog without a token and defaults to catalog mode instead of operational service:
-
-```sh
-docker run --rm -i \
-  --network=none \
-  --read-only \
-  --cap-drop=ALL \
-  --security-opt=no-new-privileges:true \
-  --pids-limit=64 \
-  ghcr.io/j-256/discord-mcp:0.1.1 catalog --check
-```
+`catalog --check` negotiates the credential-free, execution-disabled production contract and verifies that every tool call is blocked. `catalog --html FILE` writes a deterministic standalone explorer for the same tools, prompts, resources, schemas, completion routes, plan-review app, and digests without an external asset, network request, credential, or identifier completion value.
 
 ### Install your owner-managed bot
 
@@ -76,15 +64,19 @@ npx --yes @j-256/discord-mcp@0.1.1 preset install server-observer \
 
 Open the printed URL while signed in as a member allowed to manage that server. It requests only `View Channel` for `server-observer`, locks the server selector to the supplied ID, requests no user token, and never sends the bot token to the connector command. Keep Public Bot disabled unless other people should be able to install your application. Use `channel-reader` instead to request `View Channel` plus `Read Message History`; its plan also identifies Message Content as the recommended Developer Portal intent.
 
-The optional `--html FILE` output is a deterministic standalone guide derived from that exact validated installation plan. It provides an in-memory checklist, non-secret copy controls, the explicit Discord install navigation, strict-policy commands, and exact plan evidence without accepting a token, loading an external asset, making a background request, persisting browser state, opening a browser, or replacing an existing file. The terminal plan remains complete when HTML is not wanted.
+The optional `--html FILE` output is a deterministic standalone guide derived from that exact validated installation plan. It provides an in-memory checklist, non-secret copy controls, the explicit Discord install navigation, pinned `npx` follow-up commands, one first-read outcome, and exact plan evidence without accepting a token, loading an external asset, making a background request, persisting browser state, opening a browser, or replacing an existing file. The terminal plan remains complete when HTML is not wanted.
 
 ### Create the safest first configuration
 
-Keep the token in a secret-capable launching environment, verify one exact guild, save the complete non-secret policy in one file, and test the full MCP path:
+From a canonical process-owned private directory, keep the token in a secret-capable launching environment, verify one exact guild, save the complete non-secret policy in one file, and test the full MCP path:
 
-```sh
-export DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+```bash
+export DISCORD_BOT_TOKEN
+printf 'Discord bot token: '
+read -r -s DISCORD_BOT_TOKEN
+printf '\n'
 npx --yes @j-256/discord-mcp@0.1.1 setup \
+  --npx \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
@@ -93,29 +85,28 @@ npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json --online
 npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
 ```
 
-On PowerShell, set the token in the current process before running the same commands:
+On PowerShell 7.1 or newer, read the token into the current process without displaying it or placing its value in command history, then run the same commands:
 
 ```powershell
-$env:DISCORD_BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN"
+$env:DISCORD_BOT_TOKEN = Read-Host "Discord bot token" -MaskInput
 ```
+
+Enter each displayed multi-line shell command on one line in PowerShell; the `npx` arguments remain the same. With older Windows PowerShell, use an MCP host secret facility or protected token file instead of a token literal in command history.
 
 If the launcher, container runtime, or orchestrator mounts the token as a file, select that input instead. The path must be absolute, the file must already exist for verified setup, and `--token-file` cannot be combined with `--token-env` or an ambient `DISCORD_BOT_TOKEN`:
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.1 setup \
+  --npx \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID \
   --token-file /run/secrets/discord_bot_token
 ```
 
-The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery. It cannot enable writes, the Gateway, telemetry export, activity persistence, or Message Content access. Setup stores the credential reference and verified public IDs, never the token value, and prints a portable stdio launch descriptor for a compatible MCP client. `route_discord_goal` gives every prompt-capable client one safe entry point: standard catalog discovery, bounded reads, and at most a reviewed plan for a write, never a mutation.
+The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery. It cannot enable writes, the Gateway, telemetry export, activity persistence, or Message Content access. Setup stores the credential reference and verified public IDs, never the token value, and prints a stable exact-version stdio launch descriptor. After translating that descriptor into any compatible host, complete the guide's `get_connector_status` plus `list_channels` request as the first useful read. `route_discord_goal` gives every prompt-capable client one safe entry point for later discovery, bounded reads, and at most a reviewed plan for a write, never a mutation.
 
 The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
-
-`limits.mcpReadResponseMaxBytes` bounds one complete redacted MCP application read result by compact UTF-8 JSON bytes. It defaults to 1 MiB and accepts 64 KiB through 8 MiB. An oversized tool read returns a fixed content-free `response-too-large` error; an oversized resource or prompt fails with a fixed protocol error. The connector never clips structured JSON, emits a preview, spills withheld data, or reports the measured size. Final results from mutation-capable tools are always preserved because Discord may already have changed. Protocol discovery and notifications are outside this result boundary; use toolsets and progressive discovery to control catalog size.
-
-Credential-authenticated Incoming-webhook messages use `storage.webhookCredentialRoot`, an existing canonical process-owned `0700` directory. Connector-created credentials become available through separately gated exact lookup, bounded plain-text delivery, editing, and reviewed deletion, with exclusive `0600` files and durable directory synchronization. MCP accepts no credential, execution URL, path, identity override, thread target, rich payload, file, component, poll, or raw webhook payload. Allowlist direct text or announcement channels in `scopes.webhookMessageChannelIds`, then enable only the required webhook-message capability.
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or migration mode. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
@@ -159,6 +150,7 @@ Use `channel-reader` only when bounded message history and native search are nee
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.1 setup \
+  --npx \
   --config ./discord-reader.json \
   --preset channel-reader \
   --guild-id YOUR_GUILD_ID \
@@ -281,7 +273,9 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 ## Documentation
 
+- [First verified read and initialization recovery](docs/getting-started.md)
 - [Complete operator and capability reference](docs/reference.md)
+- [Setup and operator support](SUPPORT.md)
 - [Security model and reporting](SECURITY.md)
 - [Release and independent verification runbook](docs/releasing.md)
 - [MCP Registry manifest](server.json)

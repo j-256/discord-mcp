@@ -66,6 +66,8 @@ import {
 import { loadConnectorConfigDocument } from "../src/config.js"
 import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
+  CONNECTOR_NPM_PACKAGE,
+  CONNECTOR_VERSION,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
 } from "../src/constants.js"
 import {
@@ -809,6 +811,20 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "setup",
     "--config",
     "/configuration/discord.json",
+    "--npx",
+  ]), {
+    command: "setup",
+    configFile: "/configuration/discord.json",
+    json: false,
+    launcherCommand: undefined,
+    overwrite: false,
+    packageLaunch: true,
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments([
+    "setup",
+    "--config",
+    "/configuration/discord.json",
     "--preset",
     "server-observer",
     "--guild-id",
@@ -1002,6 +1018,17 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.throws(() => parseCliArguments(["unknown"]), /Unknown command/)
   assert.throws(() => parseCliArguments(["doctor", "--online", "--online"]), /only once/)
+  assert.throws(
+    () => parseCliArguments([
+      "setup",
+      "--config",
+      "/configuration/discord.json",
+      "--npx",
+      "--command",
+      "/usr/local/bin/discord-mcp",
+    ]),
+    /--npx and --command are mutually exclusive/,
+  )
   assert.throws(
     () => parseCliArguments([
       "serve",
@@ -1964,6 +1991,44 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
+test("CLI setup can emit a stable pinned npx package launch", async () => {
+  let received: unknown
+  const stdout = outputStream()
+  const packageSpec = `${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`
+  const exitCode = await runCli({
+    args: ["setup", "--config", CONFIG_FILE, "--npx"],
+    dependencies: dependencies({
+      async prepareSetup(options) {
+        received = options
+        return {
+          ...setupReport(),
+          launch: {
+            ...setupReport().launch,
+            args: ["--yes", packageSpec, "serve", "--config", CONFIG_FILE],
+            command: "npx",
+          },
+        }
+      },
+    }),
+    entrypointPath: "/temporary/npm-cache/discord-mcp/dist/cli.js",
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    executablePath: "/usr/bin/node",
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.deepEqual(received, {
+    args: ["--yes", packageSpec, "serve"],
+    command: "npx",
+    configFile: CONFIG_FILE,
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    overwriteConfig: false,
+  })
+  assert.match(stdout.value(), /"command": "npx"/)
+  assert.match(stdout.value(), new RegExp(packageSpec.replace("/", "\\/")))
+  assert.doesNotMatch(stdout.value(), /temporary\/npm-cache/)
+})
+
 test("CLI forwards profile setup intent and redacts custom credential aliases", async () => {
   let received: unknown
   const stdout = outputStream()
@@ -2406,6 +2471,17 @@ test("CLI generates human and JSON bot installation plans with optional offline 
   assert.match(textOutput.value(), /Administrator: not requested/)
   assert.match(textOutput.value(), /MESSAGE_CONTENT \(recommended\)/)
   assert.match(textOutput.value(), /guild-locked/)
+  assert.match(textOutput.value(), /available to setup as DISCORD_BOT_TOKEN/)
+  assert.match(textOutput.value(), /MCP host to supply the same reference/)
+  assert.match(textOutput.value(), /canonical process-owned private directory/)
+  assert.match(
+    textOutput.value(),
+    new RegExp(`npx --yes ${CONNECTOR_NPM_PACKAGE.replace("/", "\\/")}@${CONNECTOR_VERSION.replaceAll(".", "\\.")}`),
+  )
+  assert.match(textOutput.value(), /setup --npx --config/)
+  assert.match(textOutput.value(), /first read-only outcome/)
+  assert.match(textOutput.value(), /get_connector_status, list_channels/)
+  assert.match(textOutput.value(), /Discord writes: disabled/)
   assert.match(textOutput.value(), /Discord was not contacted and no browser was opened/)
   assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
   assert.deepEqual(
@@ -2908,6 +2984,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
+  const setupHelpOutput = outputStream()
   const smokeHelpOutput = outputStream()
   const versionOutput = outputStream()
 
@@ -2940,6 +3017,11 @@ test("CLI renders smoke, help, and version output", async () => {
     args: ["recipe", "--help"],
     dependencies: dependencies(),
     stdout: recipeHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["setup", "--help"],
+    dependencies: dependencies(),
+    stdout: setupHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
     args: ["smoke", "--help"],
@@ -2977,6 +3059,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /plan NAME FILE/)
   assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
+  assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
+  assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
+  assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
   assert.match(versionOutput.value(), /0\.1\.1/)
 })
 
