@@ -60,6 +60,7 @@ test("bot installation plans are exact, fixed-origin, and credential-free", () =
     `${packageCommand} config validate ./discord-mcp.json`,
     `${packageCommand} doctor --config ./discord-mcp.json --online`,
     `${packageCommand} smoke --config ./discord-mcp.json`,
+    `${packageCommand} host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html`,
   ])
   assert.deepEqual(observer.postInstall.firstRead, {
     guildId: GUILD_ID,

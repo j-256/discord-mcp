@@ -13,7 +13,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Inspect or administer exact guilds through your own bot | Designed fit | The operator owns the Discord application, bot installation, token custody, policy, and effective Discord permissions |
 | Start read-only and add narrowly reviewed capabilities | Designed fit | Presets establish bounded reads; additive recipes and explicit policy gates expose later workflows without granting Discord authority themselves |
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
-| Use a local MCP host that can launch stdio and forward a secret reference | Designed fit | Setup emits a pinned, model-neutral launch descriptor and a separate list of secret names to forward |
+| Use a local MCP host that can launch stdio and forward a secret reference | Designed fit | `host` emits a pinned model-neutral launch contract and optional private interactive field-mapping guide |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
 | Use a Discord user account or selfbot | Not supported | The connector accepts a Discord bot token and verifies the pinned application and bot identities |
@@ -34,7 +34,7 @@ Discord permissions remain the outer authority boundary. Local policy can only n
 
 ## MCP host compatibility
 
-`setup --npx --config FILE --json` produces the compatibility contract to translate into a host. It intentionally does not edit a client-owned configuration file or assume one product's schema.
+`host --npx --config FILE --html PRIVATE_FILE` validates one policy without reading its credential and produces the compatibility contract to translate into a host. Its optional mode-0600 interactive guide maps exact fields by meaning, supplies copy controls and a read-only verification request, and states its own limitations. The command intentionally does not contact Discord or the network, start a process, discover or edit a host, open a browser, or assume one product's schema. The private artifact contains Discord identifiers and may contain local paths, so it must not be shared or committed.
 
 | Host capability | Requirement | Behavior when absent or incomplete |
 | --- | --- | --- |
@@ -92,6 +92,7 @@ These are architectural boundaries, not a backlog promise. A future capability n
 | `doctor --config FILE` | Local runtime, policy, path, and credential-availability diagnostics without contacting Discord | Whether the token authenticates or the bot can access the intended guild |
 | `doctor --config FILE --online` | Pinned application and bot identity, bounded guild membership, and application posture through documented read-only calls | Message visibility, every feature permission, a host launch, or any Discord write |
 | `smoke --config FILE` | The selected packaged stdio entrypoint negotiates MCP, exposes the expected catalogs, starts configured optional runtimes, and completes its documented read-only identity path | Correct translation into a third-party host or every operational tool |
+| `host --npx --config FILE --html PRIVATE_FILE` | One exact credential-free policy-to-stdio mapping, private guide bytes, and a read-only host verification request | Correct host-specific translation, credential availability, process startup, Discord access, or host approval behavior |
 | Default automated tests and coverage | Deterministic contracts against injected transports, malformed evidence, policy boundaries, and failure cases without contacting Discord | Universal correctness against Discord's live service or every host implementation |
 | Package and container verification | Reproducible contents, safe packaged startup, contract identity, and documented runtime constraints | Live Discord behavior or absence of software defects |
 | Provenance, SBOMs, and attestations | Artifact origin, build inputs and process claims, component inventories, and digest bindings within their documented trust model | Security certification, vulnerability absence, license compliance, or completeness |

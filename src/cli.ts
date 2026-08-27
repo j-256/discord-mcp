@@ -28,6 +28,14 @@ import {
   type DiscordOnboardingHtmlExportReport,
 } from "./onboarding-html.js"
 import {
+  exportDiscordHostActivationHtml,
+  type DiscordHostActivationHtmlExportReport,
+} from "./host-activation-html.js"
+import {
+  createHostActivationPlan,
+  type HostActivationPlan,
+} from "./host-activation.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
@@ -60,6 +68,7 @@ import {
 import {
   explainConnectorConfig,
   initializeConnectorConfigFile,
+  resolveConnectorConfigFile,
   showConnectorConfigFile,
   validateConnectorConfigFile,
   type ConfigExplainReport,
@@ -101,6 +110,7 @@ import {
 } from "./operator-recovery.js"
 import {
   diagnoseConnector,
+  createStdioLaunchDescriptor,
   OPERATOR_REPORT_SCHEMA_VERSION,
   prepareSetup,
   smokeConnector,
@@ -143,6 +153,7 @@ const CLI_COMMANDS = Object.freeze([
   "coordination",
   "doctor",
   "help",
+  "host",
   "preset",
   "profile",
   "recipe",
@@ -238,6 +249,16 @@ export type ParsedCliArguments =
   }
   | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
+  | {
+    command: "host"
+    configFile?: string
+    htmlFile?: string
+    json: boolean
+    launcherCommand: string | undefined
+    packageLaunch?: true
+    profileName?: string
+    serverName: string | undefined
+  }
   | {
     action: "install"
     applicationId: string
@@ -345,6 +366,10 @@ export interface CliDependencies {
     activeFile: string,
     outputFile: string,
   ): Promise<DiscordConfigWorkbenchHtmlExportReport>
+  exportHostActivationHtml(
+    file: string,
+    plan: HostActivationPlan,
+  ): Promise<DiscordHostActivationHtmlExportReport>
   exportOnboardingHtml(
     file: string,
     plan: BotInstallPlan,
@@ -414,6 +439,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   exportActivityHtml: exportDiscordActivityHtml,
   exportCatalogHtml: exportDiscordCatalogHtml,
   exportConfigWorkbenchHtml: exportDiscordConfigWorkbenchHtml,
+  exportHostActivationHtml: exportDiscordHostActivationHtml,
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
@@ -583,6 +609,73 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
           },
         }
       : {}),
+    ...(profileName ? { profileName } : {}),
+    serverName,
+  }
+}
+
+function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "host" }> {
+  let configFile: string | undefined
+  let htmlFile: string | undefined
+  let json = false
+  let launcherCommand: string | undefined
+  let packageLaunch = false
+  let profileName: string | undefined
+  let serverName: string | undefined
+  const seen = new Set<string>()
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (!argument?.startsWith("--")) {
+      throw new ConfigurationError(`Unexpected host argument ${argument || ""}`)
+    }
+    if (seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    if (argument === "--npx") {
+      packageLaunch = true
+      continue
+    }
+    if (![
+      "--command",
+      "--config",
+      "--html",
+      "--name",
+      "--profile",
+    ].includes(argument)) {
+      throw new ConfigurationError(`Unknown option ${argument}`)
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError(`Option ${argument} requires a value`)
+    }
+    index += 1
+    if (argument === "--command") launcherCommand = value
+    if (argument === "--config") configFile = value
+    if (argument === "--html") htmlFile = value
+    if (argument === "--name") serverName = value
+    if (argument === "--profile") profileName = value
+  }
+  if (configFile && profileName) {
+    throw new ConfigurationError("Options --config and --profile are mutually exclusive")
+  }
+  if (!configFile && !profileName) {
+    throw new ConfigurationError("Host activation requires --config FILE or --profile NAME")
+  }
+  if (packageLaunch && launcherCommand !== undefined) {
+    throw new ConfigurationError("Options --npx and --command are mutually exclusive")
+  }
+  return {
+    command: "host",
+    ...(configFile ? { configFile } : {}),
+    ...(htmlFile ? { htmlFile } : {}),
+    json,
+    launcherCommand,
+    ...(packageLaunch ? { packageLaunch: true as const } : {}),
     ...(profileName ? { profileName } : {}),
     serverName,
   }
@@ -1288,6 +1381,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   }
   if (command === "config") return parseConfigCommand(rest)
   if (command === "coordination") return parseCoordinationCommand(rest)
+  if (command === "host") return parseHostOptions(rest)
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
@@ -1326,6 +1420,9 @@ function helpText(topic: CliCommand | undefined): string {
   }
   if (topic === "doctor") {
     return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+  }
+  if (topic === "host") {
+    return "Usage: discord-mcp host (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--html FILE] [--json]\n\nGenerate an exact credential-free local stdio activation plan for any compatible MCP host. The default launch uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. Optional HTML exclusively creates a mode-0600 interactive guide with semantic field mapping, copy controls, host requirements, a read-only verification request, and visible limitations. The guide contains private Discord identifiers and may contain local paths, so do not share or commit it. This command reads no credential value, contacts no network or Discord endpoint, starts no process, discovers no host, and changes no policy or host configuration. Exit status is 0 on success and 2 on command failure."
   }
   if (topic === "coordination") {
     return [
@@ -1395,7 +1492,8 @@ function helpText(topic: CliCommand | undefined): string {
     "  config   Create, validate, inspect, and review one non-secret policy file",
     "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
     "  serve    Run the stdio MCP server with a selected policy (default)",
-    "  setup    Create or verify a policy and generate safe client configuration",
+    "  setup    Create or verify a policy and generate a portable launch descriptor",
+    "  host     Map one verified policy into any compatible local MCP host",
     "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  recipe   Review and add a bounded workflow to an existing policy",
@@ -1645,6 +1743,49 @@ function renderSetup(report: SetupReport): string {
     "Translate the requirements into the MCP host's required-server, write-approval, elicitation, and timeout settings.",
   )
   return lines.join("\n")
+}
+
+function renderHostActivation(plan: HostActivationPlan): string {
+  const source = plan.policy.source.kind === "config"
+    ? `configuration ${plan.policy.source.file}`
+    : `managed profile ${plan.policy.source.name}`
+  return [
+    "Discord MCP host activation: ok",
+    `Activation digest: ${plan.activationDigest}`,
+    `Policy: ${plan.policy.name} from ${source}`,
+    `Application: ${plan.policy.identity.applicationId}`,
+    `Bot: ${plan.policy.identity.botId}`,
+    `Guild scope: ${plan.policy.readScope.guildIds.join(", ")}`,
+    `Channel scope: ${plan.policy.readScope.channelIds.join(", ") || "all visible channels in exact guild scope"}`,
+    `Tool surface: ${plan.policy.tools.surface}`,
+    `Toolsets: ${plan.policy.tools.toolsets.join(", ")}`,
+    `Credential environment names: ${plan.launch.secrets.environmentVariables.join(", ") || "none"}`,
+    `Credential files: ${plan.launch.secrets.files.join(", ") || "none"}`,
+    "",
+    "Portable stdio launch descriptor:",
+    JSON.stringify(plan.launch, null, 2),
+    "",
+    "Read-only host verification request:",
+    plan.verification.prompt,
+    "",
+    "No credential value was read or embedded. Discord and the network were not contacted. No process was started, no host was discovered, and no policy or host configuration was changed.",
+  ].join("\n")
+}
+
+function renderHostActivationHtmlExport(
+  report: DiscordHostActivationHtmlExportReport,
+): string {
+  return [
+    "Discord MCP host activation guide: ok",
+    `File: ${report.file}`,
+    `Format: ${report.format}`,
+    `Activation digest: ${report.activationDigest}`,
+    `HTML digest: ${report.htmlDigest}`,
+    `Bytes: ${report.bytes}`,
+    "Boundary: private mode-0600 standalone HTML with memory-only checklist state and no external navigation",
+    "The guide contains private Discord identifiers and may contain local paths. It contains no credential value and must not be shared or committed.",
+    "No credential value was read, Discord and the network were not contacted, no browser or process was started, no host was discovered, and no policy or host configuration was changed.",
+  ].join("\n")
 }
 
 interface PresetListReport {
@@ -2425,8 +2566,68 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
       }
       case "help":
-        safeWrite(stdout, helpText(parsed.topic), environment)
+        safeWrite(
+          stdout,
+          helpText(parsed.topic),
+          parsed.topic === "host" ? {} : environment,
+        )
         return CLI_EXIT_CODES.success
+      case "host": {
+        const defaultLauncher = currentEntrypointLaunch(options)
+        const launcher = parsed.packageLaunch
+          ? publishedPackageLaunch()
+          : parsed.launcherCommand
+            ? { args: ["serve"], command: parsed.launcherCommand }
+            : defaultLauncher
+        let plan: HostActivationPlan
+        if (parsed.configFile) {
+          const file = resolveConnectorConfigFile(parsed.configFile)
+          const document = dependencies.loadConfigDocument(file)
+          const launch = createStdioLaunchDescriptor({
+            applicationId: document.identity.applicationId,
+            args: launcher.args,
+            botId: document.identity.botId,
+            command: launcher.command,
+            config: { document, file },
+            ...(parsed.serverName ? { serverName: parsed.serverName } : {}),
+          })
+          plan = createHostActivationPlan({
+            document,
+            launch,
+            source: { file, kind: "config" },
+          })
+        } else {
+          const name = normalizeProfileName(parsed.profileName || "")
+          const profile = await dependencies.loadProfile(name, { environment })
+          const launch = createStdioLaunchDescriptor({
+            applicationId: profile.identity.applicationId,
+            args: launcher.args,
+            botId: profile.identity.botId,
+            command: launcher.command,
+            profile,
+            ...(parsed.serverName ? { serverName: parsed.serverName } : {}),
+          })
+          plan = createHostActivationPlan({
+            document: profile,
+            launch,
+            source: { kind: "profile", name: profile.name },
+          })
+        }
+        const guide = parsed.htmlFile
+          ? await dependencies.exportHostActivationHtml(parsed.htmlFile, plan)
+          : undefined
+        safeWrite(
+          stdout,
+          parsed.json
+            ? jsonReport({ ...plan, ...(guide ? { guide } : {}) })
+            : [
+                renderHostActivation(plan),
+                ...(guide ? [renderHostActivationHtmlExport(guide)] : []),
+              ].join("\n\n"),
+          {},
+        )
+        return CLI_EXIT_CODES.success
+      }
       case "profile": {
         const location = { environment }
         if (parsed.action === "list") {
@@ -2661,10 +2862,11 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
     }
     const guidance = classifyCliFailure(error, context)
     const message = safeCliFailureMessage(error, context)
+    const outputEnvironment = args[0] === "host" ? {} : environment
     if (requestsJson(args, parsed)) {
-      safeWrite(stdout, jsonReport(cliErrorReport(message, guidance)), environment)
+      safeWrite(stdout, jsonReport(cliErrorReport(message, guidance)), outputEnvironment)
     } else {
-      safeWrite(stderr, renderCliFailure(message, guidance), environment)
+      safeWrite(stderr, renderCliFailure(message, guidance), outputEnvironment)
     }
     return failureExitCode(parsed)
   }

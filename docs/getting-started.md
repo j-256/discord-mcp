@@ -11,7 +11,7 @@ Before creating a token, use [product boundaries and host compatibility](limitat
 - One Discord application and bot that you own
 - One exact-guild read-only bot installation
 - One strict JSON policy containing public IDs and an external secret reference, never the token
-- One pinned package launch descriptor that any compatible stdio MCP host can translate
+- One private interactive activation guide with an exact pinned package launch that any compatible stdio MCP host can translate
 - Separate proof of policy validity, Discord identity and scope, server startup, and host-side use
 
 ## Before you begin
@@ -141,9 +141,17 @@ npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
 
 Stop here and use the recovery ladder below if any check fails. Do not weaken policy, add `Administrator`, or enable a write surface to make a diagnostic pass.
 
-## 7. Translate the portable descriptor into the host
+## 7. Generate the private host activation guide
 
-Setup prints typed launch data similar to this shape:
+After smoke passes, generate an exact host-neutral handoff. This command does not read the token or another credential value, contact Discord or the network, start the server, discover a host, edit a policy or host configuration, or open a browser:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.1 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+```
+
+The command prints the complete activation plan and exclusively creates the requested mode-0600 standalone guide. The file contains public application and bot IDs, private guild and channel IDs, the exact policy selector, and local command or secret-file paths, but no credential value. Keep it private and do not commit it, attach it to an issue, or include it in a screenshot.
+
+The guide presents typed launch data similar to this shape:
 
 ```json
 {
@@ -172,9 +180,9 @@ Setup prints typed launch data similar to this shape:
 }
 ```
 
-Map `command` and `args` exactly into the host's local stdio server configuration. Configure the host's secret facility or launch environment to supply each name in `environment.forward`; do not replace the name with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls.
+Open the guide locally and map `command` and ordered `args` exactly into the host's local stdio server configuration. Configure the host's protected secret facility or launch environment to supply each name in `environment.forward`; do not replace the name with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls.
 
-Host formats differ, so Discord MCP emits typed launch requirements instead of editing or guessing a host-specific file. Restart or reload the host, inspect its negotiated server list, and confirm that `discord` is available.
+Host formats differ, so the guide maps each field by meaning instead of guessing or editing a host-specific file. It also shows full-versus-progressive tool-surface behavior, an exact structured smoke fallback, and a read-only verification request. Restart or reload the host, inspect its negotiated server list, and confirm that `discord` is available.
 
 ## 8. Complete the first useful read
 
@@ -197,7 +205,7 @@ npx --yes @j-256/discord-mcp@0.1.1 config validate ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.1 doctor --config ./discord-mcp.json --online
 npx --yes @j-256/discord-mcp@0.1.1 smoke --config ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.1 setup --npx --config ./discord-mcp.json --json
+npx --yes @j-256/discord-mcp@0.1.1 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
 ```
 
 - If a bare `discord-mcp` command is not found, use the pinned `npx --yes @j-256/discord-mcp@0.1.1` prefix or install the package globally before using the bare executable.
@@ -205,7 +213,7 @@ npx --yes @j-256/discord-mcp@0.1.1 setup --npx --config ./discord-mcp.json --jso
 - If offline doctor reports the credential unavailable, make the exact referenced environment variable or file available to that process. The connector has no fallback token source.
 - If online doctor fails identity or guild access, verify the token belongs to the intended application, reinstall the exact generated grant in the intended guild, and inspect role or channel overrides. Do not broaden to `Administrator`.
 - If smoke fails, correct its reported layer before editing the host. Smoke exercises the same stdio server entrypoint without a model or host dependency.
-- If a host says the connection closed during initialization, compare its command and arguments field by field with the final JSON descriptor. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/cli.js serve --config FILE`.
+- If a host says the connection closed during initialization, compare its command and arguments field by field with the private activation guide. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/cli.js serve --config FILE`.
 - If smoke passes but the host still fails, verify that the host forwards the referenced secret, uses stdio rather than a shell prompt or HTTP transport, allows the startup timeout, and was restarted after configuration changed.
 - If the server loads but an expected tool is absent, inspect `config show`, the selected toolsets, and `tools.surface`. Tool discovery can narrow the catalog but cannot grant a tool omitted by policy.
 

@@ -29,6 +29,8 @@ const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
 const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
 const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
+const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
+const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
@@ -75,6 +77,8 @@ const REQUIRED_FILES = [
   "SECURITY.md",
   "discord-mcp.config.schema.json",
   "dist/cli.js",
+  "dist/host-activation-html.js",
+  "dist/host-activation.js",
   "dist/index.d.ts",
   "dist/index.js",
   "docs/getting-started.md",
@@ -334,6 +338,8 @@ assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
 assert.equal(typeof connector.planConfigRecipe, "function")
 assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")
+assert.equal(typeof connector.createHostActivationPlan, "function")
+assert.equal(typeof connector.exportDiscordHostActivationHtml, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
   botId: "200000000000000001",
@@ -700,6 +706,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     `${packageCommand} config validate ./discord-mcp.json`,
     `${packageCommand} doctor --config ./discord-mcp.json --online`,
     `${packageCommand} smoke --config ./discord-mcp.json`,
+    `${packageCommand} host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html`,
   ])
   assert.deepEqual(installPlan.postInstall.firstRead, {
     guildId: "300000000000000001",
@@ -871,6 +878,92 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   })
   const initializedConfig = JSON.parse(configResult.stdout)
   invariant(initializedConfig.status === "ok", "installed config initialization failed")
+  const firstHostActivationFile = join(consumer, "host-activation-first.html")
+  const secondHostActivationFile = join(consumer, "host-activation-second.html")
+  const hostActivation = async (file) => {
+    const result = await run(bin, [
+      "host",
+      "--npx",
+      "--config",
+      configFile,
+      "--html",
+      file,
+      "--json",
+    ], {
+      capture: true,
+      cwd: consumer,
+      env: environment,
+    })
+    return JSON.parse(result.stdout)
+  }
+  const firstHostActivation = await hostActivation(firstHostActivationFile)
+  const secondHostActivation = await hostActivation(secondHostActivationFile)
+  for (const report of [firstHostActivation, secondHostActivation]) {
+    invariant(report.status === "ok", "installed host activation planning failed")
+    invariant(report.format === HOST_ACTIVATION_FORMAT, "installed host activation format changed")
+    invariant(SHA256_DIGEST_PATTERN.test(report.activationDigest), "installed host activation digest is invalid")
+    assert.deepEqual(report.policy.source, { file: configFile, kind: "config" })
+    assert.deepEqual(report.launch.args, [
+      "--yes",
+      `${PACKAGE_NAME}@${version}`,
+      "serve",
+      "--config",
+      configFile,
+    ])
+    assert.deepEqual(report.privacy, {
+      configurationChanged: false,
+      credentialValuesEmbedded: false,
+      credentialValuesRead: false,
+      discordContacted: false,
+      hostConfigurationChanged: false,
+      hostDiscovered: false,
+      processStarted: false,
+    })
+    invariant(report.guide?.format === HOST_ACTIVATION_HTML_FORMAT, "installed host activation HTML format changed")
+    invariant(report.guide?.activationDigest === report.activationDigest, "installed host activation HTML is not bound to its plan")
+    invariant(SHA256_DIGEST_PATTERN.test(report.guide?.htmlDigest), "installed host activation HTML digest is invalid")
+    assert.deepEqual({
+      automaticNetwork: report.guide.automaticNetwork,
+      browserOpened: report.guide.browserOpened,
+      credentialValuesEmbedded: report.guide.credentialValuesEmbedded,
+      credentialValuesRead: report.guide.credentialValuesRead,
+      discordContacted: report.guide.discordContacted,
+      externalNavigationOrigins: report.guide.externalNavigationOrigins,
+      hostConfigurationChanged: report.guide.hostConfigurationChanged,
+      hostDiscovered: report.guide.hostDiscovered,
+      outputFileCreated: report.guide.outputFileCreated,
+      processStarted: report.guide.processStarted,
+      statePersistence: report.guide.statePersistence,
+    }, {
+      automaticNetwork: "disabled",
+      browserOpened: false,
+      credentialValuesEmbedded: false,
+      credentialValuesRead: false,
+      discordContacted: false,
+      externalNavigationOrigins: [],
+      hostConfigurationChanged: false,
+      hostDiscovered: false,
+      outputFileCreated: true,
+      processStarted: false,
+      statePersistence: "disabled",
+    })
+  }
+  assert.equal(secondHostActivation.activationDigest, firstHostActivation.activationDigest, "installed host activation plan is not deterministic")
+  assert.equal(secondHostActivation.guide.htmlDigest, firstHostActivation.guide.htmlDigest, "installed host activation HTML digest is not deterministic")
+  const firstHostActivationBytes = await readFile(firstHostActivationFile)
+  const secondHostActivationBytes = await readFile(secondHostActivationFile)
+  invariant(firstHostActivationBytes.equals(secondHostActivationBytes), "installed host activation HTML is not deterministic")
+  invariant(
+    ((await lstat(firstHostActivationFile)).mode & 0o077) === 0
+      && ((await lstat(secondHostActivationFile)).mode & 0o077) === 0,
+    "installed host activation HTML is not private",
+  )
+  const hostActivationHtml = firstHostActivationBytes.toString("utf8")
+  invariant(hostActivationHtml.includes(HOST_ACTIVATION_HTML_FORMAT), "installed host activation HTML omitted its format")
+  invariant(hostActivationHtml.includes(firstHostActivation.activationDigest), "installed host activation HTML omitted its plan digest")
+  invariant(hostActivationHtml.includes("connect-src 'none'"), "installed host activation HTML permits network connections")
+  invariant(!hostActivationHtml.includes(DUMMY_TOKEN), "installed host activation HTML captured an ambient secret")
+  invariant(!/(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)/.test(hostActivationHtml), "installed host activation HTML contains forbidden browser authority")
   const firstWorkbenchFile = join(consumer, "workbench-first.html")
   const secondWorkbenchFile = join(consumer, "workbench-second.html")
   const firstWorkbenchResult = await run(bin, [

@@ -12,8 +12,8 @@ import {
   type ExclusivePrivateFileSystem,
 } from "./exclusive-private-file.js"
 
-export const ONBOARDING_HTML_FORMAT = "discord-mcp.onboarding-html.v2"
-export const ONBOARDING_HTML_SCHEMA_VERSION = 2
+export const ONBOARDING_HTML_FORMAT = "discord-mcp.onboarding-html.v3"
+export const ONBOARDING_HTML_SCHEMA_VERSION = 3
 
 export interface DiscordOnboardingHtmlExportOptions {
   fileSystem?: ExclusivePrivateFileSystem
@@ -142,7 +142,7 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
   const scriptHash = digest(ONBOARDING_SCRIPT, "base64")
   const portalUrl = `https://discord.com/developers/applications/${plan.applicationId}`
   const permissions = plan.permissions.names.join(", ")
-  const [setup, validate, doctor, smoke] = plan.postInstall.commands
+  const [setup, validate, doctor, smoke, hostActivation] = plan.postInstall.commands
   const commandMarkup = plan.postInstall.commands.slice(1).map(commandBlock).join("")
   const evidence = escapeHtml(JSON.stringify(plan, null, 2))
   return `<!doctype html>
@@ -209,7 +209,7 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
         <li><a href="#step-3"><b>3</b>Install bot</a></li>
         <li><a href="#step-4"><b>4</b>Supply secret</a></li>
         <li><a href="#step-5"><b>5</b>Create policy</a></li>
-        <li><a href="#step-6"><b>6</b>Verify and connect</a></li>
+        <li><a href="#step-6"><b>6</b>Verify and activate</a></li>
       </ol>
     </nav>
   </div>
@@ -259,11 +259,11 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
       </div>
     </section>
     <section class="step" id="step-6">
-      <div class="step-head"><div class="step-title"><span class="number">6</span><div><h2>Verify, then connect any compatible host</h2><p>Prove the policy and read-only MCP path before copying the portable stdio descriptor printed by setup.</p></div></div><label class="done"><input type="checkbox" data-step autocomplete="off" aria-label="Mark step 6 complete">Checked</label></div>
+      <div class="step-head"><div class="step-title"><span class="number">6</span><div><h2>Verify, then activate any compatible host</h2><p>Prove the policy and read-only MCP path before generating an exact private host handoff.</p></div></div><label class="done"><input type="checkbox" data-step autocomplete="off" aria-label="Mark step 6 complete">Checked</label></div>
       <div class="step-body">
         <div class="command-list">${commandMarkup}</div>
-        <p class="callout"><strong>Run in order.</strong> <code>${escapeHtml(validate || "")}</code> checks the strict document, <code>${escapeHtml(doctor || "")}</code> verifies Discord identity and access, and <code>${escapeHtml(smoke || "")}</code> negotiates the real MCP contract and calls only connector status.</p>
-        <p>Copy the portable stdio launch descriptor from setup into any compatible MCP host. Keep the token in that host's secret facility and pass the policy with <code>--config</code> or the optional non-secret config-file selector.</p>
+        <p class="callout"><strong>Run in order.</strong> <code>${escapeHtml(validate || "")}</code> checks the strict document, <code>${escapeHtml(doctor || "")}</code> verifies Discord identity and access, <code>${escapeHtml(smoke || "")}</code> negotiates the real MCP contract and calls only connector status, and <code>${escapeHtml(hostActivation || "")}</code> writes the private interactive host guide.</p>
+        <p>Open <code>discord-mcp-host-activation.html</code> locally and map its exact command, ordered arguments, external secret references, approval requirements, and timeouts into any compatible local MCP host. The guide cannot discover or edit a host, contains private Discord identifiers and local paths, and must not be shared or committed.</p>
         <div class="field"><span class="field-label">First useful read</span><div class="value-row"><code id="first-read-prompt">${escapeHtml(plan.postInstall.firstRead.prompt)}</code>${copyButton("first-read-prompt", "first-read prompt")}</div><p class="note">Tools: <code>${escapeHtml(plan.postInstall.firstRead.toolNames.join(", "))}</code>. Discord writes remain disabled.</p></div>
         <p class="note">The host runs this local process. Discord MCP supplies no shared bot, remote relay, account login, or model-specific integration.</p>
       </div>
