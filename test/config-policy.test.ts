@@ -343,6 +343,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVerificationChangesEnabled: false,
+    memberVerificationGuildIds: [],
     memberVoiceAuditEnabled: false,
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
@@ -1647,6 +1649,8 @@ test("configuration and policy require an exact administration guild and protect
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVerificationChangesEnabled: false,
+    memberVerificationGuildIds: [],
     memberVoiceAuditEnabled: false,
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
@@ -3174,6 +3178,81 @@ test("configuration and policy isolate reviewed member nickname authority", () =
     }, { homeDirectory: "/test/home" }),
     /must contain at most 100 unique IDs/,
   )
+})
+
+test("configuration and policy isolate reviewed member verification authority", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        memberVerificationGuildIds: [OTHER_GUILD_ID],
+      },
+    }, { homeDirectory: "/test/home" }),
+    /\$\.scopes\.memberVerificationGuildIds must be a subset/u,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        memberVerificationChanges: true,
+      },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.scopes\.memberVerificationGuildIds/u,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    scopes: {
+      memberVerificationGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertMemberVerificationChangeAllowed(GUILD_ID, USER_ID),
+    /member verification changes are disabled/u,
+  )
+
+  const policy = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      memberVerificationChanges: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    },
+    scopes: {
+      memberVerificationGuildIds: [GUILD_ID],
+      protectedUserIds: [USER_ID],
+    },
+    tools: {
+      surface: "progressive",
+      toolsets: ["member-verification"],
+    },
+  }, { homeDirectory: "/test/home" }))
+  policy.assertMemberVerificationChangeAllowed(
+    GUILD_ID,
+    "400000000000000002",
+  )
+  assert.throws(
+    () => policy.assertMemberVerificationChangeAllowed(
+      OTHER_GUILD_ID,
+      "400000000000000002",
+    ),
+    /outside the member verification scope/u,
+  )
+  assert.throws(
+    () => policy.assertMemberVerificationChangeAllowed(GUILD_ID, USER_ID),
+    /protected from administration/u,
+  )
+  assert.equal(policy.describe().memberVerificationChangesEnabled, true)
+  assert.deepEqual(policy.describe().memberVerificationGuildIds, [GUILD_ID])
+  assert.deepEqual(policy.describe().mcpToolsets, ["member-verification"])
 })
 
 test("configuration and policy isolate exact member-role authority", () => {
@@ -5511,6 +5590,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVerificationChangesEnabled: false,
+    memberVerificationGuildIds: [],
     memberVoiceAuditEnabled: false,
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],

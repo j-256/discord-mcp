@@ -111,6 +111,7 @@ export interface ConnectorConfig {
   allowNicknameChanges: boolean
   allowOtherMemberNicknameChanges: boolean
   allowMemberRoleChanges: boolean
+  allowMemberVerificationChanges: boolean
   allowMemberVoiceAudit: boolean
   allowMemberVoiceChanges: boolean
   allowCrossGuildMessageForwarding: boolean
@@ -213,6 +214,7 @@ export interface ConnectorConfig {
   nicknameGuildIds: ReadonlySet<string>
   memberRoleGuildIds: ReadonlySet<string>
   memberRoleIds: ReadonlySet<string>
+  memberVerificationGuildIds: ReadonlySet<string>
   memberVoiceChannelIds: ReadonlySet<string>
   memberVoiceGuildIds: ReadonlySet<string>
   messageForwardSourceChannelIds: ReadonlySet<string>
@@ -566,6 +568,7 @@ export function loadConnectorConfigDocument(
   const nicknameGuildIds = configScope(document, "nicknameGuildIds", CONNECTOR_LIMITS.memberNicknameGuildAllowlist)
   const memberRoleGuildIds = configScope(document, "memberRoleGuildIds")
   const memberRoleIds = configScope(document, "memberRoleIds", CONNECTOR_LIMITS.memberRoleAllowlist)
+  const memberVerificationGuildIds = configScope(document, "memberVerificationGuildIds")
   const memberVoiceChannelIds = configScope(
     document,
     "memberVoiceChannelIds",
@@ -668,6 +671,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("memberDirectoryGuildIds"), memberDirectoryGuildIds],
     [configPolicyPath("nicknameGuildIds"), nicknameGuildIds],
     [configPolicyPath("memberRoleGuildIds"), memberRoleGuildIds],
+    [configPolicyPath("memberVerificationGuildIds"), memberVerificationGuildIds],
     [configPolicyPath("memberVoiceGuildIds"), memberVoiceGuildIds],
     [configPolicyPath("nativeInteractionGuildIds"), nativeInteractionGuildIds],
     [configPolicyPath("threadGuildIds"), threadGuildIds],
@@ -1039,6 +1043,15 @@ export function loadConnectorConfigDocument(
     )
   }
   const allowMemberRoleChanges = configCapability(document, "memberRoleChanges")
+  const allowMemberVerificationChanges = configCapability(
+    document,
+    "memberVerificationChanges",
+  )
+  if (allowMemberVerificationChanges && memberVerificationGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowMemberVerificationChanges")} requires ${configPolicyPath("memberVerificationGuildIds")}`,
+    )
+  }
   const allowBulkMemberRoleChanges = configCapability(
     document,
     "bulkMemberRoleChanges",
@@ -1316,6 +1329,7 @@ export function loadConnectorConfigDocument(
     allowNicknameChanges,
     allowOtherMemberNicknameChanges,
     allowMemberRoleChanges,
+    allowMemberVerificationChanges,
     allowNativeCommandChanges,
     allowNativeInteractions,
     allowMemberVoiceAudit,
@@ -1453,6 +1467,7 @@ export function loadConnectorConfigDocument(
     nicknameGuildIds,
     memberRoleGuildIds,
     memberRoleIds,
+    memberVerificationGuildIds,
     memberVoiceChannelIds,
     memberVoiceGuildIds,
     messageForwardSourceChannelIds,

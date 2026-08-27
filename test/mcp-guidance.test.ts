@@ -745,6 +745,7 @@ function guidanceService(options: {
     executeMemberRoleChange: unexpected,
     executeBulkMemberRoleChange: unexpected,
     executeMemberNicknameChange: unexpected,
+    executeMemberVerificationChange: unexpected,
     executeMemberVoiceChange: unexpected,
     executeThreadChange: unexpected,
     executeAutoModerationChange: unexpected,
@@ -1845,6 +1846,7 @@ function guidanceService(options: {
     planMemberRoleChange: unexpected,
     planBulkMemberRoleChange: unexpected,
     planMemberNicknameChange: unexpected,
+    planMemberVerificationChange: unexpected,
     planMemberVoiceChange: unexpected,
     planScheduledEventChange: unexpected,
     planStageInstanceChange: unexpected,
@@ -2255,6 +2257,8 @@ function guidanceService(options: {
         memberRoleChangesEnabled: false,
         memberRoleGuildIds: [],
         memberRoleCount: 0,
+        memberVerificationChangesEnabled: false,
+        memberVerificationGuildIds: [],
         memberVoiceAuditEnabled: false,
         memberVoiceChangesEnabled: false,
         memberVoiceChannelIds: [],
@@ -6189,6 +6193,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     target: { kind: "current-bot" },
   })
 
+  const memberVerification = promptText(await client.getPrompt({
+    arguments: {
+      auditReason: "Reviewed Membership Screening bypass",
+      bypassesVerification: "true",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      userId: USER_ID,
+    },
+    name: MCP_PROMPT_NAMES.reviewMemberVerificationChange,
+  }))
+  assert.deepEqual(JSON.parse(memberVerification.split("\n")[1] || ""), {
+    auditReason: "Reviewed Membership Screening bypass",
+    bypassesVerification: true,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    userId: USER_ID,
+  })
+  assert.match(memberVerification, /Call only plan_member_verification_change/u)
+  assert.match(memberVerification, /Do not call execute_member_verification_change/u)
+  assert.match(memberVerification, /documented authorization path/u)
+  assert.match(memberVerification, /Pending membership is allowed/u)
+  assert.match(memberVerification, /Raw flags are never caller input or review output/u)
+  assert.match(memberVerification, /preserves every unrelated bit/u)
+
   const memberRole = promptText(await client.getPrompt({
     arguments: {
       action: "add",
@@ -6721,6 +6749,16 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         userId: USER_ID,
       },
       name: MCP_PROMPT_NAMES.reviewMemberNicknameChange,
+    },
+    {
+      arguments: {
+        auditReason: "Reviewed Membership Screening bypass",
+        bypassesVerification: "yes",
+        guildId: GUILD_ID,
+        operationKey: OPERATION_KEY,
+        userId: USER_ID,
+      },
+      name: MCP_PROMPT_NAMES.reviewMemberVerificationChange,
     },
     {
       arguments: {

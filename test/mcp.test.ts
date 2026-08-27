@@ -288,6 +288,10 @@ import type {
   MemberNicknameChangeRequest,
 } from "../src/member-nickname-service.js"
 import type {
+  MemberVerificationChangePlan,
+  MemberVerificationChangeRequest,
+} from "../src/member-verification-service.js"
+import type {
   MemberRoleChangePlan,
   MemberRoleChangeRequest,
 } from "../src/member-role-service.js"
@@ -407,6 +411,9 @@ import {
   MemberNicknameExecutionError,
   MemberNicknameOperationConflictError,
   MemberNicknamePlanChangedError,
+  MemberVerificationExecutionError,
+  MemberVerificationOperationConflictError,
+  MemberVerificationPlanChangedError,
   MemberRoleExecutionError,
   MemberRoleOperationConflictError,
   MemberRolePlanChangedError,
@@ -757,6 +764,7 @@ const POLL_ANSWER_ONE = "Reliability"
 const POLL_ANSWER_TWO = "Usability"
 const MEMBER_NICKNAME_OPERATION_KEY = "member-nickname-attempt-0001"
 const MEMBER_NICKNAME = "Reviewed nickname"
+const MEMBER_VERIFICATION_OPERATION_KEY = "member-verification-attempt-0001"
 const MEMBER_MODERATION_OPERATION_KEY = "member-moderation-attempt-0001"
 const BULK_GUILD_BAN_OPERATION_KEY = "bulk-guild-ban-attempt-0001"
 const BULK_MEMBER_ROLE_OPERATION_KEY = "bulk-member-role-attempt-0001"
@@ -7229,6 +7237,71 @@ function memberNicknamePlan(
   }
 }
 
+function memberVerificationPlan(
+  request: MemberVerificationChangeRequest,
+  digest = DIGEST,
+  writeRequired = true,
+): MemberVerificationChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    botId: BOT_ID,
+    createdAt: "2026-08-27T00:00:00.000Z",
+    desiredBypassesVerification: request.bypassesVerification,
+    digest,
+    guild: {
+      id: request.guildId,
+      name: "Untrusted private guild",
+      ownerId: GUILD_OWNER_ID,
+    },
+    hierarchy: {
+      botHighestRoleIds: [ROLE_ID],
+      botHighestRolePosition: 10,
+      targetAdministrator: false,
+      targetBelowBot: true,
+      targetHighestRoleIds: [request.guildId],
+      targetHighestRolePosition: 0,
+    },
+    operationKeyHash: OPERATION_KEY_HASH,
+    permission: {
+      administrator: false,
+      authorizationPath: "manage-guild",
+      effectivePermissionNames: ["MANAGE_GUILD"],
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+      requiredPermissions: ["MANAGE_GUILD"],
+      requiredPermissionsPresent: true,
+      unknownPermissionBits: "0",
+    },
+    privacy: {
+      persistence: "content-free-outcomes-only",
+      rawFlagsExposed: false,
+      transientUntrustedFields: ["guildName", "username"],
+    },
+    risks: writeRequired
+      ? [
+          request.bypassesVerification
+            ? "The exact member will be allowed to participate despite guild verification requirements"
+            : "The exact member will no longer bypass guild verification requirements",
+        ]
+      : [],
+    schemaVersion: 1,
+    status: writeRequired ? "planned" : "already-current",
+    target: {
+      currentBypassesVerification: writeRequired
+        ? !request.bypassesVerification
+        : request.bypassesVerification,
+      id: request.userId,
+      pending: true,
+      username: "untrusted-member-name",
+    },
+    warnings: [
+      "Every unrelated member flag bit is preserved exactly and never exposed",
+      "The operation key is one-shot and cannot be retried after reservation",
+    ],
+    writeRequired,
+  }
+}
+
 function memberVoicePlan(
   request: MemberVoiceChangeRequest,
   digest = DIGEST,
@@ -8344,6 +8417,8 @@ function fixturePolicy(): PolicyDescription {
     memberRoleChangesEnabled: false,
     memberRoleGuildIds: [],
     memberRoleCount: 0,
+    memberVerificationChangesEnabled: false,
+    memberVerificationGuildIds: [],
     memberVoiceAuditEnabled: false,
     memberVoiceChangesEnabled: false,
     memberVoiceChannelIds: [],
@@ -8560,6 +8635,10 @@ function serviceFixture(overrides: {
   memberNicknameError?: Error
   memberNicknamePlanDigest?: string
   memberNicknameWriteRequired?: boolean
+  memberVerificationDrift?: boolean
+  memberVerificationError?: Error
+  memberVerificationPlanDigest?: string
+  memberVerificationWriteRequired?: boolean
   memberRoleAction?: "add" | "none" | "remove"
   memberRoleError?: Error
   memberRolePlanDigest?: string
@@ -8807,6 +8886,8 @@ function serviceFixture(overrides: {
     messageForwardPlan: 0,
     memberNicknameExecute: 0,
     memberNicknamePlan: 0,
+    memberVerificationExecute: 0,
+    memberVerificationPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -11704,6 +11785,37 @@ function serviceFixture(overrides: {
         verification,
       }
     },
+    async executeMemberVerificationChange(request, planDigest) {
+      if (overrides.memberVerificationError) throw overrides.memberVerificationError
+      calls.memberVerificationExecute += 1
+      const writeRequired = overrides.memberVerificationWriteRequired ?? true
+      const planned = memberVerificationPlan(request, planDigest, writeRequired)
+      const observedBypassesVerification = overrides.memberVerificationDrift
+        ? !request.bypassesVerification
+        : request.bypassesVerification
+      return {
+        activityId: writeRequired ? "activity-member-verification" : null,
+        desiredBypassesVerification: request.bypassesVerification,
+        guildId: request.guildId,
+        observedBypassesVerification: writeRequired
+          ? observedBypassesVerification
+          : planned.target.currentBypassesVerification,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: !writeRequired
+          ? "already-current" as const
+          : overrides.memberVerificationDrift
+            ? "completed-with-drift" as const
+            : "completed" as const,
+        userId: request.userId,
+        verification: !writeRequired
+          ? "not-required" as const
+          : overrides.memberVerificationDrift
+            ? "drift" as const
+            : "match" as const,
+      }
+    },
     async executeMemberVoiceChange(request, planDigest) {
       if (overrides.memberVoiceError) throw overrides.memberVoiceError
       calls.memberVoiceExecute += 1
@@ -12683,6 +12795,14 @@ function serviceFixture(overrides: {
         overrides.memberNicknameWriteRequired ?? true,
       )
     },
+    async planMemberVerificationChange(request) {
+      calls.memberVerificationPlan += 1
+      return memberVerificationPlan(
+        request,
+        overrides.memberVerificationPlanDigest || DIGEST,
+        overrides.memberVerificationWriteRequired ?? true,
+      )
+    },
     async planMemberVoiceChange(request) {
       calls.memberVoicePlan += 1
       return memberVoicePlan(
@@ -13519,6 +13639,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "verify_guild_scaffold",
       "plan_member_nickname_change",
       "execute_member_nickname_change",
+      "plan_member_verification_change",
+      "execute_member_verification_change",
       "plan_member_role_change",
       "execute_member_role_change",
       "plan_bulk_member_role_change",
@@ -15124,6 +15246,30 @@ test("progressive discovery enables the complete reviewed member nickname workfl
   )
 })
 
+test("progressive discovery enables the complete reviewed member verification workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_member_verification_change" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_member_verification_change",
+    "plan_member_verification_change",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_member_verification_change",
+      "execute_member_verification_change",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("progressive discovery enables the complete reviewed member-role workflow", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
@@ -16141,6 +16287,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messageForwardPlan: 0,
     memberNicknameExecute: 0,
     memberNicknamePlan: 0,
+    memberVerificationExecute: 0,
+    memberVerificationPlan: 0,
     memberRoleExecute: 0,
     memberRolePlan: 0,
     memberVoiceExecute: 0,
@@ -31059,6 +31207,404 @@ test("MCP member nickname changes expose uncertain, rate-limited, and conflict o
     new RegExp(MEMBER_NICKNAME_OPERATION_KEY),
   )
   assert.doesNotMatch(JSON.stringify(unsafeResult), /private nickname/)
+})
+
+test("MCP member verification changes expose only named boolean intent", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const planned = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    name: "plan_member_verification_change",
+  })
+  for (const arguments_ of [
+    {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: "true",
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      flags: 4,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      userId: USER_ID,
+    },
+    {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      userId: "0",
+    },
+  ]) {
+    const invalid = await client.callTool({
+      arguments: arguments_ as never,
+      name: "plan_member_verification_change",
+    })
+    assert.equal(invalid.isError, true)
+  }
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(structuredContent(planned).desiredBypassesVerification, true)
+  assert.equal(
+    (structuredContent(planned).target as Record<string, unknown>)
+      .currentBypassesVerification,
+    false,
+  )
+  assert.equal(
+    (structuredContent(planned).permission as Record<string, unknown>)
+      .authorizationPath,
+    "manage-guild",
+  )
+  assert.equal(
+    (structuredContent(planned).privacy as Record<string, unknown>).rawFlagsExposed,
+    false,
+  )
+  assert.doesNotMatch(JSON.stringify(planned), /"flags":/u)
+  assert.equal(calls.memberVerificationPlan, 1)
+})
+
+test("MCP member verification changes bind approval to named state and complete authority", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return {
+        action: "accept",
+        content: { approve: true },
+      }
+    },
+    serverMessages,
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_verification_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).desiredBypassesVerification, true)
+  assert.equal(structuredContent(result).observedBypassesVerification, true)
+  assert.equal(calls.memberVerificationPlan, 1)
+  assert.equal(calls.memberVerificationExecute, 1)
+  assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
+  assert.match(confirmationMessage, new RegExp(BOT_ID))
+  assert.match(confirmationMessage, new RegExp(GUILD_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /Target is pending: true/u)
+  assert.match(confirmationMessage, /Current BYPASSES_VERIFICATION: false/u)
+  assert.match(confirmationMessage, /Desired BYPASSES_VERIFICATION: true/u)
+  assert.match(confirmationMessage, /Authorization path: manage-guild/u)
+  assert.match(confirmationMessage, /Required permissions: MANAGE_GUILD/u)
+  assert.match(confirmationMessage, /Target is below bot: true/u)
+  assert.match(confirmationMessage, /Target administrator: false/u)
+  assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
+  assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
+  assert.match(confirmationMessage, new RegExp(DIGEST))
+  assert.match(confirmationMessage, /untrusted data/u)
+  assert.match(confirmationMessage, /Every unrelated member flag is preserved/u)
+  assert.match(confirmationMessage, /one exact non-retried PATCH/u)
+  assert.doesNotMatch(confirmationMessage, /raw flags: [0-9]/iu)
+  assert.doesNotMatch(
+    confirmationMessage,
+    new RegExp(MEMBER_VERIFICATION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(MEMBER_VERIFICATION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(result), /"flags":/u)
+})
+
+test("MCP member verification changes skip no-op approval and stop on refusal", async (context) => {
+  let confirmations = 0
+  const current = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberVerificationWriteRequired: false },
+  })
+  const currentResult = await current.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: false,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(currentResult).status, "already-current")
+  assert.equal(structuredContent(currentResult).observedBypassesVerification, false)
+  assert.equal(confirmations, 0)
+  assert.equal(current.calls.memberVerificationExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.memberVerificationExecute, 0)
+
+  const rejected = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: false },
+    }),
+  })
+  const rejectedResult = await rejected.client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      bypassesVerification: true,
+      guildId: GUILD_ID,
+      operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      planDigest: DIGEST,
+      userId: USER_ID,
+    },
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(rejectedResult).status, "confirmation-invalid")
+  assert.equal(rejectedResult.isError, true)
+  assert.equal(rejected.calls.memberVerificationExecute, 0)
+})
+
+test("MCP member verification signed state rejects every changed intent field", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    auditReason: AUDIT_REASON,
+    bypassesVerification: true,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    userId: USER_ID,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_member_verification_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, auditReason: "Different reviewed reason" },
+    { ...request, bypassesVerification: false },
+    { ...request, guildId: OTHER_GUILD_ID },
+    { ...request, operationKey: "member-verification-attempt-0002" },
+    { ...request, planDigest: DIFFERENT_DIGEST },
+    { ...request, userId: GUILD_OWNER_ID },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_member_verification_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_member_verification_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.memberVerificationExecute, 0)
+})
+
+test("MCP member verification changes reject drift and expose safe typed outcomes", async (context) => {
+  let confirmations = 0
+  const arguments_ = {
+    auditReason: AUDIT_REASON,
+    bypassesVerification: true,
+    guildId: GUILD_ID,
+    operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+    planDigest: DIGEST,
+    userId: USER_ID,
+  }
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      confirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { memberVerificationPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(confirmations, 0)
+  assert.equal(changed.calls.memberVerificationExecute, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const drift = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: { memberVerificationDrift: true },
+  })
+  const driftResult = await drift.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(driftResult).status, "completed-with-drift")
+  assert.equal(structuredContent(driftResult).verification, "drift")
+  assert.equal(structuredContent(driftResult).observedBypassesVerification, false)
+
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVerificationError: new MemberVerificationExecutionError(
+        "Discord member verification outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const executionChanged = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVerificationError: new MemberVerificationPlanChangedError(
+        DIGEST,
+        DIFFERENT_DIGEST,
+      ),
+    },
+  })
+  const executionChangedResult = await executionChanged.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(executionChangedResult).status, "plan-changed")
+  assert.equal(
+    ((structuredContent(executionChangedResult).error as Record<string, unknown>)
+      .actualDigest),
+    DIFFERENT_DIGEST,
+  )
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limit",
+    method: "PATCH",
+    retryAfterMs: 2_500,
+    route: "/guilds/{guild_id}/members/{user_id}",
+    status: 429,
+  })
+  const limited = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVerificationError: new MemberVerificationExecutionError(
+        "Discord member verification change was rate limited",
+        { status: "failed" },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const limitedResult = await limited.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(limitedResult).status, "rate-limited")
+  assert.equal(
+    ((structuredContent(limitedResult).error as Record<string, unknown>).retryAfterMs),
+    2_500,
+  )
+
+  const receipt = {
+    activityId: "activity-member-verification",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    status: "completed",
+    timestamp: "2026-08-27T00:00:00.000Z",
+    userId: USER_ID,
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVerificationError: new MemberVerificationOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(MEMBER_VERIFICATION_OPERATION_KEY),
+  )
+
+  const unsafeConflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      memberVerificationError: new MemberVerificationOperationConflictError({
+        ...receipt,
+        flags: 4,
+        operationKey: MEMBER_VERIFICATION_OPERATION_KEY,
+      }),
+    },
+  })
+  const unsafeResult = await unsafeConflict.client.callTool({
+    arguments: arguments_,
+    name: "execute_member_verification_change",
+  })
+  assert.deepEqual(
+    (structuredContent(unsafeResult).error as Record<string, unknown>).receipt,
+    { status: "unavailable" },
+  )
+  assert.doesNotMatch(
+    JSON.stringify(unsafeResult),
+    new RegExp(MEMBER_VERIFICATION_OPERATION_KEY),
+  )
+  assert.doesNotMatch(JSON.stringify(unsafeResult), /"flags":/u)
 })
 
 test("MCP member-role changes plan exact IDs and reject unsafe schemas", async (context) => {

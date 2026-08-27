@@ -11,6 +11,7 @@ import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_FORUM_LAYOUTS,
   DISCORD_FORUM_SORT_ORDERS,
+  DISCORD_GUILD_MEMBER_FLAGS,
   DISCORD_LIMITS,
   DISCORD_MESSAGE_FLAGS,
   GATEWAY_DEFAULTS,
@@ -51,6 +52,7 @@ import {
   GuildTemplateEvidenceError,
   InviteEvidenceError,
   MemberNicknameEvidenceError,
+  MemberVerificationEvidenceError,
   MemberVoiceEvidenceError,
   OnboardingEvidenceError,
   redactText,
@@ -1449,6 +1451,12 @@ export interface DiscordGuildMemberNicknameUpdate {
   userId: string
 }
 
+export interface DiscordGuildMemberVerificationUpdate {
+  bypassesVerification: boolean
+  flags: number
+  userId: string
+}
+
 export type ModifyGuildMemberVoiceInput =
   | { channelId: string | null }
   | { deaf: boolean }
@@ -1631,6 +1639,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_guild_template",
   "modify_current_member_nickname",
   "modify_guild_member_nickname",
+  "modify_guild_member_verification_bypass",
   "modify_guild_member_timeout",
   "modify_guild_member_voice",
   "modify_thread_state",
@@ -2939,6 +2948,47 @@ function projectGuildMemberNicknameUpdate(
   } catch (error) {
     throw new MemberNicknameEvidenceError(
       "Discord returned invalid member nickname evidence",
+      { cause: error },
+    )
+  }
+}
+
+function projectGuildMemberVerificationUpdate(
+  value: unknown,
+  userId: string,
+): DiscordGuildMemberVerificationUpdate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new MemberVerificationEvidenceError(
+      "Discord returned invalid member verification evidence",
+    )
+  }
+  const record = value as Record<string, unknown>
+  const user = record.user
+  try {
+    if (!user || typeof user !== "object" || Array.isArray(user)) {
+      throw new RangeError("Discord guild-member update omitted its user")
+    }
+    assertPositiveSnowflake(
+      (user as Record<string, unknown>).id as string,
+      "Discord guild-member update user ID",
+    )
+    if ((user as Record<string, unknown>).id !== userId) {
+      throw new RangeError("Discord guild-member update user ID does not match the request")
+    }
+    if (!Number.isSafeInteger(record.flags) || (record.flags as number) < 0) {
+      throw new RangeError("Discord guild-member update flags are invalid")
+    }
+    const flags = record.flags as number
+    return {
+      bypassesVerification: (
+        BigInt(flags) & BigInt(DISCORD_GUILD_MEMBER_FLAGS.bypassesVerification)
+      ) !== 0n,
+      flags,
+      userId,
+    }
+  } catch (error) {
+    throw new MemberVerificationEvidenceError(
+      "Discord returned invalid member verification evidence",
       { cause: error },
     )
   }
@@ -11568,6 +11618,34 @@ export class DiscordClient {
       },
     )
     return projectGuildMemberNicknameUpdate(response, userId)
+  }
+
+  async modifyGuildMemberVerificationBypass(
+    guildId: string,
+    userId: string,
+    flags: number,
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildMemberVerificationUpdate> {
+    assertPositiveSnowflake(guildId, "Discord member verification guild ID")
+    assertPositiveSnowflake(userId, "Discord member verification user ID")
+    if (!Number.isSafeInteger(flags) || flags < 0) {
+      throw new RangeError("Discord member verification flags must be a nonnegative safe integer")
+    }
+    encodeDiscordAuditReason(auditReason)
+    const response = await this.#request<unknown>(
+      "modify_guild_member_verification_bypass",
+      `/guilds/${guildId}/members/${userId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { flags },
+        diagnosticRoute: "/guilds/{guild.id}/members/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+    return projectGuildMemberVerificationUpdate(response, userId)
   }
 
   async modifyGuildMemberVoice(

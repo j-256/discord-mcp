@@ -19,6 +19,7 @@ import {
 import {
   DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_TYPES,
+  DISCORD_GUILD_MEMBER_FLAGS,
   DISCORD_MESSAGE_FLAGS,
 } from "../src/constants.js"
 import {
@@ -367,6 +368,7 @@ function serviceFixture(overrides: {
   inviteOptions?: ConnectorServiceOptions["inviteOptions"]
   memberNicknameOptions?: ConnectorServiceOptions["memberNicknameOptions"]
   memberRoleOptions?: ConnectorServiceOptions["memberRoleOptions"]
+  memberVerificationOptions?: ConnectorServiceOptions["memberVerificationOptions"]
   memberVoiceOptions?: ConnectorServiceOptions["memberVoiceOptions"]
   onboardingOptions?: ConnectorServiceOptions["onboardingOptions"]
   welcomeScreenOptions?: ConnectorServiceOptions["welcomeScreenOptions"]
@@ -934,6 +936,9 @@ function serviceFixture(overrides: {
     async modifyGuildMemberNickname() {
       throw new Error("Unexpected member nickname change")
     },
+    async modifyGuildMemberVerificationBypass() {
+      throw new Error("Unexpected member verification change")
+    },
     async modifyGuildMemberVoice() {
       throw new Error("Unexpected member voice change")
     },
@@ -1120,6 +1125,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.memberNicknameOptions
         ? { memberNicknameOptions: overrides.memberNicknameOptions }
+        : {}),
+      ...(overrides.memberVerificationOptions
+        ? { memberVerificationOptions: overrides.memberVerificationOptions }
         : {}),
       ...(overrides.memberRoleOptions
         ? { memberRoleOptions: overrides.memberRoleOptions }
@@ -7111,6 +7119,145 @@ test("service pins identity through the narrow reviewed current-bot nickname rou
     }),
     /member-nickname-attempt|Old private|Reviewed bot nickname|Reviewed current-bot/,
   )
+})
+
+test("service pins identity and coordinates reviewed member verification changes", async () => {
+  const operationStore = new MemoryOperationStore()
+  const botRoleId = "800000000000000001"
+  const targetRoleId = "800000000000000002"
+  const targetId = "700000000000000002"
+  const unrelatedFlag = 1 << 3
+  let targetFlags = unrelatedFlag
+  let verificationWrites = 0
+  const intents: WriteCoordinationIntent[] = []
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      intents.push(intent)
+      return operation()
+    },
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "700000000000000001" }
+      },
+      async getGuildMember(_guildId, userId) {
+        return userId === BOT_ID
+          ? {
+              flags: 0,
+              pending: false,
+              roles: [botRoleId],
+              user: bot(),
+            }
+          : {
+              flags: targetFlags,
+              pending: true,
+              roles: [targetRoleId],
+              user: { id: targetId, username: "private-target-name" },
+            }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, 0n, "@everyone"),
+          {
+            ...role(botRoleId, DISCORD_PERMISSIONS.MANAGE_GUILD, "connector"),
+            managed: true,
+            position: 10,
+            tags: { bot_id: BOT_ID },
+          },
+          {
+            ...role(targetRoleId, 0n, "private-target-role"),
+            position: 1,
+          },
+        ]
+      },
+      async modifyGuildMemberVerificationBypass(
+        guildId,
+        userId,
+        flags,
+        auditReason,
+      ) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, targetId)
+        assert.equal(
+          flags,
+          unrelatedFlag | DISCORD_GUILD_MEMBER_FLAGS.bypassesVerification,
+        )
+        assert.equal(auditReason, "Reviewed Membership Screening bypass")
+        verificationWrites += 1
+        targetFlags = flags
+        return {
+          bypassesVerification: true,
+          flags,
+          userId,
+        }
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        memberVerificationChanges: true,
+      },
+      readScope: {
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        memberVerificationGuildIds: [GUILD_ID],
+      },
+    },
+    memberVerificationOptions: {
+      clock: () => new Date("2026-08-27T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(28),
+      randomId: () => "activity-member-verification",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    auditReason: "Reviewed Membership Screening bypass",
+    bypassesVerification: true,
+    guildId: GUILD_ID,
+    operationKey: "member-verification-attempt-0001",
+    userId: targetId,
+  }
+
+  const plan = await service.planMemberVerificationChange(request)
+  const result = await service.executeMemberVerificationChange(request, plan.digest)
+
+  assert.equal(plan.applicationId, APPLICATION_ID)
+  assert.equal(plan.botId, BOT_ID)
+  assert.equal(plan.target.id, targetId)
+  assert.equal(plan.target.currentBypassesVerification, false)
+  assert.equal(plan.target.pending, true)
+  assert.equal(plan.desiredBypassesVerification, true)
+  assert.equal(plan.permission.authorizationPath, "manage-guild")
+  assert.equal(plan.hierarchy.targetBelowBot, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.observedBypassesVerification, true)
+  assert.equal(result.userId, targetId)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(verificationWrites, 1)
+  assert.deepEqual(intents, [{
+    kind: "member-verification-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [
+      { id: targetId, kind: "member" },
+      { collection: "members", guildId: GUILD_ID, kind: "guild-collection" },
+    ],
+  }])
+  assert.equal(operationStore.receipt?.kind, "member-verification-change")
+  assert.equal(operationStore.receipt?.resourceId, targetId)
+  assert.equal(operationStore.receipt?.status, "completed")
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify({
+      activity: calls.activityEntries,
+      receipt: operationStore.receipt,
+    }),
+    /member-verification-attempt|private-target-name|private-target-role|Reviewed Membership Screening bypass|"flags"/,
+  )
+  assert.doesNotMatch(JSON.stringify({ plan, result }), /"flags"/)
 })
 
 test("service pins identity through reviewed exact member-role changes", async () => {

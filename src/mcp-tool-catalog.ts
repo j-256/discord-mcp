@@ -80,6 +80,7 @@ type McpToolWorkflow =
   | "member-moderation"
   | "member-nickname-change"
   | "member-role-change"
+  | "member-verification-change"
   | "member-voice-change"
   | "message-deletion"
   | "message-forward"
@@ -413,6 +414,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["change", "clear", "execute", "member", "nick", "nickname", "profile"],
     toolset: "member-nicknames",
     workflow: "member-nickname-change",
+  },
+  execute_member_verification_change: {
+    keywords: ["bypass", "execute", "member", "membership screening", "verification", "verify"],
+    toolset: "member-verification",
+    workflow: "member-verification-change",
   },
   execute_member_role_change: {
     keywords: ["add", "assign", "assign role", "execute", "member", "permission", "remove", "role"],
@@ -783,6 +789,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["change", "clear", "member", "nick", "nickname", "plan", "profile", "review"],
     toolset: "member-nicknames",
     workflow: "member-nickname-change",
+  },
+  plan_member_verification_change: {
+    keywords: ["bypass", "member", "membership screening", "plan", "review", "verification", "verify"],
+    toolset: "member-verification",
+    workflow: "member-verification-change",
   },
   plan_member_role_change: {
     keywords: ["add", "assign", "assign role", "member", "permission", "plan", "remove", "review", "role"],

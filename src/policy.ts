@@ -133,6 +133,8 @@ export interface PolicyDescription {
   memberRoleChangesEnabled: boolean
   memberRoleGuildIds: string[]
   memberRoleCount: number
+  memberVerificationChangesEnabled: boolean
+  memberVerificationGuildIds: string[]
   memberVoiceAuditEnabled: boolean
   memberVoiceChangesEnabled: boolean
   memberVoiceChannelIds: string[]
@@ -282,6 +284,7 @@ export class ScopePolicy {
   readonly #allowNicknameChanges: boolean
   readonly #allowOtherMemberNicknameChanges: boolean
   readonly #allowMemberRoleChanges: boolean
+  readonly #allowMemberVerificationChanges: boolean
   readonly #allowBulkMemberRoleChanges: boolean
   readonly #allowMemberVoiceAudit: boolean
   readonly #allowMemberVoiceChanges: boolean
@@ -405,6 +408,7 @@ export class ScopePolicy {
   readonly #nicknameGuildIds: ReadonlySet<string>
   readonly #memberRoleGuildIds: ReadonlySet<string>
   readonly #memberRoleIds: ReadonlySet<string>
+  readonly #memberVerificationGuildIds: ReadonlySet<string>
   readonly #memberVoiceChannelIds: ReadonlySet<string>
   readonly #memberVoiceGuildIds: ReadonlySet<string>
   readonly #messageForwardSourceChannelIds: ReadonlySet<string>
@@ -510,6 +514,7 @@ export class ScopePolicy {
     | "allowNicknameChanges"
     | "allowOtherMemberNicknameChanges"
     | "allowMemberRoleChanges"
+    | "allowMemberVerificationChanges"
     | "allowMemberVoiceAudit"
     | "allowMemberVoiceChanges"
     | "allowCrossGuildMessageForwarding"
@@ -613,6 +618,7 @@ export class ScopePolicy {
     | "nicknameGuildIds"
     | "memberRoleGuildIds"
     | "memberRoleIds"
+    | "memberVerificationGuildIds"
     | "memberVoiceChannelIds"
     | "memberVoiceGuildIds"
     | "messageForwardSourceChannelIds"
@@ -702,6 +708,7 @@ export class ScopePolicy {
     this.#allowOtherMemberNicknameChanges = config.allowOtherMemberNicknameChanges
       ?? false
     this.#allowMemberRoleChanges = config.allowMemberRoleChanges ?? false
+    this.#allowMemberVerificationChanges = config.allowMemberVerificationChanges ?? false
     this.#allowMemberVoiceAudit = config.allowMemberVoiceAudit ?? false
     this.#allowMemberVoiceChanges = config.allowMemberVoiceChanges ?? false
     this.#allowCrossGuildMessageForwarding = config.allowCrossGuildMessageForwarding ?? false
@@ -827,6 +834,7 @@ export class ScopePolicy {
     this.#nicknameGuildIds = config.nicknameGuildIds ?? new Set()
     this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
     this.#memberRoleIds = config.memberRoleIds ?? new Set()
+    this.#memberVerificationGuildIds = config.memberVerificationGuildIds ?? new Set()
     this.#memberVoiceChannelIds = config.memberVoiceChannelIds ?? new Set()
     this.#memberVoiceGuildIds = config.memberVoiceGuildIds ?? new Set()
     this.#messageForwardSourceChannelIds = config.messageForwardSourceChannelIds ?? new Set()
@@ -1085,6 +1093,9 @@ export class ScopePolicy {
         && this.#memberRoleIds.size > 0,
       memberRoleGuildIds: [...this.#memberRoleGuildIds].sort(),
       memberRoleCount: this.#memberRoleIds.size,
+      memberVerificationChangesEnabled: this.#allowMemberVerificationChanges
+        && this.#memberVerificationGuildIds.size > 0,
+      memberVerificationGuildIds: [...this.#memberVerificationGuildIds].sort(),
       memberVoiceAuditEnabled: this.#allowMemberVoiceAudit
         && this.#memberVoiceGuildIds.size > 0
         && this.#memberVoiceChannelIds.size > 0,
@@ -1833,6 +1844,20 @@ export class ScopePolicy {
     if (!this.#nicknameGuildIds.has(guildId)) {
       throw new PolicyError(`Discord guild ${guildId} is outside the nickname-change scope`)
     }
+  }
+
+  assertMemberVerificationChangeAllowed(guildId: string, userId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowMemberVerificationChanges) {
+      throw new PolicyError("Discord member verification changes are disabled by connector configuration")
+    }
+    if (this.#memberVerificationGuildIds.size === 0) {
+      throw new PolicyError("Discord member verification changes require an explicit guild allowlist")
+    }
+    if (!this.#memberVerificationGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the member verification scope`)
+    }
+    this.assertUserNotProtected(userId)
   }
 
   assertOtherMemberNicknameChangeAllowed(guildId: string, userId: string): void {

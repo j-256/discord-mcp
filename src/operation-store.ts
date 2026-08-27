@@ -64,6 +64,7 @@ export const OPERATION_KINDS = [
   "member-nickname-change",
   "member-moderation",
   "member-role-change",
+  "member-verification-change",
   "member-voice-change",
   "message-deletion",
   "message-forward",

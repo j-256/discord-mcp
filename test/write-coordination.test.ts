@@ -978,6 +978,47 @@ test("overlapping same-process claims wait while disjoint targets remain concurr
   assert.equal(secondStarted, true)
 })
 
+test("member verification claims overlap other exact-member administration", async (context) => {
+  const { coordinator } = await fixture(context)
+  const targets = [
+    writeResourceTarget("member", MESSAGE_ID),
+    writeGuildCollectionTarget("members", GUILD_ID),
+  ]
+  let releaseFirst: (() => void) | undefined
+  let firstStarted: (() => void) | undefined
+  let secondStarted = false
+  const firstReady = new Promise<void>((resolvePromise) => {
+    firstStarted = resolvePromise
+  })
+  const firstRelease = new Promise<void>((resolvePromise) => {
+    releaseFirst = resolvePromise
+  })
+
+  const nickname = coordinator.run(intent(targets, {
+    kind: "member-nickname-change",
+  }), async () => {
+    firstStarted?.()
+    await firstRelease
+    return "nickname"
+  })
+  await firstReady
+  const verification = coordinator.run(intent(targets, {
+    kind: "member-verification-change",
+    operationKey: OTHER_OPERATION_KEY,
+    planDigest: OTHER_PLAN_DIGEST,
+  }), async () => {
+    secondStarted = true
+    return "verification"
+  })
+
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise))
+  assert.equal(secondStarted, false)
+  releaseFirst?.()
+  assert.equal(await nickname, "nickname")
+  assert.equal(await verification, "verification")
+  assert.equal(secondStarted, true)
+})
+
 test("failed partial acquisition releases owned targets without running the callback", async (context) => {
   const { directory, operationStore } = await fixture(context)
   const blockedTarget = writeResourceTarget("message", MESSAGE_ID)

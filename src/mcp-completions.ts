@@ -153,6 +153,11 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   promptBinding(MCP_PROMPT_NAMES.authorGuildBlueprint, "guildId", "allowedGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewGuildScaffold, "guildId", "guildScaffoldGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewMemberNicknameChange, "guildId", "nicknameGuildIds"),
+  promptBinding(
+    MCP_PROMPT_NAMES.reviewMemberVerificationChange,
+    "guildId",
+    "memberVerificationGuildIds",
+  ),
   promptBinding(MCP_PROMPT_NAMES.reviewMemberRoleChange, "guildId", "memberRoleGuildIds"),
   promptBinding(
     MCP_PROMPT_NAMES.reviewBulkMemberRoleChange,

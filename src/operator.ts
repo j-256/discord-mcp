@@ -196,6 +196,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   memberNicknamePolicy: "member-nickname-policy",
   otherMemberNicknamePolicy: "other-member-nickname-policy",
   memberRolePolicy: "member-role-policy",
+  memberVerificationPolicy: "member-verification-policy",
   memberVoiceAuditPolicy: "member-voice-audit-policy",
   memberVoiceChangePolicy: "member-voice-change-policy",
   messageContentIntent: "message-content-intent",
@@ -773,6 +774,12 @@ function policyWarnings(config: ConnectorConfig): string[] {
     warnings.push("The member-role toggle is enabled but changes remain blocked because exact guild and role allowlists are both required")
   }
   if (
+    config.allowMemberVerificationChanges
+    && config.memberVerificationGuildIds.size === 0
+  ) {
+    warnings.push("The member verification-change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
+  }
+  if (
     config.allowBulkMemberRoleChanges
     && (
       config.bulkMemberRoleGuildIds.size === 0
@@ -1042,6 +1049,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [config.allowMemberDirectory, "members", "Member directory"],
     [config.allowBanAudit, "bans", "Guild ban audit"],
     [config.allowNicknameChanges, "member-nicknames", "Reviewed member nickname changes"],
+    [
+      config.allowMemberVerificationChanges,
+      "member-verification",
+      "Reviewed member verification-bypass changes",
+    ],
     [
       config.allowMemberRoleChanges || config.allowBulkMemberRoleChanges,
       "member-roles",
@@ -2860,6 +2872,25 @@ export async function diagnoseConnector(
         ? "Other-member nickname changes are enabled behind the base gate with protected-user, owner, pending-member, administrator, MANAGE_NICKNAMES, and strict hierarchy checks"
         : "Other-member nickname changes are disabled; the narrower current-bot route remains independently available",
     ))
+    if (!config.allowMemberVerificationChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVerificationPolicy,
+        "pass",
+        "Reviewed member verification-bypass changes are disabled",
+      ))
+    } else if (config.memberVerificationGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVerificationPolicy,
+        "warn",
+        "Member verification-bypass changes are enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.memberVerificationPolicy,
+        "pass",
+        `Reviewed member verification-bypass changes are constrained to ${config.memberVerificationGuildIds.size} exact guilds with named-bit preservation, documented alternative permission evidence, protected and special-member exclusions, strict hierarchy, signed approval, one-shot execution, and exact readback`,
+      ))
+    }
     if (!config.allowMemberVoiceAudit) {
       checks.push(check(
         DOCTOR_CHECK_IDS.memberVoiceAuditPolicy,

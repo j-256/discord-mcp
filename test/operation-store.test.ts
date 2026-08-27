@@ -804,6 +804,10 @@ test("file operation store isolates every durable write operation-key domain", a
   const onboarding = { ...receipt(), kind: "onboarding-change" as const }
   const memberModeration = { ...receipt(), kind: "member-moderation" as const }
   const memberRole = { ...receipt(), kind: "member-role-change" as const }
+  const memberVerification = {
+    ...receipt(),
+    kind: "member-verification-change" as const,
+  }
   const pin = { ...receipt(), kind: "message-pin" as const }
   const pollCreate = { ...receipt(), kind: "poll-create" as const }
   const pollEnd = { ...receipt(), kind: "poll-end" as const }
@@ -846,6 +850,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(onboarding)).created, true)
   assert.equal((await store.reserve(memberModeration)).created, true)
   assert.equal((await store.reserve(memberRole)).created, true)
+  assert.equal((await store.reserve(memberVerification)).created, true)
   assert.equal((await store.reserve(pin)).created, true)
   assert.equal((await store.reserve(pollCreate)).created, true)
   assert.equal((await store.reserve(pollEnd)).created, true)
@@ -952,6 +957,13 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("member-role-change", memberRole.operationKeyHash),
     memberRole,
+  )
+  assert.deepEqual(
+    await store.get(
+      "member-verification-change",
+      memberVerification.operationKeyHash,
+    ),
+    memberVerification,
   )
   assert.deepEqual(
     await store.get("message-pin", pin.operationKeyHash),

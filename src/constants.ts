@@ -105,6 +105,7 @@ export const MCP_TOOLSET_NAMES = [
   "linked-roles",
   "member-nicknames",
   "member-roles",
+  "member-verification",
   "members",
   "message-forwarding",
   "messages",
@@ -771,6 +772,10 @@ export const DISCORD_APPLICATION_FLAGS = Object.freeze({
   gatewayPresence: 1n << 12n,
   gatewayPresenceLimited: 1n << 13n,
   verificationPendingGuildLimit: 1n << 16n,
+})
+
+export const DISCORD_GUILD_MEMBER_FLAGS = Object.freeze({
+  bypassesVerification: 1 << 2,
 })
 
 export const DISCORD_CHANNEL_TYPES = Object.freeze({

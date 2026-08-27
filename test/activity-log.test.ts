@@ -49,6 +49,7 @@ import {
   type MemberModerationActivity,
   type MemberNicknameActivity,
   type MemberRoleActivity,
+  type MemberVerificationActivity,
   type MemberVoiceActivity,
   type MessagePinActivity,
   type MessageForwardActivity,
@@ -692,6 +693,32 @@ function memberVoice(
     guildId: "100",
     id,
     kind: "member-voice-change",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    userId: "400",
+    verification: status === "completed"
+      ? "match"
+      : status === "completed-with-drift"
+        ? "drift"
+        : null,
+  }
+}
+
+function memberVerification(
+  id: string,
+  status: MemberVerificationActivity["status"],
+): MemberVerificationActivity {
+  return {
+    desiredBypassesVerification: true,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "member-verification-change",
     operationKeyHash: `sha256:${"7".repeat(64)}`,
     planDigest: `hmac-sha256:${"8".repeat(64)}`,
     schemaVersion: 1,
@@ -2675,6 +2702,53 @@ test("JSONL activity log keeps member nickname evidence content-free", async (co
     JSON.stringify(result),
     /private audit|private member|private new|private old|private-operation|private role/,
   )
+})
+
+test("JSONL activity log keeps member verification evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+
+  await store.append({
+    ...memberVerification("1", "pending"),
+    auditReason: "must never reach disk",
+    flags: 12,
+    username: "must-not-persist",
+  } as MemberVerificationActivity)
+  await appendFile(
+    file,
+    `${JSON.stringify(memberVerification("2", "completed-with-drift"))}\n${JSON.stringify({
+      ...memberVerification("3", "completed"),
+      flags: 4,
+    })}\n${JSON.stringify({
+      ...memberVerification("4", "pending"),
+      verification: "match",
+    })}\n`,
+    "utf8",
+  )
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.doesNotMatch(persisted, /must never reach disk|must-not-persist/u)
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.equal(result.entries[0]?.kind, "member-verification-change")
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "desiredBypassesVerification",
+    "error",
+    "guildId",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "userId",
+    "verification",
+  ])
+  assert.doesNotMatch(JSON.stringify(result), /auditReason|flags|username/u)
 })
 
 test("JSONL activity log keeps member voice evidence and state content-free", async (context) => {

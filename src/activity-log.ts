@@ -539,6 +539,28 @@ export interface MemberNicknameActivity {
   verification: "drift" | "match" | null
 }
 
+export type MemberVerificationActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface MemberVerificationActivity {
+  desiredBypassesVerification: boolean
+  error: string | null
+  guildId: string
+  id: string
+  kind: "member-verification-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: MemberVerificationActivityStatus
+  timestamp: string
+  userId: string
+  verification: "drift" | "match" | null
+}
+
 export type MemberVoiceActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1665,6 +1687,7 @@ export type ActivityEntry =
   | MemberModerationActivity
   | MemberNicknameActivity
   | MemberRoleActivity
+  | MemberVerificationActivity
   | MemberVoiceActivity
   | MessagePinActivity
   | MessageForwardActivity
@@ -2790,6 +2813,84 @@ function parseMemberNicknameActivity(
     schemaVersion: SCHEMA_VERSION,
     status: record.status as MemberNicknameActivityStatus,
     targetKind: record.targetKind as "current-bot" | "member",
+    timestamp: record.timestamp,
+    userId: record.userId,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+const MEMBER_VERIFICATION_ACTIVITY_KEYS = [
+  "desiredBypassesVerification",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "userId",
+  "verification",
+] as const
+
+function parseMemberVerificationActivity(
+  value: unknown,
+): MemberVerificationActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  if (
+    keys.length !== MEMBER_VERIFICATION_ACTIVITY_KEYS.length
+    || keys.some((key, index) => key !== MEMBER_VERIFICATION_ACTIVITY_KEYS[index])
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "member-verification-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.desiredBypassesVerification !== "boolean"
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.userId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.userId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    desiredBypassesVerification: record.desiredBypassesVerification,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "member-verification-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as MemberVerificationActivityStatus,
     timestamp: record.timestamp,
     userId: record.userId,
     verification: record.verification as "drift" | "match" | null,
@@ -6447,6 +6548,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseOnboardingActivity(value)
     || parseMemberNicknameActivity(value)
     || parseMemberRoleActivity(value)
+    || parseMemberVerificationActivity(value)
     || parseMemberVoiceActivity(value)
     || parseThreadGovernanceActivity(value)
     || parseRoleCreationActivity(value)
@@ -6466,7 +6568,24 @@ export class JsonlActivityLog implements ActivityStore {
   }
 
   async append(entry: ActivityEntry): Promise<void> {
-    const normalized = parseActivityEntry(entry)
+    const normalized = parseActivityEntry(entry) || (
+      entry.kind === "member-verification-change"
+        ? parseMemberVerificationActivity({
+            desiredBypassesVerification: entry.desiredBypassesVerification,
+            error: entry.error,
+            guildId: entry.guildId,
+            id: entry.id,
+            kind: entry.kind,
+            operationKeyHash: entry.operationKeyHash,
+            planDigest: entry.planDigest,
+            schemaVersion: entry.schemaVersion,
+            status: entry.status,
+            timestamp: entry.timestamp,
+            userId: entry.userId,
+            verification: entry.verification,
+          })
+        : undefined
+    )
     if (!normalized) {
       throw new AuditLogError("Discord activity has an invalid content-free shape")
     }

@@ -259,6 +259,10 @@
           "type": "boolean",
           "description": "Enable member role changes policy"
         },
+        "memberVerificationChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed exact-member changes to Discord's named BYPASSES_VERIFICATION state"
+        },
         "memberVoiceAudit": {
           "type": "boolean",
           "description": "Enable member voice audit policy"
@@ -1290,6 +1294,16 @@
           },
           "description": "Exact Discord ID allowlist for member role ids"
         },
+        "memberVerificationGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact guild ID allowlist for reviewed member verification-bypass changes"
+        },
         "memberVoiceChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1677,7 +1691,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 65,
+          "maxItems": 66,
           "type": "array",
           "items": {
             "type": "string",
@@ -1722,6 +1736,7 @@
               "linked-roles",
               "member-nicknames",
               "member-roles",
+              "member-verification",
               "members",
               "message-forwarding",
               "messages",

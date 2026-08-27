@@ -341,6 +341,8 @@ function status(
       memberRoleChangesEnabled: false,
       memberRoleGuildIds: [],
       memberRoleCount: 0,
+      memberVerificationChangesEnabled: false,
+      memberVerificationGuildIds: [],
       memberVoiceAuditEnabled: false,
       memberVoiceChangesEnabled: false,
       memberVoiceChannelIds: [],
@@ -474,6 +476,7 @@ function toolService(
     executeGlobalApplicationCommandChange: unexpected,
     executeRoleOrder: unexpected,
     executeMemberNicknameChange: unexpected,
+    executeMemberVerificationChange: unexpected,
     executeMemberRoleChange: unexpected,
     executeBulkMemberRoleChange: unexpected,
     executeMemberVoiceChange: unexpected,
@@ -573,6 +576,7 @@ function toolService(
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberNicknameChange: unexpected,
+    planMemberVerificationChange: unexpected,
     planMemberRoleChange: unexpected,
     planBulkMemberRoleChange: unexpected,
     planMemberVoiceChange: unexpected,
@@ -4417,6 +4421,54 @@ test("doctor and setup explain reviewed member nickname scope without Discord wr
   assertDefaultSecretForwarding(setup)
 })
 
+test("doctor and setup explain reviewed member verification-bypass scope", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      memberVerificationChanges: true,
+    },
+    scopes: {
+      memberVerificationGuildIds: [GUILD_ID],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  assert.throws(
+    () => loadFixtureConfig(fixturePolicy({
+      capabilities: {
+        memberVerificationChanges: true,
+      },
+    })),
+    /requires.*memberVerificationGuildIds/u,
+  )
+  const setup = await prepareSetup({
+    configOverrides: enabledPolicy,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const verification = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.memberVerificationPolicy,
+  )
+  assert.equal(verification?.status, "pass")
+  assert.match(verification?.summary || "", /1 exact guilds/u)
+  assert.match(verification?.summary || "", /named-bit preservation/u)
+  assert.match(verification?.summary || "", /documented alternative permission evidence/u)
+  assert.match(verification?.summary || "", /protected and special-member exclusions/u)
+  assert.match(verification?.summary || "", /signed approval, one-shot execution, and exact readback/u)
+  assert.match(omitted.warnings.join("\n"), /member-verification toolset/u)
+  assertDefaultSecretForwarding(setup)
+})
+
 test("doctor and setup explain privacy-safe reviewed member voice scope", async () => {
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -5852,6 +5904,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_member_moderation",
     "review_member_nickname_change",
     "review_member_role_change",
+    "review_member_verification_change",
     "review_member_voice_change",
     "review_message_deletion",
     "review_message_forward",
@@ -5978,6 +6031,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_member_moderation",
     "execute_member_nickname_change",
     "execute_member_role_change",
+    "execute_member_verification_change",
     "execute_member_voice_change",
     "execute_message_forward",
     "execute_message_pin",

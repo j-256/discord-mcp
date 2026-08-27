@@ -522,6 +522,16 @@ import type {
 } from "./member-role-service.js"
 import { MemberRoleService } from "./member-role-service.js"
 import type {
+  MemberVerificationChangePlan,
+  MemberVerificationChangeRequest,
+  MemberVerificationChangeResult,
+  MemberVerificationServiceOptions,
+} from "./member-verification-service.js"
+import {
+  MemberVerificationService,
+  normalizeMemberVerificationChangeRequest,
+} from "./member-verification-service.js"
+import type {
   MemberVoiceAuditResult,
   MemberVoiceChangePlan,
   MemberVoiceChangeRequest,
@@ -968,6 +978,7 @@ export interface DiscordServiceClient {
   modifyCurrentApplicationFlags: DiscordClient["modifyCurrentApplicationFlags"]
   modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
   modifyGuildMemberNickname: DiscordClient["modifyGuildMemberNickname"]
+  modifyGuildMemberVerificationBypass: DiscordClient["modifyGuildMemberVerificationBypass"]
   modifyGuildMemberVoice: DiscordClient["modifyGuildMemberVoice"]
   modifyThreadState: DiscordClient["modifyThreadState"]
   modifyWebhook: DiscordClient["modifyWebhook"]
@@ -1188,6 +1199,10 @@ export interface ConnectorServiceOptions {
   >
   memberNicknameOptions?: Pick<
     MemberNicknameServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  memberVerificationOptions?: Pick<
+    MemberVerificationServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   memberVoiceOptions?: Pick<
@@ -1477,6 +1492,7 @@ export class ConnectorService {
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberNicknameService: MemberNicknameService
   readonly #memberRoleService: MemberRoleService
+  readonly #memberVerificationService: MemberVerificationService
   readonly #memberVoiceService: MemberVoiceService
   readonly #nativeInteractionCommandService: NativeInteractionCommandService
   readonly #permissionOverwriteService: ChannelPermissionOverwriteService
@@ -1932,6 +1948,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.memberNicknameOptions,
+    })
+    this.#memberVerificationService = new MemberVerificationService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.memberVerificationOptions,
     })
     this.#memberRoleService = new MemberRoleService({
       activityStore: this.#activityStore,
@@ -4119,6 +4142,20 @@ export class ConnectorService {
     )
   }
 
+  async planMemberVerificationChange(
+    request: MemberVerificationChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<MemberVerificationChangePlan> {
+    normalizeMemberVerificationChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#memberVerificationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planMemberVoiceChange(
     request: MemberVoiceChangeRequest,
     options: RequestOptions = {},
@@ -4975,6 +5012,31 @@ export class ConnectorService {
         writeGuildCollectionTarget("members", normalized.guildId),
       ],
       () => this.#memberNicknameService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeMemberVerificationChange(
+    request: MemberVerificationChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<MemberVerificationChangeResult> {
+    const normalized = normalizeMemberVerificationChangeRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "member-verification-change",
+      normalized.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("member", normalized.userId),
+        writeGuildCollectionTarget("members", normalized.guildId),
+      ],
+      () => this.#memberVerificationService.execute(
         identity.application.id,
         identity.bot.id,
         request,

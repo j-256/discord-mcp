@@ -1809,6 +1809,42 @@ export class MemberNicknameEvidenceError extends Error {
   override name = "MemberNicknameEvidenceError"
 }
 
+export class MemberVerificationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord member verification snapshot does not match the reviewed plan")
+    this.name = "MemberVerificationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class MemberVerificationOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord member verification operation key has already been reserved")
+    this.name = "MemberVerificationOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class MemberVerificationExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "MemberVerificationExecutionError"
+    this.result = result
+  }
+}
+
+export class MemberVerificationEvidenceError extends Error {
+  override name = "MemberVerificationEvidenceError"
+}
+
 export class ThreadGovernancePlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string
