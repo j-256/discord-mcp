@@ -1,6 +1,6 @@
 # Release runbook
 
-Discord MCP uses deliberately separate release operations for a credential-free first-publication candidate, normal staged npm publication, immutable OCI publication, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
+Discord MCP uses deliberately separate release operations for a credential-free first-publication candidate, normal staged npm publication, immutable OCI publication, MCP Registry registration, and an immutable GitHub Release. No operation contacts Discord or needs a Discord bot token.
 
 ## Public-source preflight
 
@@ -23,7 +23,7 @@ Before any publication:
 2. Set the repository description exactly to `Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `discord-mcp`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose, and leave the homepage unset until a durable project-owned documentation location exists. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
 3. Create or re-enable protection for `main` after the visibility change and require the `CI gate` and CodeQL checks. Require CODEOWNERS review for workflows, package metadata, registry metadata, release scripts, security policy, and community files.
 4. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
-5. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
+5. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Enable repository-level immutable Releases before publishing any GitHub Release. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
 6. Enable two-factor authentication on the npm maintainer account.
 7. Confirm that the npm maintainer controls the `@j-256` scope.
 8. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
@@ -157,6 +157,8 @@ The protected image operation reconstructs the npm archive from the tag and requ
 
 Before publishing, the workflow exports and validates the complete multi-architecture OCI layout with digest-pinned BuildKit, architecture-emulation, and SBOM-generator images. It verifies every referenced blob and requires the exact platform, annotation, configuration, layer-binding, provenance, and SPDX structure. BuildKit evidence may use its legacy compatibility image config or its OCI artifact encoding. The artifact form must name the exact runnable manifest as its subject and use OCI's canonical empty JSON config descriptor. The release build then binds BuildKit provenance and SPDX records for both platform manifests into the root index and pushes signed GitHub provenance for that exact root digest. It requires the public index to match the preflight invariants, runs the pulled image with a read-only root filesystem and no network or Linux capabilities, compares its catalog evidence to the source contract, and verifies the signed root claim against the exact repository, workflow, tag ref, and source commit.
 
+BuildKit `mode=max` identifies the provenance record's detail level, not a maximum security or SLSA assurance level. The [provenance, SBOM, and attestation boundaries](reference.md#provenance-sbom-and-attestation-boundaries) distinguish the build receipt, detected software inventory, signed artifact binding, and guarantees that still require independent review.
+
 GitHub creates a new personal container package as private by default. On the first image publication, the workflow may publish and attest the immutable tag and then fail its anonymous-read check with a recovery instruction. Open the package settings, confirm that the source repository is linked, review the package contents and permissions, and change visibility to Public. Visibility changes are consequential and may be irreversible, so do this only after the review. Rerun the same protected `image` operation. It detects the existing exact tag, does not overwrite or re-attest it, and completes only if the now-public digest and behavior match the release.
 
 If the exact tag already exists but any digest, platform, annotation, image configuration, attestation, or runtime proof differs, the operation fails closed. Fix the source and publish a new semantic version; never replace a published tag.
@@ -171,7 +173,40 @@ gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=register -f ta
 
 The register operation reconstructs the package from the tag, requires its SHA-512 integrity to equal npm's published integrity, and requires the public OCI index and every platform configuration to match the same version and source commit. It downloads MCP Registry publisher `v1.8.1` from the official release, verifies the pinned Linux archive SHA-256, validates `server.json`, authenticates with GitHub OIDC, and publishes only when the exact registry version is absent. Metadata checks require the npm entry to pass one config-file argument, the OCI entry to use one read-only config mount and the hardened operational command, and both entries to request only the bot-token secret. An already matching registry entry is a successful no-op. Existing mismatched metadata fails closed.
 
+## Publish the immutable GitHub Release
+
+After npm, the public OCI image, and the MCP Registry expose the same exact version, dispatch the final protected operation:
+
+```sh
+gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=github-release -f tag=vMAJOR.MINOR.PATCH
+```
+
+The read-only release job reconstructs the npm archive and SPDX SBOM, verifies the package, image, and Registry version as one public identity, signs the reconstructed evidence, and retains it for the publisher job. The dependent publisher job alone receives `contents: write`, plus read-only access to that run's artifacts and GitHub attestations. It installs the exact SHA-256-pinned GitHub CLI archive, downloads only that run's evidence, resolves the protected tag to the exact source commit, and generates deterministic release notes and `SHA256SUMS`. GitHub does not expose its repository-level immutable-Releases setting to `GITHUB_TOKEN`, so the protected environment reviewer must confirm that setting before approving this job; automation receives no standing repository-administration credential.
+
+An absent Release is created as a draft. An existing draft may be reconciled only for the exact asset set below, then its tag, title, notes, asset names, sizes, SHA-256 digests, download URLs, and source commit are verified before publication:
+
+- `j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz`
+- `catalog-evidence.json`
+- `release-notes.md`
+- `sbom.spdx.json`
+- `SHA256SUMS`
+
+Publishing locks the tag and assets when repository-level immutable Releases remain enabled and creates GitHub's Release attestation over the tag, commit, and assets. GitHub still permits the displayed Release title and body to be edited, so `release-notes.md` is the canonical immutable copy and is covered by `SHA256SUMS`. The workflow waits for the immutable postcondition, verifies the Release attestation and every asset attestation, downloads every public asset, compares each byte-for-byte with the protected evidence, and verifies the checksum manifest. A matching immutable Release is a successful no-op. A mutable published Release, mismatched immutable Release, prerelease, unexpected asset, or draft that cannot be reconciled exactly fails closed. The workflow never deletes a Release or an unexpected asset.
+
 ## Independent verification
+
+Verify the immutable GitHub Release, download its exact assets, verify each local asset against GitHub's Release attestation, and check the checksum manifest:
+
+```sh
+mkdir discord-mcp-release
+gh release verify vMAJOR.MINOR.PATCH --repo j-256/discord-mcp
+gh release download vMAJOR.MINOR.PATCH --repo j-256/discord-mcp --dir discord-mcp-release
+gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --repo j-256/discord-mcp
+gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/release-notes.md --repo j-256/discord-mcp
+(cd discord-mcp-release && shasum -a 256 -c SHA256SUMS)
+```
+
+`gh release verify` establishes GitHub's signed binding among the immutable tag, source commit, and complete asset digest set. `gh release verify-asset` establishes that the local file is one exact attested asset. The checksum manifest makes the package, catalog evidence, canonical notes, and SBOM directly comparable with ordinary local tools. These integrity checks establish identity and origin, not freedom from defects, vulnerabilities, malicious source, or scanner omissions.
 
 Download the exact npm package and verify both provenance and its SBOM attestation:
 
@@ -243,6 +278,7 @@ The exact registry response is also available from `https://registry.modelcontex
 - Reject an unapproved npm stage and publish a corrected new version
 - Deprecate a flawed public npm version and publish a corrected new version rather than overwriting it
 - Publish a corrected OCI image under a new semantic version rather than overwriting or reusing an existing tag
+- Leave a malformed draft unpublished for explicit maintainer cleanup; publish a corrected semantic version if an immutable GitHub Release is wrong
 - Revoke a suspected credential immediately and preserve workflow logs without copying secrets into an issue
 - Use npm unpublish only for a confirmed security emergency and after evaluating downstream breakage
 - Publish corrected MCP Registry metadata under the corrected package version; never claim mismatched metadata is equivalent
@@ -258,6 +294,8 @@ The exact registry response is also available from `https://registry.modelcontex
 - [GitHub private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
 - [GitHub security and analysis settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-security-and-analysis-settings-for-your-repository)
 - [GitHub artifact and SBOM attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+- [GitHub immutable Releases](https://docs.github.com/en/enterprise-cloud@latest/code-security/concepts/supply-chain-security/immutable-releases)
+- [GitHub Release integrity verification](https://docs.github.com/en/enterprise-cloud@latest/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity)
 - [GitHub container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 - [GitHub package visibility and access](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
 - [Docker multi-platform images](https://docs.docker.com/build/ci/github-actions/multi-platform/)

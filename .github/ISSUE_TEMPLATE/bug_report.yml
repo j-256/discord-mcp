@@ -20,7 +20,7 @@ body:
     attributes:
       label: Version
       description: Exact package version, image tag, or source revision
-      placeholder: 0.1.0
+      placeholder: MAJOR.MINOR.PATCH
     validations:
       required: true
   - type: dropdown

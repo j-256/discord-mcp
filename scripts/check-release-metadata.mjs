@@ -34,6 +34,8 @@ const NODE_IMAGE = "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa4
 const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
 const SBOM_GENERATOR_IMAGE = "docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+const GITHUB_CLI_VERSION = "2.98.0"
+const GITHUB_CLI_SHA256 = "3b8ac6b30336802fc1a858d7c084e11cdf24ac1a761ca90b68022d7d729208de"
 const README_MAX_BYTES = 32 * 1024
 const COMMUNITY_FILE_MAX_BYTES = 12 * 1024
 const README_REQUIRED_HEADINGS = Object.freeze([
@@ -643,6 +645,7 @@ async function checkAutomation() {
     "stage",
     "image",
     "register",
+    "github-release",
     "Require a clean first-publication candidate",
     "npm stage publish",
     "--provenance",
@@ -659,6 +662,25 @@ async function checkAutomation() {
     "mcp-publisher 1.8.1 ",
     "Attest catalog evidence",
     "Attest exact OCI image provenance",
+    "Verify complete public distribution for GitHub Release",
+    "Verify exact tag and prepare immutable release evidence",
+    "Create an absent release as an editable draft",
+    "Reconcile and verify the editable draft",
+    "Publish the exact draft immutably",
+    "Verify immutable release and every public asset",
+    "Retain immutable GitHub Release verification",
+    "scripts/github-release.mjs prepare",
+    "scripts/github-release.mjs inspect",
+    "scripts/github-release.mjs verify",
+    "gh release create",
+    "gh release upload",
+    "gh release verify",
+    "gh release verify-asset",
+    "SHA256SUMS",
+    "release-notes.md",
+    `GITHUB_CLI_SHA256: ${GITHUB_CLI_SHA256}`,
+    `GITHUB_CLI_VERSION: ${GITHUB_CLI_VERSION}`,
+    "gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz",
     "subject-name: ${{ steps.release.outputs.image_name }}",
     "catalog-evidence.json",
     "container-evidence.json",
@@ -700,9 +722,11 @@ async function checkAutomation() {
   }
   const ociLayoutVerifier = await readFile(join(REPOSITORY_ROOT, "scripts/verify-oci-layout.mjs"), "utf8")
   const ociRegistry = await readFile(join(REPOSITORY_ROOT, "scripts/oci-registry.mjs"), "utf8")
+  const githubReleaseHelper = await readFile(join(REPOSITORY_ROOT, "scripts/github-release.mjs"), "utf8")
   invariant(release.includes(SBOM_GENERATOR_IMAGE), "release workflow does not pin its SBOM generator")
   invariant(ociRegistry.includes(SBOM_GENERATOR_IMAGE), "OCI utilities do not pin their SBOM generator")
   invariant(ociLayoutVerifier.includes("SBOM_GENERATOR_IMAGE"), "OCI preflight does not use the pinned SBOM generator")
+  invariant(!githubReleaseHelper.includes("/immutable-releases"), "GitHub Release automation must not require unavailable repository administration authority")
   for (const workflowName of ["ci.yml", "release.yml"]) {
     const workflow = await readFile(join(workflowsDirectory, workflowName), "utf8")
     invariant(workflow.includes("NPM_CONFIG_REGISTRY: https://registry.npmjs.org"), `${workflowName} must pin the npm registry`)
@@ -713,6 +737,47 @@ async function checkAutomation() {
   invariant(release.includes("create-storage-record: false"), "personal image attestation must disable unsupported storage records")
   invariant((release.match(/packages: write/g) || []).length === 1, "only the image release job may write packages")
   invariant((release.match(/packages: read/g) || []).length === 1, "the non-image release job must use read-only package access")
+  invariant((release.match(/contents: write/g) || []).length === 1, "only the immutable GitHub Release job may write repository contents")
+  invariant((release.match(/actions: read/g) || []).length === 1, "only the immutable GitHub Release job may read retained workflow evidence")
+  invariant((release.match(/attestations: read/g) || []).length === 1, "only the immutable GitHub Release job may use read-only attestation authority")
+  invariant((release.match(/name: Install verified GitHub CLI/g) || []).length === 2, "every GitHub CLI consumer must install the reviewed binary")
+  const githubReleaseStart = release.indexOf("\n  github_release:")
+  const githubReleaseEnd = release.indexOf("\n  image:", githubReleaseStart)
+  invariant(githubReleaseStart > 0 && githubReleaseEnd > githubReleaseStart, "immutable GitHub Release job boundaries are invalid")
+  const githubReleaseJob = release.slice(githubReleaseStart, githubReleaseEnd)
+  for (const required of [
+    "needs: release",
+    "environment: release",
+    "actions: read",
+    "attestations: read",
+    "contents: write",
+    "--expect-package matching",
+    "--expect-npm matching",
+    "--expect-oci matching",
+    "--expect-registry matching",
+    "--expect draft",
+    "--expect immutable",
+    "--draft=false",
+    "--verify-tag",
+    "--clobber",
+    "release-notes.md",
+    "sha256sum -c SHA256SUMS",
+  ]) {
+    invariant(githubReleaseJob.includes(required), `immutable GitHub Release job is missing ${required}`)
+  }
+  for (const forbidden of [
+    "attestations: write",
+    "artifact-metadata: write",
+    "id-token: write",
+    "packages: read",
+    "packages: write",
+    "administration:",
+    "secrets.",
+    "gh release delete",
+    "gh release delete-asset",
+  ]) {
+    invariant(!githubReleaseJob.includes(forbidden), `immutable GitHub Release job contains forbidden authority ${forbidden}`)
+  }
   invariant(!release.includes("secrets.NPM_TOKEN"), "release workflow must not use a standing npm token")
   invariant(
     (ci.match(/catalog-evidence\.json/g) || []).length >= 2,

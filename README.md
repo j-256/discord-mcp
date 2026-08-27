@@ -271,7 +271,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 
 `catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, policy-completion bindings, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, plan-review app response, and execution guard.
 
-The release workflow rebuilds candidates from source, packs them twice, installs them without lifecycle scripts, compares them across supported Node.js lines, builds an exact-version multi-architecture OCI image, tests the image under a read-only root filesystem with no capabilities or network, generates an SPDX SBOM, and retains signed provenance, SBOM, and catalog attestations. The [release runbook](docs/releasing.md) documents the human-controlled publication gates and independent verification path.
+Release automation verifies reproducible npm and OCI artifacts, SPDX inventories, and signed provenance, then publishes an immutable GitHub Release binding its tag, commit, and evidence. Provenance is a build receipt, an SBOM a parts list, and an attestation their exact artifact-and-issuer binding; none certifies security or completeness. See the [evidence boundaries](docs/reference.md#provenance-sbom-and-attestation-boundaries) and [release runbook](docs/releasing.md).
 
 ## Architecture
 

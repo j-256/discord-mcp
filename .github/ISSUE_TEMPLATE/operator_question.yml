@@ -45,7 +45,7 @@ body:
     attributes:
       label: Version
       description: Exact package version, image tag, or source revision when applicable
-      placeholder: 0.1.0
+      placeholder: MAJOR.MINOR.PATCH
   - type: input
     id: runtime
     attributes:
