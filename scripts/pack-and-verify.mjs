@@ -253,6 +253,19 @@ const EXPECTED_MCP_TOOL_PROGRESS = [
   { message: "Discord request round started", progress: 0, total: 1 },
   { message: "Discord request round finished", progress: 1, total: 1 },
 ]
+const MCP_PROGRESS_SETTLE_ROUNDS = 2
+
+async function settleMcpProgress(progress) {
+  for (
+    let round = 0;
+    round < MCP_PROGRESS_SETTLE_ROUNDS
+      && progress.length < EXPECTED_MCP_TOOL_PROGRESS.length;
+    round += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
+
 function assertOperationalInstructions(client) {
   const instructions = client.getInstructions()
   assert.equal(typeof instructions, "string")
@@ -435,6 +448,7 @@ try {
   }, {
     onprogress: (update) => progress.push(update),
   })
+  await settleMcpProgress(progress)
   assert.deepEqual(progress, EXPECTED_MCP_TOOL_PROGRESS)
   assert.equal(discovery.isError, undefined)
   assert.deepEqual(
@@ -475,6 +489,7 @@ try {
   }, {
     onprogress: (update) => progress.push(update),
   })
+  await settleMcpProgress(progress)
   const completion = await modernClient.complete({
     argument: { name: "guildId", value: "300" },
     ref: { type: "ref/resource", uri: "discord://guilds/{guildId}/channels" },
