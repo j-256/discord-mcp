@@ -7635,12 +7635,18 @@ function threadGovernancePlan(
             ? { field: "invitable", value: request.enabled }
             : request.action === "set-slowmode"
               ? { field: "rateLimitPerUser", value: request.rateLimitPerUser }
-              : { field: "membership", value: request.action === "add-member" }
-  const membershipAction = request.action === "add-member"
+              : {
+                  field: "membership",
+                  value: request.action === "add-member" || request.action === "join",
+                }
+  const targetedMembershipAction = request.action === "add-member"
     || request.action === "remove-member"
+  const selfMembershipAction = request.action === "join"
+    || request.action === "leave"
+  const membershipAction = targetedMembershipAction || selfMembershipAction
   const membershipCurrent = membershipAction
     ? writeRequired
-      ? request.action === "remove-member"
+      ? request.action === "leave" || request.action === "remove-member"
       : desired.value as boolean
     : null
   const thread = {
@@ -7679,7 +7685,7 @@ function threadGovernancePlan(
         isMember: membershipCurrent as boolean,
         joinedAt: membershipCurrent ? "2026-08-22T00:00:00.000Z" : null,
         unknownFieldCount: 0,
-        userId: request.userId,
+        userId: targetedMembershipAction ? request.userId : BOT_ID,
       }
     : null
   return {
@@ -7689,8 +7695,10 @@ function threadGovernancePlan(
     authorizationBasis: writeRequired ? "manage-threads" : "already-current",
     botId: BOT_ID,
     connectorMembership: {
-      isMember: true,
-      joinedAt: "2026-08-21T00:00:00.000Z",
+      isMember: selfMembershipAction ? membershipCurrent as boolean : true,
+      joinedAt: selfMembershipAction && !membershipCurrent
+        ? null
+        : "2026-08-21T00:00:00.000Z",
       unknownFieldCount: 0,
       userId: BOT_ID,
     },
@@ -7702,7 +7710,7 @@ function threadGovernancePlan(
       name: "Private guild name",
       ownerId: GUILD_OWNER_ID,
     },
-    member: membershipAction
+    member: targetedMembershipAction
       ? { id: request.userId, username: "untrusted-member-name" }
       : null,
     membership,
@@ -7734,7 +7742,7 @@ function threadGovernancePlan(
     risks: writeRequired ? ["One exact non-retried thread write"] : [],
     schemaVersion: 1,
     status: writeRequired ? "planned" : "already-current",
-    targetPermission: membershipAction
+    targetPermission: targetedMembershipAction
       ? permission(["VIEW_CHANNEL", "SEND_MESSAGES_IN_THREADS"], [request.guildId])
       : null,
     thread,
@@ -10200,8 +10208,12 @@ function serviceFixture(overrides: {
       if (planned.desired.field !== "membership") {
         observedThread[planned.desired.field] = planned.desired.value as never
       }
-      const membershipAction = request.action === "add-member"
+      const targetedMembershipAction = request.action === "add-member"
         || request.action === "remove-member"
+      const selfMembershipAction = request.action === "join"
+        || request.action === "leave"
+      const membershipAction = targetedMembershipAction || selfMembershipAction
+      const membershipUserId = targetedMembershipAction ? request.userId : BOT_ID
       return {
         action: request.action,
         activityId: writeRequired ? "activity-thread-governance" : null,
@@ -10209,12 +10221,12 @@ function serviceFixture(overrides: {
         guildId: request.guildId,
         observedMembership: membershipAction
           ? {
-              isMember: request.action === "add-member",
-              joinedAt: request.action === "add-member"
+              isMember: request.action === "add-member" || request.action === "join",
+              joinedAt: request.action === "add-member" || request.action === "join"
                 ? "2026-08-22T00:00:00.000Z"
                 : null,
               unknownFieldCount: 0,
-              userId: request.userId,
+              userId: membershipUserId,
             }
           : null,
         observedThread,
@@ -10222,7 +10234,7 @@ function serviceFixture(overrides: {
         planDigest,
         schemaVersion: 1,
         status: writeRequired ? "completed" : "already-current",
-        targetUserId: membershipAction ? request.userId : null,
+        targetUserId: targetedMembershipAction ? request.userId : null,
         threadId: request.threadId,
         verification: writeRequired ? "match" : "not-required",
       }
@@ -33600,6 +33612,16 @@ test("MCP thread governance audits exact state and rejects mixed action shapes",
     },
     name: "plan_thread_change",
   })
+  const selfJoin = await client.callTool({
+    arguments: {
+      action: "join",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: `${THREAD_GOVERNANCE_OPERATION_KEY}-join`,
+      threadId: THREAD_ID,
+    },
+    name: "plan_thread_change",
+  })
   const invalidMetadata = await client.callTool({
     arguments: {
       action: "archive",
@@ -33618,6 +33640,17 @@ test("MCP thread governance audits exact state and rejects mixed action shapes",
       guildId: GUILD_ID,
       operationKey: THREAD_GOVERNANCE_OPERATION_KEY,
       threadId: THREAD_ID,
+    },
+    name: "plan_thread_change",
+  })
+  const invalidSelfMembership = await client.callTool({
+    arguments: {
+      action: "leave",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: THREAD_GOVERNANCE_OPERATION_KEY,
+      threadId: THREAD_ID,
+      userId: USER_ID,
     },
     name: "plan_thread_change",
   })
@@ -33641,11 +33674,16 @@ test("MCP thread governance audits exact state and rejects mixed action shapes",
     field: "name",
     value: "reviewed-thread-name",
   })
+  assert.deepEqual(structuredContent(selfJoin).desired, {
+    field: "membership",
+    value: true,
+  })
   assert.equal(invalidMetadata.isError, true)
   assert.equal(invalidMembership.isError, true)
+  assert.equal(invalidSelfMembership.isError, true)
   assert.equal(calls.threadGovernanceGet, 1)
   assert.equal(calls.threadGovernanceMembership, 1)
-  assert.equal(calls.threadGovernancePlan, 1)
+  assert.equal(calls.threadGovernancePlan, 2)
 })
 
 test("MCP thread changes bind signed approval to exact state and authority", async (context) => {
@@ -33687,6 +33725,7 @@ test("MCP thread changes bind signed approval to exact state and authority", asy
   assert.match(confirmationMessage, new RegExp(THREAD_ID))
   assert.match(confirmationMessage, /Desired field: name/)
   assert.match(confirmationMessage, /Desired value: "reviewed-thread-name"/)
+  assert.match(confirmationMessage, /Current connector membership: true/)
   assert.match(confirmationMessage, /Authorization basis: manage-threads/)
   assert.match(confirmationMessage, /VIEW_CHANNEL, MANAGE_THREADS/)
   assert.match(confirmationMessage, new RegExp(AUDIT_REASON))
@@ -33702,6 +33741,44 @@ test("MCP thread changes bind signed approval to exact state and authority", asy
     JSON.stringify(serverMessages),
     new RegExp(THREAD_GOVERNANCE_OPERATION_KEY),
   )
+})
+
+test("MCP thread self-membership binds approval to the connector identity", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      action: "join",
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: `${THREAD_GOVERNANCE_OPERATION_KEY}-join`,
+      planDigest: DIGEST,
+      threadId: THREAD_ID,
+    },
+    name: "execute_thread_change",
+  })
+  const structured = structuredContent(result)
+  assert.equal(structured.status, "completed")
+  assert.equal(structured.targetUserId, null)
+  assert.deepEqual(structured.observedMembership, {
+    isMember: true,
+    joinedAt: "2026-08-22T00:00:00.000Z",
+    unknownFieldCount: 0,
+    userId: BOT_ID,
+  })
+  assert.equal(calls.threadGovernancePlan, 1)
+  assert.equal(calls.threadGovernanceExecute, 1)
+  assert.match(confirmationMessage, /Action: join/)
+  assert.match(confirmationMessage, /Current connector membership: false/)
+  assert.match(confirmationMessage, /Target member: not applicable/)
+  assert.match(confirmationMessage, /Desired field: membership/)
+  assert.match(confirmationMessage, /Desired value: "true"/)
 })
 
 test("MCP thread changes skip no-op confirmation and stop on refusal or fresh drift", async (context) => {

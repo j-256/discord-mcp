@@ -705,6 +705,8 @@ export type ThreadCreationMode = typeof THREAD_CREATION_MODES[number]
 export const THREAD_CHANGE_ACTIONS = [
   "add-member",
   "archive",
+  "join",
+  "leave",
   "lock",
   "remove-member",
   "rename",

@@ -185,6 +185,7 @@ interface FixtureState {
   readbackError: unknown
   responseOverride: DiscordThreadStateSummary | null
   roles: DiscordRole[]
+  selfMembershipWriteEffect: boolean
   targetMember: DiscordGuildMember
   thread: DiscordThreadStateSummary
 }
@@ -234,6 +235,7 @@ function fixture(options: {
         tags: { bot_id: BOT_ID },
       }),
     ],
+    selfMembershipWriteEffect: true,
     targetMember: {
       roles: [USER_ROLE_ID],
       user: { id: USER_ID, username: "target-user" },
@@ -303,6 +305,22 @@ function fixture(options: {
         if (state.readbackError) throw state.readbackError
       }
       return state.thread
+    },
+    async joinThread() {
+      mutations += 1
+      events.push("write:join")
+      state.mutationStarted?.()
+      if (state.mutationGate) await state.mutationGate
+      if (state.mutationError) throw state.mutationError
+      if (state.selfMembershipWriteEffect) state.membership.add(BOT_ID)
+    },
+    async leaveThread() {
+      mutations += 1
+      events.push("write:leave")
+      state.mutationStarted?.()
+      if (state.mutationGate) await state.mutationGate
+      if (state.mutationError) throw state.mutationError
+      if (state.selfMembershipWriteEffect) state.membership.delete(BOT_ID)
     },
     async modifyThreadState(_threadId, input) {
       mutations += 1
@@ -374,6 +392,8 @@ test("thread governance normalization enforces closed action schemas", () => {
   const cases: ThreadChangeRequest[] = [
     request({ action: "rename", name: "renamed-thread" }),
     request({ action: "archive", name: undefined }),
+    request({ action: "join", name: undefined }),
+    request({ action: "leave", name: undefined }),
     request({ action: "unarchive", name: undefined }),
     request({ action: "lock", name: undefined }),
     request({ action: "unlock", name: undefined }),
@@ -399,6 +419,10 @@ test("thread governance normalization enforces closed action schemas", () => {
   )
   assert.throws(
     () => normalizeThreadChangeRequest(request({ action: "archive", name: "extra" })),
+    /accepts no action-specific fields/,
+  )
+  assert.throws(
+    () => normalizeThreadChangeRequest(request({ action: "join", name: undefined, userId: USER_ID })),
     /accepts no action-specific fields/,
   )
   assert.throws(
@@ -538,6 +562,99 @@ test("thread governance adds and removes exact members with content-free records
   assert.match(durable, new RegExp(THREAD_ID))
 })
 
+test("thread governance joins and leaves as the connector with exact readback", async () => {
+  const joinTarget = fixture({ state: {
+    membership: new Set(),
+    thread: thread({
+      invitable: null,
+      locked: true,
+      type: DISCORD_CHANNEL_TYPES.publicThread,
+    }),
+  } })
+  const joinEveryone = joinTarget.state.roles.find(({ id }) => id === GUILD_ID)
+  const joinBotRole = joinTarget.state.roles.find(({ id }) => id === BOT_ROLE_ID)
+  assert.ok(joinEveryone)
+  assert.ok(joinBotRole)
+  joinEveryone.permissions = DISCORD_PERMISSIONS.VIEW_CHANNEL.toString()
+  joinBotRole.permissions = "0"
+  const joinRequest = request({ action: "join", name: undefined })
+  const joinPlan = await joinTarget.service.plan(APPLICATION_ID, BOT_ID, joinRequest)
+  assert.equal(joinPlan.authorizationBasis, "self-membership")
+  assert.equal(joinPlan.connectorMembership.isMember, false)
+  assert.equal(joinPlan.membership?.isMember, false)
+  assert.deepEqual(joinPlan.desired, { field: "membership", value: true })
+  assert.equal(joinPlan.member, null)
+  const joinResult = await joinTarget.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    joinRequest,
+    joinPlan.digest,
+  )
+  assert.equal(joinResult.observedMembership?.isMember, true)
+  assert.equal(joinResult.observedMembership?.userId, BOT_ID)
+  assert.equal(joinResult.targetUserId, null)
+  assert.ok(joinTarget.events.includes("write:join"))
+
+  const leaveTarget = fixture({ state: {
+    thread: thread({
+      invitable: null,
+      locked: true,
+      type: DISCORD_CHANNEL_TYPES.publicThread,
+    }),
+  } })
+  const leaveEveryone = leaveTarget.state.roles.find(({ id }) => id === GUILD_ID)
+  const leaveBotRole = leaveTarget.state.roles.find(({ id }) => id === BOT_ROLE_ID)
+  assert.ok(leaveEveryone)
+  assert.ok(leaveBotRole)
+  leaveEveryone.permissions = DISCORD_PERMISSIONS.VIEW_CHANNEL.toString()
+  leaveBotRole.permissions = "0"
+  const leaveRequest = request({ action: "leave", name: undefined })
+  const leavePlan = await leaveTarget.service.plan(APPLICATION_ID, BOT_ID, leaveRequest)
+  assert.equal(leavePlan.authorizationBasis, "self-membership")
+  assert.equal(leavePlan.membership?.isMember, true)
+  assert.deepEqual(leavePlan.desired, { field: "membership", value: false })
+  const leaveResult = await leaveTarget.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    leaveRequest,
+    leavePlan.digest,
+  )
+  assert.equal(leaveResult.observedMembership?.isMember, false)
+  assert.equal(leaveResult.observedMembership?.userId, BOT_ID)
+  assert.equal(leaveResult.targetUserId, null)
+  assert.ok(leaveTarget.events.includes("write:leave"))
+
+  const privateLeave = fixture()
+  const privateLeaveRequest = request({
+    action: "leave",
+    name: undefined,
+    operationKey: `${OPERATION_KEY}-private-leave`,
+  })
+  const privateLeavePlan = await privateLeave.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    privateLeaveRequest,
+  )
+  assert.equal(privateLeavePlan.authorizationBasis, "manage-threads")
+  assert.ok(privateLeavePlan.warnings.some((warning) => (
+    warning.includes("explicit private-thread membership")
+  )))
+  const privateLeaveResult = await privateLeave.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    privateLeaveRequest,
+    privateLeavePlan.digest,
+  )
+  assert.equal(privateLeaveResult.observedMembership?.isMember, false)
+
+  const durable = JSON.stringify({
+    activities: privateLeave.activities,
+    receipt: privateLeave.operationStore.lastReceipt,
+  })
+  assert.doesNotMatch(durable, /connector|Reviewed thread governance/u)
+  assert.doesNotMatch(durable, new RegExp(OPERATION_KEY))
+})
+
 test("thread governance no-ops do not reserve or persist", async () => {
   const target = fixture()
   const change = request({ name: "private-thread" })
@@ -558,6 +675,24 @@ test("thread governance no-ops do not reserve or persist", async () => {
   const remove = request({ action: "remove-member", name: undefined, userId: USER_ID })
   const absentPlan = await absent.service.plan(APPLICATION_ID, BOT_ID, remove)
   assert.equal(absentPlan.status, "already-current")
+
+  const selfCurrent = fixture()
+  const selfCurrentBotRole = selfCurrent.state.roles.find(({ id }) => id === BOT_ROLE_ID)
+  assert.ok(selfCurrentBotRole)
+  selfCurrentBotRole.permissions = "0"
+  const join = request({ action: "join", name: undefined })
+  const joinPlan = await selfCurrent.service.plan(APPLICATION_ID, BOT_ID, join)
+  assert.equal(joinPlan.status, "already-current")
+  assert.equal(joinPlan.authorizationBasis, "already-current")
+
+  const selfAbsent = fixture({ state: { membership: new Set() } })
+  const selfAbsentBotRole = selfAbsent.state.roles.find(({ id }) => id === BOT_ROLE_ID)
+  assert.ok(selfAbsentBotRole)
+  selfAbsentBotRole.permissions = "0"
+  const leave = request({ action: "leave", name: undefined })
+  const leavePlan = await selfAbsent.service.plan(APPLICATION_ID, BOT_ID, leave)
+  assert.equal(leavePlan.status, "already-current")
+  assert.equal(leavePlan.authorizationBasis, "already-current")
 })
 
 test("thread governance binds plans to canonical evidence and rejects stale state", async () => {
@@ -673,6 +808,39 @@ test("thread governance requires exact scope, permissions, and supported relatio
     /cannot view the thread parent/,
   )
 
+  for (const [action, membership] of [
+    ["join", new Set<string>()],
+    ["leave", new Set([BOT_ID])],
+  ] as const) {
+    const privateSelfMembership = fixture({ state: { membership } })
+    const privateBotRole = privateSelfMembership.state.roles.find(({ id }) => (
+      id === BOT_ROLE_ID
+    ))
+    assert.ok(privateBotRole)
+    privateBotRole.permissions = "0"
+    await assert.rejects(
+      privateSelfMembership.service.plan(
+        APPLICATION_ID,
+        BOT_ID,
+        request({ action, name: undefined }),
+      ),
+      /private-thread self-membership changes require MANAGE_THREADS/,
+    )
+  }
+
+  const archivedJoin = fixture({ state: {
+    membership: new Set(),
+    thread: thread({ archived: true }),
+  } })
+  await assert.rejects(
+    archivedJoin.service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ action: "join", name: undefined }),
+    ),
+    /must be active/,
+  )
+
   const wrongParent = fixture({ state: {
     parent: {
       guild_id: GUILD_ID,
@@ -762,6 +930,26 @@ test("thread governance fails closed on pending-audit, readback, and receipt fai
   const readbackPlan = await readback.service.plan(APPLICATION_ID, BOT_ID, request())
   await assert.rejects(
     readback.service.execute(APPLICATION_ID, BOT_ID, request(), readbackPlan.digest),
+    (error: unknown) => executionResult(error).status === "uncertain",
+  )
+
+  const membershipReadback = fixture({ state: {
+    membership: new Set(),
+    selfMembershipWriteEffect: false,
+  } })
+  const join = request({ action: "join", name: undefined })
+  const membershipReadbackPlan = await membershipReadback.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    join,
+  )
+  await assert.rejects(
+    membershipReadback.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      join,
+      membershipReadbackPlan.digest,
+    ),
     (error: unknown) => executionResult(error).status === "uncertain",
   )
 

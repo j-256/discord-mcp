@@ -1622,6 +1622,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_invite_target_users_job_status",
   "get_webhook",
   "get_webhook_message",
+  "join_thread",
   "list_guild_invites",
   "list_guild_integrations",
   "list_guild_webhooks",
@@ -1641,6 +1642,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_stickers",
   "list_guild_templates",
   "list_guild_scheduled_event_users",
+  "leave_thread",
   "list_reaction_users",
   "modify_application_emoji",
   "modify_guild_emoji",
@@ -12617,6 +12619,40 @@ export class DiscordClient {
         ...options,
         automaticRateLimitRetry: false,
         diagnosticRoute: "/channels/{thread.id}/thread-members/{user.id}",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async joinThread(
+    threadId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    await this.#request<void>(
+      "join_thread",
+      `/channels/${threadId}/thread-members/@me`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{thread.id}/thread-members/@me",
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  async leaveThread(
+    threadId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(threadId, "Discord thread-governance thread ID")
+    await this.#request<void>(
+      "leave_thread",
+      `/channels/${threadId}/thread-members/@me`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{thread.id}/thread-members/@me",
         suppressFailureCause: true,
       },
     )

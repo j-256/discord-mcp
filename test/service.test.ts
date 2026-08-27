@@ -427,6 +427,12 @@ function serviceFixture(overrides: {
     async addThreadMember() {
       throw new Error("Unexpected thread-member add")
     },
+    async joinThread() {
+      throw new Error("Unexpected thread join")
+    },
+    async leaveThread() {
+      throw new Error("Unexpected thread leave")
+    },
     async addGuildMemberRole() {
       throw new Error("Unexpected member-role add")
     },
