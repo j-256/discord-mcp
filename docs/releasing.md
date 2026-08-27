@@ -13,7 +13,7 @@ Before changing visibility:
 3. Inspect commit author metadata, historical filenames, repository issues, pull requests, releases, deployments, Actions variables and secret names, environments, and public-facing repository metadata. Confirm that no private identity, path, discussion, artifact, or log should remain hidden.
 4. Scan the current tree and every retained package for machine-local paths and model-, vendor-, client-, or harness-specific branding. Decide explicitly whether transparent historical references are acceptable. A zero-history-reference policy requires a separately authorized history rewrite with an external mirror backup and credential rotation where applicable.
 5. Run the complete release metadata, test, coverage, build, package, dependency, and container gates on the exact commit intended for public exposure. Require the remote CI gate to pass as well.
-6. Confirm that `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`, privacy-safe issue forms including operator questions, the pull-request template, `SECURITY.md`, CODEOWNERS, and the release runbook are present and protected.
+6. Confirm that `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`, privacy-safe issue forms including operator questions and verified outcomes, the pull-request template, `SECURITY.md`, CODEOWNERS, and the release runbook are present and protected.
 
 ## Repository prerequisites
 

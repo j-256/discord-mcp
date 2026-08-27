@@ -431,6 +431,7 @@ async function checkCommunityFiles() {
   const bugReport = await readFile(join(issueDirectory, "bug_report.yml"), "utf8")
   const featureRequest = await readFile(join(issueDirectory, "feature_request.yml"), "utf8")
   const operatorQuestion = await readFile(join(issueDirectory, "operator_question.yml"), "utf8")
+  const verifiedOutcome = await readFile(join(issueDirectory, "verified_outcome.yml"), "utf8")
   const issueConfig = await readFile(join(issueDirectory, "config.yml"), "utf8")
   const pullRequest = await readFile(
     join(REPOSITORY_ROOT, ".github/pull_request_template.md"),
@@ -443,6 +444,7 @@ async function checkCommunityFiles() {
     [".github/ISSUE_TEMPLATE/bug_report.yml", bugReport],
     [".github/ISSUE_TEMPLATE/feature_request.yml", featureRequest],
     [".github/ISSUE_TEMPLATE/operator_question.yml", operatorQuestion],
+    [".github/ISSUE_TEMPLATE/verified_outcome.yml", verifiedOutcome],
     [".github/ISSUE_TEMPLATE/config.yml", issueConfig],
     [".github/pull_request_template.md", pullRequest],
   ])
@@ -482,6 +484,7 @@ async function checkCommunityFiles() {
     "Start with offline evidence",
     "Share only privacy-safe evidence",
     "Never post a bot token",
+    "verified-outcome form",
     "private GitHub Security Advisory",
     "no response-time guarantee",
   ]) {
@@ -491,10 +494,12 @@ async function checkCommunityFiles() {
     ["bug report", bugReport],
     ["feature proposal", featureRequest],
     ["operator question", operatorQuestion],
+    ["verified outcome", verifiedOutcome],
   ]) {
     invariant(form.startsWith("name: "), `${name} form heading is invalid`)
     invariant(form.includes("type: checkboxes"), `${name} form lacks its privacy acknowledgement`)
     invariant(form.includes("required: true"), `${name} form lacks required evidence`)
+    invariant(!form.includes("type: upload"), `${name} form must not solicit file uploads`)
     invariant(
       !/^\s+id:\s*(?:token|credential|content|guild_id|channel_id|user_id|message_id)\s*$/imu.test(form),
       `${name} form requests prohibited private input`,
@@ -507,6 +512,10 @@ async function checkCommunityFiles() {
   invariant(operatorQuestion.includes("Read SUPPORT.md"), "operator form lacks its support guide route")
   invariant(operatorQuestion.includes("do not paste a configuration document"), "operator form lacks its configuration privacy boundary")
   invariant(operatorQuestion.includes("Exact question"), "operator form lacks a bounded question field")
+  invariant(verifiedOutcome.includes("No Discord IDs"), "outcome form lacks its identifier privacy boundary")
+  invariant(verifiedOutcome.includes("First friction point"), "outcome form lacks first-friction evidence")
+  invariant(verifiedOutcome.includes("Repeat-use intent"), "outcome form lacks repeat-use evidence")
+  invariant(verifiedOutcome.includes("Voluntary outcome reports never authorize"), "outcome form lacks its maintainer-authority boundary")
   invariant(issueConfig.startsWith("blank_issues_enabled: false\n"), "blank issues must remain disabled")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/security/advisories/new`), "issue routing lacks private vulnerability reporting")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/reference.md`), "issue routing lacks the operator reference")

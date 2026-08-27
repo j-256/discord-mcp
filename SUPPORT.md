@@ -21,6 +21,7 @@ Run `doctor --online` or another live probe only with a bot and guild you contro
 - Use the operator-question form for setup, policy, Discord permission or intent, MCP host, diagnostic, recovery, package, or container questions
 - Use the bug form for a reproducible product defect with a minimal synthetic reproduction
 - Use the feature-proposal form for a new capability or authority boundary
+- Use the verified-outcome form after a successful or blocked journey to share coarse setup time, first friction, repeat-use intent, and next-workflow demand without posting Discord evidence
 - Use a [private GitHub Security Advisory](https://github.com/j-256/discord-mcp/security/advisories/new) for an undisclosed vulnerability, following [SECURITY.md](SECURITY.md)
 
 ## Share only privacy-safe evidence
