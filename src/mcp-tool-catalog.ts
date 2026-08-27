@@ -204,7 +204,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "direct-message-change",
   },
   execute_automod_change: {
-    keywords: ["automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "update"],
+    keywords: ["automod", "configure automod", "create", "delete", "disable", "enable", "execute", "moderation", "policy", "rule", "spam rule", "update"],
     toolset: "automod",
     workflow: "automod-change",
   },
@@ -399,7 +399,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "bulk-guild-ban",
   },
   execute_guild_prune: {
-    keywords: ["cohort", "execute", "guild", "inactive", "members", "prune"],
+    keywords: ["cohort", "execute", "guild", "inactive", "inactive members", "members", "prune"],
     toolset: "guild-prunes",
     workflow: "guild-prune",
   },
@@ -414,7 +414,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "member-role-change",
   },
   execute_member_voice_change: {
-    keywords: ["deafen", "disconnect", "execute", "member", "move", "mute", "voice"],
+    keywords: ["deafen", "disconnect", "execute", "member", "move", "move member", "mute", "voice"],
     toolset: "voice-moderation",
     workflow: "member-voice-change",
   },
@@ -444,7 +444,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-creation",
   },
   execute_role_configuration: {
-    keywords: ["color", "configure", "emoji", "execute", "hoist", "icon", "image", "mentionable", "name", "permission", "role"],
+    keywords: ["color", "configure", "emoji", "execute", "hoist", "icon", "image", "mentionable", "name", "permission", "role", "role permission"],
     toolset: "role-configuration",
     workflow: "role-configuration",
   },
@@ -454,7 +454,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-ordering",
   },
   execute_scheduled_event_change: {
-    keywords: ["calendar", "cancel", "complete", "create", "event", "execute", "schedule", "transition", "update"],
+    keywords: ["calendar", "cancel", "complete", "create", "event", "execute", "guild event", "schedule", "schedule event", "transition", "update"],
     toolset: "scheduled-events",
     workflow: "scheduled-event-change",
   },
@@ -484,7 +484,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "webhook-creation",
   },
   explain_channel_access: {
-    keywords: ["access", "permissions", "read", "view"],
+    keywords: ["access", "permissions", "read", "view", "view channel"],
     toolset: "guilds",
   },
   explain_principal_permissions: {
@@ -496,7 +496,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "audit-logs",
   },
   get_guild_ban: {
-    keywords: ["audit", "ban", "exact", "guild", "moderation", "user"],
+    keywords: ["audit", "ban", "exact", "guild", "moderation", "user", "user ban"],
     toolset: "bans",
   },
   get_guild_invite: {
@@ -764,7 +764,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "bulk-guild-ban",
   },
   plan_guild_prune: {
-    keywords: ["cohort", "estimate", "guild", "inactive", "members", "plan", "prune", "review"],
+    keywords: ["cohort", "estimate", "guild", "inactive", "inactive members", "members", "plan", "prune", "review"],
     toolset: "guild-prunes",
     workflow: "guild-prune",
   },
@@ -779,12 +779,12 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "member-role-change",
   },
   plan_member_voice_change: {
-    keywords: ["deafen", "disconnect", "member", "move", "mute", "plan", "review", "voice"],
+    keywords: ["deafen", "disconnect", "member", "move", "move member", "mute", "plan", "review", "voice"],
     toolset: "voice-moderation",
     workflow: "member-voice-change",
   },
   plan_automod_change: {
-    keywords: ["automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "update"],
+    keywords: ["automod", "configure automod", "create", "delete", "disable", "enable", "moderation", "plan", "policy", "review", "rule", "spam rule", "update"],
     toolset: "automod",
     workflow: "automod-change",
   },
@@ -1029,7 +1029,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-creation",
   },
   plan_role_configuration: {
-    keywords: ["color", "configure", "emoji", "hoist", "icon", "image", "mentionable", "name", "permission", "plan", "review", "role"],
+    keywords: ["color", "configure", "emoji", "hoist", "icon", "image", "mentionable", "name", "permission", "plan", "review", "role", "role permission"],
     toolset: "role-configuration",
     workflow: "role-configuration",
   },
@@ -1039,7 +1039,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "role-ordering",
   },
   plan_scheduled_event_change: {
-    keywords: ["calendar", "cancel", "complete", "create", "event", "plan", "review", "schedule", "transition", "update"],
+    keywords: ["calendar", "cancel", "complete", "create", "event", "guild event", "plan", "review", "schedule", "schedule event", "transition", "update"],
     toolset: "scheduled-events",
     workflow: "scheduled-event-change",
   },
@@ -1111,7 +1111,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "interactions",
   },
   search_messages: {
-    keywords: ["author", "content", "filter", "guild", "message", "search"],
+    keywords: ["author", "content", "filter", "guild", "guild message", "message", "search"],
     toolset: "messages",
   },
   search_guild_members: {
@@ -1171,9 +1171,10 @@ interface SearchableMcpTool extends TrackedMcpTool {
   description: string
   keywords: readonly string[]
   normalizedDescription: string
-  normalizedKeywords: string
+  normalizedKeywordGroups: ReadonlyArray<readonly string[]>
   normalizedName: string
   normalizedTitle: string
+  normalizedToolset: string
   risk: McpDiscoveryRisk
   summary: string
   title: string
@@ -1186,21 +1187,130 @@ export interface DiscordToolDiscoveryCatalog {
   surface: McpToolSurface
 }
 
+const SEARCH_EXACT_SCORE = 10_000
+const SEARCH_NAME_PREFIX_SCORE = 500
+const SEARCH_TITLE_PREFIX_SCORE = 300
+const SEARCH_MATCHED_TERM_BONUS = 25
+const SEARCH_MULTI_TERM_MIN_SCORE = 150
+const SEARCH_STEM_MIN_CHARACTERS = 4
+const REVIEWED_PLAN_TOOL_PREFIX = "plan_"
+const SEARCH_RESULT_PRIORITIES = Object.freeze({
+  mutation: 0,
+  readOnly: 1,
+  reviewedPlan: 2,
+})
+
+const SEARCH_FIELD_WEIGHTS = Object.freeze({
+  description: Object.freeze({ phrase: 60, term: 10 }),
+  keywords: Object.freeze({ phrase: 150, term: 40 }),
+  name: Object.freeze({ phrase: 200, term: 100 }),
+  title: Object.freeze({ phrase: 150, term: 60 }),
+  toolset: Object.freeze({ phrase: 100, term: 30 }),
+})
+
+const SEARCH_CHANGE_VARIANTS = Object.freeze([
+  "configur",
+  "edit",
+  "modify",
+  "set",
+  "update",
+])
+const SEARCH_CONFIGURE_VARIANTS = Object.freeze([
+  "change",
+  "edit",
+  "modify",
+  "set",
+  "update",
+])
+const SEARCH_FIND_VARIANTS = Object.freeze(["lookup", "search"])
+const SEARCH_SEMANTIC_VARIANTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  change: SEARCH_CHANGE_VARIANTS,
+  changed: SEARCH_CHANGE_VARIANTS,
+  changing: SEARCH_CHANGE_VARIANTS,
+  configuration: SEARCH_CONFIGURE_VARIANTS,
+  configure: SEARCH_CONFIGURE_VARIANTS,
+  configured: SEARCH_CONFIGURE_VARIANTS,
+  configuring: SEARCH_CONFIGURE_VARIANTS,
+  find: SEARCH_FIND_VARIANTS,
+  finding: SEARCH_FIND_VARIANTS,
+  found: SEARCH_FIND_VARIANTS,
+  look: SEARCH_FIND_VARIANTS,
+  lookup: SEARCH_FIND_VARIANTS,
+  many: ["bulk"],
+  multiple: ["bulk"],
+  reorder: ["order"],
+  reordered: ["order"],
+  reordering: ["order"],
+  view: ["access"],
+  viewed: ["access"],
+  viewing: ["access"],
+})
+
 const SEARCH_STOP_WORDS = new Set([
   "a",
+  "about",
   "an",
   "and",
+  "at",
+  "by",
+  "can",
+  "could",
   "discord",
+  "do",
+  "does",
+  "during",
   "for",
+  "from",
+  "i",
   "in",
+  "into",
+  "is",
+  "it",
+  "may",
+  "me",
+  "my",
   "of",
   "on",
   "or",
   "please",
+  "that",
   "the",
+  "this",
   "to",
   "tool",
+  "using",
+  "want",
+  "what",
+  "which",
+  "who",
+  "why",
+  "with",
+  "without",
+  "would",
+  "you",
+  "your",
 ])
+
+interface SearchTerm {
+  variants: readonly string[]
+}
+
+interface SearchScore {
+  matchedTerms: number
+  score: number
+  totalTerms: number
+}
+
+interface WeightedSearchField {
+  phraseWeight: number
+  termWeight: number
+  tokens: readonly string[]
+}
+
+interface RankedSearchTool {
+  entry: SearchableMcpTool
+  result: SearchScore
+}
 
 function normalize(value: string): string {
   return value
@@ -1334,9 +1444,12 @@ export function createDiscordToolDiscoveryCatalog(
       description,
       keywords: metadata.keywords,
       normalizedDescription: normalize(description),
-      normalizedKeywords: normalize(metadata.keywords.join(" ")),
+      normalizedKeywordGroups: metadata.keywords.map((keyword) => (
+        normalize(keyword).split(" ").filter(Boolean)
+      )),
       normalizedName: normalize(tool.name),
       normalizedTitle: normalize(title),
+      normalizedToolset: normalize(metadata.toolset),
       risk: discoveryRisk(annotations),
       summary: toolSummary(description),
       title,
@@ -1351,24 +1464,188 @@ export function createDiscordToolDiscoveryCatalog(
   return { entries, surface }
 }
 
+function searchTermVariants(term: string): string[] {
+  const variants = new Set([term])
+  if (term.endsWith("ies") && term.length > 4) {
+    variants.add(`${term.slice(0, -3)}y`)
+  } else if (term.endsWith("s") && term.length > 3 && !term.endsWith("ss")) {
+    variants.add(term.slice(0, -1))
+  }
+  if (term.endsWith("ed") && term.length > 4) {
+    const base = term.slice(0, -2)
+    variants.add(base)
+    if (base.at(-1) === base.at(-2)) variants.add(base.slice(0, -1))
+  }
+  if (term.endsWith("ing") && term.length > 5) {
+    const base = term.slice(0, -3)
+    variants.add(base)
+    if (base.at(-1) === base.at(-2)) variants.add(base.slice(0, -1))
+  }
+  for (const variant of [...variants]) {
+    for (const semantic of SEARCH_SEMANTIC_VARIANTS[variant] || []) {
+      variants.add(semantic)
+    }
+  }
+  return [...variants]
+}
+
+function meaningfulSearchTerms(query: string): SearchTerm[] {
+  return [...new Set(
+    query
+      .split(" ")
+      .filter((term) => term && !SEARCH_STOP_WORDS.has(term)),
+  )].map((term) => ({ variants: searchTermVariants(term) }))
+}
+
+function searchTokenMatches(
+  token: string,
+  variants: readonly string[],
+): boolean {
+  return variants.some((variant) => (
+    token === variant
+    || (variant.length >= SEARCH_STEM_MIN_CHARACTERS && token.startsWith(variant))
+  ))
+}
+
+function searchFieldMatchesTerm(
+  field: WeightedSearchField,
+  term: SearchTerm,
+): boolean {
+  return field.tokens.some((token) => searchTokenMatches(token, term.variants))
+}
+
+function searchFieldMatchesPhrase(
+  field: WeightedSearchField,
+  left: SearchTerm,
+  right: SearchTerm,
+): boolean {
+  for (let index = 0; index < field.tokens.length - 1; index += 1) {
+    const leftToken = field.tokens[index]
+    const rightToken = field.tokens[index + 1]
+    if (
+      leftToken !== undefined
+      && rightToken !== undefined
+      && searchTokenMatches(leftToken, left.variants)
+      && searchTokenMatches(rightToken, right.variants)
+    ) return true
+  }
+  return false
+}
+
+function weightedSearchFields(entry: SearchableMcpTool): WeightedSearchField[] {
+  return [
+    {
+      phraseWeight: SEARCH_FIELD_WEIGHTS.name.phrase,
+      termWeight: SEARCH_FIELD_WEIGHTS.name.term,
+      tokens: entry.normalizedName.split(" "),
+    },
+    {
+      phraseWeight: SEARCH_FIELD_WEIGHTS.title.phrase,
+      termWeight: SEARCH_FIELD_WEIGHTS.title.term,
+      tokens: entry.normalizedTitle.split(" "),
+    },
+    {
+      phraseWeight: SEARCH_FIELD_WEIGHTS.toolset.phrase,
+      termWeight: SEARCH_FIELD_WEIGHTS.toolset.term,
+      tokens: entry.normalizedToolset.split(" "),
+    },
+    ...entry.normalizedKeywordGroups.map((tokens) => ({
+      phraseWeight: SEARCH_FIELD_WEIGHTS.keywords.phrase,
+      termWeight: SEARCH_FIELD_WEIGHTS.keywords.term,
+      tokens,
+    })),
+    {
+      phraseWeight: SEARCH_FIELD_WEIGHTS.description.phrase,
+      termWeight: SEARCH_FIELD_WEIGHTS.description.term,
+      tokens: entry.normalizedDescription.split(" "),
+    },
+  ]
+}
+
 function scoreTool(
   entry: SearchableMcpTool,
   query: string,
-  terms: readonly string[],
-): number {
-  if (query === "") return 1
-  if (entry.normalizedName === query) return 10_000
-  let score = 0
-  if (entry.normalizedName.startsWith(query)) score += 500
-  if (entry.normalizedTitle.startsWith(query)) score += 300
-  for (const term of terms) {
-    if (entry.normalizedName.includes(term)) score += 100
-    if (entry.normalizedTitle.includes(term)) score += 60
-    if (normalize(entry.toolset).includes(term)) score += 30
-    if (entry.normalizedKeywords.includes(term)) score += 40
-    if (entry.normalizedDescription.includes(term)) score += 10
+  terms: readonly SearchTerm[],
+): SearchScore {
+  if (query === "") return { matchedTerms: 0, score: 1, totalTerms: 0 }
+  if (entry.normalizedName === query) {
+    return {
+      matchedTerms: terms.length,
+      score: SEARCH_EXACT_SCORE,
+      totalTerms: terms.length,
+    }
   }
-  return score
+  const fields = weightedSearchFields(entry)
+  let score = 0
+  let matchedTerms = 0
+  if (entry.normalizedName.startsWith(query)) score += SEARCH_NAME_PREFIX_SCORE
+  if (entry.normalizedTitle.startsWith(query)) score += SEARCH_TITLE_PREFIX_SCORE
+  for (const term of terms) {
+    const termScore = Math.max(
+      0,
+      ...fields.map((field) => (
+        searchFieldMatchesTerm(field, term) ? field.termWeight : 0
+      )),
+    )
+    if (termScore > 0) {
+      matchedTerms += 1
+      score += termScore
+    }
+  }
+  for (let index = 0; index < terms.length - 1; index += 1) {
+    const left = terms[index]
+    const right = terms[index + 1]
+    if (left === undefined || right === undefined) continue
+    score += Math.max(
+      0,
+      ...fields.map((field) => (
+        searchFieldMatchesPhrase(field, left, right) ? field.phraseWeight : 0
+      )),
+    )
+  }
+  score += matchedTerms * SEARCH_MATCHED_TERM_BONUS
+  return { matchedTerms, score, totalTerms: terms.length }
+}
+
+function qualifiesSearchScore(result: SearchScore): boolean {
+  if (result.score <= 0) return false
+  if (result.totalTerms <= 1) return true
+  return result.matchedTerms >= Math.ceil(result.totalTerms / 2)
+    && result.score >= SEARCH_MULTI_TERM_MIN_SCORE
+}
+
+function searchResultPriority(entry: SearchableMcpTool): number {
+  if (entry.name.startsWith(REVIEWED_PLAN_TOOL_PREFIX)) {
+    return SEARCH_RESULT_PRIORITIES.reviewedPlan
+  }
+  return entry.annotations.readOnlyHint
+    ? SEARCH_RESULT_PRIORITIES.readOnly
+    : SEARCH_RESULT_PRIORITIES.mutation
+}
+
+function promoteReviewedPlans(
+  eligibleEntries: readonly SearchableMcpTool[],
+  ranked: readonly RankedSearchTool[],
+): RankedSearchTool[] {
+  const planners = new Map<McpToolWorkflow, SearchableMcpTool>()
+  for (const entry of eligibleEntries) {
+    if (
+      entry.workflow
+      && entry.name.startsWith(REVIEWED_PLAN_TOOL_PREFIX)
+      && !planners.has(entry.workflow)
+    ) planners.set(entry.workflow, entry)
+  }
+  const promoted = new Map(ranked.map((candidate) => [candidate.entry.name, candidate]))
+  for (const candidate of ranked) {
+    if (candidate.entry.annotations.readOnlyHint || !candidate.entry.workflow) continue
+    const planner = planners.get(candidate.entry.workflow)
+    if (!planner) continue
+    const existing = promoted.get(planner.name)
+    if (!existing || existing.result.score < candidate.result.score) {
+      promoted.set(planner.name, { entry: planner, result: candidate.result })
+    }
+  }
+  return [...promoted.values()]
 }
 
 function toolsetSummaries(entries: readonly SearchableMcpTool[]) {
@@ -1427,30 +1704,34 @@ export function discoverDiscordTools(
   catalog: DiscordToolDiscoveryCatalog,
 ) {
   const query = normalize(input.query || "")
-  const terms = [...new Set(
-    query
-      .split(" ")
-      .filter((term) => term && !SEARCH_STOP_WORDS.has(term)),
-  )]
+  const terms = meaningfulSearchTerms(query)
   const hasFilters = Boolean(input.query || input.risk || input.toolset)
+  const eligibleEntries = catalog.entries
+    .filter((entry) => !input.toolset || entry.toolset === input.toolset)
+    .filter((entry) => !input.risk || entry.risk === input.risk)
   const exactEntry = query === ""
     ? undefined
-    : catalog.entries.find((entry) => (
+    : eligibleEntries.find((entry) => (
         entry.normalizedName === query
-        && (!input.toolset || entry.toolset === input.toolset)
-        && (!input.risk || entry.risk === input.risk)
       ))
-  const ranked = hasFilters
-    ? catalog.entries
-        .filter((entry) => !input.toolset || entry.toolset === input.toolset)
-        .filter((entry) => !input.risk || entry.risk === input.risk)
-        .map((entry) => ({ entry, score: scoreTool(entry, query, terms) }))
-        .filter(({ score }) => score > 0)
-        .sort((left, right) => (
-          right.score - left.score
-          || left.entry.name.localeCompare(right.entry.name)
-        ))
+  const directRanked: RankedSearchTool[] = hasFilters
+    ? eligibleEntries
+        .map((entry) => ({ entry, result: scoreTool(entry, query, terms) }))
+        .filter(({ result }) => qualifiesSearchScore(result))
     : []
+  const ranked = (query === ""
+    ? directRanked
+    : promoteReviewedPlans(eligibleEntries, directRanked)
+  ).sort((left, right) => {
+    const scoreDifference = right.result.score - left.result.score
+    if (scoreDifference !== 0) return scoreDifference
+    if (query !== "") {
+      const priorityDifference = searchResultPriority(right.entry)
+        - searchResultPriority(left.entry)
+      if (priorityDifference !== 0) return priorityDifference
+    }
+    return left.entry.name.localeCompare(right.entry.name)
+  })
   const selected = exactEntry
     ? [exactEntry]
     : ranked.slice(0, input.limit).map(({ entry }) => entry)

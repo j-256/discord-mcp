@@ -14360,6 +14360,111 @@ test("MCP tool discovery returns bounded exact contracts without contacting Disc
   assert.equal(Object.values(calls).every((count) => count === 0), true)
 })
 
+test("MCP tool discovery routes representative goals and rejects unsupported weak matches", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const goals: ReadonlyArray<{
+    expected: readonly string[]
+    first?: string
+    query: string
+  }> = [
+    { expected: ["read_messages"], first: "read_messages", query: "summarize recent channel messages" },
+    { expected: ["search_messages"], first: "search_messages", query: "search guild messages about an incident" },
+    { expected: ["explain_channel_access"], first: "explain_channel_access", query: "who can view this channel" },
+    { expected: ["search_guild_members"], first: "search_guild_members", query: "find a guild member by name" },
+    { expected: ["get_guild_ban"], first: "get_guild_ban", query: "inspect why a user is banned" },
+    { expected: ["plan_direct_message_change"], first: "plan_direct_message_change", query: "send a private direct message" },
+    { expected: ["plan_attachment_message"], first: "plan_attachment_message", query: "send a file attachment" },
+    { expected: ["plan_embed_message"], first: "plan_embed_message", query: "publish a rich embed" },
+    { expected: ["plan_forum_post"], first: "plan_forum_post", query: "create a forum post" },
+    { expected: ["plan_message_deletion"], first: "plan_message_deletion", query: "delete a message" },
+    { expected: ["plan_message_pin"], first: "plan_message_pin", query: "pin a message" },
+    { expected: ["plan_member_moderation"], first: "plan_member_moderation", query: "ban one member" },
+    { expected: ["plan_bulk_guild_ban"], first: "plan_bulk_guild_ban", query: "ban many members" },
+    { expected: ["plan_guild_prune"], first: "plan_guild_prune", query: "remove inactive members" },
+    { expected: ["plan_member_nickname_change"], first: "plan_member_nickname_change", query: "change a member nickname" },
+    { expected: ["plan_member_role_change"], first: "plan_member_role_change", query: "assign a role to a member" },
+    { expected: ["plan_member_voice_change"], first: "plan_member_voice_change", query: "move a member to another voice channel" },
+    { expected: ["plan_channel_creation"], first: "plan_channel_creation", query: "create a channel" },
+    { expected: ["plan_channel_metadata_change"], first: "plan_channel_metadata_change", query: "change a channel topic" },
+    { expected: ["plan_channel_order"], first: "plan_channel_order", query: "reorder a channel" },
+    { expected: ["plan_channel_deletion"], first: "plan_channel_deletion", query: "delete a channel" },
+    { expected: ["plan_role_creation"], first: "plan_role_creation", query: "create a role" },
+    { expected: ["plan_role_configuration"], first: "plan_role_configuration", query: "change role permissions" },
+    { expected: ["plan_role_order"], first: "plan_role_order", query: "reorder roles" },
+    { expected: ["plan_role_deletion"], first: "plan_role_deletion", query: "delete a role" },
+    { expected: ["plan_automod_change"], first: "plan_automod_change", query: "configure automod spam rules" },
+    { expected: ["plan_scheduled_event_change"], first: "plan_scheduled_event_change", query: "schedule a guild event" },
+    { expected: ["plan_stage_instance_change"], first: "plan_stage_instance_change", query: "start a stage event" },
+    { expected: ["plan_guild_application_command_change", "plan_native_interaction_command"], query: "create a slash command" },
+    { expected: ["plan_onboarding_change"], first: "plan_onboarding_change", query: "configure server onboarding" },
+    { expected: ["plan_guild_welcome_screen_change"], first: "plan_guild_welcome_screen_change", query: "configure the welcome screen" },
+    { expected: ["plan_guild_community_change"], first: "plan_guild_community_change", query: "enable community mode" },
+    { expected: ["plan_guild_incident_action_change"], first: "plan_guild_incident_action_change", query: "lock down a guild during an incident" },
+    { expected: ["plan_webhook_creation"], first: "plan_webhook_creation", query: "create an incoming webhook" },
+    { expected: ["plan_invite_creation"], first: "plan_invite_creation", query: "create a private invite" },
+  ]
+
+  for (const goal of goals) {
+    const discovery = structuredContent(await client.callTool({
+      arguments: { limit: 5, query: goal.query },
+      name: "discover_discord_tools",
+    }))
+    const names = (discovery.matches as Array<{ name: string }>).map(({ name }) => name)
+    assert.equal(
+      goal.expected.some((name) => names.includes(name)),
+      true,
+      `${goal.query}: expected ${goal.expected.join(" or ")}, received ${names.join(", ")}`,
+    )
+    if (goal.first) {
+      assert.equal(names[0], goal.first, `${goal.query}: unexpected first match`)
+    }
+  }
+
+  for (const query of [
+    "create an entire Discord server",
+    "show who is online",
+    "make the bot type",
+  ]) {
+    const discovery = structuredContent(await client.callTool({
+      arguments: { limit: 5, query },
+      name: "discover_discord_tools",
+    }))
+    assert.deepEqual(discovery.matches, [], `${query}: unexpected weak match`)
+    assert.equal(discovery.totalMatches, 0)
+  }
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
+test("progressive natural-language discovery leads with a plan and reveals its workflow", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["channel-creation"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { limit: 1, query: "create a channel" },
+    name: "discover_discord_tools",
+  }))
+  assert.equal((discovery.matches as Array<{ name: string }>)[0]?.name, "plan_channel_creation")
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_creation",
+    "plan_channel_creation",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_creation",
+      "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
 test("MCP activity results omit the private local file path", async (context) => {
   const { client } = await connectedFixture(context)
 
@@ -15559,7 +15664,7 @@ test("progressive discovery exposes voice reads with reviewed channel settings",
   const discovery = structuredContent(await client.callTool({
     arguments: {
       limit: 7,
-      query: "voice region bitrate video quality",
+      query: "voice channel region status",
       toolset: "channel-metadata",
     },
     name: "discover_discord_tools",
