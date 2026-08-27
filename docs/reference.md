@@ -1,6 +1,6 @@
 # Discord MCP complete reference
 
-[Getting started and first verified read](getting-started.md) | [Project overview](../README.md)
+[Getting started and first verified read](getting-started.md) | [Product boundaries and host compatibility](limitations.md) | [Project overview](../README.md)
 
 <img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.1/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
 

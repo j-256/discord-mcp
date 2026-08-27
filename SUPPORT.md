@@ -1,6 +1,6 @@
 # Support
 
-Discord MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation.
+Discord MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation. Check [product boundaries and host compatibility](docs/limitations.md) before filing a setup issue or enabling a write capability.
 
 ## Start with offline evidence
 
@@ -32,4 +32,4 @@ Never post a bot token, webhook credential, invite or template code, collector h
 
 ## Support boundaries
 
-Community support is best effort and has no response-time guarantee. Maintainers cannot administer an operator's Discord account, application, bot, guild, MCP host, or secret store. For an active safety incident, use Discord's own moderation, account-security, and support controls first; a public project issue is not an incident-response channel.
+Community support is best effort and has no response-time guarantee. Maintainers cannot administer an operator's Discord account, application, bot, guild, MCP host, or secret store. The connector's privacy guarantees do not govern retention by Discord, an MCP host, a model provider, the operating system, terminal capture, or operator-created infrastructure. For an active safety incident, use Discord's own moderation, account-security, and support controls first; a public project issue is not an incident-response channel.

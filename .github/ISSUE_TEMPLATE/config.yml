@@ -3,6 +3,9 @@ contact_links:
   - name: Getting started and recovery
     url: https://github.com/j-256/discord-mcp/blob/main/docs/getting-started.md
     about: Complete the first verified read or isolate policy, Discord, stdio, and host startup failures
+  - name: Product fit and boundaries
+    url: https://github.com/j-256/discord-mcp/blob/main/docs/limitations.md
+    about: Check custody, host compatibility, privacy claims, deliberate non-goals, and verification limits
   - name: Security vulnerability
     url: https://github.com/j-256/discord-mcp/security/advisories/new
     about: Report vulnerabilities privately without credentials or Discord data

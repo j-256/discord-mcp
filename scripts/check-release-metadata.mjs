@@ -60,6 +60,15 @@ const REFERENCE_REQUIRED_HEADINGS = Object.freeze([
   "## Verification",
   "## Release integrity",
 ])
+const LIMITATIONS_REQUIRED_HEADINGS = Object.freeze([
+  "## Fit check",
+  "## Custody and privacy boundary",
+  "## MCP host compatibility",
+  "## Discord and operational constraints",
+  "## Deliberately unsupported",
+  "## What verification proves",
+  "## Choose the next path",
+])
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
 const EXPECTED_DEPENDENCIES = {
@@ -115,6 +124,7 @@ const EXPECTED_PACKAGE_FILES = [
   "dist",
   "discord-mcp.config.schema.json",
   "docs/getting-started.md",
+  "docs/limitations.md",
   "docs/reference.md",
   "docs/releasing.md",
   "SUPPORT.md",
@@ -346,12 +356,16 @@ async function checkDocumentation(packageJson) {
     join(REPOSITORY_ROOT, "docs/getting-started.md"),
     "utf8",
   )
+  const limitations = await readFile(
+    join(REPOSITORY_ROOT, "docs/limitations.md"),
+    "utf8",
+  )
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
   )
-  const documentation = `${readme}\n${gettingStarted}\n${reference}`
+  const documentation = `${readme}\n${gettingStarted}\n${limitations}\n${reference}`
   const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
@@ -399,6 +413,23 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("[Getting started and first verified read](getting-started.md)"), "complete reference lacks the getting-started link")
   invariant(reference.includes("[Project overview](../README.md)"), "complete reference lacks the landing-page link")
   invariant(gettingStarted.startsWith("# Getting started: first verified Discord read\n"), "getting-started heading is invalid")
+  invariant(limitations.startsWith("# Product boundaries and host compatibility\n"), "limitations guide heading is invalid")
+  invariant(Buffer.byteLength(limitations) <= README_MAX_BYTES, "limitations guide must remain concise")
+  for (const heading of LIMITATIONS_REQUIRED_HEADINGS) {
+    invariant(limitations.includes(heading), `limitations guide is missing ${heading}`)
+  }
+  for (const required of [
+    "operator-owned bot",
+    "The connector's non-persistence claims",
+    "the host's transcript and data policy remain part of the trust boundary",
+    "`notifications/tools/list_changed`",
+    "does not identify the human approver",
+    "Shared bot, multi-tenant relay, public HTTP listener, or hosted control plane",
+    "These are architectural boundaries, not a backlog promise",
+    "strong contract evidence",
+  ]) {
+    invariant(limitations.includes(required), `limitations guide is missing ${required}`)
+  }
   invariant(!/DISCORD_BOT_TOKEN\s*=\s*["']YOUR_DISCORD_BOT_TOKEN["']/.test(documentation), "documentation must not teach token literals in command history")
   for (const required of [
     "--npx",
@@ -411,6 +442,9 @@ async function checkDocumentation(packageJson) {
     invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
   }
   invariant(readme.includes("[Get a verified read](docs/getting-started.md)"), "README lacks the getting-started route")
+  invariant(readme.includes("[Fit and boundaries](docs/limitations.md)"), "README lacks the product-boundaries route")
+  invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
+  invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
@@ -512,6 +546,7 @@ async function checkCommunityFiles() {
   ]) {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }
+  invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
   for (const [name, form] of [
     ["bug report", bugReport],
     ["feature proposal", featureRequest],
@@ -531,7 +566,7 @@ async function checkCommunityFiles() {
   invariant(bugReport.includes("Minimal synthetic reproduction"), "bug form lacks synthetic reproduction guidance")
   invariant(featureRequest.includes("No Discord content"), "feature form lacks its privacy warning")
   invariant(featureRequest.includes("Freshness and failure safety"), "feature form lacks reviewed-write analysis")
-  invariant(operatorQuestion.includes("Read SUPPORT.md"), "operator form lacks its support guide route")
+  invariant(operatorQuestion.includes("Read SUPPORT.md and docs/limitations.md"), "operator form lacks its support and product-boundaries routes")
   invariant(operatorQuestion.includes("do not paste a configuration document"), "operator form lacks its configuration privacy boundary")
   invariant(operatorQuestion.includes("Exact question"), "operator form lacks a bounded question field")
   invariant(verifiedOutcome.includes("No Discord IDs"), "outcome form lacks its identifier privacy boundary")
@@ -541,6 +576,7 @@ async function checkCommunityFiles() {
   invariant(issueConfig.startsWith("blank_issues_enabled: false\n"), "blank issues must remain disabled")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/security/advisories/new`), "issue routing lacks private vulnerability reporting")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/getting-started.md`), "issue routing lacks the getting-started guide")
+  invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/limitations.md`), "issue routing lacks the product-boundaries guide")
   invariant(issueConfig.includes(`${REPOSITORY_URL}/blob/main/docs/reference.md`), "issue routing lacks the operator reference")
   invariant(pullRequest.startsWith("## Summary\n"), "pull-request template heading is invalid")
   for (const required of [

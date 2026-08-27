@@ -4,6 +4,8 @@
 
 This is the shortest supported path from no installation to one useful Discord read through an MCP host. It creates an operator-owned bot, installs only a read-only permission grant, writes one strict non-secret policy file, verifies the real stdio server, and ends with `get_connector_status` plus `list_channels` for one exact guild. No Discord write surface is enabled.
 
+Before creating a token, use [product boundaries and host compatibility](limitations.md) to confirm that a local owner-managed bot, transient Discord content, exact-ID operations, and the host's stdio and secret-forwarding model fit the intended use.
+
 ## What you will have
 
 - One Discord application and bot that you own
@@ -216,3 +218,4 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`
 - Plan and review a recipe before applying it to the active policy
 - Read the [safety model](reference.md#safety-model) before enabling any write capability
+- Recheck [product boundaries and host compatibility](limitations.md) before moving from reads and plans to reviewed writes
