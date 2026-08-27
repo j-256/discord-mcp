@@ -16,6 +16,7 @@ import {
   loadFixtureConfig as loadConnectorConfig,
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
+import { escapeRegularExpression } from "./regular-expression.js"
 import {
   DISCORD_APPLICATION_FLAGS,
   DISCORD_CHANNEL_TYPES,
@@ -3828,7 +3829,7 @@ test("service keeps webhook credentials private across exact message lifecycle o
   assert.doesNotMatch(durableRecords, /Delivered webhook notice/)
   assert.doesNotMatch(durableRecords, /Edited webhook notice/)
   assert.doesNotMatch(durableRecords, /Remove the superseded webhook notice/)
-  assert.doesNotMatch(durableRecords, new RegExp(credential.replace(/[.]/g, "\\.")))
+  assert.doesNotMatch(durableRecords, new RegExp(escapeRegularExpression(credential)))
 })
 
 test("service pins identity through privacy-safe integration audit and deletion", async () => {

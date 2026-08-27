@@ -39,6 +39,7 @@ import type {
   DiscordGuildMember,
   DiscordRole,
 } from "../src/types.js"
+import { escapeRegularExpression } from "./regular-expression.js"
 
 const APPLICATION_ID = "100000000000000001"
 const GUILD_ID = "200000000000000001"
@@ -528,7 +529,7 @@ test("invite deletion records pending state before one write and verifies absenc
   assert.equal(operationStore.lastReceipt?.resourceId, inviteRef)
   const serialized = JSON.stringify({ activities, receipt: operationStore.lastReceipt, result })
   assert.doesNotMatch(serialized, new RegExp(PRIVATE_CODE))
-  assert.doesNotMatch(serialized, new RegExp(AUDIT_REASON.replace(/[ /]/gu, "\\$&")))
+  assert.doesNotMatch(serialized, new RegExp(escapeRegularExpression(AUDIT_REASON)))
 })
 
 test("invite deletion rejects a stale plan before reservation or mutation", async () => {

@@ -8581,7 +8581,12 @@ export class DiscordClient {
   readonly #token: string
 
   constructor(options: DiscordClientOptions) {
-    this.#apiBaseUrl = (options.apiBaseUrl || DISCORD_API_BASE_URL).replace(/\/+$/, "")
+    const apiBaseUrl = options.apiBaseUrl || DISCORD_API_BASE_URL
+    let apiBaseUrlEnd = apiBaseUrl.length
+    while (apiBaseUrlEnd > 0 && apiBaseUrl.charCodeAt(apiBaseUrlEnd - 1) === 47) {
+      apiBaseUrlEnd -= 1
+    }
+    this.#apiBaseUrl = apiBaseUrl.slice(0, apiBaseUrlEnd)
     this.#fetch = options.fetchImplementation || globalThis.fetch
     this.#maxAutomaticRetryWaitMs = options.maxAutomaticRetryWaitMs
       ?? DISCORD_LIMITS.automaticRetryWaitMs
@@ -8599,7 +8604,9 @@ export class DiscordClient {
   ): Promise<T> {
     const method = DISCORD_REST_OPERATIONS[operation]
     const url = new URL(`${this.#apiBaseUrl}${route}`)
-    const diagnosticRoute = parameters.diagnosticRoute ?? route.replace(/\?.*$/u, "")
+    const queryIndex = route.indexOf("?")
+    const diagnosticRoute = parameters.diagnosticRoute
+      ?? (queryIndex === -1 ? route : route.slice(0, queryIndex))
     const contentSensitive = CONTENT_SENSITIVE_REST_OPERATIONS.has(operation)
     const headers = new Headers({
       Accept: parameters.accept ?? "application/json",

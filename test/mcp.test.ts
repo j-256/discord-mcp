@@ -555,6 +555,7 @@ import {
   loadFixtureConfig,
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
+import { escapeRegularExpression } from "./regular-expression.js"
 import { fixtureApplicationCommandAudit } from "./application-command-audit-fixture.js"
 import { fixtureApplicationRoleConnectionMetadataAudit } from "./application-role-connection-metadata-audit-fixture.js"
 import { fixtureApplicationSkuAudit } from "./application-sku-audit-fixture.js"
@@ -21629,7 +21630,7 @@ test("MCP poll creation binds signed approval to every immutable field", async (
   assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
   assert.match(confirmationMessage, new RegExp(BOT_ID))
   assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
-  assert.match(confirmationMessage, new RegExp(POLL_QUESTION.replace("?", "\\?")))
+  assert.match(confirmationMessage, new RegExp(escapeRegularExpression(POLL_QUESTION)))
   assert.match(confirmationMessage, new RegExp(POLL_ANSWER_ONE))
   assert.match(confirmationMessage, /Duration hours: 72/u)
   assert.match(confirmationMessage, /Allow multiple answers: true/u)
@@ -23152,7 +23153,7 @@ test("MCP invite creation binds signed approval to exact private capability deli
     OPERATION_KEY_HASH,
     DIGEST,
   ]) {
-    assert.match(confirmationMessage, new RegExp(value.replace(/[/.]/gu, "\\$&")))
+    assert.match(confirmationMessage, new RegExp(escapeRegularExpression(value)))
   }
   assert.match(confirmationMessage, /Maximum age seconds: 3600/)
   assert.match(confirmationMessage, /Maximum uses: 1/)
@@ -25413,7 +25414,7 @@ test("MCP guild incident execution binds approval to the exact local review inte
     AUDIT_REASON,
     DIGEST,
   ]) {
-    assert.match(confirmationMessage, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    assert.match(confirmationMessage, new RegExp(escapeRegularExpression(value)))
   }
   assert.match(confirmationMessage, /Current incident actions/)
   assert.match(confirmationMessage, /the reason is not sent to Discord/)

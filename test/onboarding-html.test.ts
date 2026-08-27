@@ -100,7 +100,7 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(verificationCommands, /discord-mcp doctor/)
   assert.match(verificationCommands, /discord-mcp smoke/)
 
-  const script = html.match(/<script>([\s\S]+)<\/script>/)?.[1]
+  const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]
   assert.ok(script)
   const expectedSource = `script-src 'sha256-${createHash("sha256").update(script).digest("base64")}'`
   assert.ok(html.includes(expectedSource))
