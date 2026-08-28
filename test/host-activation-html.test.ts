@@ -24,6 +24,10 @@ import {
   createHostActivationPlan,
   type HostActivationPlan,
 } from "../src/host-activation.js"
+import {
+  HOST_ADAPTER_IDS,
+  createHostAdapterCatalog,
+} from "../src/host-adapters.js"
 import { createStdioLaunchDescriptor } from "../src/operator.js"
 
 const APPLICATION_ID = "100000000000000001"
@@ -74,6 +78,7 @@ function escaped(value: string): string {
 
 test("host activation HTML renders an exact private host-neutral handoff", () => {
   const plan = activationPlan()
+  const adapterCatalog = createHostAdapterCatalog(plan)
   const html = renderDiscordHostActivationHtml(plan)
 
   assert.equal(renderDiscordHostActivationHtml(plan), html)
@@ -85,7 +90,7 @@ test("host activation HTML renders an exact private host-neutral handoff", () =>
   assert.match(html, /Cannot read a credential value/)
   assert.match(html, /Cannot start a local process/)
   assert.match(html, /Cannot contact Discord or another network/)
-  assert.match(html, /Cannot validate a host-specific translation/)
+  assert.match(html, /Cannot prove an installed host accepts a projection/)
   assert.match(html, /Cannot prove a host approval interface/)
   assert.match(html, /Local child process only; do not translate to HTTP/)
   assert.match(html, /Required server/)
@@ -93,6 +98,23 @@ test("host activation HTML renders an exact private host-neutral handoff", () =>
   assert.match(html, /Elicitation/)
   assert.match(html, /Startup timeout/)
   assert.match(html, /Tool timeout/)
+  assert.match(html, /Choose one verified host projection/)
+  assert.match(html, /Common MCP JSON/)
+  assert.match(html, /Visual Studio Code/)
+  assert.match(html, /Gemini CLI extension/)
+  assert.match(html, /Merge, do not overwrite/)
+  assert.match(html, /Official schema source/)
+  assert.match(html, /MCP install URI flow/)
+  assert.match(html, /Private install URI/)
+  assert.match(html, /text, not an active link/)
+  assert.ok(html.includes(escaped("${input:discord-mcp-credential-1}")))
+  assert.ok(html.includes(escaped(`\${env:${TOKEN_ALIAS}}`)))
+  assert.ok(html.includes(escaped(`\${${TOKEN_ALIAS}}`)))
+  assert.ok(html.includes(escaped(JSON.stringify(adapterCatalog, null, 2))))
+  for (const adapter of adapterCatalog.adapters) {
+    assert.ok(html.includes(adapter.adapterDigest))
+    assert.ok(html.includes(escaped(adapter.content)))
+  }
   assert.match(html, /Forward references, never values/)
   assert.match(html, /Do not paste a bot token into a static host file/)
   assert.ok(html.includes(escaped(plan.verification.prompt)))
@@ -109,13 +131,16 @@ test("host activation HTML renders an exact private host-neutral handoff", () =>
   assert.match(html, /meta name="referrer" content="no-referrer"/)
   assert.match(html, /navigator\.clipboard\.writeText/)
   assert.match(html, /aria-label="Copy server name"/)
+  assert.match(html, /aria-label="Copy Common MCP JSON"/)
+  assert.doesNotMatch(html, /Copy Common MCP JSON JSON/)
   assert.match(html, /aria-label="Copy empty inline environment map"/)
   assert.match(html, /Must remain empty\. Forward named secret references/)
   assert.match(html, /aria-label="Copy structured smoke launch"/)
   assert.match(html, /role="status" aria-live="polite"/)
   assert.match(html, /<main id="main" class="shell" tabindex="-1">/)
   assert.match(html, /prefers-reduced-motion/)
-  assert.equal((html.match(/data-step autocomplete="off"/g) || []).length, 5)
+  assert.equal((html.match(/data-step autocomplete="off"/g) || []).length, 6)
+  assert.equal((html.match(/<article class="adapter" role="listitem"/g) || []).length, HOST_ADAPTER_IDS.length)
   assert.doesNotMatch(html, /<script\s+src=/)
   assert.doesNotMatch(html, /<link\b/)
   assert.doesNotMatch(html, /url\(https?:/)
@@ -164,6 +189,13 @@ test("host activation HTML export is deterministic, exclusive, private, and offl
     assert.equal(firstReport.format, HOST_ACTIVATION_HTML_FORMAT)
     assert.equal(firstReport.schemaVersion, HOST_ACTIVATION_HTML_SCHEMA_VERSION)
     assert.equal(firstReport.activationDigest, plan.activationDigest)
+    assert.deepEqual(firstReport.adapterIds, HOST_ADAPTER_IDS)
+    assert.deepEqual(
+      firstReport.adapterDigests,
+      createHostAdapterCatalog(plan).adapters.map((adapter) => adapter.adapterDigest),
+    )
+    assert.equal(Object.isFrozen(firstReport.adapterIds), true)
+    assert.equal(Object.isFrozen(firstReport.adapterDigests), true)
     assert.equal(firstReport.bytes, firstBytes.byteLength)
     assert.equal(firstReport.htmlDigest, `sha256:${sha256(firstBytes)}`)
     assert.equal(secondReport.htmlDigest, firstReport.htmlDigest)

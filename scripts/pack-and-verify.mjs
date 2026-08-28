@@ -29,8 +29,9 @@ const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
 const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v2"
 const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
+const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
-const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v1"
+const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
@@ -62,6 +63,7 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
 })
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
 const EXPECTED_SETUP_PRESETS = ["server-observer", "channel-reader"]
+const EXPECTED_HOST_ADAPTERS = ["mcp-json", "cursor", "vscode", "gemini-extension"]
 const EXPECTED_RISK_CLASSES = [
   "administrative-write",
   "destructive-write",
@@ -79,6 +81,7 @@ const REQUIRED_FILES = [
   "dist/cli.js",
   "dist/host-activation-html.js",
   "dist/host-activation.js",
+  "dist/host-adapters.js",
   "dist/index.d.ts",
   "dist/index.js",
   "docs/comparison.md",
@@ -195,6 +198,14 @@ async function assertNoSecrets(packageDirectory, files) {
 }
 
 async function assertNeutralPackage(packageDirectory, files) {
+  const clientCompatibilityFiles = new Set([
+    "README.md",
+    "SUPPORT.md",
+    "docs/comparison.md",
+    "docs/getting-started.md",
+    "docs/limitations.md",
+    "docs/reference.md",
+  ])
   for (const relative of files) {
     invariant(
       !containsSpecificReference(relative),
@@ -202,7 +213,10 @@ async function assertNeutralPackage(packageDirectory, files) {
     )
     const contents = await readFile(join(packageDirectory, relative))
     invariant(
-      !containsSpecificReference(contents.toString("latin1")),
+      !containsSpecificReference(contents.toString("latin1"), {
+        allowClientCompatibility: clientCompatibilityFiles.has(relative)
+          || relative.startsWith("dist/host-adapters."),
+      }),
       `npm archive file ${relative} has model- or harness-specific branding`,
     )
   }
@@ -341,6 +355,8 @@ assert.equal(typeof connector.planConfigRecipe, "function")
 assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")
 assert.equal(typeof connector.createHostActivationPlan, "function")
+assert.equal(typeof connector.createHostAdapterCatalog, "function")
+assert.equal(connector.HOST_ADAPTER_IDS.length, 4)
 assert.equal(typeof connector.exportDiscordHostActivationHtml, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
@@ -930,8 +946,74 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
       hostDiscovered: false,
       processStarted: false,
     })
+    invariant(report.adapterCatalog?.format === HOST_ADAPTER_CATALOG_FORMAT, "installed host adapter catalog format changed")
+    invariant(report.adapterCatalog?.activationDigest === report.activationDigest, "installed host adapters are not bound to their activation")
+    assert.deepEqual(
+      report.adapterCatalog.adapters.map((adapter) => adapter.id),
+      EXPECTED_HOST_ADAPTERS,
+      "installed host adapter inventory changed",
+    )
+    const adapterDigests = new Set()
+    for (const adapter of report.adapterCatalog.adapters) {
+      invariant(adapter.activationDigest === report.activationDigest, `installed ${adapter.id} adapter is not activation-bound`)
+      invariant(SHA256_DIGEST_PATTERN.test(adapter.adapterDigest), `installed ${adapter.id} adapter digest is invalid`)
+      invariant(!adapterDigests.has(adapter.adapterDigest), `installed ${adapter.id} adapter digest is duplicated`)
+      adapterDigests.add(adapter.adapterDigest)
+      assert.equal(adapter.content, `${JSON.stringify(adapter.configuration, null, 2)}\n`, `installed ${adapter.id} adapter bytes are not canonical`)
+      invariant(!adapter.content.includes(DUMMY_TOKEN), `installed ${adapter.id} adapter captured an ambient secret`)
+      assert.deepEqual(adapter.requirements, {
+        ...report.launch.requirements,
+        timeouts: report.launch.timeouts,
+      })
+    }
+    const adapters = Object.fromEntries(report.adapterCatalog.adapters.map((adapter) => [adapter.id, adapter]))
+    const credentialName = report.launch.secrets.environmentVariables[0]
+    invariant(typeof credentialName === "string", "installed host activation omitted its credential reference")
+    const commonServer = adapters["mcp-json"].configuration.mcpServers[report.launch.serverName]
+    assert.deepEqual(commonServer, {
+      args: report.launch.args,
+      command: report.launch.command,
+    })
+    const cursorServer = adapters.cursor.configuration.mcpServers[report.launch.serverName]
+    assert.deepEqual(cursorServer, {
+      args: report.launch.args,
+      command: report.launch.command,
+      env: { [credentialName]: `\${env:${credentialName}}` },
+      type: "stdio",
+    })
+    const cursorUri = new URL(adapters.cursor.installUri)
+    assert.equal(cursorUri.searchParams.get("name"), report.launch.serverName)
+    assert.deepEqual(
+      JSON.parse(Buffer.from(cursorUri.searchParams.get("config"), "base64").toString("utf8")),
+      cursorServer,
+    )
+    const vscodeServer = adapters.vscode.configuration.servers[report.launch.serverName]
+    assert.deepEqual(adapters.vscode.configuration.inputs, [{
+      description: `Discord bot credential for ${credentialName}`,
+      id: "discord-mcp-credential-1",
+      password: true,
+      type: "promptString",
+    }])
+    assert.equal(vscodeServer.env[credentialName], "${input:discord-mcp-credential-1}")
+    invariant(vscodeServer.sandboxEnabled === undefined, "installed VS Code adapter enables auto-approving sandbox behavior")
+    const geminiManifest = adapters["gemini-extension"].configuration
+    assert.deepEqual(geminiManifest.settings, [{
+      description: `Discord bot credential exposed only as ${credentialName}`,
+      envVar: credentialName,
+      name: `Discord credential (${credentialName})`,
+      sensitive: true,
+    }])
+    assert.equal(
+      geminiManifest.mcpServers[geminiManifest.name].env[credentialName],
+      `\${${credentialName}}`,
+    )
     invariant(report.guide?.format === HOST_ACTIVATION_HTML_FORMAT, "installed host activation HTML format changed")
     invariant(report.guide?.activationDigest === report.activationDigest, "installed host activation HTML is not bound to its plan")
+    assert.deepEqual(report.guide?.adapterIds, EXPECTED_HOST_ADAPTERS)
+    assert.deepEqual(
+      report.guide?.adapterDigests,
+      report.adapterCatalog.adapters.map((adapter) => adapter.adapterDigest),
+    )
     invariant(SHA256_DIGEST_PATTERN.test(report.guide?.htmlDigest), "installed host activation HTML digest is invalid")
     assert.deepEqual({
       automaticNetwork: report.guide.automaticNetwork,
@@ -960,6 +1042,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     })
   }
   assert.equal(secondHostActivation.activationDigest, firstHostActivation.activationDigest, "installed host activation plan is not deterministic")
+  assert.deepEqual(secondHostActivation.adapterCatalog, firstHostActivation.adapterCatalog, "installed host adapter catalog is not deterministic")
   assert.equal(secondHostActivation.guide.htmlDigest, firstHostActivation.guide.htmlDigest, "installed host activation HTML digest is not deterministic")
   const firstHostActivationBytes = await readFile(firstHostActivationFile)
   const secondHostActivationBytes = await readFile(secondHostActivationFile)
@@ -972,9 +1055,30 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   const hostActivationHtml = firstHostActivationBytes.toString("utf8")
   invariant(hostActivationHtml.includes(HOST_ACTIVATION_HTML_FORMAT), "installed host activation HTML omitted its format")
   invariant(hostActivationHtml.includes(firstHostActivation.activationDigest), "installed host activation HTML omitted its plan digest")
+  for (const adapter of firstHostActivation.adapterCatalog.adapters) {
+    invariant(hostActivationHtml.includes(adapter.adapterDigest), `installed host activation HTML omitted ${adapter.id} evidence`)
+  }
+  invariant(hostActivationHtml.includes("${input:discord-mcp-credential-1}"), "installed host activation HTML omitted VS Code secure input")
+  invariant(hostActivationHtml.includes("Private install URI"), "installed host activation HTML omitted the private Cursor install URI")
+  invariant(!/href="cursor:/u.test(hostActivationHtml), "installed host activation HTML made the private Cursor URI navigable")
   invariant(hostActivationHtml.includes("connect-src 'none'"), "installed host activation HTML permits network connections")
   invariant(!hostActivationHtml.includes(DUMMY_TOKEN), "installed host activation HTML captured an ambient secret")
   invariant(!/(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)/.test(hostActivationHtml), "installed host activation HTML contains forbidden browser authority")
+  const selectedAdapter = await run(bin, [
+    "host",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "vscode",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  invariant(selectedAdapter.stdout.includes("Discord MCP host adapter: Visual Studio Code (vscode)"), "installed host adapter selection did not render")
+  invariant(selectedAdapter.stdout.includes("${input:discord-mcp-credential-1}"), "installed host adapter selection omitted VS Code secure input")
+  invariant(!selectedAdapter.stdout.includes(DUMMY_TOKEN), "installed host adapter selection captured an ambient secret")
   const firstWorkbenchFile = join(consumer, "workbench-first.html")
   const secondWorkbenchFile = join(consumer, "workbench-second.html")
   const firstWorkbenchResult = await run(bin, [

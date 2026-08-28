@@ -180,9 +180,28 @@ The guide presents typed launch data similar to this shape:
 }
 ```
 
-Open the guide locally and map `command` and ordered `args` exactly into the host's local stdio server configuration. Configure the host's protected secret facility or launch environment to supply each name in `environment.forward`; do not replace the name with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls.
+The same activation digest binds four deterministic adapters shown together in the private guide:
 
-Host formats differ, so the guide maps each field by meaning instead of guessing or editing a host-specific file. It also shows full-versus-progressive tool-surface behavior, an exact structured smoke fallback, and a read-only verification request. Restart or reload the host, inspect its negotiated server list, and confirm that `discord` is available.
+The canonical `environment.forward` field remains the source of every adapter's environment-reference list; adapters never discover or invent another credential name.
+
+| Adapter ID | Copyable artifact | Credential strategy |
+| --- | --- | --- |
+| `mcp-json` | Common top-level `mcpServers` document | The host starts from protected process state that already has the named variable; the portable JSON omits non-portable secret syntax |
+| `cursor` | Cursor `mcp.json` plus a reviewable private install URI | Exact `${env:DISCORD_BOT_TOKEN}` reference resolved at launch |
+| `vscode` | VS Code `mcp.json` with a password input | Host-protected `${input:discord-mcp-credential-1}` value; sandboxing stays disabled because VS Code auto-approves sandboxed MCP tools |
+| `gemini-extension` | Complete policy-specific `gemini-extension.json` | `sensitive: true` extension setting stored through Gemini CLI's system-keychain path and passed by exact environment name |
+
+For a terminal-only handoff, append one adapter ID to human output:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter vscode
+```
+
+`--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify all four adapter digests against the same activation digest. The command never writes or discovers a host configuration. Merge only the generated server and input records into the documented destination and preserve unrelated entries. A file-backed credential policy causes every adapter to omit environment, input, and extension-setting secret fields because the exact policy already names the protected file.
+
+Open the guide locally, choose the host projection, and preserve its exact command and ordered arguments. Never replace an environment or secure-input reference with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls. The adapters retain those requirements as explicit guidance when a host schema cannot encode them.
+
+The generated schema proves deterministic translation from the activation plan, not acceptance by the installed host version. Restart or reload the host, inspect its negotiated server list, and confirm that the generated host server name is available. Then use the guide's read-only verification request. If startup fails, use its structured smoke fallback before changing policy or Discord permissions.
 
 ## 8. Complete the first useful read
 

@@ -525,7 +525,7 @@ function rewriteMarkdown(markdown, source, route, resolveLink) {
 
 async function writeText(file, content) {
   const normalized = content.endsWith("\n") ? content : `${content}\n`
-  invariant(!containsSpecificReference(normalized), `${relative(REPOSITORY_ROOT, file)} violates model and harness neutrality`)
+  invariant(!containsSpecificReference(normalized, { allowClientCompatibility: true }), `${relative(REPOSITORY_ROOT, file)} violates model and harness neutrality`)
   invariant(!TOKEN_PATTERN.test(normalized), `${relative(REPOSITORY_ROOT, file)} contains a token-shaped value`)
   invariant(!PRIVATE_PATH_PATTERN.test(normalized), `${relative(REPOSITORY_ROOT, file)} contains a private absolute path`)
   await mkdir(dirname(file), { recursive: true })
