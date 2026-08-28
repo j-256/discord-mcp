@@ -1,7 +1,14 @@
-import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+
+import {
+  assertComparisonRegistryCoverage,
+  collectCurrentRegistryCompetitors,
+  comparisonExternalLinks,
+  comparisonRegistryClassificationLinks,
+  loadCurrentRegistryPages,
+} from "./comparison-registry.mjs"
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const COMPARISON_FILE = resolve(SCRIPT_DIRECTORY, "..", "..", "docs", "comparison.md")
@@ -13,18 +20,6 @@ const USER_AGENT = "discord-mcp-documentation-link-verifier/1.0"
 
 function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
-}
-
-function externalLinks(markdown) {
-  assert.doesNotMatch(markdown, /\]\(http:\/\//u, "Comparison evidence links must use HTTPS")
-  const links = [...markdown.matchAll(/!?\[[^\]]*\]\((https:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\)/gu)]
-    .map((match) => new URL(match[1]))
-    .map((url) => {
-      url.hash = ""
-      return url.href
-    })
-  assert.ok(links.length > 0, "Comparison contains no external evidence links")
-  return [...new Set(links)].sort()
 }
 
 async function fetchStatus(url) {
@@ -40,6 +35,31 @@ async function fetchStatus(url) {
   const status = response.status
   await response.body?.cancel()
   return status
+}
+
+async function fetchRegistryResponse(url) {
+  let lastFailure
+  for (const retryDelay of RETRY_DELAYS_MS) {
+    if (retryDelay > 0) await delay(retryDelay)
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent": USER_AGENT,
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+      if (response.ok) return await response.json()
+      const status = response.status
+      await response.body?.cancel()
+      lastFailure = new Error(`HTTP ${status}`)
+      if (!RETRYABLE_STATUS.has(status)) break
+    } catch (error) {
+      lastFailure = error
+    }
+  }
+  throw new Error(`${url}: ${lastFailure?.message || "unknown failure"}`)
 }
 
 async function verifyLink(url) {
@@ -60,7 +80,11 @@ async function verifyLink(url) {
 
 async function main() {
   const markdown = await readFile(COMPARISON_FILE, "utf8")
-  const queue = externalLinks(markdown)
+  const queue = comparisonExternalLinks(markdown)
+  const classificationLinks = comparisonRegistryClassificationLinks(markdown)
+  const registryPages = await loadCurrentRegistryPages(fetchRegistryResponse)
+  const competitors = collectCurrentRegistryCompetitors(registryPages)
+  const coverage = assertComparisonRegistryCoverage(classificationLinks, competitors)
   const total = queue.length
   const failures = []
   const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
@@ -74,8 +98,10 @@ async function main() {
     }
   })
   await Promise.all(workers)
-  assert.deepEqual(failures, [], `Comparison evidence has unreachable links:\n${failures.join("\n")}`)
-  process.stdout.write(`Verified ${total} external comparison evidence links\n`)
+  if (failures.length > 0) {
+    throw new Error(`Comparison evidence has unreachable links:\n${failures.join("\n")}`)
+  }
+  process.stdout.write(`Verified ${coverage.competitorCount} current Registry competitors and ${total} external comparison evidence links\n`)
 }
 
 await main()

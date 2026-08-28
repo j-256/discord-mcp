@@ -423,12 +423,14 @@ async function checkDocumentationPortal() {
     "site/package.json",
     "site/plugins/accessible-tables.mjs",
     "site/scripts/browser-test.mjs",
+    "site/scripts/comparison-registry.mjs",
     "site/scripts/evidence-link-test.mjs",
     "site/scripts/generate.mjs",
     "site/src/components/ReleaseFooter.astro",
     "site/src/content.config.ts",
     "site/src/pages/404.astro",
     "site/src/styles/custom.css",
+    "site/test/comparison-registry.test.mjs",
     "site/test/site.test.mjs",
     "site/tsconfig.json",
     "src/catalog.ts",
@@ -623,6 +625,7 @@ async function checkDocumentation(packageJson) {
     "Not demonstrated",
     "Different fit",
     "Not auditable",
+    "official Registry's complete current Discord search",
   ]) {
     invariant(comparison.includes(required), `field comparison is missing ${required}`)
   }
