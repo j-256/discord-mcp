@@ -4233,6 +4233,9 @@ test("Discord client projects exact member voice state and sends one-field PATCH
     deaf: false,
     guildId: "100",
     mute: true,
+    selfDeaf: false,
+    selfMute: false,
+    suppressed: false,
     unknownFieldCount: 1,
     userId: "400",
   })
@@ -4382,7 +4385,10 @@ test("Discord client projects current-user voice state and sets one exact status
         guild_id: "100",
         member: { user: { id: "400", username: "discarded" } },
         mute: false,
+        self_deaf: false,
+        self_mute: true,
         session_id: "discarded-session",
+        suppress: false,
         user_id: "400",
       })
     },
@@ -4399,6 +4405,9 @@ test("Discord client projects current-user voice state and sets one exact status
     deaf: false,
     guildId: "100",
     mute: false,
+    selfDeaf: false,
+    selfMute: true,
+    suppressed: false,
     unknownFieldCount: 1,
     userId: "400",
   })
@@ -9355,6 +9364,77 @@ test("Discord client sends exact non-retried soundboard writes", async () => {
     { operation: "modify_guild_soundboard_sound", retries: 0 },
     { operation: "delete_guild_soundboard_sound", retries: 0 },
   ])
+})
+
+test("Discord client sends exact non-retried soundboard playback requests", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    url: string
+  }> = []
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method,
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    sleep: async () => {
+      throw new Error("Soundboard playback must not retry")
+    },
+    token: TOKEN,
+  })
+
+  await client.sendSoundboardSound("200", "1", undefined)
+  await client.sendSoundboardSound("200", "300", "100")
+
+  assert.deepEqual(requests, [{
+    body: { sound_id: "1" },
+    method: "POST",
+    url: `${API_BASE_URL}/channels/200/send-soundboard-sound`,
+  }, {
+    body: { sound_id: "300", source_guild_id: "100" },
+    method: "POST",
+    url: `${API_BASE_URL}/channels/200/send-soundboard-sound`,
+  }])
+  assert.deepEqual(records.map(({ operation, retries }) => ({ operation, retries })), [
+    { operation: "send_soundboard_sound", retries: 0 },
+    { operation: "send_soundboard_sound", retries: 0 },
+  ])
+})
+
+test("Discord client validates soundboard playback and never retries refusal", async () => {
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "private playback detail", retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.sendSoundboardSound("200", "300", undefined),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+  await assert.rejects(client.sendSoundboardSound("invalid", "300", undefined))
+  await assert.rejects(client.sendSoundboardSound("200", "invalid", undefined))
+  await assert.rejects(client.sendSoundboardSound("200", "300", "invalid"))
+  assert.equal(requests, 1)
 })
 
 test("Discord client validates soundboard writes before fetching and never retries", async () => {

@@ -395,6 +395,10 @@
           "type": "boolean",
           "description": "Enable soundboard changes policy"
         },
+        "soundboardPlayback": {
+          "type": "boolean",
+          "description": "Enable exact-scope guarded soundboard playback with live voice-state and permission proof"
+        },
         "stageInstanceAudit": {
           "type": "boolean",
           "description": "Enable stage instance audit policy"
@@ -1587,6 +1591,26 @@
             "pattern": "^[0-9]{1,20}$"
           },
           "description": "Exact Discord ID allowlist for soundboard guild ids"
+        },
+        "soundboardPlaybackChannelIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact ordinary voice-channel ID allowlist for guarded soundboard playback"
+        },
+        "soundboardPlaybackSourceGuildIds": {
+          "minItems": 0,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          },
+          "description": "Exact custom-sound source guild ID allowlist for guarded soundboard playback"
         },
         "stageChannelIds": {
           "minItems": 0,

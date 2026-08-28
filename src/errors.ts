@@ -580,6 +580,37 @@ export class GatewayVoiceChannelStatusError extends Error {
   }
 }
 
+export class GatewaySoundboardEffectError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GatewaySoundboardEffectError"
+  }
+}
+
+export class SoundboardPlaybackEvidenceError extends Error {
+  override name = "SoundboardPlaybackEvidenceError"
+}
+
+export class SoundboardPlaybackOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord soundboard playback operation key has already been reserved")
+    this.name = "SoundboardPlaybackOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class SoundboardPlaybackExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "SoundboardPlaybackExecutionError"
+    this.result = result
+  }
+}
+
 export class VoiceChannelStatusEvidenceError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)

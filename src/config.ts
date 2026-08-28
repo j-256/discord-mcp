@@ -145,6 +145,7 @@ export interface ConnectorConfig {
   allowScheduledEventUserAudit: boolean
   allowSoundboardAudit: boolean
   allowSoundboardChanges: boolean
+  allowSoundboardPlayback: boolean
   allowStageInstanceAudit: boolean
   allowStageInstanceChanges: boolean
   allowStageStartNotifications: boolean
@@ -256,6 +257,8 @@ export interface ConnectorConfig {
   scheduledEventRoots: readonly string[]
   secretEnvironmentVariables: ReadonlySet<string>
   soundboardGuildIds: ReadonlySet<string>
+  soundboardPlaybackChannelIds: ReadonlySet<string>
+  soundboardPlaybackSourceGuildIds: ReadonlySet<string>
   soundboardRoots: readonly string[]
   stageChannelIds: ReadonlySet<string>
   token: string
@@ -679,6 +682,16 @@ export function loadConnectorConfigDocument(
   const integrationIds = configScope(document, "integrationIds", CONNECTOR_LIMITS.integrationIdAllowlist)
   const scheduledEventGuildIds = configScope(document, "scheduledEventGuildIds")
   const soundboardGuildIds = configScope(document, "soundboardGuildIds", CONNECTOR_LIMITS.soundboardGuildAllowlist)
+  const soundboardPlaybackChannelIds = configScope(
+    document,
+    "soundboardPlaybackChannelIds",
+    CONNECTOR_LIMITS.soundboardPlaybackChannelAllowlist,
+  )
+  const soundboardPlaybackSourceGuildIds = configScope(
+    document,
+    "soundboardPlaybackSourceGuildIds",
+    CONNECTOR_LIMITS.soundboardPlaybackSourceGuildAllowlist,
+  )
   const welcomeScreenGuildIds = configScope(
     document,
     "welcomeScreenGuildIds",
@@ -730,6 +743,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("roleOrderingGuildIds"), roleOrderingGuildIds],
     [configPolicyPath("scheduledEventGuildIds"), scheduledEventGuildIds],
     [configPolicyPath("soundboardGuildIds"), soundboardGuildIds],
+    [configPolicyPath("soundboardPlaybackSourceGuildIds"), soundboardPlaybackSourceGuildIds],
     [configPolicyPath("welcomeScreenGuildIds"), welcomeScreenGuildIds],
     [configPolicyPath("widgetSettingsGuildIds"), widgetSettingsGuildIds],
     [configPolicyPath("webhookGuildIds"), webhookGuildIds],
@@ -764,6 +778,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("pinChannelIds"), pinChannelIds],
     [configPolicyPath("pollChannelIds"), pollChannelIds],
     [configPolicyPath("reactionChannelIds"), reactionChannelIds],
+    [configPolicyPath("soundboardPlaybackChannelIds"), soundboardPlaybackChannelIds],
     [
       configPolicyPath("announcementSubscriptionSourceChannelIds"),
       announcementSubscriptionSourceChannelIds,
@@ -1313,9 +1328,15 @@ export function loadConnectorConfigDocument(
   }
   const allowSoundboardAudit = configCapability(document, "soundboardAudit")
   const allowSoundboardChanges = configCapability(document, "soundboardChanges")
+  const allowSoundboardPlayback = configCapability(document, "soundboardPlayback")
   if (allowSoundboardChanges && !allowSoundboardAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowSoundboardChanges")} requires ${configPolicyPath("allowSoundboardAudit")}`,
+    )
+  }
+  if (allowSoundboardPlayback && soundboardPlaybackChannelIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowSoundboardPlayback")} requires ${configPolicyPath("soundboardPlaybackChannelIds")}`,
     )
   }
   const allowWelcomeScreenAudit = configCapability(document, "welcomeScreenAudit")
@@ -1480,6 +1501,7 @@ export function loadConnectorConfigDocument(
     allowScheduledEventUserAudit,
     allowSoundboardAudit,
     allowSoundboardChanges,
+    allowSoundboardPlayback,
     allowStageInstanceAudit,
     allowStageInstanceChanges,
     allowStageStartNotifications,
@@ -1658,6 +1680,8 @@ export function loadConnectorConfigDocument(
       connectorConfigSecretEnvironmentNames(document),
     ),
     soundboardGuildIds,
+    soundboardPlaybackChannelIds,
+    soundboardPlaybackSourceGuildIds,
     soundboardRoots: parseOwnedRoots(
       document.storage.soundboardRoots,
       "$.storage.soundboardRoots",

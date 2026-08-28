@@ -208,6 +208,9 @@ export interface PolicyDescription {
   soundboardChangesEnabled: boolean
   soundboardCreationEnabled: boolean
   soundboardGuildIds: string[]
+  soundboardPlaybackChannelIds: string[]
+  soundboardPlaybackEnabled: boolean
+  soundboardPlaybackSourceGuildIds: string[]
   soundboardRootCount: number
   stageChannelIds: string[]
   stageInstanceAuditEnabled: boolean
@@ -355,6 +358,7 @@ export class ScopePolicy {
   readonly #allowScheduledEventUserAudit: boolean
   readonly #allowSoundboardAudit: boolean
   readonly #allowSoundboardChanges: boolean
+  readonly #allowSoundboardPlayback: boolean
   readonly #allowStageInstanceAudit: boolean
   readonly #allowStageInstanceChanges: boolean
   readonly #allowStageStartNotifications: boolean
@@ -464,6 +468,8 @@ export class ScopePolicy {
   readonly #scheduledEventGuildIds: ReadonlySet<string>
   readonly #scheduledEventRoots: readonly string[]
   readonly #soundboardGuildIds: ReadonlySet<string>
+  readonly #soundboardPlaybackChannelIds: ReadonlySet<string>
+  readonly #soundboardPlaybackSourceGuildIds: ReadonlySet<string>
   readonly #soundboardRoots: readonly string[]
   readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
@@ -586,6 +592,7 @@ export class ScopePolicy {
     | "allowScheduledEventUserAudit"
     | "allowSoundboardAudit"
     | "allowSoundboardChanges"
+    | "allowSoundboardPlayback"
     | "allowStageInstanceAudit"
     | "allowStageInstanceChanges"
     | "allowStageStartNotifications"
@@ -689,6 +696,8 @@ export class ScopePolicy {
     | "scheduledEventGuildIds"
     | "scheduledEventRoots"
     | "soundboardGuildIds"
+    | "soundboardPlaybackChannelIds"
+    | "soundboardPlaybackSourceGuildIds"
     | "soundboardRoots"
     | "stageChannelIds"
     | "threadParentIds"
@@ -808,6 +817,7 @@ export class ScopePolicy {
     this.#allowScheduledEventUserAudit = config.allowScheduledEventUserAudit ?? false
     this.#allowSoundboardAudit = config.allowSoundboardAudit ?? false
     this.#allowSoundboardChanges = config.allowSoundboardChanges ?? false
+    this.#allowSoundboardPlayback = config.allowSoundboardPlayback ?? false
     this.#allowStageInstanceAudit = config.allowStageInstanceAudit ?? false
     this.#allowStageInstanceChanges = config.allowStageInstanceChanges ?? false
     this.#allowStageStartNotifications = config.allowStageStartNotifications ?? false
@@ -926,6 +936,8 @@ export class ScopePolicy {
     this.#scheduledEventGuildIds = config.scheduledEventGuildIds ?? new Set()
     this.#scheduledEventRoots = config.scheduledEventRoots ?? []
     this.#soundboardGuildIds = config.soundboardGuildIds ?? new Set()
+    this.#soundboardPlaybackChannelIds = config.soundboardPlaybackChannelIds ?? new Set()
+    this.#soundboardPlaybackSourceGuildIds = config.soundboardPlaybackSourceGuildIds ?? new Set()
     this.#soundboardRoots = config.soundboardRoots ?? []
     this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
@@ -1303,6 +1315,12 @@ export class ScopePolicy {
         && this.#soundboardGuildIds.size > 0
         && this.#soundboardRoots.length > 0,
       soundboardGuildIds: [...this.#soundboardGuildIds].sort(),
+      soundboardPlaybackChannelIds: [...this.#soundboardPlaybackChannelIds].sort(),
+      soundboardPlaybackEnabled: this.#allowSoundboardPlayback
+        && this.#soundboardPlaybackChannelIds.size > 0,
+      soundboardPlaybackSourceGuildIds: [
+        ...this.#soundboardPlaybackSourceGuildIds,
+      ].sort(),
       soundboardRootCount: this.#soundboardRoots.length,
       stageChannelIds: [...this.#stageChannelIds].sort(),
       stageInstanceAuditEnabled: this.#allowStageInstanceAudit
@@ -2448,6 +2466,45 @@ export class ScopePolicy {
     this.assertSoundboardAuditable(guildId)
     if (!this.#allowSoundboardChanges) {
       throw new PolicyError("Discord soundboard changes are disabled by connector configuration")
+    }
+  }
+
+  assertSoundboardPlaybackEnabled(): void {
+    if (!this.#allowSoundboardPlayback) {
+      throw new PolicyError("Discord soundboard playback is disabled by connector configuration")
+    }
+    if (this.#soundboardPlaybackChannelIds.size === 0) {
+      throw new PolicyError(
+        "Discord soundboard playback requires an explicit voice-channel allowlist",
+      )
+    }
+  }
+
+  assertSoundboardPlaybackChannelIdAllowed(channelId: string): void {
+    this.assertSoundboardPlaybackEnabled()
+    if (!this.#soundboardPlaybackChannelIds.has(channelId)) {
+      throw new PolicyError(`Discord channel ${channelId} is outside the soundboard playback scope`)
+    }
+  }
+
+  assertSoundboardPlaybackChannel(channel: DiscordChannel): string {
+    this.assertSoundboardPlaybackChannelIdAllowed(channel.id)
+    const guildId = this.assertChannelReadable(channel)
+    if (channel.type !== DISCORD_CHANNEL_TYPES.voice) {
+      throw new PolicyError(
+        "Discord soundboard playback scope requires an exact ordinary voice channel",
+      )
+    }
+    return guildId
+  }
+
+  assertSoundboardPlaybackSourceGuildAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    this.assertSoundboardPlaybackEnabled()
+    if (!this.#soundboardPlaybackSourceGuildIds.has(guildId)) {
+      throw new PolicyError(
+        `Discord guild ${guildId} is outside the soundboard playback source scope`,
+      )
     }
   }
 

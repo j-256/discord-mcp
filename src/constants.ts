@@ -634,6 +634,9 @@ export const CONNECTOR_LIMITS = Object.freeze({
   searchFilterStrings: 25,
   scheduledEventUserPageDefault: 25,
   soundboardGuildAllowlist: 100,
+  soundboardPlaybackChannelAllowlist: 100,
+  soundboardPlaybackEventTimeoutMs: 2_000,
+  soundboardPlaybackSourceGuildAllowlist: 100,
   stageInstanceChannels: 25,
   threadGovernanceGuildAllowlist: 100,
   threadGovernanceThreadAllowlist: 100,
@@ -707,6 +710,7 @@ export const DISCORD_GATEWAY_INTENTS = Object.freeze({
   guildMessages: 1 << 9,
   guildMessagePolls: 1 << 24,
   guildMessageReactions: 1 << 10,
+  guildVoiceStates: 1 << 7,
   guilds: 1 << 0,
 })
 

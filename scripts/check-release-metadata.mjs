@@ -649,6 +649,7 @@ async function checkDocumentation(packageJson) {
     "## How to read the matrix",
     "## Head-to-head matrix",
     "## Why each lead is material",
+    "## Soundboard playback head-to-head",
     "## Audited releases and source limits",
     "## Registry matches outside the scored local comparison",
     "## Maintenance rule",
@@ -680,6 +681,41 @@ async function checkDocumentation(packageJson) {
   invariant(
     comparisonRows.slice(2).every((row) => row.split("|")[2]?.trim() === "**Lead**"),
     "field comparison contains an outcome Discord MCP does not lead",
+  )
+  const comparisonLines = comparison.split("\n")
+  let scoredComparisonTables = 0
+  for (let index = 0; index < comparisonLines.length; index += 1) {
+    const header = comparisonLines[index]
+      ?.split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim())
+    if (header?.[1] !== "Discord MCP") continue
+    scoredComparisonTables += 1
+    const separator = comparisonLines[index + 1]
+      ?.split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim())
+    invariant(
+      separator?.length === header.length
+      && separator.every((cell) => /^---$/u.test(cell)),
+      `field comparison table ${header[0]} has an invalid separator`,
+    )
+    let scoredRows = 0
+    for (let rowIndex = index + 2; rowIndex < comparisonLines.length; rowIndex += 1) {
+      const line = comparisonLines[rowIndex]
+      if (!line?.startsWith("| ")) break
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim())
+      invariant(
+        cells[1]?.startsWith("**Lead**"),
+        `field comparison table ${header[0]} contains a row Discord MCP does not lead`,
+      )
+      scoredRows += 1
+    }
+    invariant(scoredRows > 0, `field comparison table ${header[0]} has no scored rows`)
+  }
+  invariant(
+    scoredComparisonTables > 1,
+    "field comparison lacks focused head-to-head tables",
   )
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")

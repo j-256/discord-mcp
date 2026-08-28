@@ -224,6 +224,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "scheduledEventChanges",
   "soundboardAudit",
   "soundboardChanges",
+  "soundboardPlayback",
   "stageInstanceAudit",
   "stageInstanceChanges",
   "stageStartNotifications",
@@ -320,6 +321,8 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "roleOrderingGuildIds",
   "scheduledEventGuildIds",
   "soundboardGuildIds",
+  "soundboardPlaybackChannelIds",
+  "soundboardPlaybackSourceGuildIds",
   "stageChannelIds",
   "threadParentIds",
   "threadGuildIds",
@@ -503,6 +506,9 @@ const MEMBER_VERIFICATION_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exac
 const MEMBER_VERIFICATION_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed member verification-bypass changes"
 const PERMISSION_SYNCS_CAPABILITY_DESCRIPTION = "Enable reviewed complete parent-category permission synchronization with explicit replacement and future-propagation acknowledgment"
 const PERMISSION_SYNC_SCOPE_DESCRIPTION = "Exact direct child channel ID allowlist for reviewed parent-category permission synchronization"
+const SOUNDBOARD_PLAYBACK_CAPABILITY_DESCRIPTION = "Enable exact-scope guarded soundboard playback with live voice-state and permission proof"
+const SOUNDBOARD_PLAYBACK_CHANNEL_SCOPE_DESCRIPTION = "Exact ordinary voice-channel ID allowlist for guarded soundboard playback"
+const SOUNDBOARD_PLAYBACK_SOURCE_GUILD_SCOPE_DESCRIPTION = "Exact custom-sound source guild ID allowlist for guarded soundboard playback"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "guildCommunityAudit") {
@@ -601,6 +607,9 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "permissionSyncs") {
     return PERMISSION_SYNCS_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "soundboardPlayback") {
+    return SOUNDBOARD_PLAYBACK_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -679,6 +688,12 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "permissionSyncChannelIds") {
     return PERMISSION_SYNC_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "soundboardPlaybackChannelIds") {
+    return SOUNDBOARD_PLAYBACK_CHANNEL_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "soundboardPlaybackSourceGuildIds") {
+    return SOUNDBOARD_PLAYBACK_SOURCE_GUILD_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }

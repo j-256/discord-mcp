@@ -70,6 +70,11 @@ import type {
 } from "../src/operation-store.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import {
+  normalizeSoundboardPlaybackRequest,
+  soundboardPlaybackIntentKey,
+  soundboardPlaybackRequestDigest,
+} from "../src/soundboard-playback-service.js"
+import {
   CONNECTOR_STATUS_PRIVACY,
   CONNECTOR_STATUS_SCHEMA_VERSION,
   ConnectorService,
@@ -546,6 +551,9 @@ function serviceFixture(overrides: {
     },
     async createGuildSoundboardSound() {
       throw new Error("Unexpected soundboard creation")
+    },
+    async sendSoundboardSound() {
+      throw new Error("Unexpected soundboard playback")
     },
     async createGuildSticker(_guildId, input) {
       return {
@@ -5503,6 +5511,9 @@ test("service reads and executes record-free voice channel status no-ops", async
           deaf: false,
           guildId: GUILD_ID,
           mute: false,
+          selfDeaf: false,
+          selfMute: false,
+          suppressed: false,
           unknownFieldCount: 0,
           userId: BOT_ID,
         }
@@ -5650,6 +5661,9 @@ test("service coordinates exact voice channel status writes before final executi
           deaf: false,
           guildId: GUILD_ID,
           mute: false,
+          selfDeaf: false,
+          selfMute: false,
+          suppressed: false,
           unknownFieldCount: 0,
           userId: BOT_ID,
         }
@@ -6760,6 +6774,100 @@ test("service pins identity through privacy-safe reviewed soundboard changes", a
   ])
   assert.equal(operationStore.receipt?.kind, "guild-soundboard-change")
   assert.equal(operationStore.receipt?.resourceId, SOUNDBOARD_SOUND_ID)
+})
+
+test("service replays completed soundboard playback from pinned local evidence", async () => {
+  const operationKey = "soundboard-playback-service-attempt-0001"
+  const request = {
+    channelId: CHANNEL_ID,
+    operationKey,
+    soundId: SOUNDBOARD_SOUND_ID,
+    sourceGuildId: null,
+  }
+  const normalized = normalizeSoundboardPlaybackRequest(request)
+  const requestDigest = soundboardPlaybackRequestDigest(
+    soundboardPlaybackIntentKey(TOKEN),
+    APPLICATION_ID,
+    BOT_ID,
+    normalized,
+  )
+  const operationStore = new MemoryOperationStore()
+  operationStore.receipt = {
+    activityId: "activity-soundboard-playback",
+    error: null,
+    guildId: GUILD_ID,
+    kind: "soundboard-playback",
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest: requestDigest,
+    resourceId: CHANNEL_ID,
+    schemaVersion: 1,
+    status: "completed",
+    timestamp: "2026-08-28T12:00:00.000Z",
+    verification: "match",
+  }
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const { calls, service } = serviceFixture({
+    configOverrides: {
+      capabilities: { soundboardPlayback: true },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: { soundboardPlaybackChannelIds: [CHANNEL_ID] },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+
+  const result = await service.playSoundboardSound(request)
+
+  assert.equal(result.localReplay, true)
+  assert.equal(result.verification, "verified-local-replay")
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+  assert.deepEqual(writeCoordinator.intents, [])
+})
+
+test("service coordinates new soundboard playback on the exact voice channel", async () => {
+  const request = {
+    channelId: CHANNEL_ID,
+    operationKey: "soundboard-playback-service-attempt-0002",
+    soundId: SOUNDBOARD_SOUND_ID,
+    sourceGuildId: null,
+  }
+  const normalized = normalizeSoundboardPlaybackRequest(request)
+  const requestDigest = soundboardPlaybackRequestDigest(
+    soundboardPlaybackIntentKey(TOKEN),
+    APPLICATION_ID,
+    BOT_ID,
+    normalized,
+  )
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const { calls, service } = serviceFixture({
+    configOverrides: {
+      capabilities: { soundboardPlayback: true },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: { soundboardPlaybackChannelIds: [CHANNEL_ID] },
+    },
+    writeCoordinator,
+  })
+
+  await assert.rejects(
+    service.playSoundboardSound(request),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "soundboard-playback",
+    operationKeyHash: normalized.operationKeyHash,
+    planDigest: requestDigest,
+    targets: [{ id: CHANNEL_ID, kind: "channel" }],
+  }])
 })
 
 test("service pins identity through privacy-safe reviewed Stage-instance lifecycle", async () => {
@@ -8252,6 +8360,9 @@ test("service pins identity through privacy-safe reviewed member voice changes",
     deaf: false,
     guildId: GUILD_ID,
     mute: false,
+    selfDeaf: false,
+    selfMute: false,
+    suppressed: false,
     unknownFieldCount: 0,
     userId: targetId,
   }

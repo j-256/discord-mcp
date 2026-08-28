@@ -1026,6 +1026,154 @@ test("Voice-status-only Gateway serializes exact guild queries and discards non-
   await gateway.stop()
 })
 
+test("Soundboard-playback-only Gateway corroborates one exact bot effect without buffering it", async () => {
+  const scheduler = new FakeScheduler()
+  const sockets: FakeSocket[] = []
+  const eventStore = new GatewayEventStore({
+    allowedChannelIds: new Set([CHANNEL_ID]),
+    allowedGuildIds: new Set([GUILD_ID]),
+    bufferSize: 10,
+    clock: () => new Date(scheduler.now),
+    cursorNamespace: "soundboardplayback1",
+    enabled: true,
+    eventFeedEnabled: false,
+    soundboardPlaybackChannelCount: 1,
+  })
+  const gateway = new DiscordGateway({
+    applicationId: APPLICATION_ID,
+    clock: () => scheduler.now,
+    config: {
+      allowedChannelIds: new Set([CHANNEL_ID]),
+      allowedGuildIds: new Set([GUILD_ID]),
+      allowGateway: false,
+      allowSoundboardPlayback: true,
+      expectedBotId: BOT_ID,
+      gatewayEventBufferSize: 10,
+      soundboardPlaybackChannelIds: new Set([CHANNEL_ID]),
+      token: TOKEN,
+    },
+    discoverGateway,
+    discoverGatewayChannel,
+    eventStore,
+    random: () => 0,
+    scheduler,
+    webSocketFactory() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+
+  await gateway.start()
+  const socket = sockets[0]
+  assert.ok(socket)
+  hello(socket)
+  assert.equal(
+    ((payloads(socket)[0]?.d as Record<string, unknown>).intents),
+    DISCORD_GATEWAY_INTENTS.guilds | DISCORD_GATEWAY_INTENTS.guildVoiceStates,
+  )
+  ready(socket)
+  assert.equal(gateway.soundboardPlaybackEventsEnabled, true)
+  assert.deepEqual(gateway.getStatus().intents, [
+    "GUILDS",
+    "GUILD_VOICE_STATES",
+  ])
+  assert.deepEqual(gateway.getStatus().projections.soundboardPlayback, {
+    enabled: true,
+    scopedChannels: 1,
+  })
+
+  const evidence = gateway.waitForSoundboardPlaybackEvent(
+    GUILD_ID,
+    CHANNEL_ID,
+    BOT_ID,
+    "1",
+  )
+  socket.message({
+    d: {
+      channel_id: CHANNEL_ID,
+      guild_id: GUILD_ID,
+      private_future: TOKEN,
+      sound_id: 1,
+      user_id: "100000000000000099",
+    },
+    op: 0,
+    s: 2,
+    t: "VOICE_CHANNEL_EFFECT_SEND",
+  })
+  socket.message({
+    d: {
+      channel_id: CHANNEL_ID,
+      emoji: { name: TOKEN },
+      future: TOKEN,
+      guild_id: GUILD_ID,
+      sound_id: 1,
+      sound_volume: 0.9,
+      user_id: BOT_ID,
+    },
+    op: 0,
+    s: 3,
+    t: "VOICE_CHANNEL_EFFECT_SEND",
+  })
+  const matched = await evidence
+  assert.equal(matched.soundId, "1")
+  assert.equal(matched.userId, BOT_ID)
+  assert.equal(matched.unknownFieldCount, 1)
+  assert.doesNotMatch(JSON.stringify(matched), new RegExp(TOKEN))
+  assert.deepEqual(gateway.listEvents().events, [])
+
+  await assert.rejects(
+    gateway.waitForSoundboardPlaybackEvent(
+      GUILD_ID,
+      SECOND_CHANNEL_ID,
+      BOT_ID,
+      "1",
+    ),
+    /outside the exact Gateway soundboard playback scope/,
+  )
+  await assert.rejects(
+    gateway.waitForSoundboardPlaybackEvent(
+      ORDERING_GUILD_ID,
+      CHANNEL_ID,
+      BOT_ID,
+      "1",
+    ),
+    /does not match its exact guild route/,
+  )
+
+  const controller = new AbortController()
+  const cancelled = gateway.waitForSoundboardPlaybackEvent(
+    GUILD_ID,
+    CHANNEL_ID,
+    BOT_ID,
+    "2",
+    { signal: controller.signal },
+  )
+  controller.abort()
+  await assert.rejects(cancelled, /was cancelled/)
+
+  const timedOut = gateway.waitForSoundboardPlaybackEvent(
+    GUILD_ID,
+    CHANNEL_ID,
+    BOT_ID,
+    "3",
+  )
+  assert.equal(scheduler.runNext(), 0)
+  socket.message({ d: null, op: 11, s: null, t: null })
+  assert.equal(scheduler.runNext(), 2_000)
+  await assert.rejects(timedOut, /timed out/)
+
+  const disconnected = gateway.waitForSoundboardPlaybackEvent(
+    GUILD_ID,
+    CHANNEL_ID,
+    BOT_ID,
+    "4",
+  )
+  socket.serverClose(1_006)
+  await assert.rejects(disconnected, /continuity changed/)
+  await gateway.stop()
+})
+
 test("Gateway routes voice evidence through the exact resolved shard", async () => {
   const scheduler = new FakeScheduler()
   const sockets: FakeSocket[] = []

@@ -174,6 +174,7 @@ export interface GatewayStatusSnapshot {
     | "GUILD_MESSAGES"
     | "GUILD_MESSAGE_REACTIONS"
     | "GUILD_MESSAGE_POLLS"
+    | "GUILD_VOICE_STATES"
   )[]
   layout: GatewayChannelLayoutStatus
   privacy: {
@@ -182,6 +183,10 @@ export interface GatewayStatusSnapshot {
     privilegedIntentsRequested: false
   }
   projections: {
+    soundboardPlayback: {
+      enabled: boolean
+      scopedChannels: number
+    }
     voiceChannelStatus: {
       enabled: boolean
       scopedChannels: number
@@ -210,6 +215,7 @@ export interface GatewayEventStoreOptions {
   enabled: boolean
   eventFeedEnabled?: boolean
   layoutGuildIds?: ReadonlySet<string>
+  soundboardPlaybackChannelCount?: number
   voiceChannelStatusChannelCount?: number
 }
 
@@ -330,6 +336,7 @@ export class GatewayEventStore implements GatewayEventSource {
   readonly #clock: () => Date
   readonly #channelLayouts: GatewayChannelLayoutStore
   readonly #voiceChannelStatusChannelCount: number
+  readonly #soundboardPlaybackChannelCount: number
   #connectedAt: string | null = null
   #continuityGaps = 0
   readonly #cursorNamespace: string
@@ -372,11 +379,18 @@ export class GatewayEventStore implements GatewayEventSource {
     }
     const eventFeedEnabled = options.eventFeedEnabled ?? options.enabled
     const voiceChannelStatusChannelCount = options.voiceChannelStatusChannelCount ?? 0
+    const soundboardPlaybackChannelCount = options.soundboardPlaybackChannelCount ?? 0
     if (
       !Number.isSafeInteger(voiceChannelStatusChannelCount)
       || voiceChannelStatusChannelCount < 0
     ) {
       throw new RangeError("Gateway voice channel status scope count must be a nonnegative integer")
+    }
+    if (
+      !Number.isSafeInteger(soundboardPlaybackChannelCount)
+      || soundboardPlaybackChannelCount < 0
+    ) {
+      throw new RangeError("Gateway soundboard playback scope count must be a nonnegative integer")
     }
     if (eventFeedEnabled && !options.enabled) {
       throw new RangeError("Gateway event feed requires an enabled Gateway connection")
@@ -394,6 +408,7 @@ export class GatewayEventStore implements GatewayEventSource {
     this.enabled = options.enabled
     this.eventFeedEnabled = eventFeedEnabled
     this.#voiceChannelStatusChannelCount = voiceChannelStatusChannelCount
+    this.#soundboardPlaybackChannelCount = soundboardPlaybackChannelCount
     this.#allowedChannelIds = new Set(options.allowedChannelIds)
     this.#allowedGuildIds = new Set(options.allowedGuildIds)
     this.#bufferSize = bufferSize
@@ -404,7 +419,9 @@ export class GatewayEventStore implements GatewayEventSource {
       guildIds: layoutGuildIds,
     })
     this.layoutEnabled = this.#channelLayouts.layoutEnabled
-    this.guildIntentRequired = this.layoutEnabled || voiceChannelStatusChannelCount > 0
+    this.guildIntentRequired = this.layoutEnabled
+      || soundboardPlaybackChannelCount > 0
+      || voiceChannelStatusChannelCount > 0
     this.#cursorNamespace = cursorNamespace
     this.#state = options.enabled ? "stopped" : "disabled"
   }
@@ -908,16 +925,21 @@ export class GatewayEventStore implements GatewayEventSource {
       },
       enabled: this.enabled,
       feedEnabled: this.eventFeedEnabled,
-      intents: this.eventFeedEnabled
-        ? [
-            "GUILDS" as const,
-            "GUILD_MESSAGES" as const,
-            "GUILD_MESSAGE_REACTIONS" as const,
-            "GUILD_MESSAGE_POLLS" as const,
-          ]
-        : this.guildIntentRequired
-          ? ["GUILDS" as const]
-          : [],
+      intents: [
+        ...(this.eventFeedEnabled
+          ? [
+              "GUILDS" as const,
+              "GUILD_MESSAGES" as const,
+              "GUILD_MESSAGE_REACTIONS" as const,
+              "GUILD_MESSAGE_POLLS" as const,
+            ]
+          : this.guildIntentRequired
+            ? ["GUILDS" as const]
+            : []),
+        ...(this.#soundboardPlaybackChannelCount > 0
+          ? ["GUILD_VOICE_STATES" as const]
+          : []),
+      ],
       layout: this.#channelLayouts.getChannelLayoutStatus(),
       privacy: {
         contentStored: false,
@@ -925,6 +947,10 @@ export class GatewayEventStore implements GatewayEventSource {
         privilegedIntentsRequested: false,
       },
       projections: {
+        soundboardPlayback: {
+          enabled: this.#soundboardPlaybackChannelCount > 0,
+          scopedChannels: this.#soundboardPlaybackChannelCount,
+        },
         voiceChannelStatus: {
           enabled: this.#voiceChannelStatusChannelCount > 0,
           scopedChannels: this.#voiceChannelStatusChannelCount,

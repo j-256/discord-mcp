@@ -1282,6 +1282,9 @@ export class MemberVoiceService {
       deaf: before.serverDeafened as boolean,
       guildId: request.guildId,
       mute: before.serverMuted as boolean,
+      selfDeaf: false,
+      selfMute: false,
+      suppressed: false,
       unknownFieldCount: before.unknownFieldCount,
       userId: request.userId,
     }

@@ -325,6 +325,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
     soundboardGuildIds: [],
+    soundboardPlaybackChannelIds: [],
+    soundboardPlaybackEnabled: false,
+    soundboardPlaybackSourceGuildIds: [],
     soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
@@ -1834,6 +1837,9 @@ test("configuration and policy require an exact administration guild and protect
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
     soundboardGuildIds: [],
+    soundboardPlaybackChannelIds: [],
+    soundboardPlaybackEnabled: false,
+    soundboardPlaybackSourceGuildIds: [],
     soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
@@ -5836,6 +5842,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
     soundboardGuildIds: [],
+    soundboardPlaybackChannelIds: [],
+    soundboardPlaybackEnabled: false,
+    soundboardPlaybackSourceGuildIds: [],
     soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
@@ -6303,6 +6312,72 @@ test("configuration and policy isolate soundboard audit, changes, and local audi
   } finally {
     await rm(temporary, { force: true, recursive: true })
   }
+})
+
+test("configuration and policy isolate guarded soundboard playback to exact channels and sources", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      soundboardPlayback: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    },
+    scopes: {
+      soundboardPlaybackChannelIds: [CHANNEL_ID],
+      soundboardPlaybackSourceGuildIds: [GUILD_ID],
+    },
+  }, { homeDirectory: "/test/home" })
+  const scoped = new ScopePolicy(config)
+
+  assert.equal(config.allowSoundboardPlayback, true)
+  assert.deepEqual([...config.soundboardPlaybackChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...config.soundboardPlaybackSourceGuildIds], [GUILD_ID])
+  scoped.assertSoundboardPlaybackChannelIdAllowed(CHANNEL_ID)
+  scoped.assertSoundboardPlaybackSourceGuildAllowed(GUILD_ID)
+  assert.equal(scoped.assertSoundboardPlaybackChannel(channel({
+    type: DISCORD_CHANNEL_TYPES.voice,
+  })), GUILD_ID)
+  assert.throws(
+    () => scoped.assertSoundboardPlaybackChannel(channel({ type: DISCORD_CHANNEL_TYPES.stageVoice })),
+    /ordinary voice channel/,
+  )
+  assert.throws(
+    () => scoped.assertSoundboardPlaybackChannelIdAllowed(OTHER_CHANNEL_ID),
+    /outside the soundboard playback scope/,
+  )
+  assert.throws(
+    () => scoped.assertSoundboardPlaybackSourceGuildAllowed(OTHER_GUILD_ID),
+    /outside the soundboard playback source scope/,
+  )
+  assert.deepEqual(scoped.describe().soundboardPlaybackChannelIds, [CHANNEL_ID])
+  assert.equal(scoped.describe().soundboardPlaybackEnabled, true)
+  assert.deepEqual(scoped.describe().soundboardPlaybackSourceGuildIds, [GUILD_ID])
+
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { soundboardPlayback: true },
+    }, { homeDirectory: "/test/home" }),
+    /requires \$\.scopes\.soundboardPlaybackChannelIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { channelIds: [CHANNEL_ID] },
+      scopes: { soundboardPlaybackChannelIds: [OTHER_CHANNEL_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { soundboardPlaybackSourceGuildIds: [OTHER_GUILD_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
 })
 
 test("configuration and policy isolate scheduled event audit, changes, and cover roots", async () => {

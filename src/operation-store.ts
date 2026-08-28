@@ -85,6 +85,7 @@ export const OPERATION_KINDS = [
   "role-ordering",
   "scheduled-event-change",
   "guild-soundboard-change",
+  "soundboard-playback",
   "stage-instance-change",
   "thread-create",
   "thread-governance-change",

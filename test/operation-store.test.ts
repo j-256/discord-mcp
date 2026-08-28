@@ -1006,6 +1006,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const role = { ...receipt(), kind: "role-creation" as const }
   const scheduledEvent = { ...receipt(), kind: "scheduled-event-change" as const }
   const soundboard = { ...receipt(), kind: "guild-soundboard-change" as const }
+  const soundboardPlayback = { ...receipt(), kind: "soundboard-playback" as const }
   const stageInstance = { ...receipt(), kind: "stage-instance-change" as const }
   const webhookChange = { ...receipt(), kind: "webhook-change" as const }
   const webhookCreation = { ...receipt(), kind: "webhook-creation" as const }
@@ -1050,6 +1051,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(role)).created, true)
   assert.equal((await store.reserve(scheduledEvent)).created, true)
   assert.equal((await store.reserve(soundboard)).created, true)
+  assert.equal((await store.reserve(soundboardPlayback)).created, true)
   assert.equal((await store.reserve(stageInstance)).created, true)
   assert.equal((await store.reserve(webhookChange)).created, true)
   assert.equal((await store.reserve(webhookCreation)).created, true)
@@ -1188,6 +1190,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("guild-soundboard-change", soundboard.operationKeyHash),
     soundboard,
+  )
+  assert.deepEqual(
+    await store.get("soundboard-playback", soundboardPlayback.operationKeyHash),
+    soundboardPlayback,
   )
   assert.deepEqual(
     await store.get("stage-instance-change", stageInstance.operationKeyHash),

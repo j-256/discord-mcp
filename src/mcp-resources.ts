@@ -161,6 +161,7 @@ async function boundedJsonResource(
   secrets: readonly (string | undefined)[],
   maxBytes: number,
   read: () => unknown | Promise<unknown>,
+  indentation = 2,
 ) {
   let result
   try {
@@ -168,7 +169,11 @@ async function boundedJsonResource(
     result = {
       contents: [{
         mimeType: "application/json",
-        text: redactedJson(resourceEnvelope(data, provenance, trust), secrets),
+        text: redactedJson(
+          resourceEnvelope(data, provenance, trust),
+          secrets,
+          indentation,
+        ),
         uri: uri.href,
       }],
     }
@@ -200,6 +205,7 @@ export function registerDiscordResources(
     trust: ResourceTrust,
     resourceSecrets: readonly (string | undefined)[],
     read: () => unknown | Promise<unknown>,
+    indentation = 2,
   ) => boundedJsonResource(
     uri,
     provenance,
@@ -207,6 +213,7 @@ export function registerDiscordResources(
     resourceSecrets,
     mcpReadResponseMaxBytes,
     read,
+    indentation,
   )
 
   server.registerResource(
@@ -347,7 +354,7 @@ export function registerDiscordResources(
           "",
           "Application privileged-intent enablement requires a separate application-security toolset and schema-v2 capability gate. It accepts only Guild Members when member-directory policy requires it or Message Content when configured tools require or recommend it; Presence, disabling, full-authorization requests, generic application fields, and automatic remediation remain unavailable. Planning binds pinned identities, authoritative current flags, named pre-state, the exact additive limited-bit transition, policy requirement, ephemeral review reason, one-shot key hash, external Developer Portal race risk, and keyed digest without returning raw flags. Execution requires a fresh matching plan, signed approval, host write approval, an exact application-wide privileged-intents claim, pending content-free activity, one non-retried limited-flags PATCH, strict exact response validation, and independent fresh exact readback. Unknown evidence and ambiguous outcomes fail closed, while rationale, raw flags, application text, raw operation keys, and credentials are never persisted.",
           "",
-          "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild allowlist plus complete ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence. Audio bytes, CDN URLs, creator profiles, and unknown raw fields are projected out and never persisted. Changes require an additional feature gate. Creation accepts only bounded canonical owned local MP3 or Ogg files from dedicated roots, validates container structure and duration, and binds the stable file snapshot into the keyed plan. Every create, metadata update, or delete requires fresh matching evidence, signed approval, durable one-shot reservation, pending content-free activity, one non-retried mutation, and exact metadata or absence readback. Normalized-name collisions, missing custom emoji references, insufficient ownership, incomplete evidence, and same-guild uncertain outcomes fail closed. No operation accepts a URL or base64 payload, plays audio, retries, rolls back, or persists sound content.",
+          "Soundboard reads and administration have separate exact-guild gates, omit audio, URLs, creator profiles, and persistence, and accept only validated local MP3 or Ogg files. Changes require fresh evidence, approval, durable one-shot state, pending activity, one non-retried mutation, and exact readback. Playback uses independent exact target-channel and source-guild scopes, then rechecks pinned identity, voice-channel type, permissions, safe bot voice state, and sound availability. Host approval, durable channel exclusion, anti-spam, pending evidence, and one non-retried request follow. Optional exact Gateway evidence cannot override ambiguous REST, which stays quarantined. No operation accepts a URL or base64 payload, retries, rolls back, or persists sound content; playback never uploads audio and administration never plays it.",
           "",
           "AutoMod inventory requires a separate exact guild allowlist. Bounded list results expose policy-entry counts and reference health without policy strings; exact lookup returns the projected policy transiently for deliberate review. Action-execution content, matched content, matched keywords, and unknown raw fields are never exposed or persisted. Changes require an additional feature gate, complete MANAGE_GUILD evidence, MODERATE_MEMBERS for timeout actions, strict trigger-action compatibility, exact role and channel references, and separately allowlisted visible text or announcement channels for alerts. New rules are always disabled; policy updates and deletion require a disabled rule; enabling and disabling are separate reviewed actions. Every change requires a fresh matching keyed plan, signed approval, durable one-shot schema-v2 receipt with a content-free request digest, pending activity, one non-retried mutation, and exact state or absence readback. After pinned identity verification, verify_automod_change checks that receipt before guild, permission, or exact-rule access and binds only its exact target to fresh live state. Guild blueprints may compose one rule stage per call but never fuzzy-adopt, delete omitted rules, or bypass any standalone AutoMod gate. Same-guild uncertain outcomes fail closed; no operation retries, rolls back, or persists policy names, strings, audit reasons, or raw operation keys.",
           "",
@@ -381,6 +388,7 @@ export function registerDiscordResources(
       "trusted-local-metadata",
       [],
       () => createMcpToolAccessManifest(),
+      0,
     ),
   )
 

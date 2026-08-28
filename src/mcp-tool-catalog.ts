@@ -196,6 +196,10 @@ export interface McpToolAccessManifest {
 }
 
 export const MCP_TOOL_CATALOG = Object.freeze({
+  check_soundboard_playback: {
+    keywords: ["audio", "check", "permission", "play", "readiness", "sound", "soundboard", "voice"],
+    toolset: "soundboard",
+  },
   add_reaction: {
     keywords: ["emoji", "react", "reaction"],
     toolset: "interactions",
@@ -1103,6 +1107,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audio", "create", "delete", "emoji", "plan", "review", "sound", "soundboard", "update"],
     toolset: "soundboard",
     workflow: "guild-soundboard-change",
+  },
+  play_soundboard_sound: {
+    keywords: ["audio", "play", "sound", "soundboard", "voice"],
+    toolset: "soundboard",
   },
   plan_guild_template_change: {
     keywords: ["create", "delete", "guild", "metadata", "plan", "snapshot", "sync", "template"],
