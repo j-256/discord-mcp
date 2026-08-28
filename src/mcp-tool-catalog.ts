@@ -629,6 +629,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["audit", "exact", "invite", "lookup", "reference"],
     toolset: "invites",
   },
+  get_guild_vanity_url: {
+    keywords: ["audit", "code", "guild", "invite", "uses", "vanity"],
+    toolset: "invites",
+  },
   get_guild_onboarding: {
     keywords: ["audit", "guild", "join", "onboarding", "prompt", "read"],
     toolset: "onboarding",

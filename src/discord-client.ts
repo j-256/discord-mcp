@@ -455,6 +455,12 @@ export interface DiscordInviteSummary {
   uses: number
 }
 
+export interface DiscordGuildVanitySummary {
+  code: string | null
+  unknownFieldCount: number
+  uses: number
+}
+
 export interface DiscordApplicationCommandPermission {
   allowed: boolean
   id: string
@@ -1634,6 +1640,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_guild_auto_moderation_rule",
   "get_guild_emoji",
   "get_guild_incident_actions",
+  "get_guild_vanity_url",
   "get_guild_profile",
   "get_forum_tags",
   "get_guild_soundboard_sound",
@@ -1953,6 +1960,35 @@ function inviteCode(record: Record<string, unknown>): string {
     throw inviteEvidenceError()
   }
   return record.code
+}
+
+function projectGuildVanityUrl(value: unknown): DiscordGuildVanitySummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new InviteEvidenceError(
+      "Discord returned invalid guild vanity URL evidence",
+    )
+  }
+  const record = value as Record<string, unknown>
+  let code: string | null
+  try {
+    code = record.code === null ? null : inviteCode(record)
+  } catch {
+    throw new InviteEvidenceError(
+      "Discord returned invalid guild vanity URL evidence",
+    )
+  }
+  if (!Number.isSafeInteger(record.uses) || (record.uses as number) < 0) {
+    throw new InviteEvidenceError(
+      "Discord returned invalid guild vanity URL evidence",
+    )
+  }
+  return {
+    code,
+    unknownFieldCount: Object.keys(record)
+      .filter((key) => key !== "code" && key !== "uses")
+      .length,
+    uses: record.uses as number,
+  }
 }
 
 function projectInviteRoleIds(value: unknown): string[] {
@@ -11673,6 +11709,19 @@ export class DiscordClient {
       throw inviteEvidenceError()
     }
     return response.map(projectInvite)
+  }
+
+  async getGuildVanityUrl(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordGuildVanitySummary> {
+    assertPositiveSnowflake(guildId, "Discord guild vanity URL guild ID")
+    const response = await this.#request<unknown>(
+      "get_guild_vanity_url",
+      `/guilds/${guildId}/vanity-url`,
+      { ...options, suppressFailureCause: true },
+    )
+    return projectGuildVanityUrl(response)
   }
 
   async createChannelInvite(

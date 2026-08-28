@@ -11,6 +11,7 @@ import {
 } from "../src/constants.js"
 import type {
   DiscordDeletedInviteSummary,
+  DiscordGuildVanitySummary,
   DiscordInviteSummary,
 } from "../src/discord-client.js"
 import {
@@ -36,6 +37,7 @@ import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import { ScopePolicy } from "../src/policy.js"
 import type {
   DiscordChannel,
+  DiscordGuild,
   DiscordGuildMember,
   DiscordRole,
 } from "../src/types.js"
@@ -163,6 +165,7 @@ interface FixtureState {
   botMember: DiscordGuildMember
   channels: DiscordChannel[]
   deleted: boolean
+  guild: DiscordGuild
   invites: DiscordInviteSummary[]
   mutationError: unknown
   mutationGate: Promise<void> | null
@@ -170,6 +173,8 @@ interface FixtureState {
   mutationUpdatesState: boolean
   readbackError: unknown
   roles: DiscordRole[]
+  vanity: DiscordGuildVanitySummary
+  vanityReads: number
 }
 
 function fixture(options: {
@@ -184,6 +189,13 @@ function fixture(options: {
     },
     channels: [channel(), channel(OTHER_CHANNEL_ID)],
     deleted: false,
+    guild: {
+      features: ["VANITY_URL"],
+      id: GUILD_ID,
+      name: "Private Guild",
+      owner_id: OWNER_ID,
+      vanity_url_code: PRIVATE_CODE,
+    },
     invites: [
       invite(PRIVATE_CODE, CHANNEL_ID),
       invite(OTHER_PRIVATE_CODE, OTHER_CHANNEL_ID, {
@@ -204,6 +216,12 @@ function fixture(options: {
       role(BOT_ROLE_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, 10),
       role(GRANTED_ROLE_ID, DISCORD_PERMISSIONS.MANAGE_ROLES, 5),
     ],
+    vanity: {
+      code: PRIVATE_CODE,
+      unknownFieldCount: 1,
+      uses: 42,
+    },
+    vanityReads: 0,
     ...options.state,
   }
   const activities: ActivityEntry[] = []
@@ -265,7 +283,7 @@ function fixture(options: {
     },
     async getGuild() {
       events.push("read:guild")
-      return { id: GUILD_ID, name: "Private Guild", owner_id: OWNER_ID }
+      return state.guild
     },
     async getGuildChannels() {
       events.push("read:channels")
@@ -278,6 +296,11 @@ function fixture(options: {
     async getGuildRoles() {
       events.push("read:roles")
       return state.roles
+    },
+    async getGuildVanityUrl() {
+      events.push("read:vanity")
+      state.vanityReads += 1
+      return state.vanity
     },
     async getInvite() {
       throw new Error("Unexpected exact invite lookup")
@@ -416,6 +439,172 @@ test("exact invite lookup resolves only a current process reference", async () =
       inviteRef.replace(/[a-f0-9]$/u, "0"),
     ),
     /absent or expired/,
+  )
+})
+
+test("guild vanity audit redacts the capability by default and discloses it explicitly", async () => {
+  const { activities, events, operationStore, service } = fixture()
+
+  const redacted = await service.getVanityUrl(
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+  )
+  assert.deepEqual(redacted.vanity, {
+    code: null,
+    codeDisclosure: "omitted",
+    configured: true,
+    eligible: true,
+    unknownFieldCount: 1,
+    uses: 42,
+  })
+  assert.equal(redacted.access.manageGuild, true)
+  assert.equal(redacted.verification.guildCrossCheck, "match")
+  assert.doesNotMatch(JSON.stringify(redacted), new RegExp(PRIVATE_CODE))
+
+  const disclosed = await service.getVanityUrl(
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    { includeCode: true },
+  )
+  assert.equal(disclosed.vanity.code, PRIVATE_CODE)
+  assert.equal(disclosed.vanity.codeDisclosure, "included")
+  assert.equal(activities.length, 0)
+  assert.equal(operationStore.receipts.size, 0)
+  assert.deepEqual(events, [
+    "read:guild",
+    "read:member",
+    "read:roles",
+    "read:vanity",
+    "read:guild",
+    "read:member",
+    "read:roles",
+    "read:vanity",
+  ])
+})
+
+test("guild vanity audit reports feature ineligibility without calling the vanity endpoint", async () => {
+  const { service, state } = fixture({
+    state: {
+      guild: {
+        features: [],
+        id: GUILD_ID,
+        name: "Private Guild",
+        owner_id: OWNER_ID,
+        vanity_url_code: null,
+      },
+    },
+  })
+
+  const result = await service.getVanityUrl(
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    { includeCode: true },
+  )
+  assert.deepEqual(result.vanity, {
+    code: null,
+    codeDisclosure: "included",
+    configured: false,
+    eligible: false,
+    unknownFieldCount: null,
+    uses: null,
+  })
+  assert.deepEqual(result.verification, {
+    endpointCalled: false,
+    guildCrossCheck: "not-applicable",
+    writePerformed: false,
+  })
+  assert.equal(state.vanityReads, 0)
+})
+
+test("guild vanity audit fails closed on policy, authority, and changing evidence", async () => {
+  const denied = fixture({ policy: policy({ audit: false }) })
+  await assert.rejects(
+    () => denied.service.getVanityUrl(APPLICATION_ID, BOT_ID, GUILD_ID),
+    PolicyError,
+  )
+  assert.deepEqual(denied.events, [])
+
+  const unauthorized = fixture({
+    state: {
+      roles: [
+        role(GUILD_ID, 0n, 0),
+        role(BOT_ROLE_ID, 0n, 10),
+        role(GRANTED_ROLE_ID, DISCORD_PERMISSIONS.MANAGE_ROLES, 5),
+      ],
+    },
+  })
+  await assert.rejects(
+    () => unauthorized.service.getVanityUrl(APPLICATION_ID, BOT_ID, GUILD_ID),
+    /lacks guild-level MANAGE_GUILD for vanity URL audit/,
+  )
+  assert.equal(unauthorized.state.vanityReads, 0)
+
+  const changed = fixture({
+    state: {
+      vanity: {
+        code: OTHER_PRIVATE_CODE,
+        unknownFieldCount: 0,
+        uses: 0,
+      },
+    },
+  })
+  await assert.rejects(
+    () => changed.service.getVanityUrl(APPLICATION_ID, BOT_ID, GUILD_ID),
+    /changed during the audit/,
+  )
+  assert.equal(changed.activities.length, 0)
+  assert.equal(changed.operationStore.receipts.size, 0)
+})
+
+test("guild vanity audit rejects malformed intent and evidence before disclosure", async () => {
+  const invalidIntent = fixture()
+  await assert.rejects(
+    () => invalidIntent.service.getVanityUrl(
+      APPLICATION_ID,
+      BOT_ID,
+      GUILD_ID,
+      { includeCode: "yes" } as never,
+    ),
+    /code disclosure must be a boolean/,
+  )
+  assert.deepEqual(invalidIntent.events, [])
+
+  const contradictory = fixture({
+    state: {
+      guild: {
+        features: [],
+        id: GUILD_ID,
+        name: "Private Guild",
+        owner_id: OWNER_ID,
+        vanity_url_code: PRIVATE_CODE,
+      },
+    },
+  })
+  await assert.rejects(
+    () => contradictory.service.getVanityUrl(APPLICATION_ID, BOT_ID, GUILD_ID),
+    /contradictory guild vanity URL feature evidence/,
+  )
+  assert.equal(contradictory.state.vanityReads, 0)
+
+  const malformed = fixture({
+    state: {
+      vanity: {
+        code: PRIVATE_CODE,
+        unknownFieldCount: 257,
+        uses: 42,
+      },
+    },
+  })
+  await assert.rejects(
+    () => malformed.service.getVanityUrl(APPLICATION_ID, BOT_ID, GUILD_ID),
+    /invalid projected guild vanity URL evidence/,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(malformed.activities),
+    new RegExp(PRIVATE_CODE),
   )
 })
 

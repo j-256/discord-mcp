@@ -326,6 +326,9 @@ async function fixture(
       events.push("read:roles")
       return state.roles
     },
+    async getGuildVanityUrl() {
+      throw new Error("Unexpected guild vanity URL lookup")
+    },
     async getInvite(code: string) {
       events.push("read:verify")
       assert.equal(code, PRIVATE_CODE)

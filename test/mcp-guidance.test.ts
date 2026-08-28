@@ -1850,6 +1850,52 @@ function guidanceService(options: {
         status: "ok" as const,
       }
     },
+    async getGuildVanityUrl(guildId, options) {
+      calls.invites += 1
+      calls.lastGuildId = guildId
+      return {
+        access: {
+          appliedRoleIds: [guildId],
+          botAdministrator: false,
+          botIsGuildOwner: false,
+          complete: true as const,
+          effectivePermissionNames: ["MANAGE_GUILD" as const],
+          effectivePermissions: DISCORD_PERMISSIONS.MANAGE_GUILD.toString(),
+          manageGuild: true as const,
+          requiredPermission: "MANAGE_GUILD" as const,
+          unknownPermissionBits: "0",
+        },
+        applicationId: "500000000000000001",
+        botId: "600000000000000001",
+        guildId,
+        localConstraints: {
+          codeCharacters: 256,
+          codeDisclosure: "explicit-tool-opt-in" as const,
+        },
+        privacy: {
+          code: "explicit-transient-opt-in" as const,
+          inviteUrl: "omitted" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        vanity: {
+          code: options?.includeCode ? "private-vanity-code" : null,
+          codeDisclosure: options?.includeCode ? "included" as const : "omitted" as const,
+          configured: true,
+          eligible: true,
+          unknownFieldCount: 0,
+          uses: 12,
+        },
+        verification: {
+          endpointCalled: true,
+          guildCrossCheck: "match" as const,
+          writePerformed: false as const,
+        },
+      }
+    },
     planInviteCreation: unexpected,
     planInviteDeletion: unexpected,
     planAutoModerationChange: unexpected,
@@ -3250,6 +3296,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildTemplates,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.guildVanityUrl,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildVanityUrl,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.guildVoiceRegions,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.guildVoiceRegions,
       },
@@ -4372,6 +4422,19 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal("url" in invite, false)
   assert.doesNotMatch(exactInvite.text, new RegExp(PRIVATE_INVITE_CODE))
 
+  const guildVanity = await readJsonResource(
+    client,
+    `discord://guilds/${GUILD_ID}/vanity-url`,
+  )
+  const vanityData = guildVanity.value.data as Record<string, unknown>
+  const vanity = vanityData.vanity as Record<string, unknown>
+  assert.equal(vanity.eligible, true)
+  assert.equal(vanity.configured, true)
+  assert.equal(vanity.uses, 12)
+  assert.equal(vanity.code, null)
+  assert.equal(vanity.codeDisclosure, "omitted")
+  assert.doesNotMatch(guildVanity.text, /private-vanity-code/u)
+
   const guildTemplates = await readJsonResource(
     client,
     `discord://guilds/${GUILD_ID}/templates`,
@@ -4593,7 +4656,7 @@ test("MCP live resources forward exact IDs and minimize untrusted message conten
   assert.equal(calls.announcementSubscriptions, 1)
   assert.equal(calls.guildExpressions, 2)
   assert.equal(calls.integrations, 1)
-  assert.equal(calls.invites, 1)
+  assert.equal(calls.invites, 2)
   assert.equal(calls.onboarding, 1)
   assert.equal(calls.welcomeScreens, 1)
   assert.equal(calls.widgetSettings, 1)

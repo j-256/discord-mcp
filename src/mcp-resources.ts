@@ -269,6 +269,8 @@ export function registerDiscordResources(
           "",
           "Guild invite audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild role inventory, a visibility-bounded channel snapshot, and complete MANAGE_GUILD evidence. Raw invite codes and URLs are bearer capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Authenticated cursors bind a local page to the complete fresh projected invite inventory and fail when it changes; target-user acceptance is explicitly omitted because guild inventory does not expose its CSV. Reviewed creation is separately gated by exact channel and private-root allowlists, explicit finite bearer or bounded exact-user acceptance, finite age and use limits, bearer acknowledgement, complete direct-channel overwrite evidence, and exact VIEW_CHANNEL plus CREATE_INSTANT_INVITE authority. Exact-user acceptance additionally requires Discord's guild-level MANAGE_GUILD permission. Persistent role assignment has another disabled capability and exact role allowlist, requires MANAGE_ROLES, a complete ready and unobfuscated Gateway layout reconciled to HTTP, strict standard-role hierarchy, no administrator or unknown permission, proof that the connector holds every granted guild and channel permission, and a minimum new-member impact review. Existing members can accept, assigned roles survive invite expiry or deletion, and temporary role-grant membership is rejected. The impact proof is a point-in-time snapshot because later role or channel-overwrite edits can change authority before or after acceptance. Creation fresh-checks an absent canonical direct-child output target, obtains signed approval, durably excludes the channel, guild invite collection, and every selected role, exclusively reserves a process-owned 0600 file, and performs one non-retried unique-invite POST. It strictly validates the response and exact assigned-role set, proves bearer identity and roles through an unauthenticated exact lookup or exact-user identity and roles through the authenticated bounded guild inventory, and then for exact-user mode requires a completed bounded target-user job plus exact authenticated CSV readback before writing and syncing the capability only to that file. The private file includes acceptance kind and count; it omits exact target user IDs and includes exact assigned role IDs plus a fixed persistence and mutable-authority warning only when applicable. The code, URL, target-user CSV, role names, permission impact, and private Discord names never enter MCP lifecycle records, errors, diagnostics, observability, receipts, or activity records; ambiguous mutation, job, file, role, or verification boundaries remain quarantined without retry, automatic role removal, or compensation. Reviewed revocation requires an additional toggle, fresh keyed plan, signed approval, one-shot reservation, pending content-free activity, one non-retried secret-route DELETE, returned-identity validation, and full-inventory absence readback. Codes, URLs, target-user lists, profiles, role names, audit reasons, raw keys, and raw payloads are never persisted or emitted through diagnostics.",
           "",
+          "Guild vanity URL audit reuses exact invite-audit scope and requires pinned identity, complete roles, owner or MANAGE_GUILD authority, the VANITY_URL feature, and matching guild and endpoint codes. Tools omit the code unless explicitly requested; resources always omit it. Codes, URLs, payloads, and persistent or observable copies stay excluded, and undocumented mutation is not offered.",
+          "",
           "Guild Template audit requires separate audit and exact-guild scope, verified connector identity, a complete bounded guild, member, role, and template inventory, continuity-stable complete or visibility-bounded channel evidence, plus complete MANAGE_GUILD evidence. Raw template codes and use URLs are reusable capabilities, so the connector replaces them with process-keyed opaque references before building any MCP result. Names, descriptions, profiles, role and channel names, topics, icon hashes, serialized snapshots, and raw payloads are omitted in favor of count-only structure, risky-permission signals, dirty state, explicit channel-comparison completeness, and fidelity limitations. Reviewed create and synchronize require complete live channel metadata; visibility-bounded evidence still permits exact metadata update or delete. Every change also requires an additional toggle, fresh full-inventory keyed plan, signed approval, durable template-collection exclusion, one-shot records, pending content-free activity, one non-retried mutation, strict capability-safe response validation, and exact full-inventory readback. Templates create future guilds from snapshots and are not backups of live IDs, members, messages, audit history, integrations, application-owned resources, or every guild feature.",
           "",
           "Guild onboarding audit requires a separate exact guild allowlist, verified connector identity, complete bounded guild-feature, onboarding, role, emoji, and membership evidence, plus continuity-stable complete or visibility-bounded channel evidence. Prompt, option, description, and Unicode emoji text is omitted by default and returned only transiently through explicit tool opt-in; unknown fields and enums are counts only. Reviewed replacement requires an additional toggle, complete MANAGE_GUILD and MANAGE_ROLES evidence, zero-authority standard roles below the connector, directly visible referenced channels, conservative enablement constraints, the COMMUNITY guild feature when enabling, exact ownership of existing IDs, a fresh matching keyed plan, signed approval, durable one-shot reservation, pending content-free activity, one non-retried full-state PUT, authoritative response-ID validation, and a fresh full readback. If any channel is obfuscated, role references are unsafe because hidden overwrites are unavailable; role-free replacements remain reviewable. Omitted prompts, options, assignments, and default channels are deletions. New-item placeholder IDs exist only in the outbound transport. Same-guild uncertain outcomes fail closed, and API readback never claims to verify the member client join flow. Onboarding text, names, audit reasons, raw operation keys, and raw payloads are never persisted.",
@@ -1281,6 +1283,31 @@ export function registerDiscordResources(
         templateSnowflake(variables, "guildId"),
         templateInviteReference(variables),
         { signal: context.mcpReq.signal },
+      ),
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.guildVanityUrl,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.guildVanityUrl,
+      resourceTemplateCompletionCallbacks(MCP_RESOURCE_TEMPLATE_URIS.guildVanityUrl, completionPolicy),
+    ),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Privacy-bounded Discord guild vanity URL audit with exact code disclosure forced off. Returns eligibility, configured state, usage count, complete MANAGE_GUILD evidence, and count-only unknown fields without the invite code, full URL, raw payload, caching, or persistence.",
+      mimeType: "application/json",
+      title: "Redacted Discord guild vanity URL audit",
+    },
+    (uri, variables, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.getGuildVanityUrl(
+        templateSnowflake(variables, "guildId"),
+        { includeCode: false, signal: context.mcpReq.signal },
       ),
     ),
   )

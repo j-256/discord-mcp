@@ -28,6 +28,7 @@ import {
   encodeDiscordAuditReason,
   type DiscordClient,
   type DiscordDeletedInviteSummary,
+  type DiscordGuildVanitySummary,
   type DiscordInviteIdentitySummary,
   type DiscordInviteSummary,
 } from "./discord-client.js"
@@ -98,6 +99,8 @@ import type {
 } from "./types.js"
 
 const INVITE_GUEST_FLAG = 1
+const GUILD_FEATURE_PATTERN = /^[A-Z0-9_]+$/u
+const MAX_PROJECTED_UNKNOWN_FIELDS = 256
 const INVITE_REFERENCE_PREFIX = "iref_hmac_sha256_"
 const INVITE_CURSOR_PREFIX = "icur_hmac_sha256_"
 const STATE_UNAVAILABLE = "invite-state-unavailable"
@@ -130,6 +133,12 @@ const INVITE_ROLE_CHANNEL_PERMISSION_MASK = DISCORD_CHANNEL_PERMISSION_NAMES.red
   0n,
 )
 const HYPOTHETICAL_INVITEE_ID = "0"
+const URL_DOT_PATH_SEGMENTS: ReadonlySet<string> = new Set([".", ".."])
+const VANITY_URL_FEATURE = "VANITY_URL"
+const VANITY_LOCAL_CONSTRAINTS = Object.freeze({
+  codeCharacters: INVITE_LIMITS.codeCharacters,
+  codeDisclosure: "explicit-tool-opt-in" as const,
+})
 
 export const INVITE_OMITTED_FIELDS = Object.freeze([
   "approximateCounts",
@@ -152,6 +161,10 @@ type InviteTargetOutcome = "settled" | "uncertain"
 export interface InviteListOptions extends RequestOptions {
   cursor?: string
   limit?: number
+}
+
+export interface GuildVanityUrlOptions extends RequestOptions {
+  includeCode?: boolean
 }
 
 export interface InviteDeletionRequest {
@@ -248,6 +261,36 @@ export interface InviteLookupResult extends Omit<
   "invites" | "page"
 > {
   invite: ProjectedInvite
+}
+
+export interface GuildVanityUrlAuditResult {
+  access: InviteAccessEvidence
+  applicationId: string
+  botId: string
+  guildId: string
+  localConstraints: typeof VANITY_LOCAL_CONSTRAINTS
+  privacy: {
+    code: "explicit-transient-opt-in"
+    inviteUrl: "omitted"
+    persistence: "none"
+    rawPayloads: "omitted"
+    unknownFields: "counts-only"
+  }
+  schemaVersion: number
+  status: "ok"
+  vanity: {
+    code: string | null
+    codeDisclosure: "included" | "omitted"
+    configured: boolean
+    eligible: boolean
+    unknownFieldCount: number | null
+    uses: number | null
+  }
+  verification: {
+    endpointCalled: boolean
+    guildCrossCheck: "match" | "not-applicable"
+    writePerformed: false
+  }
 }
 
 export interface InviteDeletionPlan {
@@ -415,6 +458,7 @@ export interface InviteServiceClient extends Pick<
   | "getGuildChannels"
   | "getGuildMember"
   | "getGuildRoles"
+  | "getGuildVanityUrl"
   | "getInvite"
   | "getInviteTargetUserIds"
   | "getInviteTargetUsersJobStatus"
@@ -607,6 +651,16 @@ export function assertInviteListInput(
 export function assertInviteGetInput(guildId: string, inviteRef: string): void {
   assertPositiveSnowflake(guildId, "Discord invite-audit guild ID")
   assertInviteReference(inviteRef)
+}
+
+export function assertGuildVanityUrlInput(
+  guildId: string,
+  includeCode: boolean,
+): void {
+  assertPositiveSnowflake(guildId, "Discord guild vanity URL guild ID")
+  if (typeof includeCode !== "boolean") {
+    throw new RangeError("Discord guild vanity URL code disclosure must be a boolean")
+  }
 }
 
 export function normalizeInviteDeletionRequest(
@@ -832,6 +886,72 @@ function exactGuild(
     throw evidenceError("Discord returned incomplete or mismatched invite guild evidence")
   }
   return value as DiscordGuild & { owner_id: string }
+}
+
+function validVanityCode(value: unknown): value is string {
+  return validText(value, INVITE_LIMITS.codeCharacters)
+    && !URL_DOT_PATH_SEGMENTS.has(value)
+}
+
+function exactVanityGuild(
+  value: DiscordGuild,
+  guildId: string,
+): DiscordGuild & {
+  features: string[]
+  owner_id: string
+  vanity_url_code: string | null
+} {
+  const guild = exactGuild(value, guildId)
+  if (
+    !Array.isArray(guild.features)
+    || guild.features.length > DISCORD_LIMITS.guildFeatures
+    || new Set(guild.features).size !== guild.features.length
+    || guild.features.some((feature) => (
+      typeof feature !== "string"
+      || feature.length < 1
+      || feature.length > DISCORD_LIMITS.guildFeatureCharacters
+      || !GUILD_FEATURE_PATTERN.test(feature)
+    ))
+    || !Object.hasOwn(guild, "vanity_url_code")
+    || !(
+      guild.vanity_url_code === null
+      || validVanityCode(guild.vanity_url_code)
+    )
+  ) {
+    throw evidenceError(
+      "Discord returned incomplete or invalid guild vanity URL evidence",
+    )
+  }
+  const eligible = guild.features.includes(VANITY_URL_FEATURE)
+  if (!eligible && guild.vanity_url_code !== null) {
+    throw evidenceError(
+      "Discord returned contradictory guild vanity URL feature evidence",
+    )
+  }
+  return guild as DiscordGuild & {
+    features: string[]
+    owner_id: string
+    vanity_url_code: string | null
+  }
+}
+
+function exactVanitySummary(
+  value: DiscordGuildVanitySummary,
+): DiscordGuildVanitySummary {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || !(value.code === null || validVanityCode(value.code))
+    || !Number.isSafeInteger(value.uses)
+    || value.uses < 0
+    || !Number.isSafeInteger(value.unknownFieldCount)
+    || value.unknownFieldCount < 0
+    || value.unknownFieldCount > MAX_PROJECTED_UNKNOWN_FIELDS
+  ) {
+    throw evidenceError("Discord returned invalid projected guild vanity URL evidence")
+  }
+  return value
 }
 
 function exactBotMember(
@@ -2949,6 +3069,102 @@ export class InviteService {
       privacy: privacyProjection(),
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
+    }
+  }
+
+  async getVanityUrl(
+    applicationId: string,
+    botId: string,
+    guildId: string,
+    options: GuildVanityUrlOptions = {},
+  ): Promise<GuildVanityUrlAuditResult> {
+    const includeCode = options.includeCode ?? false
+    assertGuildVanityUrlInput(guildId, includeCode)
+    assertPositiveSnowflake(applicationId, "Discord guild vanity URL application ID")
+    assertPositiveSnowflake(botId, "Discord guild vanity URL bot ID")
+    this.#policy.assertGuildInviteAuditable(guildId)
+    const requestOptions: RequestOptions = options.signal
+      ? { signal: options.signal }
+      : {}
+    const [rawGuild, rawBotMember, rawRoles] = await Promise.all([
+      this.#client.getGuild(guildId, requestOptions),
+      this.#client.getGuildMember(guildId, botId, requestOptions),
+      this.#client.getGuildRoles(guildId, requestOptions),
+    ])
+    const guild = exactVanityGuild(rawGuild, guildId)
+    const botMember = exactBotMember(rawBotMember, guildId, botId)
+    const roles = exactRoles(rawRoles, guildId)
+    const permissions = completePermissions(botMember, guildId, roles)
+    const botIsGuildOwner = guild.owner_id === botId
+    if (!botIsGuildOwner && !hasGuildPermission(permissions, "MANAGE_GUILD")) {
+      throw evidenceError(
+        "Discord connector bot lacks guild-level MANAGE_GUILD for vanity URL audit",
+      )
+    }
+    const access = accessEvidence(permissions, botIsGuildOwner)
+    const eligible = guild.features.includes(VANITY_URL_FEATURE)
+    const privacy = {
+      code: "explicit-transient-opt-in" as const,
+      inviteUrl: "omitted" as const,
+      persistence: "none" as const,
+      rawPayloads: "omitted" as const,
+      unknownFields: "counts-only" as const,
+    }
+    if (!eligible) {
+      return {
+        access,
+        applicationId,
+        botId,
+        guildId,
+        localConstraints: VANITY_LOCAL_CONSTRAINTS,
+        privacy,
+        schemaVersion: SCHEMA_VERSION,
+        status: "ok",
+        vanity: {
+          code: null,
+          codeDisclosure: includeCode ? "included" : "omitted",
+          configured: false,
+          eligible: false,
+          unknownFieldCount: null,
+          uses: null,
+        },
+        verification: {
+          endpointCalled: false,
+          guildCrossCheck: "not-applicable",
+          writePerformed: false,
+        },
+      }
+    }
+    const vanity = exactVanitySummary(
+      await this.#client.getGuildVanityUrl(guildId, requestOptions),
+    )
+    if (vanity.code !== guild.vanity_url_code) {
+      throw evidenceError(
+        "Discord guild vanity URL changed during the audit; retry the read",
+      )
+    }
+    return {
+      access,
+      applicationId,
+      botId,
+      guildId,
+      localConstraints: VANITY_LOCAL_CONSTRAINTS,
+      privacy,
+      schemaVersion: SCHEMA_VERSION,
+      status: "ok",
+      vanity: {
+        code: includeCode ? vanity.code : null,
+        codeDisclosure: includeCode ? "included" : "omitted",
+        configured: vanity.code !== null,
+        eligible: true,
+        unknownFieldCount: vanity.unknownFieldCount,
+        uses: vanity.uses,
+      },
+      verification: {
+        endpointCalled: true,
+        guildCrossCheck: "match",
+        writePerformed: false,
+      },
     }
   }
 
