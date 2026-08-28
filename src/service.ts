@@ -285,8 +285,14 @@ import type {
   ChannelPermissionOverwriteRequest,
   ChannelPermissionOverwriteResult,
   ChannelPermissionOverwriteServiceOptions,
+  ChannelPermissionSyncPlan,
+  ChannelPermissionSyncRequest,
+  ChannelPermissionSyncResult,
 } from "./channel-permission-overwrite-service.js"
-import { ChannelPermissionOverwriteService } from "./channel-permission-overwrite-service.js"
+import {
+  ChannelPermissionOverwriteService,
+  normalizeChannelPermissionSyncRequest,
+} from "./channel-permission-overwrite-service.js"
 import type { ConnectorConfig } from "./config.js"
 import {
   CONNECTOR_LIMITS,
@@ -338,6 +344,7 @@ import {
   ChannelClonePlanChangedError,
   ChannelDeletionPlanChangedError,
   ChannelOrderingPlanChangedError,
+  ChannelPermissionSyncPlanChangedError,
   ConfigurationError,
   ComponentMessagePlanChangedError,
   EmbedMessagePlanChangedError,
@@ -934,6 +941,7 @@ export interface DiscordServiceClient {
   deleteWebhookMessage: DiscordClient["deleteWebhookMessage"]
   endPoll: DiscordClient["endPoll"]
   editChannelPermissionOverwrite: DiscordClient["editChannelPermissionOverwrite"]
+  replaceChannelPermissionOverwrites?: DiscordClient["replaceChannelPermissionOverwrites"]
   editComponentMessage: DiscordClient["editComponentMessage"]
   editEmbedMessage: DiscordClient["editEmbedMessage"]
   editMessage: DiscordClient["editMessage"]
@@ -4241,6 +4249,20 @@ export class ConnectorService {
     )
   }
 
+  async planChannelPermissionSync(
+    request: ChannelPermissionSyncRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionSyncPlan> {
+    normalizeChannelPermissionSyncRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#permissionOverwriteService.planSync(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
   async planChannelMetadataChange(
     request: ChannelMetadataChangeRequest,
     options: RequestOptions = {},
@@ -6951,6 +6973,46 @@ export class ConnectorService {
         ),
       ],
       () => this.#permissionOverwriteService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeChannelPermissionSync(
+    request: ChannelPermissionSyncRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionSyncResult> {
+    normalizeChannelPermissionSyncRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord parent-category permission-sync plan digest is invalid")
+    }
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#permissionOverwriteService.planSync(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new ChannelPermissionSyncPlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    return this.#coordinateWrite(
+      "channel-permission-sync",
+      request.operationKey,
+      planDigest,
+      [
+        writeResourceTarget("channel", request.channelId),
+        writeResourceTarget("channel", coordinationPlan.parent.id),
+      ],
+      () => this.#permissionOverwriteService.executeSync(
         identity.application.id,
         identity.bot.id,
         request,

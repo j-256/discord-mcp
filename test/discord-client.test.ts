@@ -3356,6 +3356,105 @@ test("Discord client validates overwrite mutations and never retries their rate 
   assert.equal(sleeps, 0)
 })
 
+test("Discord client replaces a complete overwrite set once and returns the exact channel response", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    reason: string | null
+    url: string
+  }> = []
+  const response = {
+    guild_id: "100",
+    id: "200",
+    parent_id: "201",
+    permission_overwrites: [{ allow: "1024", deny: "0", id: "300", type: 0 }],
+    type: 0,
+  }
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method: init?.method || "GET",
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      return jsonResponse(response)
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.replaceChannelPermissionOverwrites(
+    "200",
+    [{ allow: "1024", deny: "0", id: "300", type: 0 }],
+    "Reviewed parent sync / case 42",
+  )
+
+  assert.deepEqual(result, response)
+  assert.deepEqual(requests, [{
+    body: {
+      permission_overwrites: [{ allow: "1024", deny: "0", id: "300", type: 0 }],
+    },
+    method: "PATCH",
+    reason: "Reviewed%20parent%20sync%20%2F%20case%2042",
+    url: `${API_BASE_URL}/channels/200`,
+  }])
+})
+
+test("Discord client validates full overwrite replacement and never retries or exposes a private cause", async () => {
+  const privateDetail = "private-permission-sync-transport-detail"
+  let requests = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: privateDetail, retry_after: 0.001 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.replaceChannelPermissionOverwrites(
+      "200",
+      [{ allow: "1024", deny: "0", id: "300", type: 0 }],
+      "reviewed",
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes(privateDetail), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+  await assert.rejects(
+    () => client.replaceChannelPermissionOverwrites(
+      "200",
+      [
+        { allow: "0", deny: "0", id: "300", type: 0 },
+        { allow: "0", deny: "0", id: "300", type: 1 },
+      ],
+      "reviewed",
+    ),
+    /duplicated/,
+  )
+  await assert.rejects(
+    () => client.replaceChannelPermissionOverwrites(
+      "200",
+      [{ allow: "1024", deny: "1024", id: "300", type: 0 }],
+      "reviewed",
+    ),
+    /must not overlap/,
+  )
+  assert.equal(requests, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client sends exact member moderation routes, bodies, and encoded reasons", async () => {
   const requests: Array<{
     body: unknown

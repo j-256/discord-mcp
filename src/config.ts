@@ -126,6 +126,7 @@ export interface ConnectorConfig {
   allowOnboardingAudit: boolean
   allowOnboardingChanges: boolean
   allowPermissionOverwrites: boolean
+  allowPermissionSyncs: boolean
   allowPinManagement: boolean
   allowPollAudit: boolean
   allowPollCreation: boolean
@@ -242,6 +243,7 @@ export interface ConnectorConfig {
   observability: ObservabilityConfig
   onboardingGuildIds: ReadonlySet<string>
   permissionOverwriteChannelIds: ReadonlySet<string>
+  permissionSyncChannelIds: ReadonlySet<string>
   protectedUserIds: ReadonlySet<string>
   pinChannelIds: ReadonlySet<string>
   pollChannelIds: ReadonlySet<string>
@@ -587,6 +589,11 @@ export function loadConnectorConfigDocument(
   const inviteRoleIds = configScope(document, "inviteRoleIds")
   const pinChannelIds = configScope(document, "pinChannelIds")
   const permissionOverwriteChannelIds = configScope(document, "permissionOverwriteChannelIds")
+  const permissionSyncChannelIds = configScope(
+    document,
+    "permissionSyncChannelIds",
+    CONNECTOR_LIMITS.permissionSyncChannelAllowlist,
+  )
   const pollChannelIds = configScope(document, "pollChannelIds")
   const reactionChannelIds = configScope(document, "reactionChannelIds", CONNECTOR_LIMITS.reactionChannelAllowlist)
   const forumPostChannelIds = configScope(document, "forumPostChannelIds")
@@ -753,6 +760,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("memberVoiceChannelIds"), memberVoiceChannelIds],
     [configPolicyPath("nativeInteractionChannelIds"), nativeInteractionChannelIds],
     [configPolicyPath("permissionOverwriteChannelIds"), permissionOverwriteChannelIds],
+    [configPolicyPath("permissionSyncChannelIds"), permissionSyncChannelIds],
     [configPolicyPath("pinChannelIds"), pinChannelIds],
     [configPolicyPath("pollChannelIds"), pollChannelIds],
     [configPolicyPath("reactionChannelIds"), reactionChannelIds],
@@ -869,6 +877,12 @@ export function loadConnectorConfigDocument(
   if (allowGuildDepartures && guildDepartureGuildIds.size === 0) {
     throw new ConfigurationError(
       `${configPolicyPath("allowGuildDepartures")} requires ${configPolicyPath("guildDepartureGuildIds")}`,
+    )
+  }
+  const allowPermissionSyncs = configCapability(document, "permissionSyncs")
+  if (allowPermissionSyncs && permissionSyncChannelIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowPermissionSyncs")} requires ${configPolicyPath("permissionSyncChannelIds")}`,
     )
   }
   if (
@@ -1447,6 +1461,7 @@ export function loadConnectorConfigDocument(
     allowOnboardingAudit,
     allowOnboardingChanges,
     allowPermissionOverwrites: configCapability(document, "permissionOverwrites"),
+    allowPermissionSyncs,
     allowPinManagement: configCapability(document, "pinManagement"),
     allowPollAudit,
     allowPollCreation,
@@ -1625,6 +1640,7 @@ export function loadConnectorConfigDocument(
     ),
     onboardingGuildIds,
     permissionOverwriteChannelIds,
+    permissionSyncChannelIds,
     protectedUserIds,
     pinChannelIds,
     pollChannelIds,

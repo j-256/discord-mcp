@@ -2308,6 +2308,8 @@ function guidanceService(options: {
         onboardingGuildIds: [],
         permissionOverwriteChannelIds: [],
         permissionOverwritesEnabled: false,
+        permissionSyncChannelIds: [],
+        permissionSyncsEnabled: false,
         protectedUserCount: 0,
         pinChannelIds: [],
         pinManagementEnabled: false,
@@ -2365,6 +2367,7 @@ function guidanceService(options: {
     executeChannelCreation: unexpected,
     executeChannelOrder: unexpected,
     executeChannelPermissionOverwrite: unexpected,
+    executeChannelPermissionSync: unexpected,
     executeForumPost: unexpected,
     executeForumTagChange: unexpected,
     executeThreadCreation: unexpected,
@@ -2886,6 +2889,7 @@ function guidanceService(options: {
     },
     planChannelCreation: unexpected,
     planChannelPermissionOverwrite: unexpected,
+    planChannelPermissionSync: unexpected,
     planMemberModeration: unexpected,
     planBulkGuildBan: unexpected,
     planGuildPrune: unexpected,
@@ -3698,7 +3702,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Forum-tag audit requires a separate exact stable-forum/)
   assert.match(safety.text, /Deletion usage is unavailable and explicit/)
   assert.match(safety.text, /exact thread plus starter-message readback/)
-  assert.match(safety.text, /permission-overwrite inventory is read-only/)
+  assert.match(safety.text, /permission-overwrite inventory is bounded/)
+  assert.match(safety.text, /Parent-category sync has an independent exact-child scope/)
   assert.match(safety.text, /Global and exact-guild voice-region resources/)
   assert.match(safety.text, /fresh guild premium tier and VIP_REGIONS capability/)
   assert.match(safety.text, /Voice channel status reads and changes reuse the exact channel-metadata scope/)
@@ -6032,6 +6037,30 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(permissionOverwrite, /Do not call execute_channel_permission_overwrite/)
   assert.match(permissionOverwrite, /connector VIEW_CHANNEL and MANAGE_ROLES retention/)
 
+  const permissionSync = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeConcurrentPermissionChangesStopped: "true",
+      acknowledgeFutureParentPropagation: "true",
+      acknowledgeOverwriteReplacement: "true",
+      auditReason: "Reviewed category inheritance",
+      channelId: CHANNEL_ID,
+      operationKey: OPERATION_KEY,
+    },
+    name: MCP_PROMPT_NAMES.reviewChannelPermissionSync,
+  }))
+  assert.deepEqual(JSON.parse(permissionSync.split("\n")[1] || ""), {
+    acknowledgeConcurrentPermissionChangesStopped: true,
+    acknowledgeFutureParentPropagation: true,
+    acknowledgeOverwriteReplacement: true,
+    auditReason: "Reviewed category inheritance",
+    channelId: CHANNEL_ID,
+    operationKey: OPERATION_KEY,
+  })
+  assert.match(permissionSync, /Call only plan_channel_permission_sync/)
+  assert.match(permissionSync, /Do not call execute_channel_permission_sync/)
+  assert.match(permissionSync, /every changed structural role or member overwrite/)
+  assert.match(permissionSync, /does not fetch member profiles/)
+
   const channelCreation = promptText(await client.getPrompt({
     arguments: {
       auditReason: "Reviewed channel",
@@ -7124,6 +7153,17 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
         targetType: "role",
       },
       name: MCP_PROMPT_NAMES.reviewChannelPermissionOverwrite,
+    },
+    {
+      arguments: {
+        acknowledgeConcurrentPermissionChangesStopped: "true",
+        acknowledgeFutureParentPropagation: "false",
+        acknowledgeOverwriteReplacement: "true",
+        auditReason: "Reviewed category inheritance",
+        channelId: CHANNEL_ID,
+        operationKey: OPERATION_KEY,
+      },
+      name: MCP_PROMPT_NAMES.reviewChannelPermissionSync,
     },
     {
       arguments: {

@@ -4,8 +4,11 @@ import type {
   ActivityStore,
   ChannelPermissionOverwriteActivity,
   ChannelPermissionOverwriteActivityStatus,
+  ChannelPermissionSyncActivity,
+  ChannelPermissionSyncActivityStatus,
 } from "./activity-log.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
@@ -20,6 +23,9 @@ import {
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
   ChannelPermissionOverwritePlanChangedError,
+  ChannelPermissionSyncExecutionError,
+  ChannelPermissionSyncOperationConflictError,
+  ChannelPermissionSyncPlanChangedError,
   DiscordApiError,
   errorMessage,
 } from "./errors.js"
@@ -74,6 +80,15 @@ export type ChannelPermissionOverwriteTargetType =
   typeof CHANNEL_PERMISSION_OVERWRITE_TARGET_TYPES[number]
 
 const STATE_UNAVAILABLE = "channel-permission-overwrite-state-unavailable"
+const SYNC_STATE_UNAVAILABLE = "channel-permission-sync-state-unavailable"
+const CHANNEL_PERMISSION_SYNC_REQUEST_KEYS: ReadonlySet<string> = new Set([
+  "acknowledgeConcurrentPermissionChangesStopped",
+  "acknowledgeFutureParentPropagation",
+  "acknowledgeOverwriteReplacement",
+  "auditReason",
+  "channelId",
+  "operationKey",
+])
 const DIRECT_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.category,
@@ -88,6 +103,14 @@ const THREAD_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcementThread,
   DISCORD_CHANNEL_TYPES.privateThread,
   DISCORD_CHANNEL_TYPES.publicThread,
+])
+const PERMISSION_SYNC_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.forum,
+  DISCORD_CHANNEL_TYPES.media,
+  DISCORD_CHANNEL_TYPES.stageVoice,
+  DISCORD_CHANNEL_TYPES.text,
+  DISCORD_CHANNEL_TYPES.voice,
 ])
 const TARGET_TYPE_CODES = Object.freeze({
   member: 1,
@@ -235,6 +258,91 @@ export interface ChannelPermissionOverwriteResult {
   targetType: ChannelPermissionOverwriteTargetType
 }
 
+export interface ChannelPermissionSyncRequest {
+  acknowledgeConcurrentPermissionChangesStopped: true
+  acknowledgeFutureParentPropagation: true
+  acknowledgeOverwriteReplacement: true
+  auditReason: string
+  channelId: string
+  operationKey: string
+}
+
+export interface NormalizedChannelPermissionSyncRequest
+  extends ChannelPermissionSyncRequest {
+  operationKeyHash: string
+}
+
+export interface ChannelPermissionSyncChange {
+  after: ChannelPermissionOverwriteView | null
+  before: ChannelPermissionOverwriteView | null
+  roleName: string | null
+  targetId: string
+  targetType: ChannelPermissionOverwriteTargetType
+}
+
+export interface ChannelPermissionSyncAuthority {
+  confidence: "complete"
+  effectivePermissions: string
+  manageChannels: boolean
+  manageRoles: boolean
+  viewChannel: boolean
+}
+
+export interface ChannelPermissionSyncPlan {
+  acknowledgments: {
+    concurrentPermissionChangesStopped: true
+    futureParentPropagation: true
+    overwriteReplacement: true
+  }
+  action: "none" | "replace"
+  applicationId: string
+  auditReason: string
+  authority: {
+    currentChild: ChannelPermissionSyncAuthority
+    parent: ChannelPermissionSyncAuthority
+    prospectiveChild: ChannelPermissionSyncAuthority
+  }
+  botId: string
+  changes: ChannelPermissionSyncChange[]
+  channel: ReturnType<typeof normalizeChannel>
+  createdAt: string
+  digest: string
+  guild: {
+    id: string
+    name: string
+  }
+  operationKeyHash: string
+  overwriteCounts: {
+    changed: number
+    currentChild: number
+    parent: number
+  }
+  parent: ReturnType<typeof normalizeChannel>
+  privacy: {
+    memberProfilesFetched: false
+    persistedOverwriteTargets: false
+    targetImpactAnalysis: "structural-only"
+  }
+  schemaVersion: number
+  status: "already-synchronized" | "planned"
+  warnings: string[]
+}
+
+export interface ChannelPermissionSyncResult {
+  activityId: string | null
+  channelId: string
+  evidenceMatched: boolean
+  guildId: string
+  operationKeyHash: string
+  parentBaselineMatched: boolean
+  parentChannelId: string
+  planDigest: string
+  responseMatched: boolean
+  schemaVersion: number
+  status: "already-synchronized" | "completed" | "completed-with-drift"
+  synchronized: boolean
+}
+
 export interface ChannelPermissionOverwriteListOptions extends RequestOptions {
   afterTargetId?: string
   limit?: number
@@ -248,7 +356,9 @@ export interface ChannelPermissionOverwriteServiceClient extends Pick<
   | "getGuild"
   | "getGuildMember"
   | "getGuildRoles"
-> {}
+> {
+  replaceChannelPermissionOverwrites?: DiscordClient["replaceChannelPermissionOverwrites"]
+}
 
 export interface ChannelPermissionOverwriteServiceOptions {
   activityStore: ActivityStore
@@ -289,6 +399,33 @@ interface ChannelPermissionOverwriteStateEvidence {
 interface BuiltChannelPermissionOverwritePlan {
   plan: ChannelPermissionOverwritePlan
   state: ChannelPermissionOverwriteStateEvidence
+}
+
+interface ChannelPermissionSyncStateEvidence {
+  action: ChannelPermissionSyncPlan["action"]
+  botMember: DiscordGuildMember
+  child: DiscordChannel & {
+    guild_id: string
+    parent_id: string
+    permission_overwrites: DiscordPermissionOverwrite[]
+  }
+  childOverwrites: CanonicalOverwrite[]
+  currentChildPermission: BotChannelPermissionResult & { confidence: "complete" }
+  guild: DiscordGuild & { owner_id: string }
+  guildId: string
+  parent: DiscordChannel & {
+    guild_id: string
+    permission_overwrites: DiscordPermissionOverwrite[]
+  }
+  parentOverwrites: CanonicalOverwrite[]
+  parentPermission: BotChannelPermissionResult & { confidence: "complete" }
+  prospectiveChildPermission: BotChannelPermissionResult & { confidence: "complete" }
+  roles: DiscordRole[]
+}
+
+interface BuiltChannelPermissionSyncPlan {
+  plan: ChannelPermissionSyncPlan
+  state: ChannelPermissionSyncStateEvidence
 }
 
 class ChannelPermissionOverwriteStateError extends Error {
@@ -377,6 +514,44 @@ export function normalizeChannelPermissionOverwriteRequest(
     targetId: request.targetId,
     targetType: request.targetType,
     targetTypeCode: TARGET_TYPE_CODES[request.targetType],
+  }
+}
+
+export function normalizeChannelPermissionSyncRequest(
+  request: ChannelPermissionSyncRequest,
+): NormalizedChannelPermissionSyncRequest {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new RangeError("Discord parent-category permission-sync request must be an object")
+  }
+  const keys = Object.keys(request)
+  if (
+    keys.length !== CHANNEL_PERMISSION_SYNC_REQUEST_KEYS.size
+    || keys.some((key) => !CHANNEL_PERMISSION_SYNC_REQUEST_KEYS.has(key))
+  ) {
+    throw new RangeError("Discord parent-category permission-sync request must contain only the documented fields")
+  }
+  assertSnowflake(request.channelId, "Discord permission-sync child channel ID")
+  if (request.acknowledgeConcurrentPermissionChangesStopped !== true) {
+    throw new RangeError("Discord permission sync requires acknowledging that concurrent permission changes have stopped")
+  }
+  if (request.acknowledgeFutureParentPropagation !== true) {
+    throw new RangeError("Discord permission sync requires acknowledging future parent-category propagation")
+  }
+  if (request.acknowledgeOverwriteReplacement !== true) {
+    throw new RangeError("Discord permission sync requires acknowledging complete overwrite replacement")
+  }
+  if (typeof request.auditReason !== "string") {
+    throw new RangeError("Discord permission-sync audit reason must be a string")
+  }
+  encodeDiscordAuditReason(request.auditReason)
+  return {
+    acknowledgeConcurrentPermissionChangesStopped: true,
+    acknowledgeFutureParentPropagation: true,
+    acknowledgeOverwriteReplacement: true,
+    auditReason: request.auditReason,
+    channelId: request.channelId,
+    operationKey: request.operationKey,
+    operationKeyHash: operationKeyHash(request.operationKey),
   }
 }
 
@@ -484,6 +659,39 @@ function discordOverwrites(
   }))
 }
 
+function syncChanges(
+  current: readonly CanonicalOverwrite[],
+  desired: readonly CanonicalOverwrite[],
+  roles: readonly DiscordRole[],
+): ChannelPermissionSyncChange[] {
+  const currentById = new Map(current.map((overwrite) => [overwrite.id, overwrite]))
+  const desiredById = new Map(desired.map((overwrite) => [overwrite.id, overwrite]))
+  const roleNames = new Map(roles.map((role) => [role.id, role.name]))
+  return [...new Set([...currentById.keys(), ...desiredById.keys()])]
+    .sort(compareSnowflakes)
+    .flatMap((targetId) => {
+      const before = currentById.get(targetId)
+      const after = desiredById.get(targetId)
+      if (before && after && before.type !== after.type) {
+        throw new ChannelPermissionOverwriteStateError(
+          `Discord permission-sync target ${targetId} changes target type between child and parent evidence`,
+        )
+      }
+      if (
+        stableString(before ? overwriteSnapshot([before])[0] : null)
+        === stableString(after ? overwriteSnapshot([after])[0] : null)
+      ) return []
+      const targetType = (after ?? before)?.type === 0 ? "role" : "member"
+      return [{
+        after: after ? overwriteView(after) : null,
+        before: before ? overwriteView(before) : null,
+        roleName: targetType === "role" ? roleNames.get(targetId) ?? null : null,
+        targetId,
+        targetType,
+      }]
+    })
+}
+
 function exactChannel(
   channel: DiscordChannel,
   channelId: string,
@@ -550,6 +758,51 @@ function exactParentChannel(
   return exact as DiscordChannel & {
     guild_id: string
     permission_overwrites: DiscordPermissionOverwrite[]
+  }
+}
+
+function exactPermissionSyncChild(
+  channel: DiscordChannel,
+  channelId: string,
+): DiscordChannel & {
+  guild_id: string
+  parent_id: string
+  permission_overwrites: DiscordPermissionOverwrite[]
+} {
+  const exact = exactChannel(channel, channelId, "permission-sync child")
+  if (
+    !PERMISSION_SYNC_CHANNEL_TYPES.has(exact.type)
+    || !exact.guild_id
+    || !exact.parent_id
+    || !Array.isArray(exact.permission_overwrites)
+  ) {
+    throw new ChannelPermissionOverwriteStateError(
+      "Discord permission sync requires a supported direct guild channel with a parent category and complete overwrite evidence",
+    )
+  }
+  return exact as DiscordChannel & {
+    guild_id: string
+    parent_id: string
+    permission_overwrites: DiscordPermissionOverwrite[]
+  }
+}
+
+function assertSyncableOverwrites(
+  overwrites: readonly CanonicalOverwrite[],
+  description: string,
+): void {
+  for (const overwrite of overwrites) {
+    const bits = overwrite.allow | overwrite.deny
+    if (unknownDiscordPermissionBits(bits) !== 0n) {
+      throw new ChannelPermissionOverwriteStateError(
+        `Discord ${description} overwrite ${overwrite.id} contains permission bits unknown to this build`,
+      )
+    }
+    if ((bits & ~CHANNEL_PERMISSION_MASK & ALL_KNOWN_PERMISSION_BITS) !== 0n) {
+      throw new ChannelPermissionOverwriteStateError(
+        `Discord ${description} overwrite ${overwrite.id} contains known permissions that are not channel-scoped`,
+      )
+    }
   }
 }
 
@@ -686,6 +939,38 @@ function completeBotPermissions(
   return result as BotChannelPermissionResult & { confidence: "complete" }
 }
 
+function completeSyncPermissions(
+  result: BotChannelPermissionResult,
+  stage: string,
+  required: readonly DiscordPermissionName[],
+): BotChannelPermissionResult & { confidence: "complete" } {
+  if (result.confidence !== "complete") {
+    throw new ChannelPermissionOverwriteStateError(
+      `Discord connector bot ${stage} permission evidence is incomplete: ${result.warnings.join("; ")}`,
+    )
+  }
+  for (const permission of required) {
+    if (!hasPermission(result, permission)) {
+      throw new ChannelPermissionOverwriteStateError(
+        `Discord connector bot lacks ${stage} channel-level ${permission}`,
+      )
+    }
+  }
+  return result as BotChannelPermissionResult & { confidence: "complete" }
+}
+
+function syncAuthority(
+  result: BotChannelPermissionResult & { confidence: "complete" },
+): ChannelPermissionSyncAuthority {
+  return {
+    confidence: "complete",
+    effectivePermissions: result.effectivePermissions,
+    manageChannels: hasPermission(result, "MANAGE_CHANNELS"),
+    manageRoles: hasPermission(result, "MANAGE_ROLES"),
+    viewChannel: hasPermission(result, "VIEW_CHANNEL"),
+  }
+}
+
 function completeTargetPermissions(
   result: PrincipalPermissionResult,
   stage: string,
@@ -768,6 +1053,31 @@ function memberSnapshot(member: DiscordGuildMember | undefined) {
   }
 }
 
+function permissionSyncSupportSnapshot(state: ChannelPermissionSyncStateEvidence) {
+  return {
+    botMember: memberSnapshot(state.botMember),
+    child: {
+      guildId: state.child.guild_id,
+      id: state.child.id,
+      name: state.child.name ?? null,
+      parentId: state.child.parent_id,
+      type: state.child.type,
+    },
+    guild: {
+      id: state.guild.id,
+      name: state.guild.name,
+      ownerId: state.guild.owner_id,
+    },
+    parent: {
+      guildId: state.parent.guild_id,
+      id: state.parent.id,
+      name: state.parent.name ?? null,
+      type: state.parent.type,
+    },
+    roles: roleSnapshot(state.roles),
+  }
+}
+
 function safeErrorCode(error: unknown): string {
   if (error instanceof DiscordApiError) {
     return `DiscordApiError.${error.status}.${error.code ?? "unknown"}`
@@ -785,6 +1095,19 @@ function receiptView(receipt: OperationReceipt) {
     operationKeyHash: receipt.operationKeyHash,
     status: receipt.status,
     targetId: receipt.resourceId,
+    timestamp: receipt.timestamp,
+    verification: receipt.verification,
+  }
+}
+
+function permissionSyncReceiptView(receipt: OperationReceipt) {
+  return {
+    activityId: receipt.activityId,
+    channelId: receipt.resourceId,
+    error: receipt.error,
+    guildId: receipt.guildId,
+    operationKeyHash: receipt.operationKeyHash,
+    status: receipt.status,
     timestamp: receipt.timestamp,
     verification: receipt.verification,
   }
@@ -843,9 +1166,63 @@ function operationReceipt(options: {
   }
 }
 
+function permissionSyncActivityEntry(options: {
+  activityId: string
+  error?: string | null
+  plan: ChannelPermissionSyncPlan
+  request: NormalizedChannelPermissionSyncRequest
+  status: ChannelPermissionSyncActivityStatus
+  timestamp: string
+  verification?: "drift" | "match" | null
+}): ChannelPermissionSyncActivity {
+  return {
+    applicationId: options.plan.applicationId,
+    botId: options.plan.botId,
+    channelId: options.request.channelId,
+    error: options.error ?? null,
+    guildId: options.plan.guild.id,
+    id: options.activityId,
+    kind: "channel-permission-sync",
+    operationKeyHash: options.request.operationKeyHash,
+    parentChannelId: options.plan.parent.id,
+    planDigest: options.plan.digest,
+    schemaVersion: SCHEMA_VERSION,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
+function permissionSyncOperationReceipt(options: {
+  activityId: string
+  error?: string | null
+  plan: ChannelPermissionSyncPlan
+  request: NormalizedChannelPermissionSyncRequest
+  status: OperationReceipt["status"]
+  timestamp: string
+  verification?: "drift" | "match" | null
+}): OperationReceipt {
+  return {
+    activityId: options.activityId,
+    error: options.error ?? null,
+    guildId: options.plan.guild.id,
+    kind: "channel-permission-sync",
+    operationKeyHash: options.request.operationKeyHash,
+    planDigest: options.plan.digest,
+    resourceId: options.status === "completed" ? options.request.channelId : null,
+    schemaVersion: 1,
+    status: options.status,
+    timestamp: options.timestamp,
+    verification: options.verification ?? null,
+  }
+}
+
 function uncertainExecution(error: unknown): boolean {
   if (
-    !(error instanceof ChannelPermissionOverwriteExecutionError)
+    !(
+      error instanceof ChannelPermissionOverwriteExecutionError
+      || error instanceof ChannelPermissionSyncExecutionError
+    )
     || !error.result
     || typeof error.result !== "object"
     || !("status" in error.result)
@@ -856,7 +1233,7 @@ function uncertainExecution(error: unknown): boolean {
 async function withChannelLock<T>(
   channelId: string,
   operation: () => Promise<T>,
-  priorUncertainError: () => ChannelPermissionOverwriteExecutionError,
+  priorUncertainError: () => Error,
 ): Promise<T> {
   const prior = CHANNEL_PERMISSION_OVERWRITE_LOCKS.get(channelId)
     ?? Promise.resolve("settled" as const)
@@ -1720,6 +2097,566 @@ export class ChannelPermissionOverwriteService {
     } catch (error) {
       throw new ChannelPermissionOverwriteExecutionError(
         "Discord channel permission change completed but the final activity record failed",
+        {
+          ...result,
+          activityRecordError: safeErrorCode(error),
+          status: "completed-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+    return result
+  }
+
+  async #permissionSyncState(
+    botId: string,
+    request: NormalizedChannelPermissionSyncRequest,
+    options: RequestOptions,
+    checkOperationKey: boolean,
+  ): Promise<ChannelPermissionSyncStateEvidence> {
+    if (typeof this.#client.replaceChannelPermissionOverwrites !== "function") {
+      throw new ChannelPermissionOverwriteStateError(
+        "Discord client does not support parent-category permission synchronization",
+      )
+    }
+    const child = exactPermissionSyncChild(
+      await this.#client.getChannel(request.channelId, options),
+      request.channelId,
+    )
+    const guildId = this.#policy.assertChannelPermissionSyncAllowed(child)
+    if (checkOperationKey) {
+      const existingReceipt = await this.#operationStore.get(
+        "channel-permission-sync",
+        request.operationKeyHash,
+      )
+      if (existingReceipt) {
+        throw new ChannelPermissionSyncOperationConflictError(
+          permissionSyncReceiptView(existingReceipt),
+        )
+      }
+    }
+    const parent = exactParentChannel(
+      await this.#client.getChannel(child.parent_id, options),
+      child.parent_id,
+      guildId,
+    )
+    const [guildValue, botMemberValue, rolesValue] = await Promise.all([
+      this.#client.getGuild(guildId, options),
+      this.#client.getGuildMember(guildId, botId, options),
+      this.#client.getGuildRoles(guildId, options),
+    ])
+    const guild = exactGuild(guildValue, guildId)
+    const botMember = exactMember(botMemberValue, botId, "connector bot")
+    const childOverwrites = canonicalOverwrites(child, "permission-sync child")
+    const parentOverwrites = canonicalOverwrites(parent, "permission-sync parent")
+    assertSyncableOverwrites(childOverwrites, "child")
+    assertSyncableOverwrites(parentOverwrites, "parent")
+    const requiredRoleIds = [
+      ...botMember.roles,
+      ...childOverwrites.filter(({ type }) => type === 0).map(({ id }) => id),
+      ...parentOverwrites.filter(({ type }) => type === 0).map(({ id }) => id),
+    ]
+    const roles = exactRoles(rolesValue, guildId, requiredRoleIds)
+    const changes = syncChanges(childOverwrites, parentOverwrites, roles)
+    if (changes.length > CONNECTOR_LIMITS.permissionSyncChangedTargets) {
+      throw new ChannelPermissionOverwriteStateError(
+        "Discord permission-sync changed-target frontier exceeds the connector safety limit",
+      )
+    }
+    for (const change of changes) {
+      if (change.targetType === "member") {
+        this.#policy.assertUserNotProtected(change.targetId)
+      }
+    }
+
+    const prospectiveChild: DiscordChannel = {
+      ...child,
+      permission_overwrites: discordOverwrites(parentOverwrites),
+    }
+    let currentChildPermission: BotChannelPermissionResult
+    let parentPermission: BotChannelPermissionResult
+    let prospectiveChildPermission: BotChannelPermissionResult
+    try {
+      currentChildPermission = evaluateBotChannelPermissions({
+        botId,
+        channel: child,
+        guildId,
+        member: botMember,
+        permissionChannel: child,
+        roles,
+      })
+      parentPermission = evaluateBotChannelPermissions({
+        botId,
+        channel: parent,
+        guildId,
+        member: botMember,
+        permissionChannel: parent,
+        roles,
+      })
+      prospectiveChildPermission = evaluateBotChannelPermissions({
+        botId,
+        channel: prospectiveChild,
+        guildId,
+        member: botMember,
+        permissionChannel: prospectiveChild,
+        roles,
+      })
+    } catch (error) {
+      throw new ChannelPermissionOverwriteStateError(
+        `Discord permission-sync authority evidence is invalid: ${errorMessage(error)}`,
+        { cause: error },
+      )
+    }
+    const completeCurrentChild = completeSyncPermissions(
+      currentChildPermission,
+      "current child",
+      ["VIEW_CHANNEL", "MANAGE_CHANNELS", "MANAGE_ROLES"],
+    )
+    const completeParent = completeSyncPermissions(
+      parentPermission,
+      "parent category",
+      ["VIEW_CHANNEL"],
+    )
+    const completeProspectiveChild = completeSyncPermissions(
+      prospectiveChildPermission,
+      "prospective child",
+      ["VIEW_CHANNEL", "MANAGE_CHANNELS", "MANAGE_ROLES"],
+    )
+    const outgoingBits = parentOverwrites.reduce(
+      (bits, overwrite) => bits | overwrite.allow | overwrite.deny,
+      0n,
+    )
+    const unavailableBits = outgoingBits & ~BigInt(completeParent.effectivePermissions)
+    if (unavailableBits !== 0n) {
+      throw new ChannelPermissionOverwriteStateError(
+        `Discord connector bot cannot copy parent-category permissions it does not hold there: ${discordPermissionNames(unavailableBits).join(",") || unavailableBits.toString()}`,
+      )
+    }
+    const action = stableString(overwriteSnapshot(childOverwrites))
+      === stableString(overwriteSnapshot(parentOverwrites))
+      ? "none"
+      : "replace"
+    return {
+      action,
+      botMember,
+      child,
+      childOverwrites,
+      currentChildPermission: completeCurrentChild,
+      guild,
+      guildId,
+      parent,
+      parentOverwrites,
+      parentPermission: completeParent,
+      prospectiveChildPermission: completeProspectiveChild,
+      roles,
+    }
+  }
+
+  async #buildPermissionSyncPlan(
+    applicationId: string,
+    botId: string,
+    request: NormalizedChannelPermissionSyncRequest,
+    options: RequestOptions,
+    checkOperationKey = true,
+  ): Promise<BuiltChannelPermissionSyncPlan> {
+    assertSnowflake(applicationId, "Discord connector application ID")
+    assertSnowflake(botId, "Discord connector bot ID")
+    const state = await this.#permissionSyncState(
+      botId,
+      request,
+      options,
+      checkOperationKey,
+    )
+    const changes = syncChanges(
+      state.childOverwrites,
+      state.parentOverwrites,
+      state.roles,
+    )
+    const warnings = [
+      "This replaces the child's complete permission-overwrite set with the parent category's complete set",
+      "A synchronized child follows later parent-category permission changes until a child overwrite changes independently",
+      "Changed member overwrites are reviewed structurally without fetching member profiles or claiming exhaustive member-effective access analysis",
+      "Guild, channel, and role names are untrusted Discord data and are never persisted by this workflow",
+      "Connector processes coordinate only when they share one canonical local activity-state root; separate roots cannot exclude overlapping permission changes",
+      "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
+    ]
+    const authority = {
+      currentChild: syncAuthority(state.currentChildPermission),
+      parent: syncAuthority(state.parentPermission),
+      prospectiveChild: syncAuthority(state.prospectiveChildPermission),
+    }
+    const digest = reviewedPlanDigest(this.#planKey, {
+      action: state.action,
+      applicationId,
+      authority,
+      botId,
+      changes,
+      childOverwrites: overwriteSnapshot(state.childOverwrites),
+      parentOverwrites: overwriteSnapshot(state.parentOverwrites),
+      request,
+      support: permissionSyncSupportSnapshot(state),
+      warnings,
+    })
+    const plan: ChannelPermissionSyncPlan = {
+      acknowledgments: {
+        concurrentPermissionChangesStopped: true,
+        futureParentPropagation: true,
+        overwriteReplacement: true,
+      },
+      action: state.action,
+      applicationId,
+      auditReason: request.auditReason,
+      authority,
+      botId,
+      changes,
+      channel: normalizeChannel(state.child),
+      createdAt: this.#clock().toISOString(),
+      digest,
+      guild: {
+        id: state.guildId,
+        name: state.guild.name,
+      },
+      operationKeyHash: request.operationKeyHash,
+      overwriteCounts: {
+        changed: changes.length,
+        currentChild: state.childOverwrites.length,
+        parent: state.parentOverwrites.length,
+      },
+      parent: normalizeChannel(state.parent),
+      privacy: {
+        memberProfilesFetched: false,
+        persistedOverwriteTargets: false,
+        targetImpactAnalysis: "structural-only",
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: state.action === "none" ? "already-synchronized" : "planned",
+      warnings,
+    }
+    return { plan, state }
+  }
+
+  planSync(
+    applicationId: string,
+    botId: string,
+    request: ChannelPermissionSyncRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionSyncPlan> {
+    return this.#buildPermissionSyncPlan(
+      applicationId,
+      botId,
+      normalizeChannelPermissionSyncRequest(request),
+      options,
+    ).then(({ plan }) => plan)
+  }
+
+  executeSync(
+    applicationId: string,
+    botId: string,
+    request: ChannelPermissionSyncRequest,
+    expectedDigest: string,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionSyncResult> {
+    const normalized = normalizeChannelPermissionSyncRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(expectedDigest)) {
+      throw new RangeError("Discord parent-category permission-sync plan digest is invalid")
+    }
+    return withChannelLock(
+      normalized.channelId,
+      () => this.#executePermissionSyncNormalized(
+        applicationId,
+        botId,
+        normalized,
+        expectedDigest,
+        options,
+      ),
+      () => new ChannelPermissionSyncExecutionError(
+        "Discord permission sync was blocked because a prior same-channel operation ended with an uncertain outcome",
+        {
+          channelId: normalized.channelId,
+          operationKeyHash: normalized.operationKeyHash,
+          planDigest: expectedDigest,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-prior-uncertain",
+        },
+      ),
+    )
+  }
+
+  async #executePermissionSyncNormalized(
+    applicationId: string,
+    botId: string,
+    request: NormalizedChannelPermissionSyncRequest,
+    expectedDigest: string,
+    options: RequestOptions,
+  ): Promise<ChannelPermissionSyncResult> {
+    let built: BuiltChannelPermissionSyncPlan
+    try {
+      built = await this.#buildPermissionSyncPlan(
+        applicationId,
+        botId,
+        request,
+        options,
+      )
+    } catch (error) {
+      if (
+        error instanceof ChannelPermissionOverwriteStateError
+        || error instanceof DiscordApiError && error.status === 404
+      ) {
+        throw new ChannelPermissionSyncPlanChangedError(
+          expectedDigest,
+          SYNC_STATE_UNAVAILABLE,
+        )
+      }
+      throw error
+    }
+    const { plan, state } = built
+    if (plan.digest !== expectedDigest) {
+      throw new ChannelPermissionSyncPlanChangedError(expectedDigest, plan.digest)
+    }
+    const baseResult = {
+      channelId: request.channelId,
+      guildId: plan.guild.id,
+      operationKeyHash: request.operationKeyHash,
+      parentChannelId: plan.parent.id,
+      planDigest: plan.digest,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    if (plan.action === "none") {
+      return {
+        ...baseResult,
+        activityId: null,
+        evidenceMatched: true,
+        parentBaselineMatched: true,
+        responseMatched: true,
+        status: "already-synchronized",
+        synchronized: true,
+      }
+    }
+
+    const activityId = this.#randomId()
+    const reservation = await this.#operationStore.reserve(
+      permissionSyncOperationReceipt({
+        activityId,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }),
+    )
+    if (!reservation.created) {
+      throw new ChannelPermissionSyncOperationConflictError(
+        permissionSyncReceiptView(reservation.receipt),
+      )
+    }
+    try {
+      await this.#activityStore.append(permissionSyncActivityEntry({
+        activityId,
+        plan,
+        request,
+        status: "pending",
+        timestamp: this.#clock().toISOString(),
+      }))
+    } catch (error) {
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(permissionSyncOperationReceipt({
+          activityId,
+          error: safeErrorCode(error),
+          plan,
+          request,
+          status: "failed",
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      throw new ChannelPermissionSyncExecutionError(
+        "Discord permission sync was blocked because pending activity could not be recorded",
+        {
+          ...baseResult,
+          activityId,
+          error: safeErrorCode(error),
+          operationRecordError,
+          status: "blocked-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+
+    let evidenceMatched: boolean | null = null
+    let mutationCompleted = false
+    let parentBaselineMatched: boolean | null = null
+    let responseMatched: boolean | null = null
+    let synchronized: boolean | null = null
+    try {
+      const replacePermissionOverwrites = this.#client.replaceChannelPermissionOverwrites
+      if (!replacePermissionOverwrites) {
+        throw new ChannelPermissionOverwriteStateError(
+          "Discord client does not support parent-category permission synchronization",
+        )
+      }
+      const response = exactPermissionSyncChild(
+        await replacePermissionOverwrites.call(
+          this.#client,
+          request.channelId,
+          discordOverwrites(state.parentOverwrites),
+          request.auditReason,
+          options,
+        ),
+        request.channelId,
+      )
+      mutationCompleted = true
+      if (
+        response.guild_id !== state.guildId
+        || response.parent_id !== state.parent.id
+      ) {
+        throw new ChannelPermissionOverwriteStateError(
+          "Discord permission-sync response changed child identity or parent binding",
+        )
+      }
+      const responseOverwrites = canonicalOverwrites(
+        response,
+        "permission-sync response",
+      )
+      assertSyncableOverwrites(responseOverwrites, "response")
+      responseMatched = stableString(overwriteSnapshot(responseOverwrites))
+        === stableString(overwriteSnapshot(state.parentOverwrites))
+      if (!responseMatched) {
+        throw new ChannelPermissionOverwriteStateError(
+          "Discord permission-sync response did not exactly match the reviewed parent overwrite set",
+        )
+      }
+      const observed = await this.#permissionSyncState(
+        botId,
+        request,
+        options,
+        false,
+      )
+      synchronized = stableString(overwriteSnapshot(observed.childOverwrites))
+        === stableString(overwriteSnapshot(observed.parentOverwrites))
+      if (!synchronized) {
+        throw new ChannelPermissionOverwriteStateError(
+          "Discord permission-sync readback did not prove exact child and parent synchronization",
+        )
+      }
+      parentBaselineMatched = stableString(overwriteSnapshot(observed.parentOverwrites))
+        === stableString(overwriteSnapshot(state.parentOverwrites))
+      evidenceMatched = stableString(permissionSyncSupportSnapshot(observed))
+        === stableString(permissionSyncSupportSnapshot(state))
+    } catch (error) {
+      const settledClientFailure = !mutationCompleted
+        && error instanceof DiscordApiError
+        && error.status >= 400
+        && error.status < 500
+        && error.status !== 408
+        && error.status !== 429
+      const status = settledClientFailure ? "failed" : "uncertain"
+      const errorCode = safeErrorCode(error)
+      let operationRecordError: string | null = null
+      try {
+        await this.#operationStore.finish(permissionSyncOperationReceipt({
+          activityId,
+          error: errorCode,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (receiptError) {
+        operationRecordError = safeErrorCode(receiptError)
+      }
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(permissionSyncActivityEntry({
+          activityId,
+          error: errorCode,
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new ChannelPermissionSyncExecutionError(
+        "Discord parent-category permission sync did not complete with a verified successful outcome",
+        {
+          ...baseResult,
+          activityId,
+          activityRecordError,
+          error: errorCode,
+          evidenceMatched,
+          operationRecordError,
+          parentBaselineMatched,
+          responseMatched,
+          retryAfterMs: error instanceof DiscordApiError
+            ? error.retryAfterMs ?? null
+            : null,
+          status,
+          synchronized,
+        },
+        { cause: error },
+      )
+    }
+
+    const verification = parentBaselineMatched && evidenceMatched ? "match" : "drift"
+    const status = verification === "match" ? "completed" : "completed-with-drift"
+    const result: ChannelPermissionSyncResult = {
+      ...baseResult,
+      activityId,
+      evidenceMatched: evidenceMatched as boolean,
+      parentBaselineMatched: parentBaselineMatched as boolean,
+      responseMatched: responseMatched as boolean,
+      status,
+      synchronized: synchronized as boolean,
+    }
+    try {
+      await this.#operationStore.finish(permissionSyncOperationReceipt({
+        activityId,
+        plan,
+        request,
+        status: "completed",
+        timestamp: this.#clock().toISOString(),
+        verification,
+      }))
+    } catch (error) {
+      let activityRecordError: string | null = null
+      try {
+        await this.#activityStore.append(permissionSyncActivityEntry({
+          activityId,
+          error: safeErrorCode(error),
+          plan,
+          request,
+          status,
+          timestamp: this.#clock().toISOString(),
+          verification,
+        }))
+      } catch (activityError) {
+        activityRecordError = safeErrorCode(activityError)
+      }
+      throw new ChannelPermissionSyncExecutionError(
+        "Discord permission sync completed but the operation receipt failed",
+        {
+          ...result,
+          activityRecordError,
+          operationRecordError: safeErrorCode(error),
+          status: "completed-operation-record-failed",
+        },
+        { cause: error },
+      )
+    }
+    try {
+      await this.#activityStore.append(permissionSyncActivityEntry({
+        activityId,
+        plan,
+        request,
+        status,
+        timestamp: this.#clock().toISOString(),
+        verification,
+      }))
+    } catch (error) {
+      throw new ChannelPermissionSyncExecutionError(
+        "Discord permission sync completed but the final activity record failed",
         {
           ...result,
           activityRecordError: safeErrorCode(error),

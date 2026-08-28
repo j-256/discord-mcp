@@ -91,6 +91,7 @@ const REFERENCE_GROUPS = Object.freeze([
     slug: "guild-lifecycle",
     titles: [
       "Privacy-safe guild integration audit and reviewed deletion",
+      "Reviewed exact guild departure",
       "Capability-safe guild invite creation, audit, and revocation",
       "Capability-safe native Guild Template lifecycle",
       "Privacy-minimized guild onboarding and reviewed replacement",
@@ -116,6 +117,7 @@ const REFERENCE_GROUPS = Object.freeze([
     slug: "channels-and-roles",
     titles: [
       "Reviewed channel permission overwrites",
+      "Reviewed parent-category permission synchronization",
       "Permission explanations",
       "Privacy-safe guild audit logs",
       "Reviewed exact-channel metadata changes",
@@ -209,6 +211,7 @@ const SECURITY_GROUPS = Object.freeze([
       "Member voice state and moderation",
       "Bulk member-role changes",
       "Channel metadata",
+      "Parent-category permission synchronization",
       "Channel ordering",
       "Channel creation",
       "Guild scaffolds",
@@ -234,6 +237,7 @@ const SECURITY_GROUPS = Object.freeze([
     titles: [
       "Webhooks",
       "Guild integrations",
+      "Guild departure",
       "Invites",
       "Guild Templates",
       "Guild Community lifecycle",

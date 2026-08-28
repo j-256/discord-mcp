@@ -6848,6 +6848,100 @@ test("service verifies identity through reviewed channel permission changes", as
   assert.equal(operationStore.receipt?.resourceId, targetRoleId)
 })
 
+test("service coordinates permission synchronization across the child and parent category", async () => {
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const child = channel({
+    parent_id: OTHER_CHANNEL_ID,
+    permission_overwrites: [{
+      allow: "0",
+      deny: DISCORD_PERMISSIONS.SEND_MESSAGES.toString(),
+      id: CREATED_ROLE_ID,
+      type: 0,
+    }],
+  })
+  const parent = channel({
+    id: OTHER_CHANNEL_ID,
+    parent_id: null,
+    permission_overwrites: [{
+      allow: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+      deny: "0",
+      id: CREATED_ROLE_ID,
+      type: 0,
+    }],
+    type: DISCORD_CHANNEL_TYPES.category,
+  })
+  const botPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+    | DISCORD_PERMISSIONS.SEND_MESSAGES
+  const { service } = serviceFixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === OTHER_CHANNEL_ID ? parent : child
+      },
+      async getGuild() {
+        return {
+          ...guild(),
+          owner_id: "900000000000000001",
+        }
+      },
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, botPermissions, "@everyone"),
+          role(CREATED_ROLE_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "reviewers"),
+        ]
+      },
+      async replaceChannelPermissionOverwrites() {
+        throw new Error("Unexpected permission-sync write")
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        permissionSyncs: true,
+      },
+      readScope: {
+        channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        permissionSyncChannelIds: [CHANNEL_ID],
+      },
+    },
+    permissionOverwriteOptions: {
+      clock: () => new Date("2026-08-21T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(17),
+      randomId: () => "activity-permission-sync",
+    },
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeConcurrentPermissionChangesStopped: true as const,
+    acknowledgeFutureParentPropagation: true as const,
+    acknowledgeOverwriteReplacement: true as const,
+    auditReason: "Reviewed parent-category permission synchronization",
+    channelId: CHANNEL_ID,
+    operationKey: "permission-sync-service-attempt-0001",
+  }
+  const plan = await service.planChannelPermissionSync(request)
+
+  await assert.rejects(
+    () => service.executeChannelPermissionSync(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "channel-permission-sync",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [
+      { id: CHANNEL_ID, kind: "channel" },
+      { id: OTHER_CHANNEL_ID, kind: "channel" },
+    ],
+  }])
+})
+
 test("service verifies identity before reviewed local-file attachment execution", async (context) => {
   const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-service-attachment-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))

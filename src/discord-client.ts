@@ -1683,6 +1683,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "modify_stage_instance",
   "modify_guild_onboarding",
   "modify_guild_incident_actions",
+  "replace_channel_permission_overwrites",
   "modify_guild_profile",
   "modify_guild_channel_positions",
   "modify_guild_role_positions",
@@ -12691,6 +12692,63 @@ export class DiscordClient {
         ...options,
         auditReason,
         automaticRateLimitRetry: false,
+      },
+    )
+  }
+
+  async replaceChannelPermissionOverwrites(
+    channelId: string,
+    overwrites: readonly DiscordPermissionOverwrite[],
+    auditReason: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordChannel> {
+    assertSearchSnowflake(channelId, "Discord permission-sync channel ID")
+    if (
+      !Array.isArray(overwrites)
+      || overwrites.length > DISCORD_LIMITS.channelPermissionOverwrites
+    ) {
+      throw new RangeError("Discord permission-sync overwrites must be a bounded array")
+    }
+    const seen = new Set<string>()
+    const bodyOverwrites = overwrites.map((overwrite) => {
+      assertSearchSnowflake(overwrite.id, "Discord permission-sync overwrite target ID")
+      if (seen.has(overwrite.id)) {
+        throw new RangeError(`Discord permission-sync overwrite target ${overwrite.id} is duplicated`)
+      }
+      seen.add(overwrite.id)
+      if (overwrite.type !== 0 && overwrite.type !== 1) {
+        throw new RangeError("Discord permission-sync overwrite target type must be 0 or 1")
+      }
+      const allow = assertPermissionBitfield(
+        overwrite.allow,
+        "Discord permission-sync overwrite allow field",
+      )
+      const deny = assertPermissionBitfield(
+        overwrite.deny,
+        "Discord permission-sync overwrite deny field",
+      )
+      if ((allow & deny) !== 0n) {
+        throw new RangeError("Discord permission-sync overwrite allow and deny fields must not overlap")
+      }
+      return {
+        allow: allow.toString(),
+        deny: deny.toString(),
+        id: overwrite.id,
+        type: overwrite.type,
+      }
+    })
+    encodeDiscordAuditReason(auditReason)
+    return this.#request<DiscordChannel>(
+      "replace_channel_permission_overwrites",
+      `/channels/${channelId}`,
+      {
+        ...options,
+        auditReason,
+        automaticRateLimitRetry: false,
+        body: { permission_overwrites: bodyOverwrites },
+        diagnosticRoute: "/channels/{channel.id}",
+        expectedSuccessStatus: 200,
+        suppressFailureCause: true,
       },
     )
   }

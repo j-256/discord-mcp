@@ -60,6 +60,7 @@ export type McpToolWorkflow =
   | "voice-channel-status-change"
   | "channel-ordering"
   | "channel-permission-overwrite"
+  | "channel-permission-sync"
   | "component-message"
   | "embed-message"
   | "direct-message-change"
@@ -382,6 +383,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["access", "channel", "execute", "member", "overwrite", "permission", "role"],
     toolset: "permission-overwrites",
     workflow: "channel-permission-overwrite",
+  },
+  execute_channel_permission_sync: {
+    keywords: ["category", "channel", "execute", "inherit", "overwrite", "parent", "permission", "propagate", "sync"],
+    toolset: "permission-sync",
+    workflow: "channel-permission-sync",
   },
   execute_forum_post: {
     keywords: ["create", "execute", "forum", "post", "thread"],
@@ -996,6 +1002,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["access", "channel", "member", "overwrite", "permission", "plan", "review", "role"],
     toolset: "permission-overwrites",
     workflow: "channel-permission-overwrite",
+  },
+  plan_channel_permission_sync: {
+    keywords: ["category", "channel", "inherit", "overwrite", "parent", "permission", "plan", "propagate", "review", "sync"],
+    toolset: "permission-sync",
+    workflow: "channel-permission-sync",
   },
   plan_application_emoji_change: {
     keywords: ["application", "create", "delete", "emoji", "plan", "rename", "review"],

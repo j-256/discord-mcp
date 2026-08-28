@@ -381,6 +381,8 @@ function status(
       onboardingGuildIds: [],
       permissionOverwriteChannelIds: [],
       permissionOverwritesEnabled: false,
+      permissionSyncChannelIds: [],
+      permissionSyncsEnabled: false,
       protectedUserCount: 0,
       pinChannelIds: [],
       pinManagementEnabled: false,
@@ -622,6 +624,7 @@ function toolService(
     executeChannelMetadataChange: unexpected,
     executeVoiceChannelStatusChange: unexpected,
     executeChannelPermissionOverwrite: unexpected,
+    executeChannelPermissionSync: unexpected,
     executeForumPost: unexpected,
     executeThreadCreation: unexpected,
     executeGuildBlueprint: unexpected,
@@ -677,6 +680,7 @@ function toolService(
     planVoiceChannelStatusChange: unexpected,
     planChannelOrder: unexpected,
     planChannelPermissionOverwrite: unexpected,
+    planChannelPermissionSync: unexpected,
     planForumPost: unexpected,
     planThreadCreation: unexpected,
     planGuildBlueprint: unexpected,
@@ -4067,6 +4071,34 @@ test("doctor and setup explain reviewed permission-overwrite scope without Disco
   assert.match(omitted.warnings.join("\n"), /permission-overwrites toolset/)
 })
 
+test("doctor and setup explain reviewed parent-category permission-sync scope without Discord writes", async () => {
+  const policy = fixturePolicy({
+    capabilities: { permissionSyncs: true },
+    scopes: { permissionSyncChannelIds: [CHANNEL_ID] },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: policy,
+    nodeVersion: "22.14.0",
+  })
+  const omitted = await prepareSetup({
+    configOverrides: fixturePolicy({
+      capabilities: { permissionSyncs: true },
+      scopes: { permissionSyncChannelIds: [CHANNEL_ID] },
+      tools: { toolsets: ["connector"] },
+    }),
+    service: statusProvider(),
+  })
+
+  const permissionSync = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.permissionSyncPolicy,
+  )
+  assert.equal(permissionSync?.status, "pass")
+  assert.match(permissionSync?.summary || "", /1 exact direct child channels/)
+  assert.match(permissionSync?.summary || "", /complete child and parent overwrite review/)
+  assert.match(permissionSync?.summary || "", /exact synchronized-state readback/)
+  assert.match(omitted.warnings.join("\n"), /permission-sync toolset/)
+})
+
 test("doctor and setup explain reviewed role-creation scope without Discord writes", async () => {
   const enabled = await diagnoseConnector({
     configOverrides: fixturePolicy({
@@ -6081,6 +6113,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_channel_metadata_change",
     "review_channel_order",
     "review_channel_permission_overwrite",
+    "review_channel_permission_sync",
     "review_direct_message_change",
     "review_embed_message",
     "review_forum_post",
@@ -6213,6 +6246,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_channel_metadata_change",
     "execute_channel_order",
     "execute_channel_permission_overwrite",
+    "execute_channel_permission_sync",
     "execute_component_message",
     "execute_direct_message_change",
     "execute_embed_message",
