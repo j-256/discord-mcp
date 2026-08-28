@@ -1489,6 +1489,42 @@ export class ApplicationIntentEvidenceError extends Error {
   override name = "ApplicationIntentEvidenceError"
 }
 
+export class BotProfilePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord bot-profile snapshot does not match the reviewed plan")
+    this.name = "BotProfilePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class BotProfileOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord bot-profile operation key has already been reserved")
+    this.name = "BotProfileOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class BotProfileExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "BotProfileExecutionError"
+    this.result = result
+  }
+}
+
+export class BotProfileEvidenceError extends Error {
+  override name = "BotProfileEvidenceError"
+}
+
 export class GuildExpressionPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

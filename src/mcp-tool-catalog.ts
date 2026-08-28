@@ -50,6 +50,7 @@ export type McpToolWorkflow =
   | "application-test-entitlement-change"
   | "attachment-message"
   | "automod-change"
+  | "bot-profile-change"
   | "bulk-guild-ban"
   | "bulk-member-role-change"
   | "channel-cloning"
@@ -330,6 +331,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "create", "delete", "entitlement", "execute", "monetization", "sku", "subscription", "test"],
     toolset: "application-entitlement-changes",
     workflow: "application-test-entitlement-change",
+  },
+  execute_bot_profile_change: {
+    keywords: ["application", "avatar", "banner", "bot", "execute", "profile", "username"],
+    toolset: "bot-profile",
+    workflow: "bot-profile-change",
   },
   execute_message_forward: {
     keywords: ["copy", "execute", "forward", "message", "snapshot"],
@@ -696,6 +702,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "emoji", "exact", "get", "lookup"],
     toolset: "application-emojis",
   },
+  get_current_bot_profile: {
+    keywords: ["application", "avatar", "banner", "bot", "current", "profile", "username"],
+    toolset: "bot-profile",
+  },
   get_observability_status: {
     keywords: ["health", "invalid-request", "metrics", "observability", "rate-limit", "telemetry", "traces"],
     toolset: "observability",
@@ -1005,6 +1015,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "create", "delete", "entitlement", "monetization", "plan", "review", "sku", "subscription", "test"],
     toolset: "application-entitlement-changes",
     workflow: "application-test-entitlement-change",
+  },
+  plan_bot_profile_change: {
+    keywords: ["application", "avatar", "banner", "bot", "plan", "profile", "review", "username"],
+    toolset: "bot-profile",
+    workflow: "bot-profile-change",
   },
   plan_forum_post: {
     keywords: ["create", "forum", "plan", "post", "review", "thread"],

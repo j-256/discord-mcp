@@ -67,6 +67,17 @@ import {
   ApplicationIntentService,
   normalizeApplicationIntentEnablementRequest,
 } from "./application-intent-service.js"
+import type {
+  BotProfileAuditResult,
+  BotProfileChangePlan,
+  BotProfileChangeRequest,
+  BotProfileChangeResult,
+  BotProfileServiceOptions,
+} from "./bot-profile-service.js"
+import {
+  BotProfileService,
+  normalizeBotProfileChangeRequest,
+} from "./bot-profile-service.js"
 import {
   projectApplicationPosture,
   projectApplicationPrivilegedIntents,
@@ -923,6 +934,7 @@ export interface DiscordServiceClient {
   getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
   getCurrentApplication: DiscordClient["getCurrentApplication"]
+  getCurrentBotProfile: DiscordClient["getCurrentBotProfile"]
   getCurrentUserVoiceState: DiscordClient["getCurrentUserVoiceState"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
@@ -1000,6 +1012,7 @@ export interface DiscordServiceClient {
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyApplicationEmoji: DiscordClient["modifyApplicationEmoji"]
   modifyCurrentApplicationFlags: DiscordClient["modifyCurrentApplicationFlags"]
+  modifyCurrentBotProfile: DiscordClient["modifyCurrentBotProfile"]
   modifyCurrentMemberNickname: DiscordClient["modifyCurrentMemberNickname"]
   modifyGuildMemberNickname: DiscordClient["modifyGuildMemberNickname"]
   modifyGuildMemberVerificationBypass: DiscordClient["modifyGuildMemberVerificationBypass"]
@@ -1073,6 +1086,10 @@ export interface ConnectorServiceOptions {
   >
   applicationIntentOptions?: Pick<
     ApplicationIntentServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  botProfileOptions?: Pick<
+    BotProfileServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   applicationRoleConnectionMetadataOptions?: Pick<
@@ -1496,6 +1513,7 @@ export class ConnectorService {
   readonly #applicationSkuAuditService: ApplicationSkuAuditService
   readonly #applicationMonetizationAuditService: ApplicationMonetizationAuditService
   readonly #applicationIntentService: ApplicationIntentService
+  readonly #botProfileService: BotProfileService
   readonly #componentMessageService: ComponentMessageService
   readonly #communityActivityService: CommunityActivityService
   readonly #embedMessageService: EmbedMessageService
@@ -1684,6 +1702,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.applicationIntentOptions,
+    })
+    this.#botProfileService = new BotProfileService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      fileRoots: options.config.botProfileRoots,
+      operationStore,
+      policy: this.#policy,
+      ...options.botProfileOptions,
     })
     this.#announcementSubscriptionService = new AnnouncementSubscriptionService({
       activityStore: this.#activityStore,
@@ -2260,6 +2286,18 @@ export class ConnectorService {
     options: RequestOptions = {},
   ): Promise<ApplicationPostureResult> {
     return this.#applicationPosture(await this.#verifyIdentity(options))
+  }
+
+  async getCurrentBotProfile(
+    options: RequestOptions = {},
+  ): Promise<BotProfileAuditResult> {
+    this.#policy.assertBotProfileAuditable()
+    const identity = await this.#verifyIdentity(options)
+    return this.#botProfileService.get(
+      identity.application.id,
+      identity.bot.id,
+      options,
+    )
   }
 
   async auditApplicationCommands(
@@ -4055,6 +4093,21 @@ export class ConnectorService {
       identity.application.id,
       identity.bot.id,
       requirements,
+      request,
+      options,
+    )
+  }
+
+  async planBotProfileChange(
+    request: BotProfileChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<BotProfileChangePlan> {
+    normalizeBotProfileChangeRequest(request)
+    this.#policy.assertBotProfileChangeAllowed()
+    const identity = await this.#verifyIdentity(options)
+    return this.#botProfileService.plan(
+      identity.application.id,
+      identity.bot.id,
       request,
       options,
     )
@@ -6664,6 +6717,35 @@ export class ConnectorService {
     } finally {
       this.#identityPromise = undefined
     }
+  }
+
+  async executeBotProfileChange(
+    request: BotProfileChangeRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<BotProfileChangeResult> {
+    normalizeBotProfileChangeRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord bot-profile plan digest is invalid")
+    }
+    this.#policy.assertBotProfileChangeAllowed()
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinateWrite(
+      "bot-profile-change",
+      request.operationKey,
+      planDigest,
+      [writeApplicationCollectionTarget(
+        "bot-profile",
+        identity.application.id,
+      )],
+      () => this.#botProfileService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
   }
 
   async executeScheduledEventChange(

@@ -30,6 +30,7 @@ import {
 
 const GUILD_ID = "100000000000000001"
 const CHANNEL_ID = "200000000000000001"
+const BOT_ID = "300000000000000001"
 const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const REQUEST_DIGEST = `hmac-sha256:${"b".repeat(64)}`
 const OPERATION_KEY = "channel-create-operation-0001"
@@ -194,6 +195,28 @@ function applicationIntentReceipt(
     timestamp: status === "pending"
       ? "2026-08-24T00:00:00.000Z"
       : "2026-08-24T00:00:01.000Z",
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function botProfileReceipt(
+  status: StandardApplicationOperationReceipt["status"] = "pending",
+): StandardApplicationOperationReceipt {
+  return {
+    activityId: "bot-profile-activity-0001",
+    applicationId: GUILD_ID,
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    kind: "bot-profile-change",
+    operationKeyHash: operationKeyHash("bot-profile-operation-0001"),
+    planDigest: PLAN_DIGEST,
+    resourceId: ["completed", "uncertain"].includes(status) ? BOT_ID : null,
+    schemaVersion: 1,
+    status,
+    timestamp: status === "pending"
+      ? "2026-08-28T00:00:00.000Z"
+      : "2026-08-28T00:00:01.000Z",
     verification: status === "completed" ? "match" : null,
   }
 }
@@ -767,6 +790,42 @@ test("file operation store keeps application intent receipts content-free", asyn
       verification: "drift",
     }),
     /invalid application-wide outcome evidence/,
+  )
+})
+
+test("file operation store keeps bot-profile receipts content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-operations-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "receipts")
+  const store = new FileOperationStore(directory)
+  const pending = botProfileReceipt()
+  const completed = botProfileReceipt("completed")
+
+  await store.reserveApplication(pending)
+  await store.finishApplication(completed)
+  assert.deepEqual(
+    await store.getApplication(pending.kind, pending.operationKeyHash),
+    completed,
+  )
+
+  const operationDirectories = await readdir(directory)
+  const operationDirectory = join(directory, operationDirectories[0] as string)
+  const text = (await Promise.all([
+    readFile(join(operationDirectory, "pending.json"), "utf8"),
+    readFile(join(operationDirectory, "terminal", "receipt.json"), "utf8"),
+  ])).join("\n")
+  assert.match(text, /bot-profile-change/)
+  assert.doesNotMatch(
+    text,
+    /bot username|image bytes|image hash|local path|review reason|bot-profile-operation-0001/u,
+  )
+
+  await assert.rejects(
+    () => store.finishApplication({
+      ...completed,
+      verification: "drift",
+    }),
+    /cannot contain drift verification/u,
   )
 })
 

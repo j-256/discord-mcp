@@ -17,6 +17,7 @@ import {
   type ApplicationEmojiActivity,
   type ApplicationEntitlementActivity,
   type ApplicationIntentActivity,
+  type BotProfileActivity,
   type ApplicationRoleConnectionMetadataActivity,
   type AttachmentMessageActivity,
   type AutoModerationActivity,
@@ -1550,6 +1551,30 @@ function applicationIntent(
     schemaVersion: 1,
     status,
     timestamp: `2026-08-24T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function botProfile(
+  id: string,
+  status: BotProfileActivity["status"],
+): BotProfileActivity {
+  return {
+    applicationId: "100",
+    avatarChanged: true,
+    bannerChanged: false,
+    botId: "200",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    id,
+    kind: "bot-profile-change",
+    operationKeyHash: `sha256:${"9".repeat(64)}`,
+    planDigest: `hmac-sha256:${"a".repeat(64)}`,
+    schemaVersion: 1,
+    status,
+    timestamp: `2026-08-28T00:00:0${id}.000Z`,
+    usernameChanged: true,
     verification: status === "completed" ? "match" : null,
   }
 }
@@ -4727,6 +4752,73 @@ test("JSONL activity log keeps application intent evidence content-free", async 
     "schemaVersion",
     "status",
     "timestamp",
+    "verification",
+  ])
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps bot-profile evidence content-free", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-bot-username",
+    "private-image-path",
+    "private-image-hash",
+    "private-image-bytes",
+    "private-review-reason",
+    "private-operation-key",
+  ]
+
+  await store.append(botProfile("1", "pending"))
+  await assert.rejects(
+    () => store.append({
+      ...botProfile("2", "completed"),
+      imageBytes: privateValues[3],
+      imageHash: privateValues[2],
+      imagePath: privateValues[1],
+      operationKey: privateValues[5],
+      reviewReason: privateValues[4],
+      username: privateValues[0],
+    } as BotProfileActivity),
+    /invalid content-free shape/u,
+  )
+  await store.append(botProfile("2", "completed"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...botProfile("3", "completed"),
+      avatarChanged: false,
+      usernameChanged: false,
+    })}\n${JSON.stringify({
+      ...botProfile("4", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 2)
+  assert.deepEqual(Object.keys(result.entries[0] || {}).sort(), [
+    "applicationId",
+    "avatarChanged",
+    "bannerChanged",
+    "botId",
+    "error",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "usernameChanged",
     "verification",
   ])
   for (const value of privateValues) {

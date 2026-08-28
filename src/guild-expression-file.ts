@@ -74,6 +74,24 @@ interface MediaDetails {
   width: number | null
 }
 
+export const DISCORD_IMAGE_DATA_FORMATS = [
+  "gif",
+  "jpeg",
+  "png",
+] as const
+
+export type DiscordImageDataFormat =
+  typeof DISCORD_IMAGE_DATA_FORMATS[number]
+
+export interface DiscordImageDataDetails {
+  animated: boolean
+  durationSeconds: number | null
+  format: DiscordImageDataFormat
+  height: number
+  mediaType: "image/gif" | "image/jpeg" | "image/png"
+  width: number
+}
+
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const
 const JPEG_SOF_MARKERS = new Set([
   0xC0,
@@ -510,6 +528,42 @@ function emojiDetails(bytes: Uint8Array): MediaDetails {
   throw new GuildExpressionFileError(
     "Discord emoji file must be JPEG, PNG, GIF, WebP, or AVIF",
   )
+}
+
+export function inspectDiscordImageDataBytes(
+  bytes: Uint8Array,
+): DiscordImageDataDetails {
+  let details: MediaDetails
+  if (matches(bytes, 0, PNG_SIGNATURE)) {
+    details = parsePng(bytes)
+    if (details.format === "apng") details = { ...details, format: "png" }
+  } else {
+    const prefix = bytes.byteLength >= 6 ? ascii(bytes, 0, 6) : ""
+    if (prefix === "GIF87a" || prefix === "GIF89a") {
+      details = parseGif(bytes)
+    } else if (matches(bytes, 0, [0xFF, 0xD8])) {
+      details = parseJpeg(bytes)
+    } else {
+      throw new GuildExpressionFileError(
+        "Discord image data must be JPEG, PNG, or GIF",
+      )
+    }
+  }
+  if (
+    details.height === null
+    || details.width === null
+    || !DISCORD_IMAGE_DATA_FORMATS.includes(
+      details.format as DiscordImageDataFormat,
+    )
+    || ![
+      "image/gif",
+      "image/jpeg",
+      "image/png",
+    ].includes(details.mediaType)
+  ) {
+    throw new GuildExpressionFileError("Discord image-data evidence is invalid")
+  }
+  return details as DiscordImageDataDetails
 }
 
 function stickerDetails(bytes: Uint8Array): MediaDetails {

@@ -92,6 +92,10 @@ import type {
   ApplicationIntentEnablementPlan,
   ApplicationIntentEnablementRequest,
 } from "../src/application-intent-service.js"
+import type {
+  BotProfileChangePlan,
+  BotProfileChangeRequest,
+} from "../src/bot-profile-service.js"
 import {
   applicationRoleConnectionMetadataSchemaDigest,
   type ApplicationRoleConnectionMetadataDefinition,
@@ -366,6 +370,8 @@ import {
   ApplicationEntitlementOperationConflictError,
   ApplicationIntentExecutionError,
   ApplicationIntentOperationConflictError,
+  BotProfileExecutionError,
+  BotProfileOperationConflictError,
   ApplicationRoleConnectionMetadataExecutionError,
   ApplicationRoleConnectionMetadataOperationConflictError,
   AttachmentMessageExecutionError,
@@ -848,6 +854,9 @@ const APPLICATION_ENTITLEMENT_FULFILLMENT_REFERENCE =
   "purchase-order-fulfilled-0001"
 const APPLICATION_INTENT_OPERATION_KEY = "application-intent-attempt-0001"
 const APPLICATION_INTENT_REVIEW_REASON = "Enable the schema-v2 member directory"
+const BOT_PROFILE_OPERATION_KEY = "bot-profile-attempt-0001"
+const BOT_PROFILE_REVIEW_REASON = "Align the public bot identity with the reviewed product"
+const BOT_PROFILE_AVATAR_PATH = "/test/discord-mcp/reviewed-bot-avatar.png"
 const APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY =
   "linked-role-metadata-attempt-0001"
 const APPLICATION_ROLE_CONNECTION_METADATA_RECORD = Object.freeze({
@@ -4606,6 +4615,111 @@ function applicationIntentPlan(
     warnings: [
       "Review reason is ephemeral",
       "Raw flags and operation key are private",
+    ],
+    writeRequired: effect === "change",
+  }
+}
+
+function botProfilePlan(
+  request: BotProfileChangeRequest,
+  digest = DIGEST,
+  effect: "change" | "none" = "change",
+): BotProfileChangePlan {
+  const requestedFields = (["avatar", "banner", "username"] as const)
+    .filter((field) => request[field] !== undefined)
+  const current = {
+    avatar: {
+      animated: false,
+      present: request.avatar?.action === "clear" && effect === "change",
+    },
+    banner: {
+      animated: false,
+      present: request.banner?.action === "clear" && effect === "change",
+    },
+    username: effect === "none" && request.username
+      ? request.username
+      : "current-bot",
+  }
+  const desiredImage = (
+    field: "avatar" | "banner",
+  ) => {
+    const change = request[field]
+    if (!change || effect === "none") return current[field]
+    return change.action === "clear"
+      ? { animated: false, present: false }
+      : { animated: false, present: true }
+  }
+  const planFile = (field: "avatar" | "banner") => (
+    request[field]?.action === "set"
+      ? {
+          contentDigest: `hmac-sha256:${(field === "avatar" ? "a" : "b").repeat(64)}`,
+          review: {
+            animated: false,
+            containedByConfiguredRoot: true as const,
+            durationSeconds: null,
+            format: "png" as const,
+            height: 128,
+            mediaType: "image/png" as const,
+            ownerMatchesProcess: true as const,
+            regularFile: true as const,
+            singleLink: true as const,
+            sizeBytes: 128,
+            stableRead: true as const,
+            width: 128,
+          },
+        }
+      : null
+  )
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    changedFields: effect === "change" ? [...requestedFields] : [],
+    createdAt: "2026-08-28T00:00:00.000Z",
+    current,
+    desired: {
+      avatar: desiredImage("avatar"),
+      banner: desiredImage("banner"),
+      username: request.username ?? current.username,
+    },
+    digest,
+    effect,
+    files: {
+      avatar: planFile("avatar"),
+      banner: planFile("banner"),
+    },
+    operationKeyHash: operationKeyHash(request.operationKey),
+    privacy: {
+      omittedFields: [
+        "application-payload",
+        "avatar-hash",
+        "banner-hash",
+        "file-paths",
+        "image-bytes",
+        "raw-operation-key",
+        "raw-user-payload",
+      ],
+      persistence: "content-free-records-only",
+    },
+    requestedFields: [...requestedFields],
+    responseUnknownFieldCount: 0,
+    reviewReason: request.reviewReason,
+    risks: [
+      "Application-wide presentation change",
+      "External current-user race",
+      "No Discord audit-log reason",
+      "One-shot operation key",
+    ],
+    schemaVersion: 1,
+    status: effect === "change" ? "planned" : "already-current",
+    verification: {
+      applicationIdentity: "exact",
+      imageByteEquality: "not-observable",
+      mutationResponse: "strict-current-bot-profile",
+      readback: "independent-exact-editable-state",
+    },
+    warnings: [
+      "Review reason is ephemeral",
+      "Image readback does not prove byte equality",
     ],
     writeRequired: effect === "change",
   }
@@ -8536,6 +8650,10 @@ function fixturePolicy(): PolicyDescription {
     applicationConsumableEntitlementUserIds: [],
     applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
+    botProfileAuditEnabled: false,
+    botProfileChangesEnabled: false,
+    botProfileImageReplacementEnabled: false,
+    botProfileRootCount: 0,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
@@ -8815,6 +8933,9 @@ function serviceFixture(overrides: {
   applicationIntentEffect?: "change" | "none"
   applicationIntentError?: Error
   applicationIntentPlanDigest?: string
+  botProfileEffect?: "change" | "none"
+  botProfileError?: Error
+  botProfilePlanDigest?: string
   applicationRoleConnectionMetadataChangeEffect?: "change" | "none"
   applicationRoleConnectionMetadataChangeError?: Error
   applicationRoleConnectionMetadataChangePlanDigest?: string
@@ -9096,6 +9217,9 @@ function serviceFixture(overrides: {
     applicationEntitlementConsumptionPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
+    botProfileExecute: 0,
+    botProfileGet: 0,
+    botProfilePlan: 0,
     applicationRoleConnectionMetadataExecute: 0,
     applicationRoleConnectionMetadataPlan: 0,
     applicationTestEntitlementExecute: 0,
@@ -9884,6 +10008,26 @@ function serviceFixture(overrides: {
         status: planned.effect === "none" ? "already-current" : "completed",
       }
     },
+    async executeBotProfileChange(request, planDigest) {
+      if (overrides.botProfileError) throw overrides.botProfileError
+      calls.botProfileExecute += 1
+      const planned = botProfilePlan(
+        request,
+        planDigest,
+        overrides.botProfileEffect,
+      )
+      return {
+        activityId: planned.effect === "none" ? null : "activity-bot-profile",
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        changedFields: planned.changedFields,
+        observed: planned.desired,
+        operationKeyHash: planned.operationKeyHash,
+        planDigest,
+        schemaVersion: 1,
+        status: planned.effect === "none" ? "already-current" : "completed",
+      }
+    },
     async executeApplicationTestEntitlementChange(request, planDigest) {
       if (overrides.applicationTestEntitlementError) {
         throw overrides.applicationTestEntitlementError
@@ -9988,6 +10132,14 @@ function serviceFixture(overrides: {
         request,
         overrides.applicationIntentPlanDigest || DIGEST,
         overrides.applicationIntentEffect,
+      )
+    },
+    async planBotProfileChange(request) {
+      calls.botProfilePlan += 1
+      return botProfilePlan(
+        request,
+        overrides.botProfilePlanDigest || DIGEST,
+        overrides.botProfileEffect,
       )
     },
     async planApplicationRoleConnectionMetadataChange(request) {
@@ -12570,6 +12722,33 @@ function serviceFixture(overrides: {
     async getApplicationPosture() {
       return fixtureApplicationPosture()
     },
+    async getCurrentBotProfile() {
+      calls.botProfileGet += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        privacy: {
+          omittedFields: [
+            "application-payload",
+            "avatar-hash",
+            "banner-hash",
+            "file-paths",
+            "image-bytes",
+            "raw-operation-key",
+            "raw-user-payload",
+          ],
+          persistence: "content-free-records-only",
+        },
+        profile: {
+          avatar: { animated: false, present: true },
+          banner: { animated: false, present: false },
+          username: "current-bot",
+        },
+        responseUnknownFieldCount: 0,
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async getStatus(options) {
       await overrides.statusRequest?.(options)
       const applicationPosture = fixtureApplicationPosture()
@@ -13855,6 +14034,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     result.tools.map((tool) => tool.name),
     [
       "audit_application_posture",
+      "get_current_bot_profile",
       "audit_application_commands",
       "audit_application_role_connection_metadata",
       "audit_application_skus",
@@ -14008,6 +14188,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_application_entitlement_consumption",
       "plan_application_intent_enablement",
       "execute_application_intent_enablement",
+      "plan_bot_profile_change",
+      "execute_bot_profile_change",
       "plan_application_role_connection_metadata_change",
       "execute_application_role_connection_metadata_change",
       "execute_guild_expression_change",
@@ -16691,6 +16873,9 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     applicationEntitlementConsumptionPlan: 0,
     applicationIntentExecute: 0,
     applicationIntentPlan: 0,
+    botProfileExecute: 0,
+    botProfileGet: 0,
+    botProfilePlan: 0,
     applicationRoleConnectionMetadataExecute: 0,
     applicationRoleConnectionMetadataPlan: 0,
     applicationTestEntitlementExecute: 0,
@@ -27429,6 +27614,278 @@ test("MCP application intent execution exposes uncertain and one-shot conflict o
     JSON.stringify(conflictResult),
     new RegExp(APPLICATION_INTENT_REVIEW_REASON),
   )
+})
+
+test("MCP bot-profile reads and plans expose only review-safe presentation evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const read = await client.callTool({
+    arguments: {},
+    name: "get_current_bot_profile",
+  })
+  assert.equal(structuredContent(read).status, "ok")
+  assert.equal(structuredContent(read).botId, BOT_ID)
+  assert.equal(
+    (structuredContent(read).profile as Record<string, unknown>).username,
+    "current-bot",
+  )
+  assert.equal(calls.botProfileGet, 1)
+
+  const requests = [
+    {
+      acknowledgeApplicationWideChange: true,
+      operationKey: BOT_PROFILE_OPERATION_KEY,
+      reviewReason: BOT_PROFILE_REVIEW_REASON,
+      username: "reviewed-bot",
+    },
+    {
+      acknowledgeApplicationWideChange: true,
+      avatar: { action: "set", filePath: BOT_PROFILE_AVATAR_PATH },
+      banner: { action: "clear" },
+      operationKey: BOT_PROFILE_OPERATION_KEY,
+      reviewReason: BOT_PROFILE_REVIEW_REASON,
+    },
+  ]
+  for (const request of requests) {
+    const result = await client.callTool({
+      arguments: request,
+      name: "plan_bot_profile_change",
+    })
+    assert.equal(structuredContent(result).status, "planned")
+    assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+    assert.equal(structuredContent(result).botId, BOT_ID)
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(BOT_PROFILE_OPERATION_KEY))
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(BOT_PROFILE_AVATAR_PATH))
+    assert.equal(Object.hasOwn(structuredContent(result), "avatarHash"), false)
+  }
+  for (const invalid of [
+    { ...requests[0], acknowledgeApplicationWideChange: false },
+    { ...requests[0], username: "discord helper" },
+    { ...requests[0], username: "@everyone" },
+    { ...requests[0], username: undefined },
+    {
+      ...requests[1],
+      avatar: { action: "set", filePath: "https://example.test/avatar.png" },
+    },
+    { ...requests[0], arbitrary: true },
+  ]) {
+    const result = await client.callTool({
+      arguments: invalid,
+      name: "plan_bot_profile_change",
+    })
+    assert.equal(result.isError, true)
+  }
+  assert.equal(calls.botProfilePlan, requests.length)
+})
+
+test("MCP bot-profile execution binds signed approval to exact remote and file evidence", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeApplicationWideChange: true,
+      avatar: { action: "set", filePath: BOT_PROFILE_AVATAR_PATH },
+      banner: { action: "clear" },
+      operationKey: BOT_PROFILE_OPERATION_KEY,
+      planDigest: DIGEST,
+      reviewReason: BOT_PROFILE_REVIEW_REASON,
+      username: "reviewed-bot",
+    },
+    name: "execute_bot_profile_change",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(structuredContent(result).applicationId, APPLICATION_ID)
+  assert.equal(structuredContent(result).botId, BOT_ID)
+  assert.equal(calls.botProfilePlan, 1)
+  assert.equal(calls.botProfileExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    "current-bot",
+    "reviewed-bot",
+    BOT_PROFILE_REVIEW_REASON,
+    operationKeyHash(BOT_PROFILE_OPERATION_KEY),
+    DIGEST,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /owned-file review/u)
+  assert.match(confirmationMessage, /does not prove byte equality/u)
+  assert.match(confirmationMessage, /sparse non-retried PATCH/u)
+  assert.match(confirmationMessage, /untrusted data/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(BOT_PROFILE_OPERATION_KEY))
+  assert.doesNotMatch(confirmationMessage, new RegExp(BOT_PROFILE_AVATAR_PATH))
+  const serializedMessages = JSON.stringify(serverMessages)
+  assert.doesNotMatch(serializedMessages, new RegExp(BOT_PROFILE_OPERATION_KEY))
+  assert.doesNotMatch(serializedMessages, new RegExp(BOT_PROFILE_AVATAR_PATH))
+})
+
+test("MCP bot-profile execution stops on no-op, refusal, or fresh-plan drift", async (context) => {
+  const argumentsValue = {
+    acknowledgeApplicationWideChange: true,
+    operationKey: BOT_PROFILE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: BOT_PROFILE_REVIEW_REASON,
+    username: "reviewed-bot",
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { botProfileEffect: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_bot_profile_change",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-current")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.botProfileExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_bot_profile_change",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.botProfileExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { botProfilePlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_bot_profile_change",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+  assert.equal(changed.calls.botProfileExecute, 0)
+})
+
+test("MCP bot-profile signed state rejects changed presentation intent", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    acknowledgeApplicationWideChange: true,
+    avatar: { action: "set" as const, filePath: BOT_PROFILE_AVATAR_PATH },
+    operationKey: BOT_PROFILE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: BOT_PROFILE_REVIEW_REASON,
+    username: "reviewed-bot",
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_bot_profile_change",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  for (const changed of [
+    { ...request, username: "different-bot" },
+    { ...request, reviewReason: "Changed profile rationale" },
+    { ...request, operationKey: "bot-profile-attempt-0002" },
+    {
+      ...request,
+      avatar: { action: "set" as const, filePath: "/test/other-avatar.png" },
+    },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_bot_profile_change: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "execute_bot_profile_change",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.botProfileExecute, 0)
+})
+
+test("MCP bot-profile execution exposes uncertain and one-shot conflict outcomes safely", async (context) => {
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const argumentsValue = {
+    acknowledgeApplicationWideChange: true,
+    operationKey: BOT_PROFILE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: BOT_PROFILE_REVIEW_REASON,
+    username: "reviewed-bot",
+  }
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      botProfileError: new BotProfileExecutionError(
+        `Discord bot-profile outcome is uncertain: ${TOKEN}`,
+        { error: TOKEN, status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_bot_profile_change",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+  assert.doesNotMatch(JSON.stringify(uncertainResult), new RegExp(TOKEN))
+
+  const receipt = {
+    activityId: "activity-bot-profile",
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    error: null,
+    operationKeyHash: operationKeyHash(BOT_PROFILE_OPERATION_KEY),
+    status: "completed" as const,
+    timestamp: "2026-08-28T00:00:00.000Z",
+    verification: "match" as const,
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      botProfileError: new BotProfileOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_bot_profile_change",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  const serialized = JSON.stringify(conflictResult)
+  assert.doesNotMatch(serialized, new RegExp(BOT_PROFILE_OPERATION_KEY))
+  assert.doesNotMatch(serialized, new RegExp(BOT_PROFILE_REVIEW_REASON))
 })
 
 test("MCP linked-role metadata planning accepts only strict complete schemas", async (context) => {

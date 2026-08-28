@@ -35,6 +35,12 @@ import {
   type DiscordStaticComponent,
 } from "./component-layout.js"
 import {
+  currentBotProfileBody,
+  projectCurrentBotProfile,
+  type DiscordCurrentBotProfile,
+  type ModifyCurrentBotProfileInput,
+} from "./bot-profile.js"
+import {
   assertCompiledEmbedLayout,
   type DiscordStaticEmbed,
 } from "./embed-layout.js"
@@ -178,6 +184,12 @@ export interface DiscordClientOptions {
 export type CreateGuildApplicationCommandInput = GuildApplicationCommandDefinition
 export type EditGuildApplicationCommandInput = GuildApplicationCommandDefinition
 export type CreateGlobalApplicationCommandInput = GlobalApplicationCommandDefinition
+
+export type {
+  DiscordCurrentBotProfile,
+  ModifyCurrentBotProfileImageInput,
+  ModifyCurrentBotProfileInput,
+} from "./bot-profile.js"
 export type EditGlobalApplicationCommandInput = GlobalApplicationCommandDefinition
 
 export interface GuildPageOptions extends RequestOptions {
@@ -8854,6 +8866,40 @@ export class DiscordClient {
 
   getCurrentUser(options: RequestOptions = {}): Promise<DiscordUser> {
     return this.#request("get_current_user", "/users/@me", options)
+  }
+
+  async getCurrentBotProfile(
+    expectedBotId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordCurrentBotProfile> {
+    const response = await this.#request<unknown>(
+      "get_current_user",
+      "/users/@me",
+      {
+        ...options,
+        suppressFailureCause: true,
+      },
+    )
+    return projectCurrentBotProfile(response, expectedBotId)
+  }
+
+  async modifyCurrentBotProfile(
+    expectedBotId: string,
+    input: ModifyCurrentBotProfileInput,
+    options: RequestOptions = {},
+  ): Promise<DiscordCurrentBotProfile> {
+    const response = await this.#request<unknown>(
+      "modify_current_bot_profile",
+      "/users/@me",
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: currentBotProfileBody(input),
+        expectedSuccessStatus: 200,
+        suppressFailureCause: true,
+      },
+    )
+    return projectCurrentBotProfile(response, expectedBotId)
   }
 
   async getGatewayBot(options: RequestOptions = {}): Promise<GatewayBotDiscovery> {
