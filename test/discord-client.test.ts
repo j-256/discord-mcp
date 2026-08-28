@@ -15,6 +15,7 @@ import {
   DiscordClient,
 } from "../src/discord-client.js"
 import {
+  ApplicationActivityInstanceEvidenceError,
   ApplicationEmojiEvidenceError,
   ApplicationMonetizationEvidenceError,
   BotProfileEvidenceError,
@@ -188,6 +189,128 @@ test("Discord client sends bot authentication only to its configured API origin"
   assert.equal(requestUrl, `${API_BASE_URL}/applications/@me`)
   assert.equal(authorization, `Bot ${TOKEN}`)
   assert.equal(redirect, "error")
+})
+
+test("Discord client reads one exact bounded application Activity instance", async () => {
+  const applicationId = "500000000000000001"
+  const guildId = "600000000000000001"
+  const channelId = "700000000000000001"
+  const launchId = "800000000000000001"
+  const userId = "900000000000000001"
+  const instanceId = "i:opaque%instance"
+  let requestUrl = ""
+  let authorization = ""
+  const records: RecordedObservation[] = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requestUrl = String(input)
+      authorization = new Headers(init?.headers).get("Authorization") || ""
+      return jsonResponse({
+        application_id: applicationId,
+        future_private_field: `private ${TOKEN}`,
+        instance_id: instanceId,
+        launch_id: launchId,
+        location: {
+          channel_id: channelId,
+          future_location_field: `private ${TOKEN}`,
+          guild_id: guildId,
+          id: `gc-${guildId}-${channelId}`,
+          kind: "gc",
+        },
+        users: [userId],
+      })
+    },
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  const result = await client.getApplicationActivityInstance(applicationId, instanceId)
+
+  assert.equal(
+    requestUrl,
+    `${API_BASE_URL}/applications/${applicationId}/activity-instances/i%3Aopaque%25instance`,
+  )
+  assert.equal(authorization, `Bot ${TOKEN}`)
+  assert.deepEqual(result, {
+    applicationId,
+    instanceId,
+    launchId,
+    location: {
+      channelId,
+      guildId,
+      kind: "gc",
+      unknownFieldCount: 1,
+    },
+    unknownFieldCount: 1,
+    userIds: [userId],
+  })
+  assert.deepEqual(records.map((record) => record.operation), [
+    "get_application_activity_instance",
+  ])
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN, "u"))
+})
+
+test("Discord client rejects malformed and oversized Activity-instance evidence privately", async () => {
+  const applicationId = "500000000000000001"
+  const instanceId = "i-valid-instance"
+  for (const response of [
+    jsonResponse({
+      application_id: applicationId,
+      instance_id: instanceId,
+      launch_id: "800000000000000001",
+      location: {
+        channel_id: "700000000000000001",
+        guild_id: "600000000000000001",
+        id: "gc-valid",
+        kind: "gc",
+      },
+      users: ["not-a-user"],
+    }),
+    jsonResponse({ private: `${TOKEN}${"x".repeat(300_000)}` }),
+  ]) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => response,
+      token: TOKEN,
+    })
+    await assert.rejects(
+      client.getApplicationActivityInstance(applicationId, instanceId),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.doesNotMatch(error.message, new RegExp(TOKEN, "u"))
+        assert.ok(
+          error instanceof ApplicationActivityInstanceEvidenceError
+          || /exceeded its local response bound/u.test(error.message),
+        )
+        return true
+      },
+    )
+  }
+})
+
+test("Discord client treats Activity-instance identifiers as content-sensitive failures", async () => {
+  const applicationId = "500000000000000001"
+  const instanceId = "private-instance-id"
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(`private ${instanceId} ${TOKEN}`)
+    },
+    maxRetries: 0,
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.getApplicationActivityInstance(applicationId, instanceId),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.message, "Discord API GET /applications/{application.id}/activity-instances/{instance.id} failed: request failed")
+      assert.doesNotMatch(error.message, new RegExp(instanceId, "u"))
+      assert.doesNotMatch(error.message, new RegExp(TOKEN, "u"))
+      return true
+    },
+  )
 })
 
 test("Discord client discovers the authenticated Gateway endpoint with bounded projection", async () => {

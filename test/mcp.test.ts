@@ -48,6 +48,7 @@ import {
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
   REACTION_LIMITS,
+  SCHEMA_VERSION,
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import {
@@ -9046,6 +9047,10 @@ function serviceFixture(overrides: {
   applicationRoleConnectionMetadataChangePlanDigest?: string
   applicationRoleConnectionMetadataError?: Error
   applicationRoleConnectionMetadataResult?: ReturnType<typeof fixtureApplicationRoleConnectionMetadataAudit>
+  applicationActivityInstanceError?: Error
+  applicationActivityInstanceResult?: Awaited<ReturnType<
+    DiscordToolService["inspectApplicationActivityInstance"]
+  >>
   applicationEntitlementError?: Error
   applicationEntitlementResult?: ReturnType<typeof fixtureApplicationEntitlementAudit>
   applicationEntitlementInspectionError?: Error
@@ -9290,6 +9295,12 @@ function serviceFixture(overrides: {
     subscriptionArguments: null as Parameters<
       DiscordToolService["auditApplicationSubscriptions"]
     > | null,
+  }
+  const applicationActivityInstanceCalls = {
+    arguments: null as Parameters<
+      DiscordToolService["inspectApplicationActivityInstance"]
+    > | null,
+    count: 0,
   }
   const communityActivityCalls = {
     arguments: null as Parameters<
@@ -9829,6 +9840,47 @@ function serviceFixture(overrides: {
         applicationId: APPLICATION_ID,
         botId: BOT_ID,
       })
+    },
+    async inspectApplicationActivityInstance(...arguments_) {
+      if (overrides.applicationActivityInstanceError) {
+        throw overrides.applicationActivityInstanceError
+      }
+      applicationActivityInstanceCalls.count += 1
+      applicationActivityInstanceCalls.arguments = arguments_
+      const request = arguments_[0]
+      return overrides.applicationActivityInstanceResult || {
+        active: true,
+        application: { botId: BOT_ID, id: APPLICATION_ID },
+        evidence: {
+          locationUnknownFields: 0,
+          responseUnknownFields: 0,
+        },
+        expected: {
+          channelId: request.channelId,
+          guildId: request.guildId,
+          user: request.userId === undefined
+            ? null
+            : { id: request.userId, present: true },
+        },
+        instanceId: request.instanceId,
+        launchId: MESSAGE_ID,
+        location: {
+          channelId: request.channelId,
+          guildId: request.guildId,
+          kind: "guild-channel" as const,
+        },
+        participantCount: 1,
+        privacy: {
+          omitted: ["participant-enumeration"],
+          participantEvidence: "count-and-exact-membership-only" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        schemaVersion: SCHEMA_VERSION,
+        status: "ok" as const,
+        warnings: [],
+      }
     },
     async auditApplicationSubscriptions(...arguments_) {
       if (overrides.applicationSubscriptionError) {
@@ -13808,6 +13860,7 @@ function serviceFixture(overrides: {
     },
   }
   return {
+    applicationActivityInstanceCalls,
     applicationMonetizationCalls,
     calls,
     communityActivityCalls,
@@ -14240,6 +14293,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     result.tools.map((tool) => tool.name),
     [
       "audit_application_posture",
+      "inspect_application_activity_instance",
       "get_current_bot_profile",
       "audit_application_commands",
       "audit_application_role_connection_metadata",
@@ -16979,6 +17033,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "audit_application_posture",
+      "inspect_application_activity_instance",
       "audit_application_commands",
       "audit_application_role_connection_metadata",
       "audit_application_skus",
@@ -17755,6 +17810,30 @@ test("progressive discovery reveals the pinned linked-role metadata audit indepe
   )
 })
 
+test("progressive discovery reveals Activity-instance verification independently", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["connector"],
+      },
+    },
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "verify application activity session" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "inspect_application_activity_instance",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["inspect_application_activity_instance", "discover_discord_tools"],
+  )
+})
+
 test("progressive discovery reveals the pinned application SKU audit independently", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: {
@@ -17872,6 +17951,82 @@ test("MCP guild webhook audit is exact-guild, read-only, and credential-redacted
   assert.match(tool.description || "", /Persists nothing/u)
 })
 
+test("MCP Activity-instance inspection is exact-scope, count-only, and strict", async (context) => {
+  const instanceId = "activity:instance%opaque"
+  const { applicationActivityInstanceCalls, client } = await connectedFixture(context)
+
+  const response = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      instanceId,
+      userId: USER_ID,
+    },
+    name: "inspect_application_activity_instance",
+  })
+  const data = structuredContent(response)
+  const invalidResults = await Promise.all([
+    client.callTool({
+      arguments: { channelId: CHANNEL_ID, guildId: GUILD_ID, instanceId: "unsafe/id" },
+      name: "inspect_application_activity_instance",
+    }),
+    client.callTool({
+      arguments: {
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        instanceId,
+        unexpected: true,
+      },
+      name: "inspect_application_activity_instance",
+    }),
+    client.callTool({
+      arguments: {
+        channelId: CHANNEL_ID,
+        guildId: GUILD_ID,
+        instanceId,
+        userId: "0",
+      },
+      name: "inspect_application_activity_instance",
+    }),
+  ])
+
+  assert.notEqual(response.isError, true)
+  assert.equal(data.active, true)
+  assert.equal(data.instanceId, instanceId)
+  assert.equal(data.participantCount, 1)
+  assert.deepEqual(data.expected, {
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    user: { id: USER_ID, present: true },
+  })
+  assert.equal("userIds" in data, false)
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(OTHER_USER_ID, "u"))
+  assert.equal(invalidResults.every((result) => result.isError === true), true)
+  assert.equal(applicationActivityInstanceCalls.count, 1)
+  assert.deepEqual(applicationActivityInstanceCalls.arguments?.[0], {
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    instanceId,
+    userId: USER_ID,
+  })
+  assert.equal(
+    applicationActivityInstanceCalls.arguments?.[1]?.signal instanceof AbortSignal,
+    true,
+  )
+  const tool = listedTool(
+    (await client.listTools()).tools,
+    "inspect_application_activity_instance",
+  )
+  assert.deepEqual(tool.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  assert.match(tool.description || "", /participant enumeration/u)
+  assert.match(tool.description || "", /nothing is persisted/u)
+})
+
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
@@ -17973,10 +18128,11 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /complete obfuscation-safe Gateway layout/)
   assert.match(content.text, /one non-retried complete position PATCH/)
   assert.match(content.text, /newer complete matching Gateway layout/)
-  assert.match(content.text, /Exact-reference parsing accepts one complete canonical Discord/)
-  assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
+  assert.match(content.text, /Exact-reference parsing converts one complete canonical Discord/)
+  assert.match(content.text, /never scans prose, resolves names, contacts Discord/)
   assert.match(content.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
   assert.match(content.text, /Current-application SKU audit re-verifies pinned identity/u)
+  assert.match(content.text, /Activity-instance inspection binds one opaque ID to pinned identity/u)
   assert.match(content.text, /Application monetization audit requires a separate disabled-by-default capability/u)
   assert.match(content.text, /Subscription reads require exactly one separately configured user/u)
   assert.match(content.text, /entitlements remain authority for access conclusions/u)

@@ -10557,6 +10557,54 @@ test("service assesses current application posture against effective policy", as
   assert.doesNotMatch(JSON.stringify(posture), /https:\/\//u)
 })
 
+test("service binds Activity-instance inspection to pinned identity and exact scope", async () => {
+  const instanceId = "opaque:activity-instance"
+  const activityCall = {
+    arguments: null as Parameters<
+      NonNullable<DiscordServiceClient["getApplicationActivityInstance"]>
+    > | null,
+  }
+  const { calls, service } = serviceFixture({
+    client: {
+      async getApplicationActivityInstance(...arguments_) {
+        activityCall.arguments = arguments_
+        return {
+          applicationId: APPLICATION_ID,
+          instanceId,
+          launchId: MESSAGE_ID,
+          location: {
+            channelId: CHANNEL_ID,
+            guildId: GUILD_ID,
+            kind: "gc",
+            unknownFieldCount: 0,
+          },
+          unknownFieldCount: 0,
+          userIds: [MEMBER_USER_ID],
+        }
+      },
+    },
+  })
+
+  const result = await service.inspectApplicationActivityInstance({
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    instanceId,
+    userId: MEMBER_USER_ID,
+  })
+
+  assert.equal(result.active, true)
+  assert.equal(result.participantCount, 1)
+  assert.deepEqual(result.expected.user, {
+    id: MEMBER_USER_ID,
+    present: true,
+  })
+  assert.deepEqual(activityCall.arguments?.slice(0, 2), [APPLICATION_ID, instanceId])
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(JSON.stringify(result).includes(PRIVATE_APPLICATION_PROFILE_TEXT), false)
+  assert.equal(JSON.stringify(result).includes(PRIVATE_BOT_PROFILE_TEXT), false)
+})
+
 test("service exposes an opt-in minimized member directory through exact REST calls", async () => {
   const remoteMember = (userId: string): DiscordGuildMember => ({
     joined_at: "2026-08-01T00:00:00.000Z",

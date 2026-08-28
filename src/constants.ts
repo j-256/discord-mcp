@@ -403,6 +403,15 @@ export const DISCORD_LIMITS = Object.freeze({
   voiceRegions: 100,
 })
 
+export const APPLICATION_ACTIVITY_INSTANCE_LIMITS = Object.freeze({
+  instanceIdCharacters: 256,
+  locationFields: 16,
+  locationIdCharacters: 256,
+  participants: 1_000,
+  responseBytes: 256 * 1_024,
+  responseFields: 16,
+})
+
 export const PERMISSION_LIMITS = Object.freeze({
   auditActions: 5,
   auditRolePage: 100,

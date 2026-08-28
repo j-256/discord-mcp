@@ -54,6 +54,14 @@ Project the response before returning it. Permit only verified IDs, booleans, fi
 
 Keep per-context installation defaults separate from legacy defaults. Report Administrator and unknown authority explicitly. Treat outgoing-webhook and Gateway Interaction delivery as mutually exclusive, require only the privileged intents selected connector capabilities need, and warn about unused Presence intent without enabling a presence workload. Findings and remediation text must come from a fixed local vocabulary, never from Discord-provided text.
 
+## Application Activity instances
+
+Inspect Activity instances only for the configured and verified current application and bot. Accept one bounded opaque instance ID plus one exact expected guild and channel already inside ordinary read scope, and optionally one exact user ID for a boolean membership answer. Accept no caller-selected application, participant enumeration, private-channel target, display name, profile, token, URL, Gateway dependency, cache, write, activity record, operation receipt, telemetry payload, or persistent file.
+
+Require the Discord response to match the pinned application, requested instance, and exact expected public guild-channel location before returning any active evidence. Fail closed on private-channel locations, guild or channel drift, malformed or duplicate participant IDs, malformed known fields, excess bounds, unknown location kinds, or identity mismatch. Treat only Discord's exact not-found response as inactive or unavailable; do not convert transport, rate-limit, server, or malformed-response failures into absence.
+
+Return only verified application and bot IDs, active state, exact expected location, launch ID, participant count, optional membership evidence for the one caller-supplied user, fixed warnings, and count-only unknown fields. Never return or persist the participant list, display names, profiles, opaque location ID, raw response, error evidence, or transport cause. Describe the result as a transient snapshot, never as durable membership, authorization, an Activity launch or join, or voice-session evidence.
+
 ## Authenticated bot profile
 
 Keep current-bot profile reads behind their own audit gate and the `bot-profile` toolset. Resolve the target only from the configured and freshly verified current application and bot identities. Accept no caller-selected application or bot ID, guild or channel scope, guild permission, privileged intent, Gateway requirement, generic User object, or raw response. Return only exact IDs, transient untrusted username, avatar and banner presence plus animation state, and bounded unknown-field counts. Never return media hashes, email, locale, flags, decorations, collectibles, or unknown values, and never persist profile text or media state.

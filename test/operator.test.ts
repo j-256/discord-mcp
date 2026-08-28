@@ -469,6 +469,7 @@ function toolService(
     auditApplicationRoleConnectionMetadata: unexpected,
     auditApplicationSkus: unexpected,
     auditApplicationSubscriptions: unexpected,
+    inspectApplicationActivityInstance: unexpected,
     auditGuildWebhooks: unexpected,
     captureGuildBlueprint: unexpected,
     executeDirectMessageChange: unexpected,

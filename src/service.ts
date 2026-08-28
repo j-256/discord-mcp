@@ -8,6 +8,11 @@ import {
   type ApplicationCommandAuditResult,
 } from "./application-command-audit-service.js"
 import {
+  ApplicationActivityInstanceService,
+  type ApplicationActivityInstanceInspectionResult,
+  type ApplicationActivityInstanceRequest,
+} from "./application-activity-instance-service.js"
+import {
   ApplicationRoleConnectionMetadataAuditService,
   type ApplicationRoleConnectionMetadataAuditResult,
 } from "./application-role-connection-metadata-audit-service.js"
@@ -950,6 +955,7 @@ export interface DiscordServiceClient {
   executeWebhookMessage: DiscordClient["executeWebhookMessage"]
   getChannel: DiscordClient["getChannel"]
   getApplicationEmoji: DiscordClient["getApplicationEmoji"]
+  getApplicationActivityInstance?: DiscordClient["getApplicationActivityInstance"]
   getApplicationEntitlement: DiscordClient["getApplicationEntitlement"]
   getGuildForumTags: DiscordClient["getGuildForumTags"]
   getGuildChannelMetadata: DiscordClient["getGuildChannelMetadata"]
@@ -1529,6 +1535,7 @@ export class ConnectorService {
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
   readonly #applicationEmojiService: ApplicationEmojiService
+  readonly #applicationActivityInstanceService: ApplicationActivityInstanceService
   readonly #applicationEntitlementService: ApplicationEntitlementService
   readonly #applicationCommandAuditService: ApplicationCommandAuditService
   readonly #guildApplicationCommandService: GuildApplicationCommandService
@@ -1671,6 +1678,10 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.applicationEmojiOptions,
+    })
+    this.#applicationActivityInstanceService = new ApplicationActivityInstanceService({
+      client: this.#client,
+      policy: this.#policy,
     })
     this.#applicationCommandAuditService = new ApplicationCommandAuditService({
       client: this.#client,
@@ -2359,6 +2370,19 @@ export class ConnectorService {
         },
       },
       guildId,
+      options,
+    )
+  }
+
+  async inspectApplicationActivityInstance(
+    request: ApplicationActivityInstanceRequest,
+    options: RequestOptions = {},
+  ): Promise<ApplicationActivityInstanceInspectionResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#applicationActivityInstanceService.inspect(
+      identity.application.id,
+      identity.bot.id,
+      request,
       options,
     )
   }
