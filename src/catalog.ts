@@ -68,6 +68,8 @@ import {
   isPlanReviewToolName,
 } from "./mcp-plan-review-app.js"
 import {
+  createMcpToolAccessManifest,
+  type McpToolAccessStage,
   selectedCanonicalMcpToolNames,
 } from "./mcp-tool-catalog.js"
 import { stableString } from "./normalize.js"
@@ -81,7 +83,7 @@ import {
 import type { OperationalObserver } from "./observability.js"
 import { ScopePolicy } from "./policy.js"
 
-export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
+export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
 
 const CATALOG_HOME_DIRECTORY = "/discord-mcp-catalog"
 const CATALOG_TOKEN_PLACEHOLDER = "catalog-only-placeholder"
@@ -132,6 +134,7 @@ const EXPECTED_RESOURCE_TEMPLATE_URIS = Object.freeze(
 )
 
 export interface DiscordCatalogCheckReport {
+  accessStageCounts: Record<McpToolAccessStage, number>
   activityRecordsCreated: false
   completionBindingCount: number
   completionBindings: McpPolicyCompletionBinding[]
@@ -171,6 +174,7 @@ export interface DiscordCatalogCheckReport {
   serverVersion: string
   status: "ok"
   toolCount: number
+  toolAccessResourceDigest: string
   toolNames: string[]
   toolsetNames: string[]
 }
@@ -186,6 +190,7 @@ export interface DiscordCatalogSnapshot {
   safetyResource: ReadResourceResult
   serverCapabilities: ServerCapabilities
   tools: ListToolsResult["tools"]
+  toolAccessResource: ReadResourceResult
 }
 
 export interface DiscordCatalogRunOptions {
@@ -576,6 +581,34 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
         && safetyContent.text.includes("review-first workflows"),
       "static safety resource is unavailable",
     )
+    const toolAccessResource = await client.readResource({
+      uri: MCP_RESOURCE_URIS.toolAccess,
+    })
+    const toolAccessContent = toolAccessResource.contents[0]
+    catalogInvariant(
+      toolAccessResource.contents.length === 1
+      && toolAccessContent
+      && "text" in toolAccessContent
+      && toolAccessContent.uri === MCP_RESOURCE_URIS.toolAccess
+      && toolAccessContent.mimeType === "application/json",
+      "tool access resource identity changed",
+    )
+    let toolAccessValue: unknown
+    try {
+      toolAccessValue = JSON.parse(toolAccessContent.text)
+    } catch {
+      throw new Error("Discord catalog invariant failed: tool access resource is not JSON")
+    }
+    const toolAccessEnvelope = objectValue(toolAccessValue)
+    const expectedToolAccess = createMcpToolAccessManifest()
+    catalogInvariant(
+      stableString(toolAccessEnvelope?.data) === stableString(expectedToolAccess),
+      "tool access resource does not match the canonical manifest",
+    )
+    catalogInvariant(
+      !toolAccessContent.text.includes(CATALOG_TOKEN_PLACEHOLDER),
+      "tool access resource exposed the catalog credential placeholder",
+    )
     const planReviewAppResource = await client.readResource({
       uri: MCP_PLAN_REVIEW_APP_URI,
     })
@@ -647,10 +680,12 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       planReviewAppResource,
       safetyResource: safety,
       serverCapabilities,
+      toolAccessResource,
       tools,
     }
     const restMethods = Object.values(DISCORD_REST_OPERATIONS)
     const report: DiscordCatalogCheckReport = {
+      accessStageCounts: expectedToolAccess.stageCounts,
       activityRecordsCreated: false,
       completionBindingCount: completionBindings.length,
       completionBindings,
@@ -690,6 +725,10 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       serverVersion: CONNECTOR_VERSION,
       status: "ok",
       toolCount: toolsResult.tools.length,
+      toolAccessResourceDigest: sha256Digest(
+        toolAccessResource,
+        "tool access resource",
+      ),
       toolNames,
       toolsetNames: [...MCP_TOOLSET_NAMES].sort(),
     }
@@ -703,6 +742,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       resources,
       safetyResource: safety,
       serverCapabilities,
+      toolAccessResource,
       tools,
     }
   } finally {

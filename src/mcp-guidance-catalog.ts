@@ -16,6 +16,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
   planReviewApp: "plan_review_app",
   policy: "connector_policy",
   safety: "connector_safety",
+  toolAccess: "connector_tool_access",
   voiceRegions: "voice_regions",
 })
 
@@ -35,6 +36,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
   planReviewApp: "ui://discord-mcp/plan-review",
   policy: "discord://connector/policy",
   safety: "discord://connector/safety",
+  toolAccess: "discord://connector/tool-access",
   voiceRegions: "discord://voice/regions",
 })
 

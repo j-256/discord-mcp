@@ -14,7 +14,11 @@ import {
   type McpToolSurface,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
-import type { McpToolName } from "./observability-catalog.js"
+import {
+  MCP_TOOL_RISK_CLASSES,
+  type McpToolName,
+  type McpToolRiskClass,
+} from "./observability-catalog.js"
 
 export type CanonicalMcpToolName = Exclude<
   McpToolName,
@@ -36,7 +40,7 @@ const MCP_DISCOVERY_DETAILS = [
 ] as const
 
 type McpDiscoveryDetail = typeof MCP_DISCOVERY_DETAILS[number]
-type McpToolWorkflow =
+export type McpToolWorkflow =
   | "announcement-crosspost"
   | "announcement-subscription"
   | "application-emoji-change"
@@ -114,6 +118,78 @@ interface CompleteToolAnnotations {
   idempotentHint: boolean
   openWorldHint: boolean
   readOnlyHint: boolean
+}
+
+export const MCP_TOOL_ACCESS_STAGES = Object.freeze([
+  "guarded-write",
+  "live-read",
+  "local",
+  "receipt-verify",
+  "review-execute",
+  "review-plan",
+] as const)
+
+export type McpToolAccessStage = typeof MCP_TOOL_ACCESS_STAGES[number]
+
+export const MCP_TOOL_ACCESS_MANIFEST_FORMAT =
+  "discord-mcp.tool-access-manifest.v1"
+
+export interface McpToolAccessContract {
+  approval:
+    | "host-write-and-signed-interactive"
+    | "host-write-approval"
+    | "none"
+  authorizationEvidence:
+    | "fresh-plan-recheck"
+    | "none"
+    | "operation-runtime"
+    | "receipt-and-readback"
+    | "target-bound-plan"
+  companions: McpToolWorkflowCompanions
+  discordRequest: "none" | "read" | "write"
+  readiness: "not-applicable" | "target-specific"
+  stage: McpToolAccessStage
+}
+
+export interface McpToolWorkflowCompanions {
+  execute: readonly CanonicalMcpToolName[]
+  plan: readonly CanonicalMcpToolName[]
+  verify: readonly CanonicalMcpToolName[]
+}
+
+export type McpToolAccessStageContract = Omit<
+  McpToolAccessContract,
+  "companions" | "stage"
+>
+
+export interface McpToolAccessEntry extends McpToolAccessContract {
+  name: McpToolName
+  riskClass: McpToolRiskClass
+  toolset: McpToolsetName
+  workflow: McpToolWorkflow | null
+}
+
+export interface McpToolAccessManifestEntry {
+  name: McpToolName
+  stage: McpToolAccessStage
+  toolset: McpToolsetName
+  workflow: McpToolWorkflow | null
+}
+
+export interface McpToolAccessManifest {
+  authorityGranted: false
+  credentialsRequired: false
+  discordContacted: false
+  entries: readonly McpToolAccessManifestEntry[]
+  format: typeof MCP_TOOL_ACCESS_MANIFEST_FORMAT
+  readiness: "target-specific"
+  schemaVersion: number
+  stageContracts: Record<McpToolAccessStage, McpToolAccessStageContract>
+  stageCounts: Record<McpToolAccessStage, number>
+  status: "ok"
+  toolsetNames: readonly McpToolsetName[]
+  warnings: readonly string[]
+  workflows: Partial<Record<McpToolWorkflow, McpToolWorkflowCompanions>>
 }
 
 export const MCP_TOOL_CATALOG = Object.freeze({
@@ -1184,6 +1260,199 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   },
 } satisfies Record<CanonicalMcpToolName, ToolCatalogMetadata>)
 
+const RECEIPT_VERIFY_TOOL_PREFIX = "verify_"
+
+function accessStage(
+  name: McpToolName,
+  riskClass: McpToolRiskClass,
+  workflow: McpToolWorkflow | null,
+): McpToolAccessStage {
+  if (riskClass === "local-read") return "local"
+  if (name.startsWith(REVIEWED_PLAN_TOOL_PREFIX)) return "review-plan"
+  if (name.startsWith(RECEIPT_VERIFY_TOOL_PREFIX)) return "receipt-verify"
+  if (riskClass === "discord-read") return "live-read"
+  if (workflow !== null) return "review-execute"
+  return "guarded-write"
+}
+
+function accessMetadata(name: McpToolName): {
+  riskClass: McpToolRiskClass
+  toolset: McpToolsetName
+  workflow: McpToolWorkflow | null
+} {
+  const riskClass = MCP_TOOL_RISK_CLASSES[name]
+  if (name === MCP_DISCOVERY_TOOL_NAME) {
+    return { riskClass, toolset: "connector", workflow: null }
+  }
+  const metadata: ToolCatalogMetadata = MCP_TOOL_CATALOG[name]
+  return {
+    riskClass,
+    toolset: metadata.toolset,
+    workflow: metadata.workflow ?? null,
+  }
+}
+
+function workflowCompanions(
+  workflow: McpToolWorkflow | null,
+): McpToolWorkflowCompanions {
+  const members = workflow === null
+    ? []
+    : (Object.keys(MCP_TOOL_CATALOG) as CanonicalMcpToolName[])
+        .filter((name) => {
+          const metadata: ToolCatalogMetadata = MCP_TOOL_CATALOG[name]
+          return metadata.workflow === workflow
+        })
+  const byStage = (stage: McpToolAccessStage) => members
+    .filter((name) => {
+      const metadata = accessMetadata(name)
+      return accessStage(name, metadata.riskClass, metadata.workflow) === stage
+    })
+    .sort()
+  return {
+    execute: byStage("review-execute"),
+    plan: byStage("review-plan"),
+    verify: byStage("receipt-verify"),
+  }
+}
+
+function accessStageContract(
+  stage: McpToolAccessStage,
+): McpToolAccessStageContract {
+  const approval = stage === "review-execute"
+    ? "host-write-and-signed-interactive"
+    : stage === "guarded-write"
+      ? "host-write-approval"
+      : "none"
+  const authorizationEvidence = stage === "local"
+    ? "none"
+    : stage === "review-plan"
+      ? "target-bound-plan"
+      : stage === "review-execute"
+        ? "fresh-plan-recheck"
+        : stage === "receipt-verify"
+          ? "receipt-and-readback"
+          : "operation-runtime"
+  return {
+    approval,
+    authorizationEvidence,
+    discordRequest: stage === "local"
+      ? "none"
+      : stage === "review-execute" || stage === "guarded-write"
+        ? "write"
+        : "read",
+    readiness: stage === "local" ? "not-applicable" : "target-specific",
+  }
+}
+
+export function mcpToolAccessContract(
+  name: McpToolName,
+): McpToolAccessContract {
+  const metadata = accessMetadata(name)
+  const stage = accessStage(name, metadata.riskClass, metadata.workflow)
+  return {
+    ...accessStageContract(stage),
+    companions: workflowCompanions(metadata.workflow),
+    stage,
+  }
+}
+
+export function mcpToolAccessEntry(name: McpToolName): McpToolAccessEntry {
+  const metadata = accessMetadata(name)
+  return {
+    ...mcpToolAccessContract(name),
+    name,
+    riskClass: metadata.riskClass,
+    toolset: metadata.toolset,
+    workflow: metadata.workflow,
+  }
+}
+
+function assertAccessTopology(entry: McpToolAccessEntry): void {
+  if (
+    entry.workflow === null
+    && (
+      entry.companions.execute.length !== 0
+      || entry.companions.plan.length !== 0
+      || entry.companions.verify.length !== 0
+    )
+  ) {
+    throw new Error(
+      `MCP access contract ${entry.name} cannot identify companions without a workflow`,
+    )
+  }
+  if (
+    entry.workflow !== null
+    && (
+      entry.companions.execute.length !== 1
+      || entry.companions.plan.length !== 1
+    )
+  ) {
+    throw new Error(
+      `MCP access contract ${entry.name} must identify one reviewed plan and execution companion`,
+    )
+  }
+  if (
+    entry.stage === "receipt-verify"
+    && entry.companions.verify.length !== 1
+  ) {
+    throw new Error(
+      `MCP access contract ${entry.name} must identify one receipt-verification companion`,
+    )
+  }
+}
+
+export function createMcpToolAccessManifest(
+  toolsets: ReadonlySet<McpToolsetName> = new Set(MCP_TOOLSET_NAMES),
+): McpToolAccessManifest {
+  const selectedToolsets = selectedMcpToolsets(toolsets)
+  const names = [
+    MCP_DISCOVERY_TOOL_NAME,
+    ...selectedCanonicalMcpToolNames(new Set(selectedToolsets)),
+  ].sort() as McpToolName[]
+  const expandedEntries = names.map(mcpToolAccessEntry)
+  for (const entry of expandedEntries) assertAccessTopology(entry)
+  const entries = expandedEntries.map((entry): McpToolAccessManifestEntry => ({
+    name: entry.name,
+    stage: entry.stage,
+    toolset: entry.toolset,
+    workflow: entry.workflow,
+  }))
+  const stageContracts = Object.fromEntries(
+    MCP_TOOL_ACCESS_STAGES.map((stage) => [stage, accessStageContract(stage)]),
+  ) as Record<McpToolAccessStage, McpToolAccessStageContract>
+  const stageCounts = Object.fromEntries(
+    MCP_TOOL_ACCESS_STAGES.map((stage) => [stage, 0]),
+  ) as Record<McpToolAccessStage, number>
+  for (const entry of entries) stageCounts[entry.stage] += 1
+  const workflows: Partial<
+    Record<McpToolWorkflow, McpToolWorkflowCompanions>
+  > = {}
+  for (const entry of expandedEntries) {
+    if (entry.workflow !== null && workflows[entry.workflow] === undefined) {
+      workflows[entry.workflow] = entry.companions
+    }
+  }
+  return {
+    authorityGranted: false,
+    credentialsRequired: false,
+    discordContacted: false,
+    entries,
+    format: MCP_TOOL_ACCESS_MANIFEST_FORMAT,
+    readiness: "target-specific",
+    schemaVersion: SCHEMA_VERSION,
+    stageContracts,
+    stageCounts,
+    status: "ok",
+    toolsetNames: selectedToolsets,
+    warnings: [
+      "Static access contracts classify the authorization lifecycle and never prove access to a Discord target",
+      "Curated presets and recipes declare setup permissions while each external tool or reviewed plan evaluates exact operation-specific evidence",
+      "Every write remains subject to its local policy, target, approval, freshness, rate, recovery, and verification gates",
+    ],
+    workflows,
+  }
+}
+
 export const discoverDiscordToolsInputSchema = z.strictObject({
   detail: z.enum(MCP_DISCOVERY_DETAILS)
     .default("compact")
@@ -1219,6 +1488,7 @@ export interface TrackedMcpTool {
 }
 
 interface SearchableMcpTool extends TrackedMcpTool {
+  access: McpToolAccessContract
   annotations: CompleteToolAnnotations
   description: string
   keywords: readonly string[]
@@ -1492,6 +1762,7 @@ export function createDiscordToolDiscoveryCatalog(
     const title = tool.handle.title || tool.name
     return {
       ...tool,
+      access: mcpToolAccessContract(tool.name),
       annotations,
       description,
       keywords: metadata.keywords,
@@ -1734,6 +2005,7 @@ function matchResult(
   includeContract: boolean,
 ) {
   return {
+    access: entry.access,
     enabled: entry.handle.enabled,
     name: entry.name,
     risk: entry.risk,

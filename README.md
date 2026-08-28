@@ -49,7 +49,7 @@ npx --yes @j-256/discord-mcp@0.1.1 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.1 preset show server-observer
 ```
 
-`catalog --check` negotiates the credential-free, execution-disabled production contract and verifies that every tool call is blocked. `catalog --html FILE` writes a deterministic standalone explorer for the same tools, prompts, resources, schemas, completion routes, plan-review app, and digests without an external asset, network request, credential, or identifier completion value.
+`catalog --check` negotiates the credential-free, execution-disabled production contract and verifies that every tool call is blocked. `catalog --html FILE` writes a deterministic standalone explorer for the same tools, access lifecycles, prompts, resources, schemas, completion routes, plan-review app, and digests without an external asset, network request, credential, or identifier completion value.
 
 ### Install your owner-managed bot
 
@@ -244,7 +244,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 
 | Command | What it proves | Discord access |
 | --- | --- | --- |
-| `discord-mcp catalog --check --json` | Exact production MCP inventories, schemas, annotations, policy-completion manifest and zero-value catalog proof, plan-review app bytes and authority, fixed execution guard, and stable contract, safety, and app digests | None |
+| `discord-mcp catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
 | `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, app source, instructions, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
@@ -263,7 +263,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
-`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, policy-completion bindings, tool schemas and annotations, prompt declarations, resource declarations, templates, safety response, plan-review app response, and execution guard.
+`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, tool access lifecycles, policy-completion bindings, tool schemas and annotations, prompts, resources, templates, safety response, review app, and execution guard.
 
 Release automation verifies reproducible npm and OCI artifacts, SPDX inventories, and signed provenance, then publishes an immutable GitHub Release binding its tag, commit, and evidence. Provenance is a build receipt, an SBOM a parts list, and an attestation their exact artifact-and-issuer binding; none certifies security or completeness. See the [evidence boundaries](docs/reference.md#provenance-sbom-and-attestation-boundaries) and [release runbook](docs/releasing.md).
 

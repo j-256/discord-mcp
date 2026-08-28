@@ -1505,6 +1505,9 @@ function helpText(topic: CliCommand | undefined): string {
 }
 
 function renderCatalog(report: DiscordCatalogCheckReport): string {
+  const accessStages = Object.entries(report.accessStageCounts)
+    .map(([stage, count]) => `${stage}=${count}`)
+    .join(", ")
   const riskClasses = Object.entries(report.riskClassCounts)
     .map(([risk, count]) => `${risk}=${count}`)
     .join(", ")
@@ -1516,6 +1519,7 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
     `Server: ${report.serverName}@${report.serverVersion}`,
     `Evidence format: ${report.evidenceFormat}`,
     `Contract digest: ${report.contractDigest}`,
+    `Tool access resource digest: ${report.toolAccessResourceDigest}`,
     `Safety resource digest: ${report.safetyResourceDigest}`,
     `Plan review app HTML digest: ${report.planReviewApp.htmlDigest}`,
     `Plan review app resource digest: ${report.planReviewApp.resourceDigest}`,
@@ -1523,6 +1527,7 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
     "Plan review app authority: display-only, no external network, permissions, or server tools",
     `Tools: ${report.toolCount}`,
     `Toolsets: ${report.toolsetNames.length}`,
+    `Access stages: ${accessStages}`,
     `Risk classes: ${riskClasses}`,
     `Prompts: ${report.promptCount}`,
     `Resources: ${report.resourceCount}`,

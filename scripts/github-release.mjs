@@ -180,7 +180,7 @@ export async function prepareGitHubReleaseEvidence({ directory, ociDigest, outpu
   const npmIntegrity = sha512Integrity(await readFile(archivePath))
 
   const catalogDocument = await readJson(catalogPath)
-  invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v1", "GitHub Release catalog evidence format is invalid")
+  invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v2", "GitHub Release catalog evidence format is invalid")
   invariant(catalogDocument.schemaVersion === 1, "GitHub Release catalog evidence schema is invalid")
   invariant(catalogDocument.serverVersion === version, "GitHub Release catalog evidence version is invalid")
   invariant(catalogDocument.status === "ok", "GitHub Release catalog evidence status is invalid")
