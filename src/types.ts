@@ -244,6 +244,7 @@ export interface DiscordGuild {
   permissions?: string
   system_channel_flags?: number
   system_channel_id?: string | null
+  vanity_url_code?: string | null
   verification_level?: number
   widget_channel_id?: string | null
   widget_enabled?: boolean

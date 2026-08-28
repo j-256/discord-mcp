@@ -987,6 +987,12 @@ const guildInviteInputSchema = z.strictObject({
   guildId: positiveSnowflakeSchema.describe("Exact separately allowlisted Discord guild ID"),
   inviteRef: inviteReferenceSchema,
 })
+const guildVanityUrlInputSchema = z.strictObject({
+  guildId: positiveSnowflakeSchema.describe("Exact separately allowlisted Discord invite-audit guild ID"),
+  includeCode: z.boolean()
+    .default(false)
+    .describe("Explicitly disclose the transient untrusted vanity invite code"),
+})
 const guildTemplateListInputSchema = z.strictObject({
   guildId: positiveSnowflakeSchema
     .describe("Exact separately allowlisted guild-template source guild ID"),
@@ -9703,6 +9709,7 @@ export interface DiscordToolService {
   getGuildAuditEntry: ConnectorService["getGuildAuditEntry"]
   getGuildBan: ConnectorService["getGuildBan"]
   getGuildInvite: ConnectorService["getGuildInvite"]
+  getGuildVanityUrl: ConnectorService["getGuildVanityUrl"]
   getGuildOnboarding: ConnectorService["getGuildOnboarding"]
   getGuildWelcomeScreen: ConnectorService["getGuildWelcomeScreen"]
   getGuildWidgetSettings: ConnectorService["getGuildWidgetSettings"]
@@ -20481,6 +20488,30 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord returned capability-safe invite ${input.inviteRef} from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("get_guild_vanity_url", server.registerTool(
+    "get_guild_vanity_url",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Audit one separately allowlisted Discord guild's vanity invite eligibility, configured state, usage count, and complete MANAGE_GUILD evidence through Discord's documented read endpoint. The exact code is omitted by default and returned only after explicit includeCode opt-in; full URLs, raw payloads, and unknown-field values are always omitted, and nothing is persisted.",
+      inputSchema: guildVanityUrlInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Audit privacy-bounded Discord guild vanity URL",
+    },
+    safeToolHandler("get_guild_vanity_url", async (
+      input: z.infer<typeof guildVanityUrlInputSchema>,
+      context,
+    ) => {
+      const result = await service.getGuildVanityUrl(input.guildId, {
+        includeCode: input.includeCode,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord vanity URL audit returned eligible=${result.vanity.eligible}, configured=${result.vanity.configured}, and code=${result.vanity.codeDisclosure} for guild ${input.guildId}`,
       )
     }, secrets, observability),
   ))

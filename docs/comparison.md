@@ -183,6 +183,43 @@ The Registry result captured on 2026-08-28 does not include TheETR's untagged [T
 
 The TheETR evidence comes from its [current-bot profile registration and handler](https://github.com/TheETR/Thee-Discord-MCP/blob/main/src/tools.ts#L549-L582). The local workflow and its limits are documented in [Reviewed authenticated bot-profile lifecycle](reference.md#reviewed-authenticated-bot-profile-lifecycle).
 
+## Broader unregistered field scan
+
+The Registry matrix remains release-exact, but idea discovery also needs public projects that have not published an official Registry record. A source-head scan captured on 2026-08-28 widened the field without mixing moving branches into the scored release table. These projects have materially different deployment, identity, and persistence models, so the disposition records what was learned rather than pretending every feature belongs in a local bot-token connector.
+
+| Public source head | Distinctive idea or product shape | Discord MCP disposition |
+| --- | --- | --- |
+| [HardHeadHackerHead](https://github.com/HardHeadHackerHead/discord-mcp) | Broad discord.js administration and a feature-aware vanity URL read | Adopt the useful vanity audit outcome, then add exact policy, pinned identity, permission proof, default code redaction, strict evidence, and MCP-native guidance |
+| [arrrnmp](https://github.com/arrrnmp/discord-mcp) | Broad typed service surface with guild allowlisting, dry-run support, and a direct vanity summary | Adopt the typed vanity summary while strengthening disclosure, feature and permission evidence, response consistency, and persistence boundaries |
+| [glittercowboy](https://github.com/glittercowboy/discord-mcp) | Very broad direct REST coverage, including vanity read and a direct vanity PATCH | Adopt only the documented read; reject the mutation because Discord's public guild resource contract does not document that route |
+| [Rastrian](https://github.com/Rastrian/DiscordMCP) | Hosted multi-tenant OAuth workspaces, policy layers, audit, automation, and a Discord-resident agent | Different fit: useful for a shared control plane, but not a reason to move a local connector's credentials, Discord content, or authority into a hosted service |
+| [sandraschi](https://github.com/sandraschi/discord-mcp) | Local dashboard, RAG ingestion, sampling-driven workflows, and bundled operational guides | Preserve the no-content-persistence boundary; retain the dashboard and workflow ideas as candidates only where they can remain private, optional, and model-neutral |
+| [Soyouse](https://github.com/Soyouse/discord-mcp) | Multi-bot session isolation, an invalid-request monitor, raw REST pass-through, a web client, and a persistent history relay | Keep the multi-bot and shared-rate-safety lessons; reject raw endpoint authority and mandatory history persistence in favor of explicit bounded contracts |
+| [SaseQ](https://github.com/SaseQ/discord-mcp) | JDA implementation with stdio and HTTP modes, container installation, health checks, and a broad conventional tool surface | Retain transport and health-check ideas while preserving deterministic native package and MCPB installation that does not require Docker |
+| [goul4rt](https://github.com/goul4rt/mcp-discord) | Standalone or embedded discord.js operation, optional Gateway behavior, and broad monitoring and administration coverage | Do not add embeddability unless it preserves one policy source, fixed-origin REST, privacy projections, and reviewed writes |
+| [LawyerCord](https://github.com/SenorLawyer/LawyerCord) | A Discord-client bridge that returns downloaded attachments as native MCP image, audio, or resource-link blocks | Evaluate native attachment results only alongside an explicit custody and platform-policy design; do not inherit user-account automation or an implicit remote-download boundary |
+
+### Guild vanity audit head-to-head
+
+HardHeadHackerHead's [vanity handler](https://github.com/HardHeadHackerHead/discord-mcp/blob/main/src/tools/server.ts) checks the guild feature and returns the code, full URL, and usage count. arrrnmp's [typed guild-settings service](https://github.com/arrrnmp/discord-mcp/blob/main/src/discord/guild-settings.ts) applies its guild allowlist and returns the endpoint's code and usage count. glittercowboy's [direct handlers](https://github.com/glittercowboy/discord-mcp/blob/main/src/server.py) expose both the read and an immediate PATCH. The focused rubric follows Discord's public [Get Guild Vanity URL contract](https://docs.discord.com/developers/resources/guild#get-guild-vanity-url), which requires `MANAGE_GUILD`, returns a nullable code plus usage count, and documents no vanity mutation route.
+
+| Vanity-audit operator outcome | Discord MCP | HardHead source head | arrrnmp source head | glittercowboy source head |
+| --- | --- | --- | --- | --- |
+| Documented read with an exact selected guild | **Lead** | Partial | Covered | Partial |
+| Exact local scope plus freshly pinned application and bot identity | **Lead** | Not demonstrated | Partial | Not demonstrated |
+| Complete owner or `MANAGE_GUILD` evidence before disclosure | **Lead** | Not demonstrated | Not demonstrated | Not demonstrated |
+| Feature-aware endpoint eligibility without masking unrelated failures | **Lead** | Partial | Not demonstrated | Not demonstrated |
+| Strict bounded response projection and unknown-field accounting | **Lead** | Not demonstrated | Partial | Partial |
+| Guild-object and endpoint-code consistency check | **Lead** | Not demonstrated | Not demonstrated | Not demonstrated |
+| Code omitted by default and disclosed only through explicit strict input | **Lead** | Not demonstrated | Not demonstrated | Not demonstrated |
+| No full invite URL in the MCP result | **Lead** | Not demonstrated | Covered | Covered |
+| Always-redacted exact-guild MCP resource and progressive discovery | **Lead** | Not demonstrated | Not demonstrated | Not demonstrated |
+| Explicit no-persistence, no-log, no-trace, and content-safe error boundary | **Lead** | Not demonstrated | Not demonstrated | Not demonstrated |
+| Documented-only mutation boundary | **Lead** | Covered | Covered | Partial |
+| Deterministic tests for eligible, ineligible, redacted, disclosed, malformed, drifted, and failed reads | **Lead** | Not demonstrated | Partial | Not demonstrated |
+
+Discord MCP's [privacy-bounded vanity audit](reference.md#privacy-bounded-vanity-url-audit) reuses the existing invite-audit capability and exact guild scope. It skips the endpoint for an ineligible guild, validates the documented feature and both independent code observations, returns only eligibility, configuration state, uses, permission evidence, and count-only unknown fields by default, and never constructs a URL. Explicit `includeCode: true` disclosure remains transient, while the exact-guild resource always forces redaction. The implementation deliberately adds no vanity write from private or inferred API behavior.
+
 ## Audited releases and source limits
 
 | Product | Registry release | Audit basis | Scope note |

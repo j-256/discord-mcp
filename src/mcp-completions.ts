@@ -102,6 +102,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.threadMembership, "userId", "threadMemberUserIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.exactGuildBan, "guildId", "banAuditGuildIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.exactGuildInvite, "guildId", "inviteGuildIds"),
+  resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.guildVanityUrl, "guildId", "inviteGuildIds"),
   resourceBinding(
     MCP_RESOURCE_TEMPLATE_URIS.channelMetadata,
     "channelId",

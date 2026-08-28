@@ -492,12 +492,15 @@ import type {
   InviteDeletionPlan,
   InviteDeletionRequest,
   InviteDeletionResult,
+  GuildVanityUrlAuditResult,
+  GuildVanityUrlOptions,
   InviteInventoryResult,
   InviteListOptions,
   InviteLookupResult,
   InviteServiceOptions,
 } from "./invite-service.js"
 import {
+  assertGuildVanityUrlInput,
   assertInviteGetInput,
   assertInviteListInput,
   InviteService,
@@ -964,6 +967,7 @@ export interface DiscordServiceClient {
   getCurrentUserVoiceState: DiscordClient["getCurrentUserVoiceState"]
   getCurrentUser: DiscordClient["getCurrentUser"]
   getGuild: DiscordClient["getGuild"]
+  getGuildVanityUrl: DiscordClient["getGuildVanityUrl"]
   getGuildIncidentActions: DiscordClient["getGuildIncidentActions"]
   getGuildProfile: DiscordClient["getGuildProfile"]
   getGuildPruneCount: DiscordClient["getGuildPruneCount"]
@@ -2791,6 +2795,20 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       inviteRef,
+      options,
+    )
+  }
+
+  async getGuildVanityUrl(
+    guildId: string,
+    options: GuildVanityUrlOptions = {},
+  ): Promise<GuildVanityUrlAuditResult> {
+    assertGuildVanityUrlInput(guildId, options.includeCode ?? false)
+    const identity = await this.#verifyIdentity(options)
+    return this.#inviteService.getVanityUrl(
+      identity.application.id,
+      identity.bot.id,
+      guildId,
       options,
     )
   }

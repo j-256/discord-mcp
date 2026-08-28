@@ -11048,6 +11048,40 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async getGuildVanityUrl(guildId, options) {
+      return {
+        access: inviteAccess(),
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId,
+        localConstraints: {
+          codeCharacters: 256,
+          codeDisclosure: "explicit-tool-opt-in" as const,
+        },
+        privacy: {
+          code: "explicit-transient-opt-in" as const,
+          inviteUrl: "omitted" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+          unknownFields: "counts-only" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+        vanity: {
+          code: options?.includeCode ? PRIVATE_INVITE_CODE : null,
+          codeDisclosure: options?.includeCode ? "included" as const : "omitted" as const,
+          configured: true,
+          eligible: true,
+          unknownFieldCount: 0,
+          uses: 12,
+        },
+        verification: {
+          endpointCalled: true,
+          guildCrossCheck: "match" as const,
+          writePerformed: false as const,
+        },
+      }
+    },
     async listGuildInvites(guildId, options) {
       calls.inviteDeletionList += 1
       return {
@@ -14331,6 +14365,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_guild_ban",
       "list_guild_invites",
       "get_guild_invite",
+      "get_guild_vanity_url",
       "list_guild_templates",
       "get_guild_onboarding",
       "get_guild_welcome_screen",
@@ -14916,6 +14951,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_webhook_message",
     "list_guild_invites",
     "get_guild_invite",
+    "get_guild_vanity_url",
     "list_guild_templates",
     "get_guild_onboarding",
     "get_guild_widget_settings",
@@ -24439,6 +24475,49 @@ test("MCP invite reads expose only opaque capability-safe evidence", async (cont
     JSON.stringify([listed, exact, invalid]),
     new RegExp(PRIVATE_INVITE_CODE),
   )
+})
+
+test("MCP guild vanity audit requires explicit code disclosure", async (context) => {
+  const { client } = await connectedFixture(context)
+  const redacted = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "get_guild_vanity_url",
+  })
+  const disclosed = await client.callTool({
+    arguments: { guildId: GUILD_ID, includeCode: true },
+    name: "get_guild_vanity_url",
+  })
+  const rejected = await client.callTool({
+    arguments: {
+      guildId: GUILD_ID,
+      includeCode: false,
+      url: `https://discord.gg/${PRIVATE_INVITE_CODE}`,
+    },
+    name: "get_guild_vanity_url",
+  })
+
+  const redactedContent = structuredContent(redacted)
+  const disclosedContent = structuredContent(disclosed)
+  assert.equal(redactedContent.status, "ok")
+  assert.equal(
+    (redactedContent.vanity as Record<string, unknown>).codeDisclosure,
+    "omitted",
+  )
+  assert.doesNotMatch(JSON.stringify(redacted), new RegExp(PRIVATE_INVITE_CODE))
+  assert.equal(
+    (disclosedContent.vanity as Record<string, unknown>).code,
+    PRIVATE_INVITE_CODE,
+  )
+  assert.equal(
+    (disclosedContent.vanity as Record<string, unknown>).codeDisclosure,
+    "included",
+  )
+  assert.doesNotMatch(
+    JSON.stringify(disclosed.content),
+    new RegExp(PRIVATE_INVITE_CODE),
+  )
+  assert.equal(rejected.isError, true)
+  assert.doesNotMatch(JSON.stringify(rejected), new RegExp(PRIVATE_INVITE_CODE))
 })
 
 test("MCP invite deletion plans reject capabilities and unsafe operation keys", async (context) => {

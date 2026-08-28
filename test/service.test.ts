@@ -702,6 +702,9 @@ function serviceFixture(overrides: {
         premium_tier: 0,
       }
     },
+    async getGuildVanityUrl() {
+      throw new Error("Unexpected guild vanity URL lookup")
+    },
     async getInvite() {
       throw new Error("Unexpected exact invite lookup")
     },
@@ -4300,11 +4303,28 @@ test("service pins identity through capability-safe invite audit and revocation"
           type: 0,
         }
       },
+      async getGuild() {
+        return {
+          ...guild(),
+          features: ["VANITY_URL"],
+          owner_id: "700000000000000001",
+          premium_tier: 0,
+          vanity_url_code: privateCode,
+        }
+      },
       async getGuildMember() {
         return { roles: [], user: bot() }
       },
       async getGuildRoles() {
         return [role(GUILD_ID, DISCORD_PERMISSIONS.MANAGE_GUILD, "@everyone")]
+      },
+      async getGuildVanityUrl(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        return {
+          code: privateCode,
+          unknownFieldCount: 0,
+          uses: 12,
+        }
       },
       async listGuildInvites(guildId) {
         assert.equal(guildId, GUILD_ID)
@@ -4332,6 +4352,7 @@ test("service pins identity through capability-safe invite audit and revocation"
     operationStore,
   })
 
+  await assert.rejects(() => service.getGuildVanityUrl("bad"), /guild ID/)
   await assert.rejects(() => service.listGuildInvites("bad"), /guild ID/)
   await assert.rejects(
     () => service.getGuildInvite(GUILD_ID, "private-invite-capability"),
@@ -4349,6 +4370,7 @@ test("service pins identity through capability-safe invite audit and revocation"
   assert.equal(calls.application, 0)
   assert.equal(calls.user, 0)
 
+  const vanity = await service.getGuildVanityUrl(GUILD_ID)
   const listed = await service.listGuildInvites(GUILD_ID)
   const inviteRef = listed.invites[0]?.inviteRef
   assert.ok(inviteRef)
@@ -4362,6 +4384,10 @@ test("service pins identity through capability-safe invite audit and revocation"
   const plan = await service.planInviteDeletion(request)
   const result = await service.executeInviteDeletion(request, plan.digest)
 
+  assert.equal(vanity.vanity.configured, true)
+  assert.equal(vanity.vanity.code, null)
+  assert.equal(vanity.vanity.eligible, true)
+  assert.equal(vanity.vanity.uses, 12)
   assert.equal(exact.invite.inviteRef, inviteRef)
   assert.equal(plan.target.inviteRef, inviteRef)
   assert.equal(plan.privacy.capabilitiesProjectedOut, true)
@@ -4375,7 +4401,15 @@ test("service pins identity through capability-safe invite audit and revocation"
   assert.equal(operationStore.receipt?.kind, "invite-deletion")
   assert.equal(operationStore.receipt?.resourceId, inviteRef)
   assert.doesNotMatch(
-    JSON.stringify([listed, exact, plan, result, calls.activityEntries, operationStore.receipt]),
+    JSON.stringify([
+      vanity,
+      listed,
+      exact,
+      plan,
+      result,
+      calls.activityEntries,
+      operationStore.receipt,
+    ]),
     new RegExp(privateCode),
   )
 })

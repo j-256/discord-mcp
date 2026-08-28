@@ -78,6 +78,79 @@ test("Discord client projects a bounded guild invite inventory", async () => {
   )
 })
 
+test("Discord client projects strict guild vanity URL evidence", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const responses = [
+    { code: PRIVATE_CODE, uses: 42, unknown_private_field: "omit-me" },
+    { code: null, uses: 0 },
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({ method: init?.method || "GET", url: String(input) })
+      return jsonResponse(responses.shift())
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(await client.getGuildVanityUrl("100"), {
+    code: PRIVATE_CODE,
+    unknownFieldCount: 1,
+    uses: 42,
+  })
+  assert.deepEqual(await client.getGuildVanityUrl("100"), {
+    code: null,
+    unknownFieldCount: 0,
+    uses: 0,
+  })
+  assert.deepEqual(requests, [
+    { method: "GET", url: `${API_BASE_URL}/guilds/100/vanity-url` },
+    { method: "GET", url: `${API_BASE_URL}/guilds/100/vanity-url` },
+  ])
+})
+
+test("Discord client rejects malformed vanity evidence and suppresses failure details", async () => {
+  const malformed: unknown[] = [
+    { code: 42, uses: 0 },
+    { code: "..", uses: 0 },
+    { code: null, uses: -1 },
+    { code: null, uses: Number.MAX_SAFE_INTEGER + 1 },
+    [],
+  ]
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse(malformed.shift()),
+    token: TOKEN,
+  })
+  for (let index = 0; index < 5; index += 1) {
+    await assert.rejects(
+      () => client.getGuildVanityUrl("100"),
+      /invalid guild vanity URL evidence/,
+    )
+  }
+  await assert.rejects(
+    () => client.getGuildVanityUrl("bad"),
+    /guild vanity URL guild ID/,
+  )
+
+  const failing = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(`private vanity failure ${PRIVATE_CODE}`)
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => failing.getGuildVanityUrl("100"),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.doesNotMatch(error.message, new RegExp(escapeRegularExpression(PRIVATE_CODE)))
+      assert.equal((error as Error & { cause?: unknown }).cause, undefined)
+      return true
+    },
+  )
+})
+
 test("Discord client deletes an invite once with a secret-safe diagnostic route", async () => {
   const requests: Array<{
     method: string | undefined

@@ -144,6 +144,10 @@ test("tool discovery normalizes safe variants while rejecting weak multi-term ma
       title: "Execute role ordering",
     }),
     trackedTool({ name: "read_messages", title: "Read Discord messages" }),
+    trackedTool({
+      name: "get_guild_vanity_url",
+      title: "Audit privacy-bounded Discord guild vanity URL",
+    }),
     trackedTool({ name: "plan_channel_creation", title: "Plan channel creation" }),
   ], "full")
 
@@ -160,6 +164,13 @@ test("tool discovery normalizes safe variants while rejecting weak multi-term ma
     query: "messages",
   }, catalog)
   assert.equal(terse.matches.some(({ name }) => name === "read_messages"), true)
+
+  const vanity = discoverDiscordTools({
+    detail: "compact",
+    limit: 1,
+    query: "check vanity invite uses",
+  }, catalog)
+  assert.equal(vanity.matches[0]?.name, "get_guild_vanity_url")
 
   const weak = discoverDiscordTools({
     detail: "compact",
