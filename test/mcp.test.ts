@@ -9364,6 +9364,11 @@ function serviceFixture(overrides: {
       DiscordToolService["analyzeCommunityActivity"]
     > | null,
   }
+  const conversationRecallCalls = {
+    arguments: null as Parameters<
+      DiscordToolService["recallConversation"]
+    > | null,
+  }
   const calls = {
     active: 0,
     addReaction: 0,
@@ -9509,6 +9514,7 @@ function serviceFixture(overrides: {
     reactionModerationPlan: 0,
     reactionUsers: 0,
     reactions: 0,
+    recall: 0,
     removeOwnReaction: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,
@@ -13875,6 +13881,40 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async recallConversation(...arguments_) {
+      calls.recall += 1
+      conversationRecallCalls.arguments = arguments_
+      const request = arguments_[0]
+      return {
+        attemptedPhraseCount: request.searchPhrases.length,
+        contextRadius: request.contextRadius ?? 2,
+        doingDeepHistoricalIndex: false,
+        guildId: request.guildId,
+        limitations: [
+          "Recall depends on the caller-supplied literal phrase variants and is not semantic or embedding search.",
+          "Discord search result totals are estimates and indexed history can be incomplete or still building.",
+          "Each returned context is a bounded current point-in-time page, not complete conversation history.",
+          "A missing or changed ranked target fails the whole result instead of presenting stale context.",
+        ] as const,
+        matches: [],
+        privacy: {
+          contextProfiles: "omitted" as const,
+          persistence: "none" as const,
+          phraseText: "input-only" as const,
+          rawPayloads: "omitted" as const,
+        },
+        requestedLimit: request.limit ?? 5,
+        schemaVersion: 1,
+        searchedPhraseCount: request.searchPhrases.length,
+        searches: request.searchPhrases.map((_phrase, index) => ({
+          documentsIndexed: null,
+          phraseIndex: index + 1,
+          returned: 0,
+          totalResultsEstimate: 0,
+        })),
+        status: "ok" as const,
+      }
+    },
     async searchMessages(guildId, options) {
       calls.search += 1
       return {
@@ -13979,6 +14019,7 @@ function serviceFixture(overrides: {
     applicationMonetizationCalls,
     calls,
     communityActivityCalls,
+    conversationRecallCalls,
     guildBlueprintCaptureCalls,
     guildCommunityCalls,
     guildIncidentCalls,
@@ -14465,6 +14506,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "analyze_community_activity",
       "read_messages",
       "search_messages",
+      "recall_conversation",
       "get_message",
       "read_message_attachment",
       "list_direct_messages",
@@ -15705,6 +15747,7 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
     { expected: ["read_messages"], first: "read_messages", query: "summarize recent channel messages" },
     { expected: ["read_messages"], first: "read_messages", query: "get context around a message" },
     { expected: ["search_messages"], first: "search_messages", query: "search guild messages about an incident" },
+    { expected: ["recall_conversation"], first: "recall_conversation", query: "recall a vaguely remembered conversation" },
     { expected: ["read_message_attachment"], first: "read_message_attachment", query: "read an exact image attachment as native media" },
     { expected: ["explain_channel_access"], first: "explain_channel_access", query: "who can view this channel" },
     { expected: ["search_guild_members"], first: "search_guild_members", query: "find a guild member by name" },
@@ -17171,6 +17214,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "analyze_community_activity",
       "read_messages",
       "search_messages",
+      "recall_conversation",
       "get_message",
       "read_message_attachment",
       "discover_discord_tools",
@@ -17185,6 +17229,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "review_application_skus",
       "summarize_channel",
       "search_guild_messages",
+      "recall_discord_conversation",
     ],
   )
   const unavailable = structuredContent(await client.callTool({
@@ -17281,6 +17326,59 @@ test("MCP message search requires a substantive filter and forwards bounded inpu
   assert.equal(calls.search, 1)
   assert.equal(invalid.isError, true)
   assert.equal(calls.search, 1)
+})
+
+test("MCP conversation recall forwards strict bounded input and cancellation", async (context) => {
+  const { calls, client, conversationRecallCalls } = await connectedFixture(context)
+
+  const valid = await client.callTool({
+    arguments: {
+      after: "2026-08-01T00:00:00Z",
+      authorIds: [USER_ID],
+      before: "2026-08-28T00:00:00Z",
+      channelIds: [CHANNEL_ID],
+      contextRadius: 3,
+      guildId: GUILD_ID,
+      limit: 4,
+      searchPhrases: ["deployment incident", "failed release"],
+      slop: 7,
+    },
+    name: "recall_conversation",
+  })
+  const invalidRange = await client.callTool({
+    arguments: {
+      after: "2026-08-28T00:00:00Z",
+      before: "2026-08-01T00:00:00Z",
+      guildId: GUILD_ID,
+      searchPhrases: ["deployment incident"],
+    },
+    name: "recall_conversation",
+  })
+  const invalidDuplicate = await client.callTool({
+    arguments: {
+      guildId: GUILD_ID,
+      searchPhrases: ["same phrase", "same phrase"],
+    },
+    name: "recall_conversation",
+  })
+
+  assert.equal(structuredContent(valid).status, "ok")
+  assert.equal(calls.recall, 1)
+  assert.deepEqual(conversationRecallCalls.arguments?.[0], {
+    after: "2026-08-01T00:00:00Z",
+    authorIds: [USER_ID],
+    before: "2026-08-28T00:00:00Z",
+    channelIds: [CHANNEL_ID],
+    contextRadius: 3,
+    guildId: GUILD_ID,
+    limit: 4,
+    searchPhrases: ["deployment incident", "failed release"],
+    slop: 7,
+  })
+  assert.equal(conversationRecallCalls.arguments?.[1]?.signal instanceof AbortSignal, true)
+  assert.equal(invalidRange.isError, true)
+  assert.equal(invalidDuplicate.isError, true)
+  assert.equal(calls.recall, 1)
 })
 
 test("MCP exact attachment reads return native content, a private link, and no byte metadata", async (context) => {
@@ -17644,6 +17742,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     reactionModerationPlan: 0,
     reactionUsers: 0,
     reactions: 0,
+    recall: 0,
     removeOwnReaction: 0,
     roleCreationExecute: 0,
     roleCreationPlan: 0,

@@ -224,6 +224,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   preview_component_layout: "local-read",
   preview_embed_message: "local-read",
   read_messages: "discord-read",
+  recall_conversation: "discord-read",
   list_message_pins: "discord-read",
   list_discord_interaction_continuations: "local-read",
   list_pending_discord_interactions: "local-read",

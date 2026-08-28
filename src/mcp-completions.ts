@@ -197,6 +197,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   promptBinding(MCP_PROMPT_NAMES.reviewThreadChange, "threadId", "threadIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewThreadChange, "userId", "threadMemberUserIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewRoleCreation, "guildId", "roleCreationGuildIds"),
+  promptBinding(MCP_PROMPT_NAMES.recallConversation, "guildId", "allowedGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.summarizeChannel, "channelId", "allowedChannelIds"),
   promptBinding(MCP_PROMPT_NAMES.searchGuildMessages, "guildId", "allowedGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewMessageDeletion, "channelId", "deleteChannelIds"),

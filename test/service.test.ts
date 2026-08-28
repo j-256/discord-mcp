@@ -11150,6 +11150,50 @@ test("service exposes Discord search indexing state and rejects filterless calls
   assert.equal(calls, 1)
 })
 
+test("service verifies pinned identity before bounded conversation recall", async () => {
+  let channelOptions: Parameters<DiscordServiceClient["getChannel"]>[1]
+  let contextOptions: Parameters<DiscordServiceClient["listMessages"]>[1]
+  let searchOptions: Parameters<DiscordServiceClient["searchGuildMessages"]>[1]
+  const signal = new AbortController().signal
+  const { calls, service } = serviceFixture({
+    client: {
+      async getChannel(_channelId, options) {
+        channelOptions = options
+        return channel()
+      },
+      async listMessages(_channelId, options) {
+        contextOptions = options
+        return [message()]
+      },
+      async searchGuildMessages(_guildId, options) {
+        searchOptions = options
+        return {
+          doing_deep_historical_index: false,
+          messages: [[message()]],
+          total_results: 1,
+        }
+      },
+    },
+  })
+
+  const result = await service.recallConversation({
+    contextRadius: 1,
+    guildId: GUILD_ID,
+    limit: 1,
+    searchPhrases: ["remember hello"],
+  }, { signal })
+
+  assert.equal(result.status, "ok")
+  assert.equal(result.matches[0]?.messageId, MESSAGE_ID)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(searchOptions?.signal, signal)
+  assert.equal(channelOptions?.signal, signal)
+  assert.equal(contextOptions?.signal, signal)
+  assert.equal(contextOptions?.around, MESSAGE_ID)
+  assert.equal(contextOptions?.limit, 3)
+})
+
 test("service bounds active threads after parent-aware local scope filtering", async () => {
   const { service } = serviceFixture({
     client: {
