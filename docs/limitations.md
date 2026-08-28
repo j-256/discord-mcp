@@ -1,6 +1,6 @@
 # Product boundaries and host compatibility
 
-[Getting started](getting-started.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md) | [Support](../SUPPORT.md)
+[Getting started](getting-started.md) | [Migration guide](migration.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md) | [Support](../SUPPORT.md)
 
 Discord MCP is designed for an operator-owned bot, a local stdio MCP host, exact least-privilege policy, transient Discord content, and review before consequential changes. This guide helps decide whether that model fits before a token is created, a host is configured, or a write capability is enabled.
 
@@ -19,6 +19,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
 | Use a compatible one-click MCPB host with an environment-backed token policy | Designed fit | Import one deterministic cross-platform bundle, select the complete strict policy, and enter only the token through the host's sensitive prompt |
 | Use another local MCP host or a file-backed token policy | Designed fit | `host` emits a pinned model-neutral launch contract, deterministic host adapters, and an optional private interactive activation guide |
+| Plan a switch from a scored local Discord MCP release | Designed fit | `migrate` accounts for every audited source tool and maps outcomes into target presets, recipes, tools, and trust-model changes without reading or changing either deployment |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
 | Use a Discord user account or selfbot | Not supported | The connector accepts a Discord bot token and verifies the pinned application and bot identities |
@@ -110,6 +111,7 @@ For an uncertain write, inspect the exact Discord target and audit evidence, ret
 | Connector-owned message archive, vector index, or Gateway content cache | Persistent content expands privacy and breach impact | Use bounded live reads and keep any caller-owned downstream retention outside the connector's claims |
 | Shared bot, multi-tenant relay, public HTTP listener, or hosted control plane | Shared custody changes the threat and authorization model | Run one local stdio connector per operator-managed bot boundary |
 | Environment-variable policy compatibility layer | Multiple ambient policy sources make effective authority harder to review | Use one strict non-secret configuration file or one managed profile; environment input is limited to the config selector and referenced secrets |
+| Automatic source, prompt, argument, policy, credential, or host migration | Apparent field compatibility can silently widen authority or misstate an operation's failure model | Use the release-exact offline planner, review every outcome disposition, and apply only the emitted strict setup and policy workflows |
 | Full server backup, cross-guild clone, or lossless restore | Discord APIs and privacy rules do not expose a complete reversible image | Use caller-retained blueprints or native Guild Templates only within their documented omissions |
 | Automatic adoption of unknown Discord fields or object types | Silent interpretation can expand authority or leak data | Upgrade to a version that explicitly models and tests the new contract |
 

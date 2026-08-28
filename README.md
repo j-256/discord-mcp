@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
+[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -52,6 +52,17 @@ npx --yes @j-256/discord-mcp@0.1.2 preset show server-observer
 
 `catalog --check` verifies the credential-free, execution-disabled production contract. `catalog --html FILE` adds a release-exact inspect-to-recovery tour to the complete offline explorer, binds each live stage to negotiated evidence, states what remains unproven, and uses no external asset, runtime request, credential, or completion ID.
 
+### Switch from another Discord MCP
+
+Generate a complete release-exact outcome map before creating policy or changing the old deployment:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 migrate list
+npx --yes @j-256/discord-mcp@0.1.2 migrate plan cappyeo@0.25.0 --html ./discord-mcp-migration.html
+```
+
+The [migration guide](docs/migration.md) covers every scored peer release. Planning scans no checkout, reads no configuration, host setting, environment value, or credential, contacts no network or Discord endpoint, and changes nothing. It maps every audited source tool into supported, review-required, or intentionally excluded outcomes and validates target routes against the negotiated production catalog. It does not rewrite prompts, arguments, configuration, credentials, or host settings.
+
 ### Install your owner-managed bot
 
 Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications), copy the public Application ID and target Server ID, and generate a callback-free install link whose guild and least-privilege permission grant come from the recommended preset:
@@ -65,7 +76,7 @@ npx --yes @j-256/discord-mcp@0.1.2 preset install server-observer \
 
 Open the printed URL while signed in as a member allowed to manage that server. It requests only `View Channel` for `server-observer`, locks the server selector to the supplied ID, requests no user token, and never sends the bot token to the connector command. Keep Public Bot disabled unless other people should be able to install your application. Use `channel-reader` instead to request `View Channel` plus `Read Message History`; its plan also identifies Message Content as the recommended Developer Portal intent.
 
-The optional `--html FILE` output is a deterministic standalone guide derived from that exact validated installation plan. It provides an in-memory checklist, non-secret copy controls, the explicit Discord install navigation, pinned `npx` follow-up commands, one first-read outcome, and exact plan evidence without accepting a token, loading an external asset, making a background request, persisting browser state, opening a browser, or replacing an existing file. The terminal plan remains complete when HTML is not wanted.
+Optional `--html FILE` adds a deterministic standalone checklist, copy controls, explicit Discord navigation, pinned follow-up commands, and exact plan evidence without a token, external asset, background request, persisted browser state, automatic browser launch, or overwrite. The terminal plan remains complete without HTML.
 
 ### Create the safest first configuration
 
@@ -110,7 +121,7 @@ The `server-observer` preset exposes guild metadata, roles, permission diagnosti
 
 The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
 
-Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or migration mode. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
+Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or automatic import mode. The offline `migrate` planner never becomes a runtime policy source. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
 ### Connect with the one-click bundle or a generated adapter
 
@@ -138,7 +149,7 @@ npx --yes @j-256/discord-mcp@0.1.2 config apply \
   --confirm ACTIVE_POLICY_NAME
 ```
 
-The private standalone workbench keeps edits in browser memory until explicit candidate download and has no secret field, network, persistence, Discord, active-file write, or approval authority. Planning remains authoritative: it reports exact changes and impacts without resolving a secret or contacting Discord. Application rereads both files, requires the fresh digest and policy-name confirmation, rejects identity or file drift, and preserves a recoverable backup. The active document remains the only policy source.
+The private workbench keeps edits in memory until explicit candidate download and has no secret, network, persistence, Discord, active-file write, or approval authority. Application rereads both files, requires the fresh digest and policy-name confirmation, rejects identity or file drift, and preserves a recoverable backup. The active document remains the only policy source.
 
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
@@ -150,7 +161,7 @@ npx --yes @j-256/discord-mcp@0.1.2 activity \
 
 The bounded review collapses each activity into its newest outcome, retains superseded history, joins durable claims only through content-free digests, and warns on every unsettled state. Its optional private explorer adds search and filters but cannot contact Discord, resolve a claim, retry an operation, or persist browser state. Use `coordination resolve` only after stopping the owner and checking the exact Discord state and audit log.
 
-Feature policy uses the same document shape. Bulk bans, bulk member-role changes, guild pruning, and other reviewed features each have separate capabilities, exact scopes, bounded limits, and documented toolsets. Single-member authority never grants batch authority. No environment-policy interface, legacy alias, fallback parser, or migration layer exists.
+Feature policy uses the same document shape. Reviewed features retain separate capabilities, exact scopes, bounded limits, and documented toolsets; single-member authority never grants batch authority. No environment-policy interface, legacy alias, fallback parser, or automatic migration layer exists.
 
 Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
 
@@ -165,7 +176,7 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
 
 ### Expand the policy through review
 
-Keep first setup read-only, then plan an additive recipe when a write workflow is needed. `guild-builder` adds model-neutral, caller-retained authoring and two-pass capture for guild structure, profile, settings, Community, Welcome Screen, onboarding, staged AutoMod, and static publications without storing the objective or blueprint. Its settings, Community, and onboarding evidence uses a nonprivileged `GUILDS`-only layout-evidence connection without changing the event feed. `incident-response` adds privacy-minimized incident audit and reviewed time-bounded lockdown changes with no Gateway or privileged intent. `channel-publisher` adds bounded text, static Components V2, and remote-free rich-embed publication and reports the required Message Content intent. [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds exact-user reads plus reviewed text and static Components V2 delivery, same-format edits, and deletion. Optional private-file delivery requires a separate capability and owned attachment root; the recipe does not grant it. Private messaging adds no guild permission, privileged intent, Gateway feed, group DM, recipient discovery, remote-file fetch, interactive callback, or immediate write path.
+Keep first setup read-only, then plan one additive recipe. `guild-builder` adds caller-retained structure authoring and capture with a nonprivileged `GUILDS`-only layout-evidence connection. `incident-response` adds privacy-minimized incident audit and reviewed time-bounded lockdown. `channel-publisher` adds bounded text, static Components V2, and remote-free embeds. [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds exact-user reads and reviewed delivery, editing, and deletion. Each recipe states its permissions, intents, scopes, risks, and exclusions before changing policy.
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.2 recipe list
@@ -183,9 +194,9 @@ npx --yes @j-256/discord-mcp@0.1.2 recipe apply direct-messenger ./discord-mcp.j
   --confirm direct-messenger
 ```
 
-Planning prints the complete proposed non-secret document, exact field changes, permissions, intents, risks, warnings, and a path-bound digest without resolving a secret or contacting Discord. Application recomputes that plan, requires the exact digest and recipe-name confirmation, rejects a concurrent source change, preserves a recoverable backup, and still grants no Discord authority by itself. Run the printed offline validation, online doctor, and smoke checks after applying. Recipes add policy only; they never remove an existing capability, scope, or toolset.
+Planning prints the complete proposed document, exact changes, requirements, risks, warnings, and path-bound digest without a secret or Discord request. Application recomputes the plan, requires exact digest and name confirmation, rejects source drift, and preserves a backup. Recipes add policy only and grant no Discord authority.
 
-Online doctor verifies identity, complete ID-only installation drift, and application posture. Smoke launches the selected policy through the real `serve` entrypoint, negotiates stable MCP over stdio, validates catalogs, annotations, the same installation audit, and read-only status, and writes nothing to Discord. Configured optional runtimes start and stop with the child; see the [operator reference](docs/reference.md#operator-cli).
+Online doctor verifies identity, complete ID-only installation drift, and application posture. Smoke launches `serve`, negotiates stable MCP over stdio, validates catalogs and read-only status, writes nothing to Discord, and shuts down configured runtimes. See the [operator reference](docs/reference.md#operator-cli).
 
 ### Build from source
 
@@ -258,6 +269,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
 | `discord-mcp recipe show guild-builder --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
 | `discord-mcp recipe plan guild-builder FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
+| `discord-mcp migrate plan SOURCE [--html FILE] [--json]` | Complete release-exact source-tool accounting, safer target routes, staged switching commands, and deterministic plan evidence without reading or changing either deployment | None |
 | `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
 | `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, complete bounded ID-only installed-guild inventory, and exact configured-scope drift | Read-only |
@@ -283,6 +295,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 - [Verified documentation portal](https://j-256.github.io/discord-mcp/)
 - [First verified read and initialization recovery](docs/getting-started.md)
+- [Release-exact migration from another Discord MCP](docs/migration.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)
 - [Source-audited field comparison](docs/comparison.md)
 - [Complete operator and capability reference](docs/reference.md)

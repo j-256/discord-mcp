@@ -23,7 +23,10 @@ import {
   createBotInstallPlan,
   type BotInstallPlan,
 } from "../src/bot-install.js"
-import type { DiscordCatalogCheckReport } from "../src/catalog.js"
+import {
+  checkDiscordCatalog,
+  type DiscordCatalogCheckReport,
+} from "../src/catalog.js"
 import {
   CATALOG_HTML_FORMAT,
   type DiscordCatalogHtmlExportReport,
@@ -43,6 +46,16 @@ import {
   HOST_ADAPTER_CATALOG_FORMAT,
   HOST_ADAPTER_IDS,
 } from "../src/host-adapters.js"
+import {
+  MIGRATION_HTML_FORMAT,
+  type DiscordMigrationHtmlExportReport,
+} from "../src/migration-html.js"
+import {
+  MIGRATION_REPORT_SCHEMA_VERSION,
+  createMigrationCatalog,
+  createMigrationPlan,
+  type MigrationPlanReport,
+} from "../src/migration-planner.js"
 import {
   applyConfigChange,
   planConfigChange,
@@ -467,6 +480,31 @@ function hostActivationHtmlReport(
   }
 }
 
+function migrationHtmlReport(
+  plan: MigrationPlanReport,
+  file = "/output/discord-mcp-migration.html",
+): DiscordMigrationHtmlExportReport {
+  return {
+    activityRecordsCreated: false,
+    automaticNetwork: "disabled",
+    browserOpened: false,
+    bytes: 54321,
+    configurationChanged: false,
+    credentialValuesEmbedded: false,
+    credentialValuesRead: false,
+    discordContacted: false,
+    file,
+    format: MIGRATION_HTML_FORMAT,
+    htmlDigest: `sha256:${"f".repeat(64)}`,
+    outputFileCreated: true,
+    planDigest: plan.planDigest,
+    schemaVersion: MIGRATION_REPORT_SCHEMA_VERSION,
+    sourceId: plan.source.id,
+    statePersistence: "disabled",
+    status: "ok",
+  }
+}
+
 function connectorProfile(options: { auditFile?: string } = {}): ConnectorProfile {
   return createConnectorProfile({
     applicationId: APPLICATION_ID,
@@ -550,6 +588,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
         activationDigest: plan.activationDigest,
       }
     },
+    async exportMigrationHtml(file, plan) {
+      return migrationHtmlReport(plan, file)
+    },
     async exportOnboardingHtml(file) {
       return onboardingHtmlReport(file)
     },
@@ -589,6 +630,12 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async loadProfile() {
       return profile
+    },
+    migrationCatalog: createMigrationCatalog,
+    async migrationPlan(sourceId) {
+      return createMigrationPlan(sourceId, {
+        checkCatalog: checkDiscordCatalog,
+      })
     },
     async prepareSetup() {
       return setupReport()
@@ -1083,6 +1130,25 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     htmlFile: "./discord-workbench.html",
     json: true,
   })
+  assert.deepEqual(parseCliArguments(["migrate", "list", "--json"]), {
+    action: "list",
+    command: "migrate",
+    json: true,
+  })
+  assert.deepEqual(parseCliArguments([
+    "migrate",
+    "plan",
+    "CAPPYEO@0.25.0",
+    "--html",
+    "./migration.html",
+    "--json",
+  ]), {
+    action: "plan",
+    command: "migrate",
+    htmlFile: "./migration.html",
+    json: true,
+    sourceId: "cappyeo@0.25.0",
+  })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
     command: "profile",
@@ -1222,6 +1288,34 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(
     () => parseCliArguments(["config", "migrate", "/configuration/discord.json"]),
     /config requires apply, explain, init, plan, show, validate, or workbench/,
+  )
+  assert.throws(
+    () => parseCliArguments(["migrate"]),
+    /migrate requires list or plan/,
+  )
+  assert.throws(
+    () => parseCliArguments(["migrate", "list", "source"]),
+    /Unknown option source/,
+  )
+  assert.throws(
+    () => parseCliArguments(["migrate", "plan"]),
+    /requires an exact source ID/,
+  )
+  assert.throws(
+    () => parseCliArguments(["migrate", "plan", "cappyeo"]),
+    /Migration source must be one of/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "migrate",
+      "plan",
+      "cappyeo@0.25.0",
+      "--html",
+      "first.html",
+      "--html",
+      "second.html",
+    ]),
+    /Option --html may be provided only once/,
   )
   assert.throws(
     () => parseCliArguments(["config", "workbench", "/configuration/discord.json"]),
@@ -3312,6 +3406,87 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
   }
 })
 
+test("CLI lists release-exact migration sources and renders complete plans with optional HTML", async () => {
+  const listOutput = outputStream()
+  const planOutput = outputStream()
+  const guideOutput = outputStream()
+  const stderr = outputStream()
+  const environment = { DISCORD_BOT_TOKEN: TOKEN }
+  const cliDependencies = dependencies()
+
+  assert.equal(await runCli({
+    args: ["migrate", "list", "--json"],
+    dependencies: cliDependencies,
+    environment,
+    stderr: stderr.stream,
+    stdout: listOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["migrate", "plan", "hypark@0.1.1", "--json"],
+    dependencies: cliDependencies,
+    environment,
+    stderr: stderr.stream,
+    stdout: planOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: [
+      "migrate",
+      "plan",
+      "targeted-reader@1.0.0",
+      "--html",
+      "/output/targeted-migration.html",
+    ],
+    dependencies: cliDependencies,
+    environment,
+    stderr: stderr.stream,
+    stdout: guideOutput.stream,
+  }), 0)
+
+  const catalog = JSON.parse(listOutput.value())
+  const plan = JSON.parse(planOutput.value())
+  assert.deepEqual(catalog.sources.map(({ id }: { id: string }) => id), [
+    "cappyeo@0.25.0",
+    "hypark@0.1.1",
+    "jaimen-bell@0.1.1",
+    "oratorian@1.1.4",
+    "pasympa@2.1.1",
+    "targeted-reader@1.0.0",
+  ])
+  assert.equal(plan.source.id, "hypark@0.1.1")
+  assert.equal(plan.configurationImported, false)
+  assert.equal(plan.argumentsTranslated, false)
+  assert.equal(plan.mappings.flatMap(({ sourceTools }: { sourceTools: string[] }) => sourceTools).length, plan.source.sourceToolCount)
+  assert.match(guideOutput.value(), /Discord MCP migration plan: targeted-reader@1\.0\.0/)
+  assert.match(guideOutput.value(), /Migration catalog digest: sha256:/)
+  assert.match(guideOutput.value(), /Source evidence: https:\/\/github\.com\/Targeted-Design-Agency\/mcp-discord-reader\/tree\/[0-9a-f]{40}/)
+  assert.match(guideOutput.value(), /Discord MCP migration HTML: ok/)
+  assert.match(guideOutput.value(), /Configuration changed: no/)
+  assert.equal(stderr.value(), "")
+  assert.doesNotMatch(listOutput.value(), new RegExp(TOKEN))
+  assert.doesNotMatch(planOutput.value(), new RegExp(TOKEN))
+  assert.doesNotMatch(guideOutput.value(), new RegExp(TOKEN))
+})
+
+test("CLI returns structured migration selection failures", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+
+  assert.equal(await runCli({
+    args: ["migrate", "plan", "cappyeo", "--json"],
+    dependencies: dependencies(),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+  }), 2)
+
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.status, "error")
+  assert.equal(report.error.message, "Invalid command usage")
+  assert.match(report.error.recovery.action, /discord-mcp help migrate/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+  assert.equal(stderr.value(), "")
+})
+
 test("CLI renders smoke, help, and version output", async () => {
   const smokeOutput = outputStream()
   const helpOutput = outputStream()
@@ -3319,6 +3494,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const catalogHelpOutput = outputStream()
   const configHelpOutput = outputStream()
   const hostHelpOutput = outputStream()
+  const migrateHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
   const setupHelpOutput = outputStream()
   const smokeHelpOutput = outputStream()
@@ -3358,6 +3534,11 @@ test("CLI renders smoke, help, and version output", async () => {
     args: ["host", "--help"],
     dependencies: dependencies(),
     stdout: hostHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["migrate", "--help"],
+    dependencies: dependencies(),
+    stdout: migrateHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
     args: ["setup", "--help"],
@@ -3407,6 +3588,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
   assert.match(hostHelpOutput.value(), /reads no credential value/)
   assert.match(hostHelpOutput.value(), /discovers no host/)
+  assert.match(migrateHelpOutput.value(), /migrate <action>/)
+  assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
+  assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)

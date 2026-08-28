@@ -77,6 +77,7 @@ export default defineConfig({
             { label: "Overview", link: "/" },
             "start/choose",
             "start/getting-started",
+            "start/migration",
           ],
         },
         {

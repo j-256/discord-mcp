@@ -1,8 +1,10 @@
 # Getting started: first verified Discord read
 
-[Project overview](../README.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Support and privacy-safe reporting](../SUPPORT.md)
+[Project overview](../README.md) | [Migration from another Discord MCP](migration.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Support and privacy-safe reporting](../SUPPORT.md)
 
 This is the shortest supported path from no installation to one useful Discord read through an MCP host. It creates an operator-owned bot, installs only a read-only permission grant, writes one strict non-secret policy file, verifies the real stdio server, and ends with `get_connector_status` plus `list_channels` for one exact guild. No Discord write surface is enabled.
+
+If another Discord MCP is already installed, generate its complete release-exact outcome map with `discord-mcp migrate list` and `discord-mcp migrate plan SOURCE` before following this setup. The [migration guide](migration.md) preserves source audit limits, separates read and write authority, and leaves both deployments unchanged.
 
 Before creating a token, use [product boundaries and host compatibility](limitations.md) to confirm that a local owner-managed bot, transient Discord content, exact-ID operations, and the host's stdio and secret-forwarding model fit the intended use.
 

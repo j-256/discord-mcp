@@ -21,6 +21,7 @@ const EXPECTED_NOT_FOUND_CONSOLE = "error: Failed to load resource: the server r
 const TEST_PATHS = [
   "/",
   "/start/getting-started/",
+  "/start/migration/",
   "/understand/boundaries/",
   "/understand/comparison/",
   "/understand/privacy/",
@@ -125,6 +126,7 @@ async function main() {
 
       await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("link", { name: "Get a verified read" }).count(), 1)
+      assert.equal(await page.getByRole("link", { name: "Switch from another Discord MCP" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Take the verified product tour" }).count(), 1)
       assert.match(await page.locator(".release-context").innerText(), /@j-256\/discord-mcp@[0-9]+\.[0-9]+\.[0-9]+/u)
       await page.keyboard.press("Tab")
@@ -132,6 +134,9 @@ async function main() {
       await page.getByRole("link", { name: "Get a verified read" }).click()
       await page.waitForURL(`${BASE_URL}/start/getting-started/`)
       assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Getting started: first verified Discord read")
+
+      await page.goto(`${BASE_URL}/start/migration/`, { waitUntil: "networkidle" })
+      assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Migrate from another Discord MCP")
 
       await page.goto(`${BASE_URL}/reference/`, { waitUntil: "networkidle" })
       const searchButton = page.getByRole("button", { name: "Search" })

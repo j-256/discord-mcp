@@ -12,6 +12,8 @@ discord-mcp doctor --config FILE
 discord-mcp catalog --check --json
 ```
 
+When switching from another Discord MCP, run `discord-mcp migrate list`, select the exact `product@version` source, and generate `discord-mcp migrate plan SOURCE --html PRIVATE_FILE`. The [migration guide](docs/migration.md) explains every disposition and the staged verification path. The planner does not scan the old deployment or import its configuration, credentials, prompts, arguments, or host settings. If a source is absent, report its public release and evidence URL through a feature proposal rather than substituting the nearest listed version.
+
 If MCPB import fails before startup, confirm that the host supports manifest version 0.3, Node.js 22 or newer, local file selection, and sensitive string input. Keep the token out of the selected config. A file-backed credential policy is intentionally incompatible with the bundle's prompted secret; preserve that policy and use the adapter path.
 
 If an MCP host reports that the connection closed during initialization, run `discord-mcp host --npx --config FILE --html PRIVATE_FILE` and choose the guide's common MCP JSON, Cursor, VS Code, or Gemini CLI projection. For terminal-only inspection, append the matching `--adapter ID`. Compare the host's exact command, ordered arguments, secret references, transport, requirements, and timeouts with that digest-bound projection. Do not attach the guide, adapter JSON, or Cursor install URI to an issue because they contain Discord identifiers and may contain local paths. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/cli.js serve --config FILE`, while a pinned published launch uses `npx --yes @j-256/discord-mcp@VERSION serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output. The [ordered recovery ladder](docs/getting-started.md#recovery-ladder) separates policy, credential, Discord, stdio, and host failures.
@@ -22,7 +24,7 @@ If online doctor reports `guild-installation-drift`, review the exact IDs privat
 
 ## Choose a route
 
-- Use the operator-question form for setup, policy, Discord permission or intent, MCP host, diagnostic, recovery, package, or container questions
+- Use the operator-question form for setup, policy, Discord permission or intent, MCP host, migration-plan interpretation, blocked cutover, diagnostic, recovery, package, or container questions
 - Use the bug form for a reproducible product defect with a minimal synthetic reproduction
 - Use the feature-proposal form for a new capability or authority boundary
 - Use the verified-outcome form after a successful or blocked journey to share coarse setup time, first friction, repeat-use intent, and next-workflow demand without posting Discord evidence
