@@ -1038,7 +1038,15 @@ function nativeInteraction(
   id: string,
   status: NativeInteractionActivity["status"],
 ): NativeInteractionActivity {
-  const errorStatus = ["rejected", "response-failed", "response-uncertain"]
+  const followup = status.startsWith("followup-")
+  const continuation = status.startsWith("continuation-")
+  const errorStatus = [
+    "followup-failed",
+    "followup-uncertain",
+    "rejected",
+    "response-failed",
+    "response-uncertain",
+  ]
     .includes(status)
   return {
     channelId: "200",
@@ -1048,7 +1056,9 @@ function nativeInteraction(
     interactionId: "300",
     kind: "native-interaction",
     referenceHash: `sha256:${"9".repeat(64)}`,
+    responseStage: continuation ? "continuation" : followup ? "followup" : "initial",
     schemaVersion: 1,
+    sequence: followup || continuation ? 1 : 0,
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     userId: "400",
@@ -3430,6 +3440,11 @@ test("JSONL activity log keeps native Interaction command and response evidence 
     response: "private response text",
     token: "private Interaction token",
   } as NativeInteractionActivity)
+  await store.append({
+    ...nativeInteraction("6", "followup-completed"),
+    response: "private follow-up text",
+    token: "private follow-up token",
+  } as NativeInteractionActivity)
   await appendFile(
     file,
     `${JSON.stringify({
@@ -3450,11 +3465,11 @@ test("JSONL activity log keeps native Interaction command and response evidence 
   const persisted = await readFile(file, "utf8")
 
   assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk|private request text|private response text|private Interaction token/)
-  assert.deepEqual(result.entries.map(({ id }) => id), ["4", "3", "2", "1"])
+  assert.deepEqual(result.entries.map(({ id }) => id), ["4", "3", "6", "2", "1"])
   assert.equal(result.skippedLines, 1)
   assert.doesNotMatch(
     JSON.stringify(result),
-    /private-command|private inventory|private historical request|private historical token/,
+    /private-command|private follow-up text|private follow-up token|private inventory|private historical request|private historical token/,
   )
 })
 

@@ -222,6 +222,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   preview_embed_message: "local-read",
   read_messages: "discord-read",
   list_message_pins: "discord-read",
+  list_discord_interaction_continuations: "local-read",
   list_pending_discord_interactions: "local-read",
   list_poll_answer_voters: "discord-read",
   list_message_reactions: "discord-read",
@@ -238,6 +239,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   verify_direct_message_change: "discord-read",
   verify_automod_change: "discord-read",
   respond_to_discord_interaction: "interaction-write",
+  send_discord_interaction_followup: "interaction-write",
 })
 
 export type McpToolName = keyof typeof MCP_TOOL_RISK_CLASSES
@@ -280,6 +282,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   create_webhook: "POST",
   execute_webhook: "POST",
   create_interaction_response: "POST",
+  create_interaction_followup: "POST",
   create_immediate_interaction_response: "POST",
   crosspost_message: "POST",
   delete_application_emoji: "DELETE",
@@ -332,6 +335,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   get_invite: "GET",
   get_invite_target_users: "GET",
   get_invite_target_users_job_status: "GET",
+  get_interaction_followup: "GET",
   get_guild_profile: "GET",
   get_guild_auto_moderation_rule: "GET",
   get_guild_audit_log: "GET",

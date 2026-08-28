@@ -43,6 +43,14 @@ class NativeInteractionFeed implements NativeInteractionSource {
     throw new Error("Pending read is outside this notification test")
   }
 
+  async listContinuations(): ReturnType<NativeInteractionSource["listContinuations"]> {
+    throw new Error("Continuation read is outside this notification test")
+  }
+
+  async followup(): ReturnType<NativeInteractionSource["followup"]> {
+    throw new Error("Follow-up response is outside this notification test")
+  }
+
   async respond(): ReturnType<NativeInteractionSource["respond"]> {
     throw new Error("Response is outside this notification test")
   }
@@ -304,6 +312,9 @@ test("Native Interaction subscriptions work without the content-free Gateway fee
   await client.subscribeResource({
     uri: MCP_RESOURCE_URIS.nativeInteractionPending,
   })
+  await client.subscribeResource({
+    uri: MCP_RESOURCE_URIS.nativeInteractionContinuations,
+  })
   await assert.rejects(
     () => client.subscribeResource({ uri: MCP_RESOURCE_URIS.gatewayEvents }),
     /does not support subscriptions/,
@@ -315,5 +326,13 @@ test("Native Interaction subscriptions work without the content-free Gateway fee
   assert.equal(
     notification.params.uri,
     MCP_RESOURCE_URIS.nativeInteractionPending,
+  )
+
+  const continuationNotification = notificationPromise(client)
+  interactions.emit("continuations")
+  const continuation = await continuationNotification
+  assert.equal(
+    continuation.params.uri,
+    MCP_RESOURCE_URIS.nativeInteractionContinuations,
   )
 })

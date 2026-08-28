@@ -32,6 +32,7 @@ const COMMAND_ID = "600000000000000001"
 const COMMAND_VERSION = "700000000000000001"
 const INTERACTION_ID = "800000000000000001"
 const MESSAGE_ID = "900000000000000001"
+const FOLLOWUP_MESSAGE_ID = "900000000000000002"
 const COMMAND_NAME = "discord-mcp"
 const TOKEN = "private.interaction-token"
 const REQUEST = "Summarize the release discussion"
@@ -174,6 +175,8 @@ interface FixtureState {
   activityAdvanceAt: number | null
   activityAdvanceMilliseconds: number
   activityFailureAt: number | null
+  activityGate: Promise<void> | null
+  activityGateAt: number | null
   applicationEndpoint: string | null
   botId: string
   channelError: unknown
@@ -181,7 +184,13 @@ interface FixtureState {
   deferError: unknown
   deferGate: Promise<void> | null
   editError: unknown
+  editGate: Promise<void> | null
   editResponse: DiscordMessage | null
+  followupCreateError: unknown
+  followupCreateGate: Promise<void> | null
+  followupGetError: unknown
+  followupReadback: DiscordMessage | null
+  followupResponse: DiscordMessage | null
   immediateError: unknown
   inventoryError: unknown
   preflightGate: Promise<void> | null
@@ -197,6 +206,8 @@ function fixture(options: {
     activityAdvanceAt: null,
     activityAdvanceMilliseconds: 0,
     activityFailureAt: null,
+    activityGate: null,
+    activityGateAt: null,
     applicationEndpoint: null,
     botId: BOT_ID,
     channelError: undefined,
@@ -204,7 +215,13 @@ function fixture(options: {
     deferError: undefined,
     deferGate: null,
     editError: undefined,
+    editGate: null,
     editResponse: null,
+    followupCreateError: undefined,
+    followupCreateGate: null,
+    followupGetError: undefined,
+    followupReadback: null,
+    followupResponse: null,
     immediateError: undefined,
     inventoryError: undefined,
     preflightGate: null,
@@ -216,7 +233,10 @@ function fixture(options: {
   const initialResponseSignals: AbortSignal[] = []
   const immediate: Array<{ content: string; id: string; token: string }> = []
   const edits: Array<{ content: string; token: string }> = []
+  const followups: Array<{ content: string; token: string }> = []
+  const followupReads: Array<{ messageId: string; token: string }> = []
   let activityCalls = 0
+  let continuationReferenceNumber = 0
   let referenceNumber = 0
   const activityStore: ActivityStore = {
     async append(entry) {
@@ -226,6 +246,9 @@ function fixture(options: {
         throw new Error("activity unavailable")
       }
       activities.push(entry)
+      if (state.activityGateAt === activityCalls && state.activityGate) {
+        await state.activityGate
+      }
       if (state.activityAdvanceAt === activityCalls) {
         nowMs += state.activityAdvanceMilliseconds
       }
@@ -248,9 +271,20 @@ function fixture(options: {
       if (requestOptions?.signal) initialResponseSignals.push(requestOptions.signal)
       if (state.immediateError) throw state.immediateError
     },
+    async createInteractionFollowup(_applicationId, token, content) {
+      events.push("response:followup")
+      followups.push({ content, token })
+      if (state.followupCreateGate) await state.followupCreateGate
+      if (state.followupCreateError) throw state.followupCreateError
+      return state.followupResponse || responseMessage(content, {
+        id: String(BigInt(FOLLOWUP_MESSAGE_ID) + BigInt(followups.length - 1)),
+        type: 0,
+      })
+    },
     async editOriginalInteractionResponse(_applicationId, token, content) {
       events.push("response:edit")
       edits.push({ content, token })
+      if (state.editGate) await state.editGate
       if (state.editError) throw state.editError
       return state.editResponse || responseMessage(content)
     },
@@ -279,6 +313,15 @@ function fixture(options: {
       events.push("read:bot")
       return { bot: true, id: state.botId, username: "connector" }
     },
+    async getInteractionFollowup(_applicationId, token, messageId) {
+      events.push("read:followup")
+      followupReads.push({ messageId, token })
+      if (state.followupGetError) throw state.followupGetError
+      return state.followupReadback || responseMessage(
+        followups.at(-1)?.content || RESPONSE,
+        { id: messageId, type: 0 },
+      )
+    },
     async listGuildApplicationCommands() {
       events.push("read:commands")
       if (state.inventoryError) throw state.inventoryError
@@ -301,6 +344,10 @@ function fixture(options: {
     },
     policy: options.policy || policy(),
     randomId: () => `activity-native-${activityCalls + 1}`,
+    randomContinuationReference: () => {
+      continuationReferenceNumber += 1
+      return `icref_${continuationReferenceNumber.toString(16).padStart(32, "0")}`
+    },
     randomReference: () => {
       referenceNumber += 1
       return `iref_${referenceNumber.toString(16).padStart(32, "0")}`
@@ -317,6 +364,8 @@ function fixture(options: {
     edits,
     events,
     immediate,
+    followupReads,
+    followups,
     initialResponseSignals,
     scheduler,
     state,
@@ -341,9 +390,14 @@ test("disabled source stays inert and exposes no pending requests", async () => 
   })
   assert.equal(source.enabled, false)
   assert.equal(source.getStatus().phase, "disabled")
+  assert.deepEqual((await source.listContinuations()).continuations, [])
   assert.deepEqual((await source.listPending()).interactions, [])
   await assert.rejects(
     () => source.respond(`iref_${"0".repeat(32)}`, "response"),
+    /disabled/,
+  )
+  await assert.rejects(
+    () => source.followup(`icref_${"0".repeat(32)}`, "response"),
     /disabled/,
   )
 })
@@ -589,9 +643,11 @@ test("response journals before one edit, validates exact evidence, and consumes 
   const result = await setup.broker.respond(reference, RESPONSE)
 
   assert.equal(result.status, "completed")
+  assert.equal(result.continuation, null)
   assert.equal(result.responseMessageId, MESSAGE_ID)
   assert.equal(JSON.stringify(result).includes(TOKEN), false)
   assert.deepEqual((await setup.broker.listPending()).interactions, [])
+  assert.deepEqual((await setup.broker.listContinuations()).continuations, [])
   assert.equal(setup.edits.length, 1)
   assert.ok(setup.events.indexOf("activity:response-pending") < setup.events.indexOf("response:edit"))
   assert.deepEqual(
@@ -599,6 +655,383 @@ test("response journals before one edit, validates exact evidence, and consumes 
     ["response-pending", "response-completed"],
   )
   await assert.rejects(() => setup.broker.respond(reference, RESPONSE), /unavailable or expired/)
+})
+
+test("explicit continuation keeps the token private and rotates after exact follow-up readback", async () => {
+  const setup = fixture()
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const reference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(reference)
+
+  const initial = await setup.broker.respond(reference, RESPONSE, { keepOpen: true })
+  const firstReference = initial.continuation?.reference
+  assert.ok(firstReference)
+  assert.equal(initial.continuation?.followupsRemaining, 3)
+  assert.equal((await setup.broker.listContinuations()).continuations.length, 1)
+  assert.equal(JSON.stringify(initial).includes(TOKEN), false)
+  assert.equal(JSON.stringify(await setup.broker.listContinuations()).includes(TOKEN), false)
+  assert.equal(JSON.stringify(setup.activities).includes(TOKEN), false)
+
+  setup.events.length = 0
+  const result = await setup.broker.followup(
+    firstReference,
+    "The first private follow-up is ready.",
+    { keepOpen: true },
+  )
+  const secondReference = result.continuation?.reference
+  assert.ok(secondReference)
+  assert.notEqual(secondReference, firstReference)
+  assert.equal(result.followupsCompleted, 1)
+  assert.equal(result.continuation?.followupsRemaining, 2)
+  assert.equal(result.verification, "response-and-readback-match")
+  assert.equal(result.responseMessageId, FOLLOWUP_MESSAGE_ID)
+  assert.equal(JSON.stringify(result).includes(TOKEN), false)
+  assert.equal(setup.followups.length, 1)
+  assert.deepEqual(setup.followupReads, [{ messageId: FOLLOWUP_MESSAGE_ID, token: TOKEN }])
+  assert.ok(setup.events.indexOf("activity:followup-pending") < setup.events.indexOf("response:followup"))
+  assert.ok(setup.events.indexOf("response:followup") < setup.events.indexOf("read:followup"))
+  assert.ok(setup.events.indexOf("read:followup") < setup.events.indexOf("activity:followup-completed"))
+  assert.ok(setup.events.indexOf("activity:followup-completed") < setup.events.indexOf("activity:continuation-opened"))
+  assert.deepEqual(
+    (await setup.broker.listContinuations()).continuations.map(({ reference }) => reference),
+    [secondReference],
+  )
+  await assert.rejects(
+    () => setup.broker.followup(firstReference, "Do not send this twice."),
+    /unavailable or expired/,
+  )
+})
+
+test("continuations enforce a fixed sequence limit and share queue capacity", async () => {
+  const setup = fixture({ maximumPending: 1 })
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const pendingReference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(pendingReference)
+  let continuation = (await setup.broker.respond(
+    pendingReference,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(continuation)
+
+  await setup.broker.ingestInteraction(interaction({ id: "800000000000000002" }))
+  assert.equal(setup.immediate.length, 1)
+  assert.match(setup.immediate[0]?.content || "", /queue is full/)
+
+  for (let sequence = 1; sequence <= 3; sequence += 1) {
+    assert.ok(continuation)
+    const result = await setup.broker.followup(
+      continuation.reference,
+      `Private follow-up ${sequence}`,
+      { keepOpen: true },
+    )
+    assert.equal(result.followupsCompleted, sequence)
+    continuation = result.continuation
+  }
+  assert.equal(continuation, null)
+  assert.deepEqual((await setup.broker.listContinuations()).continuations, [])
+  assert.equal(setup.broker.getStatus().totals.followups, 3)
+  assert.equal(setup.broker.getStatus().limits.maximumFollowups, 3)
+
+  await setup.broker.ingestInteraction(interaction({ id: "800000000000000003" }))
+  assert.equal((await setup.broker.listPending()).interactions.length, 1)
+})
+
+test("in-flight responses retain shared capacity and shutdown cannot reopen a continuation", async () => {
+  let releaseEdit!: () => void
+  const editGate = new Promise<void>((resolve) => {
+    releaseEdit = resolve
+  })
+  let releaseFollowup!: () => void
+  const followupCreateGate = new Promise<void>((resolve) => {
+    releaseFollowup = resolve
+  })
+  const setup = fixture({
+    maximumPending: 1,
+    state: { editGate, followupCreateGate },
+  })
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const pendingReference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(pendingReference)
+
+  const responding = setup.broker.respond(
+    pendingReference,
+    RESPONSE,
+    { keepOpen: true },
+  )
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  await setup.broker.ingestInteraction(interaction({
+    id: "800000000000000002",
+  }))
+  assert.match(setup.immediate.at(-1)?.content || "", /queue is full/)
+  releaseEdit()
+  const continuation = (await responding).continuation
+  assert.ok(continuation)
+
+  const followingUp = setup.broker.followup(
+    continuation.reference,
+    "The final private follow-up is ready.",
+    { keepOpen: true },
+  )
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  await setup.broker.ingestInteraction(interaction({
+    id: "800000000000000003",
+  }))
+  assert.match(setup.immediate.at(-1)?.content || "", /queue is full/)
+
+  await setup.broker.stop()
+  releaseFollowup()
+  const result = await followingUp
+  assert.equal(result.continuation, null)
+  assert.deepEqual((await setup.broker.listContinuations()).continuations, [])
+  assert.equal(setup.broker.getStatus().phase, "stopped")
+})
+
+test("shutdown during continuation recording cannot publish a late reference", async () => {
+  let releaseActivity!: () => void
+  const activityGate = new Promise<void>((resolve) => {
+    releaseActivity = resolve
+  })
+  const setup = fixture({
+    state: {
+      activityGate,
+      activityGateAt: 4,
+    },
+  })
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const pendingReference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(pendingReference)
+
+  const responding = setup.broker.respond(
+    pendingReference,
+    RESPONSE,
+    { keepOpen: true },
+  )
+  while (!setup.events.includes("activity:continuation-opened")) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  await setup.broker.stop()
+  releaseActivity()
+
+  const result = await responding
+  assert.equal(result.continuation, null)
+  assert.deepEqual((await setup.broker.listContinuations()).continuations, [])
+  assert.deepEqual(
+    setup.activities.slice(-2).map(({ status }) => status),
+    ["continuation-opened", "continuation-expired"],
+  )
+})
+
+test("follow-up pending activity failure restores the same fresh continuation", async () => {
+  const setup = fixture()
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const pendingReference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(pendingReference)
+  const continuation = (await setup.broker.respond(
+    pendingReference,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(continuation)
+  setup.state.activityFailureAt = setup.activities.length + 1
+
+  await assert.rejects(
+    () => setup.broker.followup(continuation.reference, "Blocked follow-up"),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "blocked-audit-failed")
+      return true
+    },
+  )
+  assert.equal(setup.followups.length, 0)
+  assert.deepEqual(
+    (await setup.broker.listContinuations()).continuations.map(({ reference }) => reference),
+    [continuation.reference],
+  )
+
+  setup.state.activityFailureAt = null
+  const result = await setup.broker.followup(continuation.reference, "Recorded follow-up")
+  assert.equal(result.status, "completed")
+  assert.equal(result.continuation, null)
+})
+
+test("follow-up refusal and uncertainty consume the one-shot continuation", async () => {
+  const rejected = fixture()
+  await rejected.broker.start()
+  await rejected.broker.ingestInteraction(interaction())
+  const rejectedPending = (await rejected.broker.listPending()).interactions[0]?.reference
+  assert.ok(rejectedPending)
+  const rejectedContinuation = (await rejected.broker.respond(
+    rejectedPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(rejectedContinuation)
+  rejected.state.followupCreateError = apiError(400)
+  await assert.rejects(
+    () => rejected.broker.followup(rejectedContinuation.reference, "Rejected follow-up"),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "failed")
+      return true
+    },
+  )
+  assert.deepEqual((await rejected.broker.listContinuations()).continuations, [])
+  assert.equal(rejected.followupReads.length, 0)
+  assert.equal(rejected.activities.at(-1)?.status, "followup-failed")
+
+  const uncertain = fixture()
+  await uncertain.broker.start()
+  await uncertain.broker.ingestInteraction(interaction())
+  const uncertainPending = (await uncertain.broker.listPending()).interactions[0]?.reference
+  assert.ok(uncertainPending)
+  const uncertainContinuation = (await uncertain.broker.respond(
+    uncertainPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(uncertainContinuation)
+  uncertain.state.followupCreateError = apiError(429)
+  await assert.rejects(
+    () => uncertain.broker.followup(uncertainContinuation.reference, "Uncertain follow-up"),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "uncertain")
+      return true
+    },
+  )
+  assert.deepEqual((await uncertain.broker.listContinuations()).continuations, [])
+  assert.equal(uncertain.broker.getStatus().totals.uncertain, 1)
+  assert.equal(uncertain.activities.at(-1)?.status, "followup-uncertain")
+})
+
+test("follow-up response and readback drift are quarantined after dispatch", async () => {
+  const invalid = fixture()
+  await invalid.broker.start()
+  await invalid.broker.ingestInteraction(interaction())
+  const invalidPending = (await invalid.broker.listPending()).interactions[0]?.reference
+  assert.ok(invalidPending)
+  const invalidContinuation = (await invalid.broker.respond(
+    invalidPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(invalidContinuation)
+  invalid.state.followupResponse = responseMessage("Invalid evidence", {
+    application_id: "100000000000000002",
+    id: FOLLOWUP_MESSAGE_ID,
+    type: 0,
+  })
+  await assert.rejects(
+    () => invalid.broker.followup(invalidContinuation.reference, "Invalid evidence"),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "uncertain")
+      return true
+    },
+  )
+  assert.equal(invalid.followupReads.length, 0)
+  assert.equal(invalid.broker.getStatus().lastError?.category, "followup-evidence-invalid")
+
+  const drift = fixture()
+  await drift.broker.start()
+  await drift.broker.ingestInteraction(interaction())
+  const driftPending = (await drift.broker.listPending()).interactions[0]?.reference
+  assert.ok(driftPending)
+  const driftContinuation = (await drift.broker.respond(
+    driftPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(driftContinuation)
+  drift.state.followupReadback = responseMessage("Changed after response", {
+    id: FOLLOWUP_MESSAGE_ID,
+    type: 0,
+  })
+  await assert.rejects(
+    () => drift.broker.followup(driftContinuation.reference, "Expected follow-up"),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "uncertain")
+      return true
+    },
+  )
+  assert.equal(drift.followupReads.length, 1)
+  assert.deepEqual((await drift.broker.listContinuations()).continuations, [])
+})
+
+test("follow-up completion recording failure closes the token after verified delivery", async () => {
+  const setup = fixture()
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(interaction())
+  const pendingReference = (await setup.broker.listPending()).interactions[0]?.reference
+  assert.ok(pendingReference)
+  const continuation = (await setup.broker.respond(
+    pendingReference,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(continuation)
+  setup.state.activityFailureAt = setup.activities.length + 2
+
+  await assert.rejects(
+    () => setup.broker.followup(
+      continuation.reference,
+      "Delivered but not durably completed",
+      { keepOpen: true },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof NativeInteractionResponseError)
+      assert.equal((error.result as { status: string }).status, "completed-record-failed")
+      return true
+    },
+  )
+  assert.equal(setup.followups.length, 1)
+  assert.equal(setup.followupReads.length, 1)
+  assert.deepEqual((await setup.broker.listContinuations()).continuations, [])
+})
+
+test("continuation expiry and shutdown discard tokens without editing completed responses", async () => {
+  const expired = fixture()
+  await expired.broker.start()
+  await expired.broker.ingestInteraction(interaction())
+  const expiredPending = (await expired.broker.listPending()).interactions[0]?.reference
+  assert.ok(expiredPending)
+  const expiredContinuation = (await expired.broker.respond(
+    expiredPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(expiredContinuation)
+  expired.advance(60_001)
+  expired.scheduler.runAll()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.deepEqual((await expired.broker.listContinuations()).continuations, [])
+  assert.equal(expired.broker.getStatus().totals.continuationsExpired, 1)
+  assert.equal(expired.activities.at(-1)?.status, "continuation-expired")
+
+  const stopped = fixture()
+  await stopped.broker.start()
+  await stopped.broker.ingestInteraction(interaction())
+  const stoppedPending = (await stopped.broker.listPending()).interactions[0]?.reference
+  assert.ok(stoppedPending)
+  const stoppedContinuation = (await stopped.broker.respond(
+    stoppedPending,
+    RESPONSE,
+    { keepOpen: true },
+  )).continuation
+  assert.ok(stoppedContinuation)
+  const editsBeforeStop = stopped.edits.length
+  await stopped.broker.stop()
+  assert.equal(stopped.edits.length, editsBeforeStop)
+  assert.deepEqual((await stopped.broker.listContinuations()).continuations, [])
+  assert.equal(stopped.broker.getStatus().totals.continuationsExpired, 1)
+  assert.equal(JSON.stringify(stopped.activities).includes(TOKEN), false)
 })
 
 test("pending activity failure restores response availability without dispatch", async () => {

@@ -14253,7 +14253,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_gateway_status",
       "get_gateway_events",
       "list_pending_discord_interactions",
+      "list_discord_interaction_continuations",
       "respond_to_discord_interaction",
+      "send_discord_interaction_followup",
       "list_guilds",
       "list_channels",
       "get_channel",
@@ -14779,7 +14781,25 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     },
   )
   assert.deepEqual(
+    listedTool(result.tools, "send_discord_interaction_followup").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+  )
+  assert.deepEqual(
     listedTool(result.tools, "list_pending_discord_interactions").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "list_discord_interaction_continuations").annotations,
     {
       destructiveHint: false,
       idempotentHint: true,
@@ -15594,6 +15614,35 @@ test("progressive natural-language discovery leads with a plan and reveals its w
     [
       "plan_channel_creation",
       "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
+test("progressive discovery reveals the complete token-private Interaction response lifecycle", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "send_discord_interaction_followup" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "list_discord_interaction_continuations",
+    "list_pending_discord_interactions",
+    "respond_to_discord_interaction",
+    "send_discord_interaction_followup",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "list_pending_discord_interactions",
+      "list_discord_interaction_continuations",
+      "respond_to_discord_interaction",
+      "send_discord_interaction_followup",
       "discover_discord_tools",
     ],
   )
@@ -18175,6 +18224,8 @@ test("MCP Gateway tools expose local health and cursor continuity without conten
 
 test("MCP native Interaction resources and tools keep tokens private and requests untrusted", async (context) => {
   const reference = `iref_${"1".repeat(32)}`
+  const continuationReference = `icref_${"2".repeat(32)}`
+  const rotatedContinuationReference = `icref_${"3".repeat(32)}`
   const pending = {
     channelId: CHANNEL_ID,
     commandId: "700000000000000001",
@@ -18188,8 +18239,33 @@ test("MCP native Interaction resources and tools keep tokens private and request
     schemaVersion: 1,
     userId: USER_ID,
   }
+  const continuation = {
+    channelId: CHANNEL_ID,
+    commandId: pending.commandId,
+    commandVersion: pending.commandVersion,
+    createdAt: pending.createdAt,
+    expiresAt: pending.expiresAt,
+    followupsCompleted: 0,
+    followupsRemaining: 3,
+    guildId: GUILD_ID,
+    interactionId: pending.interactionId,
+    openedAt: "2026-08-22T00:01:00.000Z",
+    reference: continuationReference,
+    schemaVersion: 1,
+    userId: USER_ID,
+  }
   let listCalls = 0
-  const responses: Array<{ reference: string; response: string }> = []
+  let continuationListCalls = 0
+  const responses: Array<{
+    keepOpen: boolean | undefined
+    reference: string
+    response: string
+  }> = []
+  const followups: Array<{
+    keepOpen: boolean | undefined
+    reference: string
+    response: string
+  }> = []
   const nativeInteractions: NativeInteractionSource = {
     enabled: true,
     getStatus() {
@@ -18202,22 +18278,35 @@ test("MCP native Interaction resources and tools keep tokens private and request
         enabled: true,
         lastError: null,
         limits: {
+          maximumFollowups: 3,
           maximumPending: 25,
           pendingPerUser: 3,
           requestCharacters: 2_000,
           responseCharacters: 2_000,
           ttlSeconds: 600,
         },
+        continuations: { count: 1 },
         pending: { count: 1, validating: 0 },
         phase: "ready",
         schemaVersion: 1,
         totals: {
           accepted: 1,
+          continuationsExpired: 0,
           expired: 0,
+          followups: 0,
           rejected: 0,
           responded: 0,
           uncertain: 0,
         },
+      }
+    },
+    async listContinuations() {
+      continuationListCalls += 1
+      return {
+        continuations: [continuation],
+        page: { capacity: 25, returned: 1 },
+        schemaVersion: 1,
+        status: "ok",
       }
     },
     async listPending() {
@@ -18229,16 +18318,52 @@ test("MCP native Interaction resources and tools keep tokens private and request
         status: "ok",
       }
     },
-    async respond(observedReference, response) {
-      responses.push({ reference: observedReference, response })
+    async respond(observedReference, response, options) {
+      responses.push({
+        keepOpen: options?.keepOpen,
+        reference: observedReference,
+        response,
+      })
       return {
         channelId: CHANNEL_ID,
+        continuation: options?.keepOpen
+          ? {
+              expiresAt: continuation.expiresAt,
+              followupsRemaining: 3,
+              reference: continuationReference,
+            }
+          : null,
         guildId: GUILD_ID,
         interactionId: pending.interactionId,
         reference: observedReference,
         responseMessageId: MESSAGE_ID,
         schemaVersion: 1,
         status: "completed",
+      }
+    },
+    async followup(observedReference, response, options) {
+      followups.push({
+        keepOpen: options?.keepOpen,
+        reference: observedReference,
+        response,
+      })
+      return {
+        channelId: CHANNEL_ID,
+        continuation: options?.keepOpen
+          ? {
+              expiresAt: continuation.expiresAt,
+              followupsRemaining: 2,
+              reference: rotatedContinuationReference,
+            }
+          : null,
+        followupsCompleted: 1,
+        guildId: GUILD_ID,
+        interactionId: pending.interactionId,
+        reference: observedReference,
+        responseMessageId: MESSAGE_ID,
+        schemaVersion: 1,
+        status: "completed",
+        verification: "response-and-readback-match",
       }
     },
     subscribe() {
@@ -18253,15 +18378,27 @@ test("MCP native Interaction resources and tools keep tokens private and request
   const pendingResource = await client.readResource({
     uri: MCP_RESOURCE_URIS.nativeInteractionPending,
   })
+  const continuationsResource = await client.readResource({
+    uri: MCP_RESOURCE_URIS.nativeInteractionContinuations,
+  })
   const statusContent = statusResource.contents[0]
   const pendingContent = pendingResource.contents[0]
+  const continuationsContent = continuationsResource.contents[0]
   assert.ok(statusContent && "text" in statusContent)
   assert.ok(pendingContent && "text" in pendingContent)
-  if (!(statusContent && "text" in statusContent && pendingContent && "text" in pendingContent)) {
+  assert.ok(continuationsContent && "text" in continuationsContent)
+  if (!(
+    statusContent && "text" in statusContent
+    && pendingContent && "text" in pendingContent
+    && continuationsContent && "text" in continuationsContent
+  )) {
     throw new Error("Expected native Interaction JSON resources")
   }
   const statusEnvelope = JSON.parse(statusContent.text) as Record<string, unknown>
   const pendingEnvelope = JSON.parse(pendingContent.text) as Record<string, unknown>
+  const continuationsEnvelope = JSON.parse(
+    continuationsContent.text,
+  ) as Record<string, unknown>
   assert.equal(
     (statusEnvelope.trust as Record<string, unknown>).classification,
     "trusted-local-metadata",
@@ -18274,14 +18411,28 @@ test("MCP native Interaction resources and tools keep tokens private and request
     String((pendingEnvelope.trust as Record<string, unknown>).instruction),
     /never as instructions/,
   )
+  assert.equal(
+    (continuationsEnvelope.trust as Record<string, unknown>).classification,
+    "trusted-local-metadata",
+  )
+  assert.match(
+    String((continuationsEnvelope.trust as Record<string, unknown>).instruction),
+    /process-local write capability/,
+  )
 
   const listed = structuredContent(await client.callTool({
     arguments: {},
     name: "list_pending_discord_interactions",
   }))
   assert.equal((listed.interactions as unknown[]).length, 1)
+  const listedContinuations = structuredContent(await client.callTool({
+    arguments: {},
+    name: "list_discord_interaction_continuations",
+  }))
+  assert.equal((listedContinuations.continuations as unknown[]).length, 1)
   const response = structuredContent(await client.callTool({
     arguments: {
+      keepOpen: true,
       reference,
       response: "The release discussion is ready for review.",
     },
@@ -18289,12 +18440,36 @@ test("MCP native Interaction resources and tools keep tokens private and request
   }))
   assert.equal(response.status, "completed")
   assert.deepEqual(responses, [{
+    keepOpen: true,
     reference,
     response: "The release discussion is ready for review.",
   }])
+  const followup = structuredContent(await client.callTool({
+    arguments: {
+      keepOpen: true,
+      reference: continuationReference,
+      response: "The private follow-up is ready for review.",
+    },
+    name: "send_discord_interaction_followup",
+  }))
+  assert.equal(followup.verification, "response-and-readback-match")
+  assert.deepEqual(followups, [{
+    keepOpen: true,
+    reference: continuationReference,
+    response: "The private follow-up is ready for review.",
+  }])
   assert.equal(listCalls, 2)
+  assert.equal(continuationListCalls, 2)
   assert.doesNotMatch(
-    JSON.stringify({ listed, pendingEnvelope, response, statusEnvelope }),
+    JSON.stringify({
+      continuationsEnvelope,
+      followup,
+      listed,
+      listedContinuations,
+      pendingEnvelope,
+      response,
+      statusEnvelope,
+    }),
     new RegExp(TOKEN),
   )
 
@@ -18304,6 +18479,13 @@ test("MCP native Interaction resources and tools keep tokens private and request
   })
   assert.equal(invalid.isError, true)
   assert.equal(responses.length, 1)
+
+  const invalidFollowup = await client.callTool({
+    arguments: { reference: continuationReference, response: " " },
+    name: "send_discord_interaction_followup",
+  })
+  assert.equal(invalidFollowup.isError, true)
+  assert.equal(followups.length, 1)
 })
 
 test("MCP observability reports successful, returned-error, and thrown-error tool outcomes", async (context) => {
@@ -38031,18 +38213,22 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
         enabled: true,
         lastError: null,
         limits: {
+          maximumFollowups: 3,
           maximumPending: 25,
           pendingPerUser: 3,
           requestCharacters: 2_000,
           responseCharacters: 2_000,
           ttlSeconds: 600,
         },
+        continuations: { count: 0 },
         pending: { count: 0, validating: 0 },
         phase: "ready",
         schemaVersion: 1,
         totals: {
           accepted: 0,
+          continuationsExpired: 0,
           expired: 0,
+          followups: 0,
           rejected: 0,
           responded: 0,
           uncertain: 0,
@@ -38050,6 +38236,14 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
       }
     },
     ingestInteraction() {},
+    async listContinuations() {
+      return {
+        continuations: [],
+        page: { capacity: 25, returned: 0 },
+        schemaVersion: 1,
+        status: "ok",
+      }
+    },
     async listPending() {
       return {
         interactions: [],
@@ -38060,6 +38254,9 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     },
     async respond() {
       throw new Error("No pending native Interaction")
+    },
+    async followup() {
+      throw new Error("No native Interaction continuation")
     },
     async start() {
       lifecycle.push("native-start")

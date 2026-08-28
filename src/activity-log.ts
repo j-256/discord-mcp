@@ -27,6 +27,7 @@ import {
   MEMBER_ROLE_ACTIONS,
   MEMBER_VOICE_ACTIONS,
   MEMBER_MODERATION_ACTIONS,
+  NATIVE_INTERACTION_DEFAULTS,
   SCHEMA_VERSION,
   SOUNDBOARD_ACTIONS,
   STAGE_INSTANCE_ACTIONS,
@@ -975,7 +976,13 @@ export interface GuildTemplateActivity {
 
 export type NativeInteractionActivityStatus =
   | "accepted"
+  | "continuation-expired"
+  | "continuation-opened"
   | "expired"
+  | "followup-completed"
+  | "followup-failed"
+  | "followup-pending"
+  | "followup-uncertain"
   | "rejected"
   | "response-completed"
   | "response-failed"
@@ -990,7 +997,9 @@ export interface NativeInteractionActivity {
   interactionId: string
   kind: "native-interaction"
   referenceHash: string
+  responseStage: "continuation" | "followup" | "initial"
   schemaVersion: number
+  sequence: number
   status: NativeInteractionActivityStatus
   timestamp: string
   userId: string
@@ -3697,7 +3706,32 @@ function parseNativeInteractionActivity(
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const status = String(record.status)
-  const errorStatus = ["rejected", "response-failed", "response-uncertain"].includes(status)
+  const responseStage = record.responseStage === undefined
+    ? "initial"
+    : String(record.responseStage)
+  const sequence = record.sequence === undefined ? 0 : record.sequence
+  const errorStatus = [
+    "followup-failed",
+    "followup-uncertain",
+    "rejected",
+    "response-failed",
+    "response-uncertain",
+  ].includes(status)
+  const initialStatus = [
+    "accepted",
+    "expired",
+    "rejected",
+    "response-completed",
+    "response-failed",
+    "response-pending",
+    "response-uncertain",
+  ].includes(status)
+  const followupStatus = [
+    "followup-completed",
+    "followup-failed",
+    "followup-pending",
+    "followup-uncertain",
+  ].includes(status)
   if (
     record.schemaVersion !== SCHEMA_VERSION
     || record.kind !== "native-interaction"
@@ -3707,7 +3741,13 @@ function parseNativeInteractionActivity(
     || Number.isNaN(Date.parse(record.timestamp))
     || ![
       "accepted",
+      "continuation-expired",
+      "continuation-opened",
       "expired",
+      "followup-completed",
+      "followup-failed",
+      "followup-pending",
+      "followup-uncertain",
       "rejected",
       "response-completed",
       "response-failed",
@@ -3724,6 +3764,16 @@ function parseNativeInteractionActivity(
     || !DISCORD_SNOWFLAKE_PATTERN.test(record.interactionId)
     || typeof record.referenceHash !== "string"
     || !OPERATION_KEY_HASH_PATTERN.test(record.referenceHash)
+    || !["continuation", "followup", "initial"].includes(responseStage)
+    || !Number.isInteger(sequence)
+    || Number(sequence) < 0
+    || Number(sequence) > NATIVE_INTERACTION_DEFAULTS.maximumFollowups
+    || (responseStage === "initial" && (!initialStatus || sequence !== 0))
+    || (responseStage === "followup" && (!followupStatus || Number(sequence) < 1))
+    || (responseStage === "continuation" && ![
+      "continuation-expired",
+      "continuation-opened",
+    ].includes(status))
     || !(record.error === null || (
       typeof record.error === "string"
       && CONTENT_FREE_ERROR_PATTERN.test(record.error)
@@ -3740,7 +3790,9 @@ function parseNativeInteractionActivity(
     interactionId: record.interactionId,
     kind: "native-interaction",
     referenceHash: record.referenceHash,
+    responseStage: responseStage as NativeInteractionActivity["responseStage"],
     schemaVersion: SCHEMA_VERSION,
+    sequence: Number(sequence),
     status: status as NativeInteractionActivityStatus,
     timestamp: record.timestamp,
     userId: record.userId,

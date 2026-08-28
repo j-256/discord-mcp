@@ -2132,6 +2132,34 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
       type: 20,
       webhook_id: "100",
     }),
+    jsonResponse({
+      application_id: "100",
+      attachments: [],
+      author: { bot: true, id: "500", username: "connector" },
+      channel_id: "600",
+      components: [],
+      content: "Private follow-up",
+      embeds: [],
+      flags: 64,
+      id: "701",
+      timestamp: "2026-08-22T00:01:00.000Z",
+      type: 0,
+      webhook_id: "100",
+    }),
+    jsonResponse({
+      application_id: "100",
+      attachments: [],
+      author: { bot: true, id: "500", username: "connector" },
+      channel_id: "600",
+      components: [],
+      content: "Private follow-up",
+      embeds: [],
+      flags: 64,
+      id: "701",
+      timestamp: "2026-08-22T00:01:00.000Z",
+      type: 0,
+      webhook_id: "100",
+    }),
   ]
   const client = new DiscordClient({
     apiBaseUrl: API_BASE_URL,
@@ -2183,6 +2211,12 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     interactionToken,
     "Reviewed response",
   )
+  await client.createInteractionFollowup(
+    "100",
+    interactionToken,
+    "Private follow-up",
+  )
+  await client.getInteractionFollowup("100", interactionToken, "701")
 
   assert.deepEqual(requests.map(({ authorization, method, url }) => ({
     authorization,
@@ -2212,6 +2246,14 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     authorization: null,
     method: "PATCH",
     url: `${API_BASE_URL}/webhooks/100/${interactionToken}/messages/@original`,
+  }, {
+    authorization: null,
+    method: "POST",
+    url: `${API_BASE_URL}/webhooks/100/${interactionToken}`,
+  }, {
+    authorization: null,
+    method: "GET",
+    url: `${API_BASE_URL}/webhooks/100/${interactionToken}/messages/701`,
   }])
   assert.deepEqual(requests[1]?.body, {
     default_member_permissions: "0",
@@ -2258,6 +2300,18 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     content: "Reviewed response",
     embeds: [],
   })
+  assert.deepEqual(requests[6]?.body, {
+    allowed_mentions: {
+      parse: [],
+      replied_user: false,
+    },
+    attachments: [],
+    components: [],
+    content: "Private follow-up",
+    embeds: [],
+    flags: DISCORD_MESSAGE_FLAGS.ephemeral,
+  })
+  assert.equal(requests[7]?.body, null)
 })
 
 test("Discord client uses full-localization reviewed command routes and exact success statuses", async () => {
@@ -3221,7 +3275,7 @@ test("Discord client requires exact-user application subscription pages", async 
   )
 })
 
-test("Discord client never retries or reveals an Interaction token after callback failure", async () => {
+test("Discord client never retries or reveals an Interaction token after transport refusal", async () => {
   const interactionToken = "private.interaction-token"
   let requests = 0
   let sleeps = 0
@@ -3238,17 +3292,25 @@ test("Discord client never retries or reveals an Interaction token after callbac
     token: TOKEN,
   })
 
-  await assert.rejects(
+  const operations = [
     () => client.createDeferredInteractionResponse("400", interactionToken),
-    (error: unknown) => {
+    () => client.createInteractionFollowup(
+      "100",
+      interactionToken,
+      "Private follow-up",
+    ),
+    () => client.getInteractionFollowup("100", interactionToken, "701"),
+  ]
+  for (const operation of operations) {
+    await assert.rejects(operation, (error: unknown) => {
       assert.ok(error instanceof DiscordApiError)
       assert.equal(error.status, 429)
       assert.equal(error.route.includes(interactionToken), false)
       assert.equal(error.message.includes(interactionToken), false)
       return true
-    },
-  )
-  assert.equal(requests, 1)
+    })
+  }
+  assert.equal(requests, operations.length)
   assert.equal(sleeps, 0)
 })
 

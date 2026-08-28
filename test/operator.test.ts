@@ -4981,6 +4981,9 @@ test("doctor and setup explain native Interaction ingress and command boundaries
   assert.match(ingress?.summary || "", /at most 7 requests for 180 seconds/)
   assert.match(ingress?.summary || "", /intents-free Gateway connection/)
   assert.match(ingress?.summary || "", /endpoint and command verification/)
+  assert.match(ingress?.summary || "", /response tokens stay broker-private/)
+  assert.match(ingress?.summary || "", /initial replies close by default/)
+  assert.match(ingress?.summary || "", /rotating one-shot continuations/)
   assert.match(omitted.warnings.join("\n"), /native-interactions toolset/)
   assert.match(
     disabled.checks.find(
@@ -6177,6 +6180,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://gateway/events",
     "discord://gateway/status",
     "discord://guilds",
+    "discord://interactions/continuations",
     "discord://interactions/pending",
     "discord://interactions/status",
     "discord://soundboard/defaults",

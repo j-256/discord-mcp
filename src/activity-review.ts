@@ -115,17 +115,22 @@ type UnsignedDiscordActivityReviewReport = Omit<
 
 const PENDING_STATUSES = new Set<string>([
   "accepted",
+  "continuation-opened",
+  "followup-pending",
   "pending",
   "response-pending",
 ])
 
 const SETTLED_STATUSES = new Set<string>([
   "completed",
+  "continuation-expired",
+  "followup-completed",
   "noop",
   "response-completed",
 ])
 
 const UNCERTAIN_STATUSES = new Set<string>([
+  "followup-uncertain",
   "response-uncertain",
   "uncertain",
 ])

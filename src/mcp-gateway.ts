@@ -48,6 +48,7 @@ const SUBSCRIBABLE_GATEWAY_URIS: ReadonlySet<string> = new Set([
   MCP_RESOURCE_URIS.gatewayStatus,
 ])
 const SUBSCRIBABLE_NATIVE_INTERACTION_URIS: ReadonlySet<string> = new Set([
+  MCP_RESOURCE_URIS.nativeInteractionContinuations,
   MCP_RESOURCE_URIS.nativeInteractionPending,
   MCP_RESOURCE_URIS.nativeInteractionStatus,
 ])
@@ -97,9 +98,11 @@ function uriForChange(kind: GatewayChangeKind): string {
 function uriForNativeInteractionChange(
   kind: NativeInteractionChangeKind,
 ): string {
-  return kind === "pending"
-    ? MCP_RESOURCE_URIS.nativeInteractionPending
-    : MCP_RESOURCE_URIS.nativeInteractionStatus
+  if (kind === "pending") return MCP_RESOURCE_URIS.nativeInteractionPending
+  if (kind === "continuations") {
+    return MCP_RESOURCE_URIS.nativeInteractionContinuations
+  }
+  return MCP_RESOURCE_URIS.nativeInteractionStatus
 }
 
 export function registerDiscordGatewayMcp(

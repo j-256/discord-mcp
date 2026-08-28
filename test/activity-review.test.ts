@@ -61,6 +61,8 @@ function nativeInteraction(
   status: NativeInteractionActivity["status"],
   timestamp: string,
 ): NativeInteractionActivity {
+  const continuation = status.startsWith("continuation-")
+  const followup = status.startsWith("followup-")
   return {
     channelId: CHANNEL_ID,
     error: null,
@@ -69,7 +71,9 @@ function nativeInteraction(
     interactionId: "400000000000000001",
     kind: "native-interaction",
     referenceHash: `hmac-sha256:${"c".repeat(64)}`,
+    responseStage: continuation ? "continuation" : followup ? "followup" : "initial",
     schemaVersion: 1,
+    sequence: continuation || followup ? 1 : 0,
     status,
     timestamp,
     userId: "500000000000000001",
@@ -213,10 +217,15 @@ test("activity review classifies every current status family without false histo
   const report = await reviewDiscordActivity("/private/activity.jsonl", 25, {
     activityStore: store([
       nativeInteraction("activity_pending", "accepted", "2026-08-24T12:00:05.000Z"),
+      nativeInteraction("activity_followup_pending", "followup-pending", "2026-08-24T12:00:04.500Z"),
       channelCreation("activity_review", "completed-with-drift", "2026-08-24T12:00:04.000Z"),
       interaction("activity_failed", "failed", "2026-08-24T12:00:03.000Z"),
+      nativeInteraction("activity_followup_failed", "followup-failed", "2026-08-24T12:00:02.500Z"),
       nativeInteraction("activity_uncertain", "response-uncertain", "2026-08-24T12:00:02.000Z"),
+      nativeInteraction("activity_followup_uncertain", "followup-uncertain", "2026-08-24T12:00:01.500Z"),
       interaction("activity_settled", "noop", "2026-08-24T12:00:01.000Z"),
+      nativeInteraction("activity_followup_settled", "followup-completed", "2026-08-24T12:00:00.500Z"),
+      nativeInteraction("activity_continuation_settled", "continuation-expired", "2026-08-24T12:00:00.000Z"),
     ]),
     async listCoordination() {
       return coordination()
@@ -227,18 +236,23 @@ test("activity review classifies every current status family without false histo
     Object.fromEntries(report.records.map(({ disposition, entry }) => [entry.id, disposition])),
     {
       activity_failed: "review",
+      activity_followup_failed: "review",
+      activity_followup_pending: "pending",
+      activity_followup_settled: "settled",
+      activity_followup_uncertain: "uncertain",
+      activity_continuation_settled: "settled",
       activity_pending: "pending",
       activity_review: "review",
       activity_settled: "settled",
       activity_uncertain: "uncertain",
     },
   )
-  assert.equal(report.summary.attentionActivities, 4)
+  assert.equal(report.summary.attentionActivities, 7)
   assert.deepEqual(report.summary.dispositions, [
-    { count: 1, value: "pending" },
-    { count: 2, value: "review" },
-    { count: 1, value: "settled" },
-    { count: 1, value: "uncertain" },
+    { count: 2, value: "pending" },
+    { count: 3, value: "review" },
+    { count: 3, value: "settled" },
+    { count: 2, value: "uncertain" },
   ])
 })
 

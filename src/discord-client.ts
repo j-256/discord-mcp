@@ -18,6 +18,7 @@ import {
   GUILD_TEMPLATE_LIMITS,
   INVITE_LIMITS,
   MEMBER_DIRECTORY_LIMITS,
+  NATIVE_INTERACTION_DEFAULTS,
   ONBOARDING_LIMITS,
   POLL_LIMITS,
   REACTION_LIMITS,
@@ -1588,6 +1589,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_guild_application_command",
   "create_guild_ban",
   "create_interaction_response",
+  "create_interaction_followup",
   "create_immediate_interaction_response",
   "create_guild_emoji",
   "create_guild_soundboard_sound",
@@ -1639,6 +1641,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "get_invite",
   "get_invite_target_users",
   "get_invite_target_users_job_status",
+  "get_interaction_followup",
   "get_webhook",
   "get_webhook_message",
   "join_thread",
@@ -6263,6 +6266,26 @@ function assertPositiveSnowflake(value: string, name: string): void {
   }
 }
 
+function assertInteractionToken(value: string): void {
+  if (!/^[A-Za-z0-9._~-]{1,512}$/.test(value)) {
+    throw new RangeError("Discord Interaction token is invalid")
+  }
+}
+
+function assertInteractionContent(value: string): void {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > NATIVE_INTERACTION_DEFAULTS.responseCharacters
+    || !value.trim()
+    || value.includes("\0")
+  ) {
+    throw new RangeError(
+      `Discord Interaction response must be 1-${NATIVE_INTERACTION_DEFAULTS.responseCharacters} nonempty characters`,
+    )
+  }
+}
+
 function encodedReactionEmoji(emoji: string): string {
   if (
     typeof emoji !== "string"
@@ -9479,9 +9502,7 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<void> {
     assertSearchSnowflake(interactionId, "Discord Interaction ID")
-    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
-      throw new RangeError("Discord Interaction token is invalid")
-    }
+    assertInteractionToken(interactionToken)
     await this.#request<void>(
       "create_interaction_response",
       `/interactions/${interactionId}/${encodeURIComponent(interactionToken)}/callback`,
@@ -9506,18 +9527,8 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<void> {
     assertSearchSnowflake(interactionId, "Discord Interaction ID")
-    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
-      throw new RangeError("Discord Interaction token is invalid")
-    }
-    if (
-      typeof content !== "string"
-      || content.length < 1
-      || content.length > 2_000
-      || !content.trim()
-      || content.includes("\0")
-    ) {
-      throw new RangeError("Discord Interaction response must be 1-2000 nonempty characters")
-    }
+    assertInteractionToken(interactionToken)
+    assertInteractionContent(content)
     await this.#request<void>(
       "create_immediate_interaction_response",
       `/interactions/${interactionId}/${encodeURIComponent(interactionToken)}/callback`,
@@ -9549,18 +9560,8 @@ export class DiscordClient {
     options: RequestOptions = {},
   ): Promise<DiscordMessage> {
     assertSearchSnowflake(applicationId, "Discord Interaction application ID")
-    if (!/^[A-Za-z0-9._~-]{1,512}$/.test(interactionToken)) {
-      throw new RangeError("Discord Interaction token is invalid")
-    }
-    if (
-      typeof content !== "string"
-      || content.length < 1
-      || content.length > 2_000
-      || !content.trim()
-      || content.includes("\0")
-    ) {
-      throw new RangeError("Discord Interaction response must be 1-2000 nonempty characters")
-    }
+    assertInteractionToken(interactionToken)
+    assertInteractionContent(content)
     return this.#request(
       "edit_original_interaction_response",
       `/webhooks/${applicationId}/${encodeURIComponent(interactionToken)}/messages/@original`,
@@ -9579,6 +9580,64 @@ export class DiscordClient {
           embeds: [],
         },
         diagnosticRoute: "/webhooks/{application.id}/{interaction.token}/messages/@original",
+        maxResponseBytes: DISCORD_LIMITS.interactionMessageResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  createInteractionFollowup(
+    applicationId: string,
+    interactionToken: string,
+    content: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(applicationId, "Discord Interaction application ID")
+    assertInteractionToken(interactionToken)
+    assertInteractionContent(content)
+    return this.#request(
+      "create_interaction_followup",
+      `/webhooks/${applicationId}/${encodeURIComponent(interactionToken)}`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        body: {
+          allowed_mentions: {
+            parse: [],
+            replied_user: false,
+          },
+          attachments: [],
+          components: [],
+          content,
+          embeds: [],
+          flags: DISCORD_MESSAGE_FLAGS.ephemeral,
+        },
+        diagnosticRoute: "/webhooks/{application.id}/{interaction.token}",
+        maxResponseBytes: DISCORD_LIMITS.interactionMessageResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+  }
+
+  getInteractionFollowup(
+    applicationId: string,
+    interactionToken: string,
+    messageId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordMessage> {
+    assertSearchSnowflake(applicationId, "Discord Interaction application ID")
+    assertInteractionToken(interactionToken)
+    assertSearchSnowflake(messageId, "Discord Interaction follow-up message ID")
+    return this.#request(
+      "get_interaction_followup",
+      `/webhooks/${applicationId}/${encodeURIComponent(interactionToken)}/messages/${messageId}`,
+      {
+        ...options,
+        authentication: "none",
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/webhooks/{application.id}/{interaction.token}/messages/{message.id}",
+        maxResponseBytes: DISCORD_LIMITS.interactionMessageResponseBytes,
         suppressFailureCause: true,
       },
     )
