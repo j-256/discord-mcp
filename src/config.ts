@@ -58,6 +58,8 @@ export interface ConnectorConfig {
   allowApplicationMonetizationAudit: boolean
   allowApplicationTestEntitlementChanges: boolean
   allowApplicationRoleConnectionMetadataChanges: boolean
+  allowBotProfileAudit: boolean
+  allowBotProfileChanges: boolean
   allowAnnouncementCrossposts: boolean
   allowAnnouncementSubscriptionAudit: boolean
   allowAnnouncementSubscriptionChanges: boolean
@@ -175,6 +177,7 @@ export interface ConnectorConfig {
   attachmentChannelIds: ReadonlySet<string>
   attachmentMaxBytes: number
   attachmentRoots: readonly string[]
+  botProfileRoots: readonly string[]
   automodAlertChannelIds: ReadonlySet<string>
   automodGuildIds: ReadonlySet<string>
   banAuditGuildIds: ReadonlySet<string>
@@ -1126,6 +1129,8 @@ export function loadConnectorConfigDocument(
     document,
     "applicationRoleConnectionMetadataChanges",
   )
+  const allowBotProfileAudit = configCapability(document, "botProfileAudit")
+  const allowBotProfileChanges = configCapability(document, "botProfileChanges")
   const allowApplicationTestEntitlementChanges = configCapability(
     document,
     "applicationTestEntitlementChanges",
@@ -1133,6 +1138,11 @@ export function loadConnectorConfigDocument(
   if (allowApplicationEmojiChanges && !allowApplicationEmojiAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowApplicationEmojiChanges")} requires ${configPolicyPath("allowApplicationEmojiAudit")}`,
+    )
+  }
+  if (allowBotProfileChanges && !allowBotProfileAudit) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowBotProfileChanges")} requires ${configPolicyPath("allowBotProfileAudit")}`,
     )
   }
   if (allowApplicationMonetizationAudit && applicationMonetizationSkuIds.size === 0) {
@@ -1349,6 +1359,8 @@ export function loadConnectorConfigDocument(
     allowApplicationMonetizationAudit,
     allowApplicationTestEntitlementChanges,
     allowApplicationRoleConnectionMetadataChanges,
+    allowBotProfileAudit,
+    allowBotProfileChanges,
     announcementCrosspostChannelIds,
     announcementSubscriptionSourceChannelIds,
     announcementSubscriptionTargetChannelIds,
@@ -1483,6 +1495,10 @@ export function loadConnectorConfigDocument(
     attachmentRoots: parseOwnedRoots(
       document.storage.attachmentRoots,
       "$.storage.attachmentRoots",
+    ),
+    botProfileRoots: parseOwnedRoots(
+      document.storage.botProfileRoots,
+      "$.storage.botProfileRoots",
     ),
     automodAlertChannelIds,
     automodGuildIds,

@@ -138,6 +138,8 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "applicationTestEntitlementChanges",
   "applicationIntentChanges",
   "applicationRoleConnectionMetadataChanges",
+  "botProfileAudit",
+  "botProfileChanges",
   "announcementCrossposts",
   "announcementSubscriptionAudit",
   "announcementSubscriptionChanges",
@@ -340,6 +342,7 @@ export const CONFIG_STORAGE_NAMES = Object.freeze([
   "applicationEmojiRoots",
   "attachmentRoots",
   "auditFile",
+  "botProfileRoots",
   "guildExpressionRoots",
   "inviteCapabilityRoots",
   "scheduledEventRoots",
@@ -360,6 +363,7 @@ export interface ConnectorConfigDocumentStorage {
   applicationEmojiRoots?: readonly string[]
   attachmentRoots?: readonly string[]
   auditFile?: string
+  botProfileRoots?: readonly string[]
   guildExpressionRoots?: readonly string[]
   inviteCapabilityRoots?: readonly string[]
   scheduledEventRoots?: readonly string[]
@@ -448,6 +452,9 @@ const APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exac
 const GLOBAL_APPLICATION_COMMAND_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed application-wide global command creation, complete-state update, and exact-ID deletion"
 const APPLICATION_COMMAND_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed application-command changes"
 const APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed complete current-application linked-role metadata replacement and clearance"
+const BOT_PROFILE_AUDIT_CAPABILITY_DESCRIPTION = "Enable privacy-bounded reads of the authenticated current bot profile"
+const BOT_PROFILE_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed application-wide current-bot username, avatar, and banner changes"
+const BOT_PROFILE_ROOT_DESCRIPTION = "Canonical process-owned roots for reviewed current-bot avatar and banner images"
 const BULK_BAN_AUDIT_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban planning"
 const BULK_BANS_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target Bulk Guild Ban execution"
 const BULK_MEMBER_ROLE_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-target bulk member-role changes"
@@ -516,6 +523,12 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "applicationRoleConnectionMetadataChanges") {
     return APPLICATION_ROLE_CONNECTION_METADATA_CHANGES_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "botProfileAudit") {
+    return BOT_PROFILE_AUDIT_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "botProfileChanges") {
+    return BOT_PROFILE_CHANGES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "channelMetadataChanges") {
     return CHANNEL_METADATA_CAPABILITY_DESCRIPTION
@@ -651,6 +664,9 @@ function scopeDescription(documentKey: string): string {
 }
 
 function storageDescription(documentKey: string): string {
+  if (documentKey === "botProfileRoots") {
+    return BOT_PROFILE_ROOT_DESCRIPTION
+  }
   if (documentKey === "guildExpressionRoots") {
     return "Owned local roots shared by guild-expression creation and reviewed role-icon images"
   }

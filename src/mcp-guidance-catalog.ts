@@ -147,6 +147,7 @@ export const MCP_PROMPT_NAMES = Object.freeze({
   reviewApplicationEntitlementConsumption:
     "review_application_entitlement_consumption",
   reviewApplicationIntentEnablement: "review_application_intent_enablement",
+  reviewBotProfileChange: "review_bot_profile_change",
   reviewApplicationTestEntitlementChange:
     "review_application_test_entitlement_change",
   reviewInviteCreation: "review_invite_creation",
@@ -232,6 +233,7 @@ export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.reviewApplicationMonetization]: "application-monetization",
   [MCP_PROMPT_NAMES.reviewApplicationSkus]: "connector",
   [MCP_PROMPT_NAMES.reviewApplicationIntentEnablement]: "application-security",
+  [MCP_PROMPT_NAMES.reviewBotProfileChange]: "bot-profile",
   [MCP_PROMPT_NAMES.reviewApplicationTestEntitlementChange]:
     "application-entitlement-changes",
   [MCP_PROMPT_NAMES.reviewInviteCreation]: "invites",

@@ -235,6 +235,7 @@ test("profile storage is private, deterministic, sorted, and credential-free", a
       "username",
       "writePolicy",
       "attachmentRoots",
+      "botProfileRoots",
       "auditFile",
       "telemetry",
     ].join("|"), "i"),

@@ -333,6 +333,9 @@ function guidanceService(options: {
       })
     },
     auditApplicationSubscriptions: unexpected,
+    executeBotProfileChange: unexpected,
+    getCurrentBotProfile: unexpected,
+    planBotProfileChange: unexpected,
     async auditGuildWebhooks(guildId) {
       calls.guildWebhookAudits += 1
       calls.lastGuildId = guildId
@@ -2133,6 +2136,10 @@ function guidanceService(options: {
         applicationConsumableEntitlementUserIds: [],
         applicationEntitlementConsumptionEnabled: false,
         applicationIntentChangesEnabled: false,
+        botProfileAuditEnabled: false,
+        botProfileChangesEnabled: false,
+        botProfileImageReplacementEnabled: false,
+        botProfileRootCount: 0,
         applicationEntitlementGuildIds: [...(options.applicationEntitlementGuildIds ?? [])],
         applicationEntitlementUserIds: [...(options.applicationEntitlementUserIds ?? [])],
         applicationMonetizationAuditEnabled:

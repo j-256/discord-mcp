@@ -217,6 +217,10 @@ function status(
       applicationConsumableEntitlementUserIds: [],
       applicationEntitlementConsumptionEnabled: false,
       applicationIntentChangesEnabled: false,
+      botProfileAuditEnabled: false,
+      botProfileChangesEnabled: false,
+      botProfileImageReplacementEnabled: false,
+      botProfileRootCount: 0,
       applicationEntitlementGuildIds: [],
       applicationEntitlementUserIds: [],
       applicationMonetizationAuditEnabled: false,
@@ -469,6 +473,7 @@ function toolService(
     planDirectMessageChange: unexpected,
     verifyDirectMessageChange: unexpected,
     getApplicationPosture: unexpected,
+    getCurrentBotProfile: unexpected,
     auditChannelDeletion: unexpected,
     auditRoleDeletion: unexpected,
     auditChannelOrder: unexpected,
@@ -479,6 +484,7 @@ function toolService(
     executeApplicationEmojiChange: unexpected,
     executeApplicationEntitlementConsumption: unexpected,
     executeApplicationIntentEnablement: unexpected,
+    executeBotProfileChange: unexpected,
     executeApplicationRoleConnectionMetadataChange: unexpected,
     executeApplicationTestEntitlementChange: unexpected,
     executeMessageForward: unexpected,
@@ -582,6 +588,7 @@ function toolService(
     planApplicationEmojiChange: unexpected,
     planApplicationEntitlementConsumption: unexpected,
     planApplicationIntentEnablement: unexpected,
+    planBotProfileChange: unexpected,
     planApplicationRoleConnectionMetadataChange: unexpected,
     planApplicationTestEntitlementChange: unexpected,
     planGuildTemplateChange: unexpected,
@@ -3257,6 +3264,71 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
   )
   assert.match(setup.warnings.join("\n"), /creation remains blocked/)
   assert.match(omitted.warnings.join("\n"), /application-emojis toolset/)
+})
+
+test("doctor and setup explain identity-bound reviewed bot-profile scope", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const canonicalRoot = await realpath(root)
+  const enabledPolicy = fixturePolicy({
+    capabilities: {
+      botProfileAudit: true,
+      botProfileChanges: true,
+    },
+    storage: {
+      botProfileRoots: [canonicalRoot],
+    },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const missingRootPolicy = fixturePolicy({
+    capabilities: {
+      botProfileAudit: true,
+      botProfileChanges: true,
+    },
+  })
+  const missingRoot = await diagnoseConnector({
+    configOverrides: missingRootPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    configOverrides: missingRootPolicy,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: {
+        toolsets: ["connector"],
+      },
+    },
+    service: statusProvider(),
+  })
+
+  const audit = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.botProfileAuditPolicy,
+  )
+  const changes = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.botProfileChangePolicy,
+  )
+  assert.equal(audit?.status, "pass")
+  assert.match(audit?.summary || "", /pinned application and bot identities/u)
+  assert.match(audit?.summary || "", /transient username/u)
+  assert.equal(changes?.status, "pass")
+  assert.match(changes?.summary || "", /fresh file evidence/u)
+  assert.match(changes?.summary || "", /application-wide one-shot coordination/u)
+  assert.match(changes?.summary || "", /independent exact editable-state readback/u)
+  assert.match(changes?.summary || "", /1 canonical image roots/u)
+  assert.equal(
+    missingRoot.checks.find(
+      (entry) => entry.id === DOCTOR_CHECK_IDS.botProfileChangePolicy,
+    )?.status,
+    "warn",
+  )
+  assert.match(setup.warnings.join("\n"), /image replacement remains blocked/u)
+  assert.match(omitted.warnings.join("\n"), /bot-profile toolset/u)
 })
 
 test("doctor and setup explain exact-beneficiary application monetization audit", async () => {
@@ -5962,6 +6034,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_application_test_entitlement_change",
     "review_attachment_message",
     "review_automod_change",
+    "review_bot_profile_change",
     "review_bulk_guild_ban",
     "review_bulk_member_role_change",
     "review_channel_clone",
@@ -6093,6 +6166,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_application_role_connection_metadata_change",
     "execute_application_test_entitlement_change",
     "execute_automod_change",
+    "execute_bot_profile_change",
     "execute_bulk_guild_ban",
     "execute_bulk_member_role_change",
     "execute_channel_clone",
@@ -6152,6 +6226,8 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     report.readOnlyTools.includes("plan_application_intent_enablement"),
     true,
   )
+  assert.equal(report.readOnlyTools.includes("get_current_bot_profile"), true)
+  assert.equal(report.readOnlyTools.includes("plan_bot_profile_change"), true)
   assert.equal(report.readOnlyTools.includes("audit_channel_order"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_clone"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_order"), true)

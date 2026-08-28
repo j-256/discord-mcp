@@ -372,6 +372,14 @@ test("coordination rejects invalid construction and intent identities", async (c
     () => invalidClaimId.run(intent([
       writeApplicationCollectionTarget("emojis", APPLICATION_ID),
     ], {
+      kind: "bot-profile-change",
+    }), async () => "unsafe"),
+    /bot-profile collection target/u,
+  )
+  await assert.rejects(
+    () => invalidClaimId.run(intent([
+      writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ], {
       kind: "application-entitlement-change",
     }), async () => "unsafe"),
     /entitlement collection target/u,
@@ -466,6 +474,52 @@ test("application intent claims use the exact application-wide security target",
     writeCoordinationTargetHash(target),
     writeCoordinationTargetHash(
       writeApplicationCollectionTarget("emojis", APPLICATION_ID),
+    ),
+  )
+})
+
+test("bot-profile claims use the exact application-wide profile target", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-coordination-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const directory = join(root, "coordination")
+  const operationStore = new FileOperationStore(join(root, "operations"))
+  const coordinator = new FileWriteCoordinator(directory, operationStore)
+  const target = writeApplicationCollectionTarget("bot-profile", APPLICATION_ID)
+  const operationKeyHashValue = operationKeyHash(OPERATION_KEY)
+
+  const result = await coordinator.run(intent([target], {
+    kind: "bot-profile-change",
+  }), async () => {
+    const pending = {
+      activityId: "bot-profile-activity-0001",
+      applicationId: APPLICATION_ID,
+      error: null,
+      kind: "bot-profile-change" as const,
+      operationKeyHash: operationKeyHashValue,
+      planDigest: PLAN_DIGEST,
+      resourceId: null,
+      schemaVersion: 1 as const,
+      status: "pending" as const,
+      timestamp: "2026-08-28T00:00:00.000Z",
+      verification: null,
+    }
+    await operationStore.reserveApplication(pending)
+    await operationStore.finishApplication({
+      ...pending,
+      resourceId: MESSAGE_ID,
+      status: "completed",
+      timestamp: "2026-08-28T00:00:01.000Z",
+      verification: "match",
+    })
+    return "application-profile"
+  })
+
+  assert.equal(result, "application-profile")
+  assert.deepEqual(await claimFiles(directory), [])
+  assert.notEqual(
+    writeCoordinationTargetHash(target),
+    writeCoordinationTargetHash(
+      writeApplicationCollectionTarget("privileged-intents", APPLICATION_ID),
     ),
   )
 })

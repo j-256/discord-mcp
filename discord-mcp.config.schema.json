@@ -51,6 +51,14 @@
           "type": "boolean",
           "description": "Enable reviewed complete current-application linked-role metadata replacement and clearance"
         },
+        "botProfileAudit": {
+          "type": "boolean",
+          "description": "Enable privacy-bounded reads of the authenticated current bot profile"
+        },
+        "botProfileChanges": {
+          "type": "boolean",
+          "description": "Enable reviewed application-wide current-bot username, avatar, and banner changes"
+        },
         "announcementCrossposts": {
           "type": "boolean",
           "description": "Enable announcement crossposts policy"
@@ -1686,6 +1694,16 @@
           "maxLength": 4096,
           "description": "Absolute path for the content-free activity log"
         },
+        "botProfileRoots": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "description": "Canonical process-owned roots for reviewed current-bot avatar and banner images"
+        },
         "guildExpressionRoots": {
           "maxItems": 32,
           "type": "array",
@@ -1749,7 +1767,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 67,
+          "maxItems": 68,
           "type": "array",
           "items": {
             "type": "string",
@@ -1766,6 +1784,7 @@
               "audit-logs",
               "automod",
               "bans",
+              "bot-profile",
               "bulk-bans",
               "channel-creation",
               "channel-deletion",

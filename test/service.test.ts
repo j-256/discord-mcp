@@ -346,6 +346,7 @@ function serviceFixture(overrides: {
   applicationEmojiOptions?: ConnectorServiceOptions["applicationEmojiOptions"]
   applicationEntitlementOptions?: ConnectorServiceOptions["applicationEntitlementOptions"]
   applicationIntentOptions?: ConnectorServiceOptions["applicationIntentOptions"]
+  botProfileOptions?: ConnectorServiceOptions["botProfileOptions"]
   applicationRoleConnectionMetadataOptions?:
     ConnectorServiceOptions["applicationRoleConnectionMetadataOptions"]
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
@@ -667,6 +668,16 @@ function serviceFixture(overrides: {
     async getCurrentApplication() {
       calls.application += 1
       return overrides.application || application()
+    },
+    async getCurrentBotProfile(expectedBotId) {
+      return {
+        avatarHash: null,
+        bannerHash: null,
+        bot: true,
+        id: expectedBotId,
+        unknownFieldCount: 0,
+        username: "connector",
+      }
     },
     async getCurrentUserVoiceState() {
       throw new Error("Unexpected current-user voice lookup")
@@ -996,6 +1007,9 @@ function serviceFixture(overrides: {
     async modifyCurrentApplicationFlags() {
       throw new Error("Unexpected current-application flag modification")
     },
+    async modifyCurrentBotProfile() {
+      throw new Error("Unexpected bot-profile modification")
+    },
     async modifyGuildAutoModerationRule() {
       throw new Error("Unexpected AutoMod rule modification")
     },
@@ -1127,6 +1141,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.applicationIntentOptions
         ? { applicationIntentOptions: overrides.applicationIntentOptions }
+        : {}),
+      ...(overrides.botProfileOptions
+        ? { botProfileOptions: overrides.botProfileOptions }
         : {}),
       ...(overrides.applicationRoleConnectionMetadataOptions
         ? {
@@ -1916,6 +1933,34 @@ test("service rejects application intent policy before identity access", async (
   )
   assert.equal(unjustified.calls.application, 0)
   assert.equal(unjustified.calls.user, 0)
+})
+
+test("service rejects bot-profile policy before identity access", async () => {
+  const disabled = serviceFixture()
+  const request = {
+    acknowledgeApplicationWideChange: true as const,
+    operationKey: "bot-profile-preflight-0001",
+    reviewReason: "Align the reviewed public identity",
+    username: "reviewed-connector",
+  }
+
+  await assert.rejects(
+    () => disabled.service.getCurrentBotProfile(),
+    /bot-profile audit is disabled/u,
+  )
+  const auditOnly = serviceFixture({
+    configOverrides: {
+      capabilities: { botProfileAudit: true },
+    },
+  })
+  await assert.rejects(
+    () => auditOnly.service.planBotProfileChange(request),
+    /bot-profile changes are disabled/u,
+  )
+  assert.equal(disabled.calls.application, 0)
+  assert.equal(disabled.calls.user, 0)
+  assert.equal(auditOnly.calls.application, 0)
+  assert.equal(auditOnly.calls.user, 0)
 })
 
 test("service rejects application entitlement write policy before identity or SKU access", async () => {
@@ -6026,6 +6071,96 @@ test("service coordinates reviewed application intents and invalidates changed i
     "application-intent-enablement",
   )
   assert.equal(operationStore.applicationReceipt?.resourceId, APPLICATION_ID)
+})
+
+test("service coordinates reviewed bot-profile changes without persisting presentation data", async () => {
+  const operationStore = new MemoryApplicationOperationStore()
+  const coordinationIntents: WriteCoordinationIntent[] = []
+  const writeCoordinator: WriteCoordinator = {
+    run(intent, operation) {
+      coordinationIntents.push(intent)
+      return operation()
+    },
+  }
+  let profileReads = 0
+  let mutationCalls = 0
+  let currentUsername = "connector"
+  let mutationInput: Record<string, unknown> | null = null
+  const currentProfile = () => ({
+    avatarHash: null,
+    bannerHash: null,
+    bot: true as const,
+    id: BOT_ID,
+    unknownFieldCount: 0,
+    username: currentUsername,
+  })
+  const { calls, service } = serviceFixture({
+    botProfileOptions: {
+      clock: () => new Date("2026-08-28T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(43),
+      randomId: () => "activity-bot-profile",
+    },
+    client: {
+      async getCurrentBotProfile(expectedBotId) {
+        assert.equal(expectedBotId, BOT_ID)
+        profileReads += 1
+        return currentProfile()
+      },
+      async modifyCurrentBotProfile(expectedBotId, input) {
+        assert.equal(expectedBotId, BOT_ID)
+        mutationCalls += 1
+        mutationInput = { ...input }
+        currentUsername = input.username || currentUsername
+        return currentProfile()
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        botProfileAudit: true,
+        botProfileChanges: true,
+      },
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeApplicationWideChange: true as const,
+    operationKey: "bot-profile-service-attempt-0001",
+    reviewReason: "Align the private reviewed public identity",
+    username: "reviewed-connector",
+  }
+
+  const audit = await service.getCurrentBotProfile()
+  const plan = await service.planBotProfileChange(request)
+  const result = await service.executeBotProfileChange(request, plan.digest)
+
+  assert.equal(audit.profile.username, "connector")
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.changedFields, ["username"])
+  assert.equal(result.status, "completed")
+  assert.equal(result.observed.username, "reviewed-connector")
+  assert.equal(mutationCalls, 1)
+  assert.deepEqual(mutationInput, { username: "reviewed-connector" })
+  assert.equal(profileReads, 4)
+  assert.equal(calls.application, 4)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(coordinationIntents, [{
+    kind: "bot-profile-change",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [{
+      applicationId: APPLICATION_ID,
+      collection: "bot-profile",
+      kind: "application-collection",
+    }],
+  }])
+  assert.equal(calls.activityEntries.length, 2)
+  assert.doesNotMatch(
+    JSON.stringify(calls.activityEntries),
+    /connector|private reviewed|bot-profile-service-attempt/u,
+  )
+  assert.equal(operationStore.applicationReceipt?.kind, "bot-profile-change")
+  assert.equal(operationStore.applicationReceipt?.resourceId, BOT_ID)
 })
 
 test("service pins identity through privacy-safe AutoMod reads and reviewed changes", async () => {

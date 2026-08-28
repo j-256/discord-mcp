@@ -24,6 +24,10 @@ export interface PolicyDescription {
   applicationConsumableEntitlementSkuIds: string[]
   applicationConsumableEntitlementUserIds: string[]
   applicationIntentChangesEnabled: boolean
+  botProfileAuditEnabled: boolean
+  botProfileChangesEnabled: boolean
+  botProfileImageReplacementEnabled: boolean
+  botProfileRootCount: number
   applicationEntitlementGuildIds: string[]
   applicationEntitlementUserIds: string[]
   applicationMonetizationAuditEnabled: boolean
@@ -257,6 +261,8 @@ export class ScopePolicy {
   readonly #allowApplicationEmojiChanges: boolean
   readonly #allowApplicationEntitlementConsumption: boolean
   readonly #allowApplicationIntentChanges: boolean
+  readonly #allowBotProfileAudit: boolean
+  readonly #allowBotProfileChanges: boolean
   readonly #allowApplicationMonetizationAudit: boolean
   readonly #allowApplicationTestEntitlementChanges: boolean
   readonly #allowApplicationRoleConnectionMetadataChanges: boolean
@@ -372,6 +378,7 @@ export class ScopePolicy {
   readonly #attachmentMaxBytes: number
   readonly #attachmentRoots: readonly string[]
   readonly #applicationEmojiRoots: readonly string[]
+  readonly #botProfileRoots: readonly string[]
   readonly #applicationCommandGuildIds: ReadonlySet<string>
   readonly #applicationConsumableEntitlementSkuIds: ReadonlySet<string>
   readonly #applicationConsumableEntitlementUserIds: ReadonlySet<string>
@@ -490,6 +497,8 @@ export class ScopePolicy {
     | "allowApplicationEmojiChanges"
     | "allowApplicationEntitlementConsumption"
     | "allowApplicationIntentChanges"
+    | "allowBotProfileAudit"
+    | "allowBotProfileChanges"
     | "allowApplicationMonetizationAudit"
     | "allowApplicationTestEntitlementChanges"
     | "allowApplicationRoleConnectionMetadataChanges"
@@ -601,6 +610,7 @@ export class ScopePolicy {
     | "attachmentMaxBytes"
     | "attachmentRoots"
     | "applicationEmojiRoots"
+    | "botProfileRoots"
     | "applicationCommandGuildIds"
     | "applicationConsumableEntitlementSkuIds"
     | "applicationConsumableEntitlementUserIds"
@@ -691,6 +701,8 @@ export class ScopePolicy {
     this.#allowApplicationEntitlementConsumption =
       config.allowApplicationEntitlementConsumption ?? false
     this.#allowApplicationIntentChanges = config.allowApplicationIntentChanges ?? false
+    this.#allowBotProfileAudit = config.allowBotProfileAudit ?? false
+    this.#allowBotProfileChanges = config.allowBotProfileChanges ?? false
     this.#allowApplicationMonetizationAudit = config.allowApplicationMonetizationAudit ?? false
     this.#allowApplicationTestEntitlementChanges =
       config.allowApplicationTestEntitlementChanges ?? false
@@ -813,6 +825,7 @@ export class ScopePolicy {
     this.#attachmentMaxBytes = config.attachmentMaxBytes ?? 0
     this.#attachmentRoots = config.attachmentRoots ?? []
     this.#applicationEmojiRoots = config.applicationEmojiRoots ?? []
+    this.#botProfileRoots = config.botProfileRoots ?? []
     this.#applicationCommandGuildIds = config.applicationCommandGuildIds ?? new Set()
     this.#applicationConsumableEntitlementSkuIds =
       config.applicationConsumableEntitlementSkuIds ?? new Set()
@@ -936,6 +949,13 @@ export class ScopePolicy {
         && this.#applicationConsumableEntitlementSkuIds.size > 0
         && this.#applicationConsumableEntitlementUserIds.size > 0,
       applicationIntentChangesEnabled: this.#allowApplicationIntentChanges,
+      botProfileAuditEnabled: this.#allowBotProfileAudit,
+      botProfileChangesEnabled: this.#allowBotProfileAudit
+        && this.#allowBotProfileChanges,
+      botProfileImageReplacementEnabled: this.#allowBotProfileAudit
+        && this.#allowBotProfileChanges
+        && this.#botProfileRoots.length > 0,
+      botProfileRootCount: this.#botProfileRoots.length,
       applicationEntitlementGuildIds: [...this.#applicationEntitlementGuildIds].sort(),
       applicationEntitlementUserIds: [...this.#applicationEntitlementUserIds].sort(),
       applicationMonetizationAuditEnabled: this.#allowApplicationMonetizationAudit
@@ -2285,6 +2305,19 @@ export class ScopePolicy {
       throw new PolicyError(
         "Discord application privileged-intent changes are disabled by connector configuration",
       )
+    }
+  }
+
+  assertBotProfileAuditable(): void {
+    if (!this.#allowBotProfileAudit) {
+      throw new PolicyError("Discord bot-profile audit is disabled by connector configuration")
+    }
+  }
+
+  assertBotProfileChangeAllowed(): void {
+    this.assertBotProfileAuditable()
+    if (!this.#allowBotProfileChanges) {
+      throw new PolicyError("Discord bot-profile changes are disabled by connector configuration")
     }
   }
 

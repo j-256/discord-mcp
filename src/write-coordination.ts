@@ -67,6 +67,7 @@ export const WRITE_COORDINATION_GUILD_COLLECTIONS = [
 ] as const
 
 export const WRITE_COORDINATION_APPLICATION_COLLECTIONS = [
+  "bot-profile",
   "emojis",
   "entitlements",
   "global-application-commands",
@@ -442,6 +443,15 @@ function normalizeTargets(
     )
   }
   const applicationTarget = [...byDescriptor.values()][0]
+  if (
+    kind === "bot-profile-change"
+    && applicationTarget?.kind === "application-collection"
+    && applicationTarget.collection !== "bot-profile"
+  ) {
+    throw new WriteCoordinationStateError(
+      "Discord bot-profile coordination requires the bot-profile collection target",
+    )
+  }
   if (
     kind === "application-emoji-change"
     && applicationTarget?.kind === "application-collection"

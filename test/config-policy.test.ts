@@ -209,6 +209,10 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     applicationConsumableEntitlementUserIds: [],
     applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
+    botProfileAuditEnabled: false,
+    botProfileChangesEnabled: false,
+    botProfileImageReplacementEnabled: false,
+    botProfileRootCount: 0,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
@@ -1657,6 +1661,10 @@ test("configuration and policy require an exact administration guild and protect
     applicationConsumableEntitlementUserIds: [],
     applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
+    botProfileAuditEnabled: false,
+    botProfileChangesEnabled: false,
+    botProfileImageReplacementEnabled: false,
+    botProfileRootCount: 0,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
@@ -5605,6 +5613,10 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     applicationConsumableEntitlementUserIds: [],
     applicationEntitlementConsumptionEnabled: false,
     applicationIntentChangesEnabled: false,
+    botProfileAuditEnabled: false,
+    botProfileChangesEnabled: false,
+    botProfileImageReplacementEnabled: false,
+    botProfileRootCount: 0,
     applicationEntitlementGuildIds: [],
     applicationEntitlementUserIds: [],
     applicationMonetizationAuditEnabled: false,
@@ -6040,6 +6052,67 @@ test("configuration and policy isolate additive application intent changes", () 
     () => disabled.assertApplicationIntentChangeAllowed(),
     /privileged-intent changes are disabled/,
   )
+})
+
+test("configuration and policy isolate bot-profile reads, changes, and image roots", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-bot-profile-"))
+  const root = await realpath(temporary)
+  try {
+    const config = loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        botProfileAudit: true,
+        botProfileChanges: true,
+      },
+      storage: {
+        botProfileRoots: [root],
+      },
+    }, { homeDirectory: "/test/home" })
+    const policy = new ScopePolicy(config)
+
+    assert.equal(config.allowBotProfileAudit, true)
+    assert.equal(config.allowBotProfileChanges, true)
+    assert.deepEqual(config.botProfileRoots, [root])
+    policy.assertBotProfileAuditable()
+    policy.assertBotProfileChangeAllowed()
+    const description = policy.describe()
+    assert.equal(description.botProfileAuditEnabled, true)
+    assert.equal(description.botProfileChangesEnabled, true)
+    assert.equal(description.botProfileImageReplacementEnabled, true)
+    assert.equal(description.botProfileRootCount, 1)
+    assert.equal(JSON.stringify(description).includes(root), false)
+
+    const clearOnly = new ScopePolicy(loadConnectorConfig({
+      token: TOKEN,
+      capabilities: {
+        botProfileAudit: true,
+        botProfileChanges: true,
+      },
+    }, { homeDirectory: "/test/home" }))
+    clearOnly.assertBotProfileChangeAllowed()
+    assert.equal(clearOnly.describe().botProfileImageReplacementEnabled, false)
+
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        capabilities: {
+          botProfileChanges: true,
+        },
+      }, { homeDirectory: "/test/home" }),
+      /requires \$\.capabilities\.botProfileAudit/u,
+    )
+    assert.throws(
+      () => loadConnectorConfig({
+        token: TOKEN,
+        storage: {
+          botProfileRoots: ["relative/path"],
+        },
+      }, { homeDirectory: "/test/home" }),
+      ConfigurationError,
+    )
+  } finally {
+    await rm(temporary, { force: true, recursive: true })
+  }
 })
 
 test("configuration and policy isolate soundboard audit, changes, and local audio roots", async () => {

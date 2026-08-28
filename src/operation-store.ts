@@ -37,6 +37,7 @@ export const OPERATION_KINDS = [
   "application-role-connection-metadata-change",
   "attachment-message",
   "automod-change",
+  "bot-profile-change",
   "bulk-guild-ban",
   "bulk-member-role-change",
   "channel-clone",
@@ -102,6 +103,7 @@ export type ApplicationOperationKind =
   | "application-entitlement-change"
   | "application-intent-enablement"
   | "application-role-connection-metadata-change"
+  | "bot-profile-change"
   | "global-application-command-change"
 export type DirectMessageOperationKind = "direct-message-change"
 export type GuildOperationKind = Exclude<
@@ -328,6 +330,7 @@ const APPLICATION_OPERATION_KINDS: readonly ApplicationOperationKind[] = [
   "application-entitlement-change",
   "application-intent-enablement",
   "application-role-connection-metadata-change",
+  "bot-profile-change",
   "global-application-command-change",
 ]
 
@@ -774,6 +777,11 @@ function parseApplicationReceipt(value: unknown): ApplicationOperationReceipt {
   ) {
     throw new OperationStoreError(
       "Discord application intent receipt has invalid application-wide outcome evidence",
+    )
+  }
+  if (record.kind === "bot-profile-change" && record.verification === "drift") {
+    throw new OperationStoreError(
+      "Discord bot-profile receipt cannot contain drift verification",
     )
   }
   return {

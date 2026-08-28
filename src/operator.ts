@@ -139,6 +139,8 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   applicationCommandChangePolicy: "application-command-change-policy",
   globalApplicationCommandChangePolicy: "global-application-command-change-policy",
   applicationIntentChangePolicy: "application-intent-change-policy",
+  botProfileAuditPolicy: "bot-profile-audit-policy",
+  botProfileChangePolicy: "bot-profile-change-policy",
   applicationMonetizationAuditPolicy: "application-monetization-audit-policy",
   applicationTestEntitlementChangePolicy:
     "application-test-entitlement-change-policy",
@@ -859,6 +861,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("Application-emoji rename and deletion are enabled, but creation remains blocked because no canonical local roots are configured")
   }
+  if (config.allowBotProfileChanges && config.botProfileRoots.length === 0) {
+    warnings.push("Bot-profile username changes and image clearance are enabled, but image replacement remains blocked because no canonical local roots are configured")
+  }
   if (config.allowScheduledEventAudit && config.scheduledEventGuildIds.size === 0) {
     warnings.push("The scheduled-event audit toggle is enabled but inventory remains blocked because an exact guild allowlist is required")
   }
@@ -933,6 +938,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       config.allowApplicationIntentChanges,
       "application-security",
       "Reviewed application privileged-intent enablement",
+    ],
+    [
+      config.allowBotProfileAudit || config.allowBotProfileChanges,
+      "bot-profile",
+      "Current-bot profile audit and reviewed changes",
     ],
     [
       config.allowApplicationMonetizationAudit,
@@ -3216,6 +3226,38 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.applicationEmojiChangePolicy,
         "pass",
         `Reviewed application emoji changes are bound to the verified pinned current application and ${config.applicationEmojiRoots.length} canonical creation roots with application-wide coordination, one-shot execution, and exact metadata or absence readback`,
+      ))
+    }
+    if (!config.allowBotProfileAudit) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.botProfileAuditPolicy,
+        "pass",
+        "Privacy-bounded current-bot profile inspection is disabled",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.botProfileAuditPolicy,
+        "pass",
+        "Privacy-bounded current-bot profile inspection is bound to the verified pinned application and bot identities with transient username and media-presence projection",
+      ))
+    }
+    if (!config.allowBotProfileChanges) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.botProfileChangePolicy,
+        "pass",
+        "Reviewed application-wide bot-profile changes are disabled",
+      ))
+    } else if (config.botProfileRoots.length === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.botProfileChangePolicy,
+        "warn",
+        "Reviewed bot-profile username changes and image clearance are enabled, but image replacement is blocked because canonical local roots are empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.botProfileChangePolicy,
+        "pass",
+        `Reviewed bot-profile changes are bound to the verified pinned application and bot identities plus ${config.botProfileRoots.length} canonical image roots with fresh file evidence, signed approval, application-wide one-shot coordination, and independent exact editable-state readback`,
       ))
     }
     checks.push(config.allowApplicationMonetizationAudit

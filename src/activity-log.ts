@@ -1262,6 +1262,29 @@ export interface ApplicationIntentActivity {
   verification: "match" | null
 }
 
+export type BotProfileActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface BotProfileActivity {
+  applicationId: string
+  avatarChanged: boolean
+  bannerChanged: boolean
+  botId: string
+  error: string | null
+  id: string
+  kind: "bot-profile-change"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: BotProfileActivityStatus
+  timestamp: string
+  usernameChanged: boolean
+  verification: "match" | null
+}
+
 export type ApplicationRoleConnectionMetadataActivityStatus =
   | "completed"
   | "failed"
@@ -1689,6 +1712,7 @@ export type ActivityEntry =
   | ApplicationRoleConnectionMetadataActivity
   | AttachmentMessageActivity
   | AutoModerationActivity
+  | BotProfileActivity
   | BulkGuildBanActivity
   | ChannelCloneActivity
   | ChannelCreationActivity
@@ -5348,6 +5372,86 @@ function parseApplicationIntentActivity(
   }
 }
 
+function parseBotProfileActivity(
+  value: unknown,
+): BotProfileActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const expectedKeys = [
+    "applicationId",
+    "avatarChanged",
+    "bannerChanged",
+    "botId",
+    "error",
+    "id",
+    "kind",
+    "operationKeyHash",
+    "planDigest",
+    "schemaVersion",
+    "status",
+    "timestamp",
+    "usernameChanged",
+    "verification",
+  ].sort()
+  const status = String(record.status)
+  if (
+    Object.keys(record).sort().join("\0") !== expectedKeys.join("\0")
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "bot-profile-change"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(status)
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.botId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.botId)
+    || typeof record.avatarChanged !== "boolean"
+    || typeof record.bannerChanged !== "boolean"
+    || typeof record.usernameChanged !== "boolean"
+    || !(
+      record.avatarChanged
+      || record.bannerChanged
+      || record.usernameChanged
+    )
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (status === "completed" && (
+      record.error !== null || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(status) && (
+      record.error === null || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    applicationId: record.applicationId,
+    avatarChanged: record.avatarChanged,
+    bannerChanged: record.bannerChanged,
+    botId: record.botId,
+    error: record.error,
+    id: record.id,
+    kind: "bot-profile-change",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as BotProfileActivityStatus,
+    timestamp: record.timestamp,
+    usernameChanged: record.usernameChanged,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseApplicationRoleConnectionMetadataActivity(
   value: unknown,
 ): ApplicationRoleConnectionMetadataActivity | undefined {
@@ -6707,6 +6811,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseApplicationEntitlementActivity(value)
     || parseApplicationEmojiActivity(value)
     || parseApplicationIntentActivity(value)
+    || parseBotProfileActivity(value)
     || parseApplicationRoleConnectionMetadataActivity(value)
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)

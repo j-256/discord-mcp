@@ -17,6 +17,7 @@ import {
 import {
   ApplicationEmojiEvidenceError,
   ApplicationMonetizationEvidenceError,
+  BotProfileEvidenceError,
   ChannelMetadataEvidenceError,
   DirectMessageEvidenceError,
   DiscordApiError,
@@ -86,6 +87,7 @@ import type {
 
 const TOKEN = "test-discord-token-value"
 const API_BASE_URL = "https://discord.test/api/v10"
+const BOT_PROFILE_BOT_ID = "100000000000000001"
 const DIRECT_MESSAGE_CHANNEL_ID = "200"
 const DIRECT_MESSAGE_ID = "300"
 const DIRECT_MESSAGE_REPLY_ID = "301"
@@ -438,6 +440,185 @@ test("Discord client sends one exact non-retried current-application flag PATCH"
     /flags input is invalid/,
   )
   assert.equal(requests.length, 1)
+})
+
+test("Discord client projects the pinned bot profile and sends one sparse image-data PATCH", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string | undefined
+    reason: string | null
+    url: string
+  }> = []
+  const avatar = roleIconPng()
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      const method = init?.method
+      requests.push({
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+        method,
+        reason: new Headers(init?.headers).get("X-Audit-Log-Reason"),
+        url: String(input),
+      })
+      if (method === "PATCH") {
+        return jsonResponse({
+          avatar: "b".repeat(32),
+          banner: null,
+          bot: true,
+          future_profile_field: `private ${TOKEN}`,
+          id: BOT_PROFILE_BOT_ID,
+          username: "reviewed-bot",
+        })
+      }
+      return jsonResponse({
+        avatar: "a_" + "a".repeat(32),
+        banner: null,
+        bot: true,
+        future_profile_field: `private ${TOKEN}`,
+        id: BOT_PROFILE_BOT_ID,
+        username: "current-bot",
+      })
+    },
+    token: TOKEN,
+  })
+
+  assert.deepEqual(
+    await client.getCurrentBotProfile(BOT_PROFILE_BOT_ID),
+    {
+      avatarHash: "a_" + "a".repeat(32),
+      bannerHash: null,
+      bot: true,
+      id: BOT_PROFILE_BOT_ID,
+      unknownFieldCount: 1,
+      username: "current-bot",
+    },
+  )
+  assert.deepEqual(
+    await client.modifyCurrentBotProfile(BOT_PROFILE_BOT_ID, {
+      avatar: { bytes: avatar, format: "png", kind: "image" },
+      banner: { kind: "clear" },
+      username: "reviewed-bot",
+    }),
+    {
+      avatarHash: "b".repeat(32),
+      bannerHash: null,
+      bot: true,
+      id: BOT_PROFILE_BOT_ID,
+      unknownFieldCount: 1,
+      username: "reviewed-bot",
+    },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      body: null,
+      method: "GET",
+      reason: null,
+      url: `${API_BASE_URL}/users/@me`,
+    },
+    {
+      body: {
+        avatar: `data:image/png;base64,${Buffer.from(avatar).toString("base64")}`,
+        banner: null,
+        username: "reviewed-bot",
+      },
+      method: "PATCH",
+      reason: null,
+      url: `${API_BASE_URL}/users/@me`,
+    },
+  ])
+  assert.doesNotMatch(JSON.stringify(await client.getCurrentBotProfile(
+    BOT_PROFILE_BOT_ID,
+  )), new RegExp(TOKEN, "u"))
+})
+
+test("Discord client rejects unsafe bot-profile inputs and mismatched identity before ambiguity", async () => {
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      if (requests === 2) {
+        return jsonResponse({
+          avatar: null,
+          bot: true,
+          id: BOT_PROFILE_BOT_ID,
+          username: "current-bot",
+        })
+      }
+      return jsonResponse({
+        avatar: null,
+        banner: null,
+        bot: true,
+        id: "100000000000000002",
+        username: "another-bot",
+      })
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.getCurrentBotProfile(BOT_PROFILE_BOT_ID),
+    BotProfileEvidenceError,
+  )
+  await assert.rejects(
+    () => client.getCurrentBotProfile(BOT_PROFILE_BOT_ID),
+    BotProfileEvidenceError,
+  )
+  await assert.rejects(
+    () => client.modifyCurrentBotProfile(BOT_PROFILE_BOT_ID, {
+      username: "Discord helper",
+    }),
+    /Discord username restrictions/u,
+  )
+  await assert.rejects(
+    () => client.modifyCurrentBotProfile(BOT_PROFILE_BOT_ID, {
+      username: "valid-bot",
+      unexpected: true,
+    } as never),
+    /supported explicit fields/u,
+  )
+  await assert.rejects(
+    () => client.modifyCurrentBotProfile(BOT_PROFILE_BOT_ID, {
+      avatar: {
+        bytes: roleIconPng(),
+        format: "jpeg",
+        kind: "image",
+      },
+    }),
+    /format does not match/u,
+  )
+  assert.equal(requests, 2)
+})
+
+test("Discord client never retries a current bot-profile mutation", async () => {
+  const records: RecordedObservation[] = []
+  let requests = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      requests += 1
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    observer: recordingObserver(records),
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.modifyCurrentBotProfile(BOT_PROFILE_BOT_ID, {
+      username: "reviewed-bot",
+    }),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(requests, 1)
+  assert.deepEqual(records, [{
+    completions: [{ errorCategory: "discord-rate-limited", outcome: "error", statusCode: 429 }],
+    operation: "modify_current_bot_profile",
+    responses: [{ sharedRateLimit: false, statusCode: 429 }],
+    retries: 0,
+    runs: 1,
+  }])
 })
 
 test("Discord client encodes bounded message pagination without undefined cursors", async () => {
