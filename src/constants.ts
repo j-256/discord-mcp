@@ -331,6 +331,7 @@ export const DISCORD_LIMITS = Object.freeze({
   guildPruneDaysMinimum: 1,
   guildPruneIncludeRoles: 100,
   guildPruneResponseBytes: 1_024,
+  interactionMessageResponseBytes: 1_048_576,
   guildDescriptionCharacters: 120,
   guildNameCharacters: 100,
   guildNameMinimumCharacters: 2,
@@ -771,6 +772,7 @@ export const INTERACTION_DEFAULTS = Object.freeze({
 
 export const NATIVE_INTERACTION_DEFAULTS = Object.freeze({
   commandName: "discord-mcp",
+  maximumFollowups: 3,
   maximumPending: 25,
   pendingPerUser: 3,
   requestCharacters: 2_000,

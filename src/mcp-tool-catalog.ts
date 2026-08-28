@@ -790,6 +790,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["list", "message", "paginated", "pin", "pinned"],
     toolset: "pins",
   },
+  list_discord_interaction_continuations: {
+    keywords: ["continuation", "discord", "followup", "interaction", "list", "private"],
+    toolset: "native-interactions",
+  },
   list_pending_discord_interactions: {
     keywords: ["discord", "interaction", "pending", "private", "queue", "request"],
     toolset: "native-interactions",
@@ -1292,7 +1296,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "webhooks",
   },
   respond_to_discord_interaction: {
-    keywords: ["discord", "interaction", "private", "reply", "respond"],
+    keywords: ["continue", "discord", "interaction", "private", "reply", "respond"],
+    toolset: "native-interactions",
+  },
+  send_discord_interaction_followup: {
+    keywords: ["continue", "discord", "followup", "interaction", "private", "respond", "send"],
     toolset: "native-interactions",
   },
 } satisfies Record<CanonicalMcpToolName, ToolCatalogMetadata>)
@@ -2021,6 +2029,13 @@ function toolsetSummaries(entries: readonly SearchableMcpTool[]) {
     .filter(({ availableTools }) => availableTools > 0)
 }
 
+const NATIVE_INTERACTION_RESPONSE_COMPANIONS: ReadonlySet<CanonicalMcpToolName> = new Set([
+  "list_discord_interaction_continuations",
+  "list_pending_discord_interactions",
+  "respond_to_discord_interaction",
+  "send_discord_interaction_followup",
+])
+
 function workflowNames(
   entries: readonly SearchableMcpTool[],
   matches: readonly SearchableMcpTool[],
@@ -2033,6 +2048,9 @@ function workflowNames(
   )
   for (const entry of entries) {
     if (entry.workflow && workflows.has(entry.workflow)) names.add(entry.name)
+  }
+  if ([...names].some((name) => NATIVE_INTERACTION_RESPONSE_COMPANIONS.has(name))) {
+    for (const name of NATIVE_INTERACTION_RESPONSE_COMPANIONS) names.add(name)
   }
   return [...names].sort()
 }

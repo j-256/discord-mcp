@@ -36,7 +36,7 @@ import type {
   RequestOptions,
 } from "./types.js"
 
-export type NativeInteractionChangeKind = "pending" | "status"
+export type NativeInteractionChangeKind = "continuations" | "pending" | "status"
 export type NativeInteractionChangeListener = (
   kind: NativeInteractionChangeKind,
 ) => void
@@ -57,6 +57,10 @@ export type NativeInteractionErrorCategory =
   | "channel-evidence-invalid"
   | "command-contract-mismatch"
   | "command-inventory-invalid"
+  | "continuation-reference-unavailable"
+  | "followup-evidence-invalid"
+  | "followup-rejected"
+  | "followup-uncertain"
   | "identity-mismatch"
   | "payload-invalid"
   | "reference-unavailable"
@@ -90,6 +94,38 @@ export interface PendingNativeInteractionList {
   status: "disabled" | "ok" | "unavailable"
 }
 
+export interface NativeInteractionContinuation {
+  channelId: string
+  commandId: string
+  commandVersion: string
+  createdAt: string
+  expiresAt: string
+  followupsCompleted: number
+  followupsRemaining: number
+  guildId: string
+  interactionId: string
+  openedAt: string
+  reference: string
+  schemaVersion: number
+  userId: string
+}
+
+export interface NativeInteractionContinuationList {
+  continuations: NativeInteractionContinuation[]
+  page: {
+    capacity: number
+    returned: number
+  }
+  schemaVersion: number
+  status: "disabled" | "ok" | "unavailable"
+}
+
+export interface NativeInteractionContinuationResult {
+  expiresAt: string
+  followupsRemaining: number
+  reference: string
+}
+
 export interface NativeInteractionBrokerStatus {
   command: {
     guildCount: number
@@ -102,6 +138,7 @@ export interface NativeInteractionBrokerStatus {
     category: NativeInteractionErrorCategory
   } | null
   limits: {
+    maximumFollowups: number
     maximumPending: number
     pendingPerUser: number
     requestCharacters: number
@@ -112,11 +149,16 @@ export interface NativeInteractionBrokerStatus {
     count: number
     validating: number
   }
+  continuations: {
+    count: number
+  }
   phase: NativeInteractionBrokerPhase
   schemaVersion: number
   totals: {
     accepted: number
+    continuationsExpired: number
     expired: number
+    followups: number
     rejected: number
     responded: number
     uncertain: number
@@ -127,20 +169,44 @@ export interface NativeInteractionResponseResult {
   channelId: string
   guildId: string
   interactionId: string
+  continuation: NativeInteractionContinuationResult | null
   reference: string
   responseMessageId: string
   schemaVersion: number
   status: "completed"
 }
 
+export interface NativeInteractionFollowupResult {
+  channelId: string
+  continuation: NativeInteractionContinuationResult | null
+  followupsCompleted: number
+  guildId: string
+  interactionId: string
+  reference: string
+  responseMessageId: string
+  schemaVersion: number
+  status: "completed"
+  verification: "response-and-readback-match"
+}
+
+export interface NativeInteractionResponseOptions extends RequestOptions {
+  keepOpen?: boolean
+}
+
 export interface NativeInteractionSource {
   readonly enabled: boolean
   getStatus(): NativeInteractionBrokerStatus
+  listContinuations(): Promise<NativeInteractionContinuationList>
   listPending(): Promise<PendingNativeInteractionList>
+  followup(
+    reference: string,
+    response: string,
+    options?: NativeInteractionResponseOptions,
+  ): Promise<NativeInteractionFollowupResult>
   respond(
     reference: string,
     response: string,
-    options?: RequestOptions,
+    options?: NativeInteractionResponseOptions,
   ): Promise<NativeInteractionResponseResult>
   subscribe(listener: NativeInteractionChangeListener): () => void
 }
@@ -155,10 +221,12 @@ export interface NativeInteractionBrokerClient extends Pick<
   DiscordClient,
   | "createDeferredInteractionResponse"
   | "createImmediateInteractionResponse"
+  | "createInteractionFollowup"
   | "editOriginalInteractionResponse"
   | "getChannel"
   | "getCurrentApplication"
   | "getCurrentUser"
+  | "getInteractionFollowup"
   | "listGuildApplicationCommands"
 > {}
 
@@ -183,6 +251,7 @@ export interface NativeInteractionBrokerOptions {
   >
   policy: ScopePolicy
   randomId?: () => string
+  randomContinuationReference?: () => string
   randomReference?: () => string
   scheduler?: NativeInteractionScheduler
 }
@@ -212,14 +281,22 @@ interface StoredInteraction extends PendingNativeInteraction {
   token: string
 }
 
+interface StoredContinuation extends NativeInteractionContinuation {
+  ready: boolean
+  timer: unknown
+  token: string
+}
+
 const INTERACTION_TYPE_APPLICATION_COMMAND = 2
 const APPLICATION_COMMAND_TYPE_CHAT_INPUT = 1
 const APPLICATION_COMMAND_OPTION_TYPE_STRING = 3
 const INTERACTION_CONTEXT_GUILD = 0
+const MESSAGE_TYPE_DEFAULT = 0
 const MESSAGE_TYPE_CHAT_INPUT_COMMAND = 20
 const ADMINISTRATOR_PERMISSION = 1n << 3n
 const MAXIMUM_PERMISSION_BITS = (1n << 128n) - 1n
 const INTERACTION_REFERENCE_PATTERN = /^iref_[a-f0-9]{32}$/
+const INTERACTION_CONTINUATION_REFERENCE_PATTERN = /^icref_[a-f0-9]{32}$/
 const INTERACTION_TOKEN_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/
 const INITIAL_RESPONSE_TIMEOUT_MS = 2_500
 const SEEN_INTERACTION_TTL_MS = 15 * 60 * 1_000
@@ -286,6 +363,20 @@ function safeErrorCategory(
       : "response-uncertain"
   }
   return "response-uncertain"
+}
+
+function assertNativeInteractionResponse(response: string): void {
+  if (
+    typeof response !== "string"
+    || response.length < 1
+    || response.length > NATIVE_INTERACTION_DEFAULTS.responseCharacters
+    || !response.trim()
+    || response.includes("\0")
+  ) {
+    throw new RangeError(
+      `Discord native Interaction response must be 1-${NATIVE_INTERACTION_DEFAULTS.responseCharacters} nonempty characters`,
+    )
+  }
 }
 
 function exactChannel(
@@ -374,6 +465,59 @@ function exactResponseMessage(
     && message.interaction_metadata.type === INTERACTION_TYPE_APPLICATION_COMMAND
     && message.interaction_metadata.user?.id === entry.userId
     && message.interaction_metadata.authorizing_integration_owners?.["0"] === entry.guildId
+  )
+}
+
+function exactFollowupInteractionMetadata(
+  message: DiscordMessage,
+  entry: StoredContinuation,
+): boolean {
+  const metadata = message.interaction_metadata
+  return metadata === undefined || Boolean(
+    metadata.id === entry.interactionId
+    && metadata.type === INTERACTION_TYPE_APPLICATION_COMMAND
+    && metadata.user?.id === entry.userId
+    && metadata.authorizing_integration_owners?.["0"] === entry.guildId
+  )
+}
+
+function exactFollowupMessage(
+  message: DiscordMessage,
+  applicationId: string,
+  botId: string,
+  entry: StoredContinuation,
+  response: string,
+  expectedMessageId?: string,
+): message is DiscordMessage {
+  return Boolean(
+    message
+    && typeof message === "object"
+    && DISCORD_SNOWFLAKE_PATTERN.test(message.id)
+    && (expectedMessageId === undefined || message.id === expectedMessageId)
+    && message.channel_id === entry.channelId
+    && message.author?.id === botId
+    && message.author.bot === true
+    && message.application_id === applicationId
+    && (message.guild_id === undefined || message.guild_id === entry.guildId)
+    && message.content === response
+    && Array.isArray(message.attachments)
+    && message.attachments.length === 0
+    && Array.isArray(message.embeds)
+    && message.embeds.length === 0
+    && Array.isArray(message.components)
+    && message.components.length === 0
+    && Array.isArray(message.mentions)
+    && message.mentions.length === 0
+    && Array.isArray(message.mention_roles)
+    && message.mention_roles.length === 0
+    && message.mention_everyone === false
+    && message.pinned === false
+    && message.tts === false
+    && message.poll === undefined
+    && message.flags === DISCORD_MESSAGE_FLAGS.ephemeral
+    && message.type === MESSAGE_TYPE_DEFAULT
+    && message.webhook_id === applicationId
+    && exactFollowupInteractionMetadata(message, entry)
   )
 }
 
@@ -479,6 +623,8 @@ function activityEntry(options: {
     "channelId" | "guildId" | "interactionId" | "reference" | "userId"
   >
   error?: string | null
+  responseStage?: NativeInteractionActivity["responseStage"]
+  sequence?: number
   status: NativeInteractionActivityStatus
   timestamp: string
 }): NativeInteractionActivity {
@@ -490,7 +636,9 @@ function activityEntry(options: {
     interactionId: options.entry.interactionId,
     kind: "native-interaction",
     referenceHash: referenceHash(options.entry.reference),
+    responseStage: options.responseStage ?? "initial",
     schemaVersion: SCHEMA_VERSION,
+    sequence: options.sequence ?? 0,
     status: options.status,
     timestamp: options.timestamp,
     userId: options.entry.userId,
@@ -507,8 +655,15 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
   #closed = false
   readonly #commandByGuild = new Map<string, DiscordApplicationCommand | undefined>()
   readonly #commandName: string
+  readonly #continuations = new Map<string, StoredContinuation>()
+  #continuationsExpired = 0
   readonly #contract: NativeInteractionCommandContract
   #expired = 0
+  #followups = 0
+  readonly #inFlight = new Map<
+    string,
+    StoredContinuation | StoredInteraction
+  >()
   readonly #ingestTasks = new Set<Promise<void>>()
   #lastError: NativeInteractionBrokerStatus["lastError"] = null
   readonly #lifecycleAbortController = new AbortController()
@@ -519,6 +674,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
   #phase: NativeInteractionBrokerPhase
   readonly #policy: ScopePolicy
   readonly #randomId: () => string
+  readonly #randomContinuationReference: () => string
   readonly #randomReference: () => string
   #rejected = 0
   #responded = 0
@@ -546,6 +702,8 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     this.#phase = options.config.allowNativeInteractions ? "stopped" : "disabled"
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
+    this.#randomContinuationReference = options.randomContinuationReference
+      || (() => `icref_${randomBytes(16).toString("hex")}`)
     this.#randomReference = options.randomReference
       || (() => `iref_${randomBytes(16).toString("hex")}`)
     this.#scheduler = options.scheduler || defaultScheduler()
@@ -668,6 +826,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       enabled: this.enabled,
       lastError: this.#lastError ? { ...this.#lastError } : null,
       limits: {
+        maximumFollowups: NATIVE_INTERACTION_DEFAULTS.maximumFollowups,
         maximumPending: this.#maximumPending,
         pendingPerUser: NATIVE_INTERACTION_DEFAULTS.pendingPerUser,
         requestCharacters: NATIVE_INTERACTION_DEFAULTS.requestCharacters,
@@ -678,11 +837,16 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         count: this.#pending.size,
         validating,
       },
+      continuations: {
+        count: this.#continuations.size,
+      },
       phase: this.#phase,
       schemaVersion: SCHEMA_VERSION,
       totals: {
         accepted: this.#accepted,
+        continuationsExpired: this.#continuationsExpired,
         expired: this.#expired,
+        followups: this.#followups,
         rejected: this.#rejected,
         responded: this.#responded,
         uncertain: this.#uncertain,
@@ -703,23 +867,40 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     }
   }
 
-  #userPending(userId: string): number {
+  #activeCount(): number {
+    return this.#pending.size + this.#continuations.size + this.#inFlight.size
+  }
+
+  #userActive(userId: string): number {
     let count = 0
     for (const entry of this.#pending.values()) {
+      if (entry.userId === userId) count += 1
+    }
+    for (const entry of this.#continuations.values()) {
+      if (entry.userId === userId) count += 1
+    }
+    for (const entry of this.#inFlight.values()) {
       if (entry.userId === userId) count += 1
     }
     return count
   }
 
   async #appendActivity(
-    entry: StoredInteraction,
+    entry: Pick<
+      StoredInteraction,
+      "channelId" | "guildId" | "interactionId" | "reference" | "userId"
+    >,
     status: NativeInteractionActivityStatus,
     error: string | null = null,
+    responseStage: NativeInteractionActivity["responseStage"] = "initial",
+    sequence = 0,
   ): Promise<void> {
     await this.#activityStore.append(activityEntry({
       activityId: this.#randomId(),
       entry,
       error,
+      responseStage,
+      sequence,
       status,
       timestamp: this.#now().toISOString(),
     }))
@@ -821,8 +1002,8 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       return
     }
     if (
-      this.#pending.size >= this.#maximumPending
-      || this.#userPending(interaction.userId) >= NATIVE_INTERACTION_DEFAULTS.pendingPerUser
+      this.#activeCount() >= this.#maximumPending
+      || this.#userActive(interaction.userId) >= NATIVE_INTERACTION_DEFAULTS.pendingPerUser
     ) {
       await this.#initialReject(interaction, STATIC_BUSY_RESPONSE, "capacity-rejected")
       return
@@ -1038,25 +1219,172 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     }
   }
 
+  #continuationResult(
+    entry: StoredContinuation,
+  ): NativeInteractionContinuationResult {
+    return {
+      expiresAt: entry.expiresAt,
+      followupsRemaining: entry.followupsRemaining,
+      reference: entry.reference,
+    }
+  }
+
+  async #expireContinuation(reference: string): Promise<void> {
+    const entry = this.#continuations.get(reference)
+    if (!entry) return
+    this.#continuations.delete(reference)
+    if (entry.timer !== undefined) this.#scheduler.clearTimeout(entry.timer)
+    entry.ready = false
+    entry.timer = undefined
+    this.#continuationsExpired += 1
+    this.#emit("continuations")
+    this.#emit("status")
+    try {
+      await this.#appendActivity(
+        entry,
+        "continuation-expired",
+        null,
+        "continuation",
+        entry.followupsCompleted,
+      )
+    } catch {
+      this.#setError("activity-unavailable")
+    }
+  }
+
+  async #openContinuation(
+    source: StoredContinuation | StoredInteraction,
+    followupsCompleted: number,
+  ): Promise<StoredContinuation | null> {
+    if (
+      this.#closed
+      || this.#phase !== "ready"
+      || followupsCompleted >= NATIVE_INTERACTION_DEFAULTS.maximumFollowups
+      || Date.parse(source.expiresAt) <= this.#now().getTime()
+    ) {
+      return null
+    }
+    const reference = this.#randomContinuationReference()
+    if (
+      !INTERACTION_CONTINUATION_REFERENCE_PATTERN.test(reference)
+      || reference === source.reference
+      || this.#continuations.has(reference)
+      || this.#pending.has(reference)
+      || this.#inFlight.has(reference)
+    ) {
+      this.#setError("continuation-reference-unavailable")
+      throw new Error("Discord native Interaction continuation reference is unavailable")
+    }
+    const entry: StoredContinuation = {
+      channelId: source.channelId,
+      commandId: source.commandId,
+      commandVersion: source.commandVersion,
+      createdAt: source.createdAt,
+      expiresAt: source.expiresAt,
+      followupsCompleted,
+      followupsRemaining: NATIVE_INTERACTION_DEFAULTS.maximumFollowups - followupsCompleted,
+      guildId: source.guildId,
+      interactionId: source.interactionId,
+      openedAt: this.#now().toISOString(),
+      ready: false,
+      reference,
+      schemaVersion: SCHEMA_VERSION,
+      timer: undefined,
+      token: source.token,
+      userId: source.userId,
+    }
+    try {
+      await this.#appendActivity(
+        entry,
+        "continuation-opened",
+        null,
+        "continuation",
+        followupsCompleted,
+      )
+    } catch (error) {
+      this.#setError("activity-unavailable")
+      throw error
+    }
+    if (
+      this.#closed
+      || this.#phase !== "ready"
+      || Date.parse(entry.expiresAt) <= this.#now().getTime()
+    ) {
+      this.#continuationsExpired += 1
+      try {
+        await this.#appendActivity(
+          entry,
+          "continuation-expired",
+          null,
+          "continuation",
+          followupsCompleted,
+        )
+      } catch {
+        this.#setError("activity-unavailable")
+      }
+      this.#emit("status")
+      return null
+    }
+    entry.ready = true
+    entry.timer = this.#scheduler.setTimeout(() => {
+      void this.#expireContinuation(reference)
+    }, Date.parse(entry.expiresAt) - this.#now().getTime())
+    this.#continuations.set(reference, entry)
+    this.#emit("continuations")
+    this.#emit("status")
+    return entry
+  }
+
+  async listContinuations(): Promise<NativeInteractionContinuationList> {
+    const now = this.#now().getTime()
+    const expired = [...this.#continuations.values()]
+      .filter((entry) => Date.parse(entry.expiresAt) <= now)
+      .map(({ reference }) => reference)
+    await Promise.all(expired.map((reference) => this.#expireContinuation(reference)))
+    const continuations = [...this.#continuations.values()]
+      .filter(({ ready }) => ready)
+      .sort((left, right) => left.openedAt.localeCompare(right.openedAt))
+      .map((entry): NativeInteractionContinuation => ({
+        channelId: entry.channelId,
+        commandId: entry.commandId,
+        commandVersion: entry.commandVersion,
+        createdAt: entry.createdAt,
+        expiresAt: entry.expiresAt,
+        followupsCompleted: entry.followupsCompleted,
+        followupsRemaining: entry.followupsRemaining,
+        guildId: entry.guildId,
+        interactionId: entry.interactionId,
+        openedAt: entry.openedAt,
+        reference: entry.reference,
+        schemaVersion: entry.schemaVersion,
+        userId: entry.userId,
+      }))
+    return {
+      continuations,
+      page: {
+        capacity: this.#maximumPending,
+        returned: continuations.length,
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: this.#phase === "ready"
+        ? "ok"
+        : this.#phase === "disabled" ? "disabled" : "unavailable",
+    }
+  }
+
   async respond(
     reference: string,
     response: string,
-    options: RequestOptions = {},
+    options: NativeInteractionResponseOptions = {},
   ): Promise<NativeInteractionResponseResult> {
+    const { keepOpen = false, ...requestOptions } = options
+    if (typeof keepOpen !== "boolean") {
+      throw new RangeError("Discord native Interaction keep-open choice is invalid")
+    }
     if (!INTERACTION_REFERENCE_PATTERN.test(reference)) {
       throw new RangeError("Discord native Interaction reference is invalid")
     }
-    if (
-      typeof response !== "string"
-      || response.length < 1
-      || response.length > NATIVE_INTERACTION_DEFAULTS.responseCharacters
-      || !response.trim()
-      || response.includes("\0")
-    ) {
-      throw new RangeError(
-        `Discord native Interaction response must be 1-${NATIVE_INTERACTION_DEFAULTS.responseCharacters} nonempty characters`,
-      )
-    }
+    assertNativeInteractionResponse(response)
     const entry = this.#pending.get(reference)
     if (!entry || !entry.ready) {
       throw new RangeError("Discord native Interaction reference is unavailable or expired")
@@ -1102,6 +1430,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       throw new RangeError("Discord native Interaction reference expired during response preparation")
     }
     this.#pending.delete(reference)
+    this.#inFlight.set(reference, entry)
     this.#emit("pending")
     this.#emit("status")
 
@@ -1111,7 +1440,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         this.#applicationId,
         entry.token,
         response,
-        options,
+        requestOptions,
       )
       if (!exactResponseMessage(
         message,
@@ -1131,6 +1460,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         )
       }
     } catch (error) {
+      this.#inFlight.delete(reference)
       const category = error instanceof NativeInteractionResponseError
         ? "response-evidence-invalid"
         : safeErrorCategory(error)
@@ -1171,6 +1501,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       this.#setError("activity-unavailable")
     }
     if (recordError) {
+      this.#inFlight.delete(reference)
       throw new NativeInteractionResponseError(
         "Discord native Interaction response completed but durable completion recording failed",
         {
@@ -1182,15 +1513,318 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         },
       )
     }
+    let continuation: StoredContinuation | null = null
+    if (keepOpen) {
+      try {
+        continuation = await this.#openContinuation(entry, 0)
+      } catch (error) {
+        this.#inFlight.delete(reference)
+        throw new NativeInteractionResponseError(
+          "Discord native Interaction response completed but a requested continuation could not be opened",
+          {
+            interactionId: entry.interactionId,
+            reference,
+            responseMessageId: message.id,
+            schemaVersion: SCHEMA_VERSION,
+            status: "completed-continuation-unavailable",
+          },
+          { cause: error },
+        )
+      }
+    }
+    this.#inFlight.delete(reference)
     this.#emit("status")
     return {
       channelId: entry.channelId,
+      continuation: continuation ? this.#continuationResult(continuation) : null,
       guildId: entry.guildId,
       interactionId: entry.interactionId,
       reference,
       responseMessageId: message.id,
       schemaVersion: SCHEMA_VERSION,
       status: "completed",
+    }
+  }
+
+  async followup(
+    reference: string,
+    response: string,
+    options: NativeInteractionResponseOptions = {},
+  ): Promise<NativeInteractionFollowupResult> {
+    const { keepOpen = false, ...requestOptions } = options
+    if (typeof keepOpen !== "boolean") {
+      throw new RangeError("Discord native Interaction keep-open choice is invalid")
+    }
+    if (!INTERACTION_CONTINUATION_REFERENCE_PATTERN.test(reference)) {
+      throw new RangeError("Discord native Interaction continuation reference is invalid")
+    }
+    assertNativeInteractionResponse(response)
+    const entry = this.#continuations.get(reference)
+    if (!entry || !entry.ready) {
+      throw new RangeError(
+        "Discord native Interaction continuation reference is unavailable or expired",
+      )
+    }
+    if (Date.parse(entry.expiresAt) <= this.#now().getTime()) {
+      await this.#expireContinuation(reference)
+      throw new RangeError(
+        "Discord native Interaction continuation reference is unavailable or expired",
+      )
+    }
+    const sequence = entry.followupsCompleted + 1
+    if (sequence > NATIVE_INTERACTION_DEFAULTS.maximumFollowups) {
+      await this.#expireContinuation(reference)
+      throw new RangeError("Discord native Interaction follow-up allowance is exhausted")
+    }
+    entry.ready = false
+    if (entry.timer !== undefined) this.#scheduler.clearTimeout(entry.timer)
+    entry.timer = undefined
+    try {
+      await this.#appendActivity(
+        entry,
+        "followup-pending",
+        null,
+        "followup",
+        sequence,
+      )
+    } catch (error) {
+      if (this.#continuations.get(reference) === entry) {
+        entry.ready = true
+        const remaining = Date.parse(entry.expiresAt) - this.#now().getTime()
+        if (remaining > 0) {
+          entry.timer = this.#scheduler.setTimeout(() => {
+            void this.#expireContinuation(reference)
+          }, remaining)
+        } else {
+          void this.#expireContinuation(reference)
+        }
+      }
+      this.#setError("activity-unavailable")
+      throw new NativeInteractionResponseError(
+        "Discord native Interaction follow-up was blocked because pending activity could not be recorded",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          schemaVersion: SCHEMA_VERSION,
+          status: "blocked-audit-failed",
+        },
+        { cause: error },
+      )
+    }
+    if (this.#continuations.get(reference) !== entry) {
+      throw new RangeError(
+        "Discord native Interaction continuation expired during follow-up preparation",
+      )
+    }
+    if (Date.parse(entry.expiresAt) <= this.#now().getTime()) {
+      await this.#expireContinuation(reference)
+      throw new RangeError(
+        "Discord native Interaction continuation expired during follow-up preparation",
+      )
+    }
+    this.#continuations.delete(reference)
+    this.#inFlight.set(reference, entry)
+    this.#emit("continuations")
+    this.#emit("status")
+
+    let message: DiscordMessage
+    try {
+      message = await this.#client.createInteractionFollowup(
+        this.#applicationId,
+        entry.token,
+        response,
+        requestOptions,
+      )
+    } catch (error) {
+      this.#inFlight.delete(reference)
+      const knownRejected = safeErrorCategory(error) === "response-rejected"
+      const category: NativeInteractionErrorCategory = knownRejected
+        ? "followup-rejected"
+        : "followup-uncertain"
+      if (knownRejected) this.#rejected += 1
+      else this.#uncertain += 1
+      this.#setError(category)
+      try {
+        await this.#appendActivity(
+          entry,
+          knownRejected ? "followup-failed" : "followup-uncertain",
+          category,
+          "followup",
+          sequence,
+        )
+      } catch {
+        this.#setError("activity-unavailable")
+      }
+      throw new NativeInteractionResponseError(
+        knownRejected
+          ? "Discord rejected the native Interaction follow-up before applying it"
+          : "Discord native Interaction follow-up has an uncertain outcome and must not be retried",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          schemaVersion: SCHEMA_VERSION,
+          status: knownRejected ? "failed" : "uncertain",
+        },
+        { cause: error },
+      )
+    }
+    if (!exactFollowupMessage(
+      message,
+      this.#applicationId,
+      this.#botId,
+      entry,
+      response,
+    )) {
+      this.#inFlight.delete(reference)
+      this.#uncertain += 1
+      this.#setError("followup-evidence-invalid")
+      try {
+        await this.#appendActivity(
+          entry,
+          "followup-uncertain",
+          "followup-evidence-invalid",
+          "followup",
+          sequence,
+        )
+      } catch {
+        this.#setError("activity-unavailable")
+      }
+      throw new NativeInteractionResponseError(
+        "Discord returned invalid native Interaction follow-up response evidence",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          schemaVersion: SCHEMA_VERSION,
+          status: "uncertain",
+        },
+      )
+    }
+
+    let readback: DiscordMessage
+    try {
+      readback = await this.#client.getInteractionFollowup(
+        this.#applicationId,
+        entry.token,
+        message.id,
+        requestOptions,
+      )
+    } catch (error) {
+      this.#inFlight.delete(reference)
+      this.#uncertain += 1
+      this.#setError("followup-uncertain")
+      try {
+        await this.#appendActivity(
+          entry,
+          "followup-uncertain",
+          "followup-uncertain",
+          "followup",
+          sequence,
+        )
+      } catch {
+        this.#setError("activity-unavailable")
+      }
+      throw new NativeInteractionResponseError(
+        "Discord native Interaction follow-up readback is unavailable, so the outcome is uncertain and must not be retried",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          responseMessageId: message.id,
+          schemaVersion: SCHEMA_VERSION,
+          status: "uncertain",
+        },
+        { cause: error },
+      )
+    }
+    if (!exactFollowupMessage(
+      readback,
+      this.#applicationId,
+      this.#botId,
+      entry,
+      response,
+      message.id,
+    )) {
+      this.#inFlight.delete(reference)
+      this.#uncertain += 1
+      this.#setError("followup-evidence-invalid")
+      try {
+        await this.#appendActivity(
+          entry,
+          "followup-uncertain",
+          "followup-evidence-invalid",
+          "followup",
+          sequence,
+        )
+      } catch {
+        this.#setError("activity-unavailable")
+      }
+      throw new NativeInteractionResponseError(
+        "Discord returned drifting native Interaction follow-up readback evidence",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          responseMessageId: message.id,
+          schemaVersion: SCHEMA_VERSION,
+          status: "uncertain",
+        },
+      )
+    }
+
+    this.#followups += 1
+    try {
+      await this.#appendActivity(
+        entry,
+        "followup-completed",
+        null,
+        "followup",
+        sequence,
+      )
+    } catch (error) {
+      this.#inFlight.delete(reference)
+      this.#setError("activity-unavailable")
+      throw new NativeInteractionResponseError(
+        "Discord native Interaction follow-up completed but durable completion recording failed",
+        {
+          interactionId: entry.interactionId,
+          reference,
+          responseMessageId: message.id,
+          schemaVersion: SCHEMA_VERSION,
+          status: "completed-record-failed",
+        },
+        { cause: error },
+      )
+    }
+    let continuation: StoredContinuation | null = null
+    if (keepOpen && sequence < NATIVE_INTERACTION_DEFAULTS.maximumFollowups) {
+      try {
+        continuation = await this.#openContinuation(entry, sequence)
+      } catch (error) {
+        this.#inFlight.delete(reference)
+        throw new NativeInteractionResponseError(
+          "Discord native Interaction follow-up completed but a requested continuation could not be opened",
+          {
+            interactionId: entry.interactionId,
+            reference,
+            responseMessageId: message.id,
+            schemaVersion: SCHEMA_VERSION,
+            status: "completed-continuation-unavailable",
+          },
+          { cause: error },
+        )
+      }
+    }
+    this.#inFlight.delete(reference)
+    this.#emit("status")
+    return {
+      channelId: entry.channelId,
+      continuation: continuation ? this.#continuationResult(continuation) : null,
+      followupsCompleted: sequence,
+      guildId: entry.guildId,
+      interactionId: entry.interactionId,
+      reference,
+      responseMessageId: message.id,
+      schemaVersion: SCHEMA_VERSION,
+      status: "completed",
+      verification: "response-and-readback-match",
     }
   }
 
@@ -1204,11 +1838,20 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       if (entry.timer !== undefined) this.#scheduler.clearTimeout(entry.timer)
       entry.timer = undefined
     }
+    for (const entry of this.#continuations.values()) {
+      entry.ready = false
+      if (entry.timer !== undefined) this.#scheduler.clearTimeout(entry.timer)
+      entry.timer = undefined
+    }
     await Promise.allSettled([...this.#ingestTasks])
     const entries = [...this.#pending.values()]
+    const continuationEntries = [...this.#continuations.values()]
     this.#pending.clear()
+    this.#continuations.clear()
     this.#expired += entries.length
+    this.#continuationsExpired += continuationEntries.length
     this.#emit("pending")
+    this.#emit("continuations")
     this.#emit("status")
     const signal = AbortSignal.timeout(SHUTDOWN_TIMEOUT_MS)
     await Promise.allSettled(entries.map(async (entry) => {
@@ -1236,7 +1879,18 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         )
       } catch {}
     }))
-    if (entries.length > 0) this.#emit("status")
+    await Promise.allSettled(continuationEntries.map(async (entry) => {
+      try {
+        await this.#appendActivity(
+          entry,
+          "continuation-expired",
+          null,
+          "continuation",
+          entry.followupsCompleted,
+        )
+      } catch {}
+    }))
+    if (entries.length > 0 || continuationEntries.length > 0) this.#emit("status")
   }
 }
 
@@ -1256,6 +1910,7 @@ export function createDisabledNativeInteractionSource(config: Pick<
     enabled: false,
     lastError: null,
     limits: {
+      maximumFollowups: NATIVE_INTERACTION_DEFAULTS.maximumFollowups,
       maximumPending: config.nativeInteractionMaxPending,
       pendingPerUser: NATIVE_INTERACTION_DEFAULTS.pendingPerUser,
       requestCharacters: NATIVE_INTERACTION_DEFAULTS.requestCharacters,
@@ -1266,11 +1921,16 @@ export function createDisabledNativeInteractionSource(config: Pick<
       count: 0,
       validating: 0,
     },
+    continuations: {
+      count: 0,
+    },
     phase: "disabled",
     schemaVersion: SCHEMA_VERSION,
     totals: {
       accepted: 0,
+      continuationsExpired: 0,
       expired: 0,
+      followups: 0,
       rejected: 0,
       responded: 0,
       uncertain: 0,
@@ -1279,6 +1939,15 @@ export function createDisabledNativeInteractionSource(config: Pick<
   return {
     enabled: false,
     getStatus: () => ({ ...status }),
+    listContinuations: async () => ({
+      continuations: [],
+      page: {
+        capacity: config.nativeInteractionMaxPending,
+        returned: 0,
+      },
+      schemaVersion: SCHEMA_VERSION,
+      status: "disabled",
+    }),
     listPending: async () => ({
       interactions: [],
       page: {
@@ -1289,6 +1958,9 @@ export function createDisabledNativeInteractionSource(config: Pick<
       status: "disabled",
     }),
     respond: async () => {
+      throw new RangeError("Discord native Interactions are disabled")
+    },
+    followup: async () => {
       throw new RangeError("Discord native Interactions are disabled")
     },
     subscribe: () => () => undefined,

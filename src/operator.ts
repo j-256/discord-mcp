@@ -1033,7 +1033,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
     [
       config.allowNativeCommandChanges || config.allowNativeInteractions,
       "native-interactions",
-      "Native Interaction command management and ingress",
+      "Native Interaction command, ingress, response, and continuation lifecycle",
     ],
     [
       config.allowInviteAudit || config.allowInviteCreation || config.allowInviteDeletions,
@@ -3665,7 +3665,7 @@ export async function diagnoseConnector(
       ? check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,
         "pass",
-        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with application endpoint and command verification plus authenticated exact-route sparse sharding and shared session-start preflight`,
+        `Native Interaction ingress accepts /${config.nativeCommandName} only in ${config.nativeInteractionGuildIds.size} guilds, ${config.nativeInteractionChannelIds.size} channels, and from ${config.nativeInteractionUserIds.size} users; the private queue holds at most ${config.nativeInteractionMaxPending} requests for ${config.nativeInteractionTtlSeconds} seconds and uses ${config.allowGateway ? "the separately enabled nonprivileged event-feed intents" : "an intents-free Gateway connection"} with application endpoint and command verification plus authenticated exact-route sparse sharding and shared session-start preflight; response tokens stay broker-private, initial replies close by default, and explicit rotating one-shot continuations share the same capacity`,
       )
       : check(
         DOCTOR_CHECK_IDS.nativeInteractionIngressPolicy,

@@ -2288,7 +2288,20 @@ const guildTemplateExecuteInputSchema = z.union([
   ),
 ])
 const nativeInteractionResponseInputSchema = z.strictObject({
+  keepOpen: z.boolean().default(false)
+    .describe("Keep the verified Interaction token private in-process behind one rotating bounded follow-up reference"),
   reference: z.string().regex(/^iref_[a-f0-9]{32}$/),
+  response: z.string()
+    .min(1)
+    .max(2_000)
+    .refine((value) => Boolean(value.trim()) && !value.includes("\0"), {
+      message: "response must be nonempty and contain no NUL characters",
+    }),
+})
+const nativeInteractionFollowupInputSchema = z.strictObject({
+  keepOpen: z.boolean().default(false)
+    .describe("Rotate a fresh process-local continuation reference after exact follow-up verification when allowance and lifetime remain"),
+  reference: z.string().regex(/^icref_[a-f0-9]{32}$/),
   response: z.string()
     .min(1)
     .max(2_000)
@@ -19409,7 +19422,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Message pins use the current paginated Discord pin endpoint for reads and a separate exact channel scope for changes: call plan_message_pin, review the exact application, bot, guild, channel, message state, permissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_message_pin with identical inputs and the digest. Pin and unpin are both treated as destructive reviewed changes; never retry with the same operation key after reservation or an uncertain outcome.",
       "Announcement crossposts use a separate exact direct-channel scope and require confirmed Message Content intent: call plan_announcement_crosspost, review the exact application, bot, guild, announcement channel, default non-poll non-forwarded message, authorship-sensitive permissions, unknown follower fanout, one-shot operation key hash, warnings, and keyed digest, then call execute_announcement_crosspost with identical inputs and the digest. Execution requires signed interactive approval, sends one non-retried request, accepts only the expected CROSSPOSTED flag transition, and verifies an exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Message forwarding uses separate exact direct-channel source and target scopes and requires confirmed Message Content intent. Call plan_message_forward and review the exact application, bot, source and target guilds and channels, age-restriction boundary, forwardable source snapshot, both complete permission decisions including unknown bits, cross-guild boundary, forced empty mentions, notification suppression, deterministic nonce, one-shot operation key hash, warnings, and keyed digest before execute_message_forward. Age-restricted source content cannot move into a non-age-restricted target. Execution requires signed interactive approval, durable source-message and target-channel coordination, pending content-free records, one non-retried create request, strict immutable-snapshot response validation, and exact target readback. Never retry after reservation or an uncertain outcome.",
-      "Native Discord Interactions use Gateway delivery with zero intents when the content-free event feed is disabled. The managed guild command is administrator-only by default, guild-only, and accepts one bounded request string. Install or remove it only through plan_native_interaction_command and execute_native_interaction_command with exact inventory review, signed interactive approval, one-shot records, a non-retried write, and fresh readback. Pending request text is private, transient, untrusted, and never persisted; Interaction tokens never cross MCP. Read discord://interactions/pending or call list_pending_discord_interactions, then answer only through respond_to_discord_interaction with its opaque one-shot reference. Responses are ephemeral, mention-free, component-free, bounded, and never retried after transmission uncertainty.",
+      "Native Discord Interactions use Gateway delivery with zero intents when the content-free event feed is disabled. The managed guild command is administrator-only by default, guild-only, and accepts one bounded request string. Install or remove it only through plan_native_interaction_command and execute_native_interaction_command with exact inventory review, signed interactive approval, one-shot records, a non-retried write, and fresh readback. Pending request text is private, transient, untrusted, and never persisted; Interaction tokens never cross MCP. Read discord://interactions/pending or call list_pending_discord_interactions, then answer through respond_to_discord_interaction with its opaque one-shot reference. By default the token is discarded after one response. An explicit keepOpen choice returns a rotating process-local continuation listed at discord://interactions/continuations; send_discord_interaction_followup consumes it, records pending content-free activity, sends one non-retried ephemeral plain-text follow-up, requires exact response and independent readback, and returns another reference only when explicitly requested within the original expiry and fixed allowance. Every response is mention-free, component-free, bounded, and quarantined after transmission or verification uncertainty.",
       "Native polls use a separate exact channel scope. get_poll returns bounded transient structure and aggregate results without fetching voters; list_poll_answer_voters requires an additional voter-audit toggle and returns IDs only. For immutable creation, call plan_poll_creation and then execute_poll_creation with identical inputs and the keyed digest. To irreversibly end a bot-owned poll, call plan_poll_end, review the exact live counts, and then execute_poll_end with identical inputs and the keyed digest. Both writes require signed interactive approval, one-shot operation keys, pending content-free audit records, and fresh readback; never retry after reservation or uncertainty.",
       "Channel webhook inventory requires a separate exact channel scope and projects webhook credentials, execution URLs, avatars, creator profiles, source objects, unknown raw fields, and unrelated channel metadata out before returning data. Creation, rename, move, and deletion require separate action toggles plus the exact webhook channel allowlist. Call the matching plan tool, review exact Incoming webhook metadata, complete source and destination inventories, capacity, permission and privacy evidence, bearer-capability consequences, audit reason, one-shot operation key hash, warnings, and keyed digest, then call the matching execute tool with identical inputs and the digest. Creation validates the returned credential inside the REST boundary and writes it only to the configured private exact-ID credential store; no token, path, or execution URL enters MCP or lifecycle records. Credential-authenticated message lookup, plain-text delivery, and exact editing use an independent exact direct-channel scope plus action gates, mention containment, anti-spam limits, durable one-shot keys for writes, and no content persistence. Message deletion additionally requires a fresh content-bound plan, signed approval, one non-retried DELETE, and exact absence readback. Never retry with the same operation key after reservation or an uncertain outcome.",
       "Guild emoji and sticker inventory requires a separate exact guild scope and projects CDN URLs, image bytes, uploader profiles, and unknown raw fields out before returning data. For create, update, or delete, call plan_guild_expression_change, review the exact identity, privacy-safe current and desired metadata, ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence, role references, local file validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_guild_expression_change with identical inputs and the digest. Creation accepts only canonical owned local files from dedicated roots, never URLs or base64. Never retry with the same operation key after reservation or an uncertain outcome.",
@@ -19869,11 +19882,29 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
+  trackCanonicalTool("list_discord_interaction_continuations", server.registerTool(
+    "list_discord_interaction_continuations",
+    {
+      annotations: READ_ONLY_LOCAL_ANNOTATIONS,
+      description: "Read bounded content-free process-local native Interaction continuation capabilities. Returns rotating opaque references, exact verified identities, expiry, and fixed remaining allowance without request text, response text, profiles, raw payloads, or Discord Interaction tokens.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List Discord native Interaction continuations",
+    },
+    safeToolHandler("list_discord_interaction_continuations", async () => {
+      const result = await nativeInteractions.listContinuations()
+      return toolResult(
+        result,
+        `Discord native Interaction broker has ${result.continuations.length} open continuations`,
+      )
+    }, secrets, observability),
+  ))
+
   trackCanonicalTool("respond_to_discord_interaction", server.registerTool(
     "respond_to_discord_interaction",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
-      description: "Consume one opaque pending Interaction reference and send one bounded ephemeral plain-text response. The Interaction token remains private, mentions and rich content are disabled, pending activity is recorded first, and the non-retried response is consumed even after uncertainty.",
+      description: "Consume one opaque pending Interaction reference and send one bounded ephemeral plain-text response. The Interaction token remains private, mentions and rich content are disabled, pending activity is recorded first, and the non-retried response is consumed even after uncertainty. Set keepOpen only to retain a fixed-count process-local follow-up capability after exact response evidence and durable completion recording.",
       inputSchema: nativeInteractionResponseInputSchema,
       outputSchema: toolOutputSchema,
       title: "Respond to pending Discord native Interaction",
@@ -19885,11 +19916,42 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       const result = await nativeInteractions.respond(
         input.reference,
         input.response,
-        { signal: context.mcpReq.signal },
+        {
+          keepOpen: input.keepOpen,
+          signal: context.mcpReq.signal,
+        },
       )
       return toolResult(
         result,
         `Responded ephemerally to Discord Interaction ${result.interactionId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("send_discord_interaction_followup", server.registerTool(
+    "send_discord_interaction_followup",
+    {
+      annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
+      description: "Consume one rotating process-local continuation reference and send one bounded ephemeral plain-text native Interaction follow-up. The Discord token never crosses MCP, mentions and rich content are disabled, pending content-free activity precedes one non-retried write, exact response plus independent readback are required, and any post-dispatch ambiguity consumes the reference. Set keepOpen only to request another rotated reference within the original expiry and fixed allowance.",
+      inputSchema: nativeInteractionFollowupInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Send Discord native Interaction follow-up",
+    },
+    safeToolHandler("send_discord_interaction_followup", async (
+      input: z.infer<typeof nativeInteractionFollowupInputSchema>,
+      context,
+    ) => {
+      const result = await nativeInteractions.followup(
+        input.reference,
+        input.response,
+        {
+          keepOpen: input.keepOpen,
+          signal: context.mcpReq.signal,
+        },
+      )
+      return toolResult(
+        result,
+        `Sent verified ephemeral follow-up ${result.followupsCompleted} for Discord Interaction ${result.interactionId}`,
       )
     }, secrets, observability),
   ))
