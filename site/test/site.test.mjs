@@ -22,13 +22,14 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex")
 }
 
-async function collectFiles(directory) {
+async function collectFiles(directory, rejectUnsupported = false) {
   const entries = await readdir(directory, { withFileTypes: true })
   const files = []
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     const candidate = join(directory, entry.name)
-    if (entry.isDirectory()) files.push(...await collectFiles(candidate))
+    if (entry.isDirectory()) files.push(...await collectFiles(candidate, rejectUnsupported))
     else if (entry.isFile()) files.push(candidate)
+    else if (rejectUnsupported) assert.fail(`${relative(SITE_DIRECTORY, candidate)} has an unsupported file type`)
   }
   return files
 }
@@ -130,7 +131,7 @@ test("documentation dependencies and install scripts are exact", async () => {
 })
 
 test("built documentation has complete local navigation and no remote runtime assets", async () => {
-  const files = await collectFiles(DIST_DIRECTORY)
+  const files = await collectFiles(DIST_DIRECTORY, true)
   const htmlFiles = files.filter((file) => file.endsWith(".html"))
   assert.ok(htmlFiles.length > 0)
   assert.ok(await exists(join(DIST_DIRECTORY, "pagefind", "pagefind.js")))

@@ -15,6 +15,12 @@ import {
   sha256,
 } from "./release-lib.mjs"
 import { containsSpecificReference } from "./neutrality.mjs"
+import {
+  DOCUMENTATION_CONTENT_PATHS,
+  DOCUMENTATION_MANIFEST_FORMAT,
+  DOCUMENTATION_URL,
+  documentationSourcePaths,
+} from "./documentation-manifest.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const MCP_NAME = "io.github.j-256/discord-mcp"
@@ -210,9 +216,12 @@ const OCI_RUNTIME_ARGUMENTS = Object.freeze([
 const EXPECTED_ACTION_PINS = new Map([
   ["actions/attest", "1e69f48acb82d1966a394da916b4c1698aa569d6"],
   ["actions/checkout", "3d3c42e5aac5ba805825da76410c181273ba90b1"],
+  ["actions/configure-pages", "45bfe0192ca1faeb007ade9deae92b16b8254a0d"],
+  ["actions/deploy-pages", "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"],
   ["actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"],
   ["actions/setup-node", "820762786026740c76f36085b0efc47a31fe5020"],
   ["actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"],
+  ["actions/upload-pages-artifact", "fc324d3547104276b827a68afc52ff2a11cc49c9"],
   ["docker/build-push-action", "53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"],
   ["docker/login-action", "dbcb813823bdd20940b903addbd779551569679f"],
   ["docker/setup-buildx-action", "37fe631027851001ddb9b187196cc803df7f5f0e"],
@@ -270,7 +279,7 @@ async function checkPackageAndLock() {
     type: "git",
     url: "git+https://github.com/j-256/discord-mcp.git",
   }, "package repository metadata is invalid")
-  invariant(packageJson.homepage === `${REPOSITORY_URL}#readme`, "package homepage is invalid")
+  invariant(packageJson.homepage === DOCUMENTATION_URL, "package homepage is invalid")
   invariant(packageJson.bugs?.url === `${REPOSITORY_URL}/issues`, "package issue tracker is invalid")
   assertEqual(packageJson.allowScripts, {
     "esbuild@0.28.2": true,
@@ -324,6 +333,12 @@ async function checkPackageAndLock() {
 async function checkDocumentationPortal() {
   const packageJson = await readJson(join(REPOSITORY_ROOT, "site/package.json"))
   const lock = await readJson(join(REPOSITORY_ROOT, "site/package-lock.json"))
+  const astroConfiguration = await readFile(join(REPOSITORY_ROOT, "site/astro.config.mjs"), "utf8")
+  const generator = await readFile(join(REPOSITORY_ROOT, "site/scripts/generate.mjs"), "utf8")
+  const publicVerifier = await readFile(
+    join(REPOSITORY_ROOT, "scripts/check-public-documentation.mjs"),
+    "utf8",
+  )
   invariant(packageJson.name === "@j-256/discord-mcp-docs", "documentation package name is invalid")
   invariant(packageJson.version === "0.0.0", "documentation package must remain non-published")
   invariant(packageJson.private === true, "documentation package must remain private")
@@ -376,6 +391,67 @@ async function checkDocumentationPortal() {
     invariant(metadata.resolved.startsWith(`${NPM_REGISTRY}/`), `${path} is not locked to the public npm registry`)
     invariant(typeof metadata.integrity === "string" && metadata.integrity.startsWith("sha512-"), `${path} lacks documentation SHA-512 integrity`)
   }
+  assertEqual(DOCUMENTATION_CONTENT_PATHS, [
+    "README.md",
+    "docs/getting-started.md",
+    "docs/limitations.md",
+    "docs/comparison.md",
+    "SUPPORT.md",
+    "docs/releasing.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "docs/reference.md",
+    "SECURITY.md",
+    "discord-mcp.config.schema.json",
+    "server.json",
+    "LICENSE",
+    "assets/discord-mcp-icon.png",
+    "package.json",
+  ], "documentation source frontier changed")
+  const documentationSources = await documentationSourcePaths()
+  for (const required of [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    "package-lock.json",
+    "scripts/check-public-documentation.mjs",
+    "scripts/check-release-metadata.mjs",
+    "scripts/documentation-manifest.mjs",
+    "scripts/neutrality.mjs",
+    "scripts/release-lib.mjs",
+    "site/astro.config.mjs",
+    "site/package-lock.json",
+    "site/package.json",
+    "site/plugins/accessible-tables.mjs",
+    "site/scripts/browser-test.mjs",
+    "site/scripts/evidence-link-test.mjs",
+    "site/scripts/generate.mjs",
+    "site/src/components/ReleaseFooter.astro",
+    "site/src/content.config.ts",
+    "site/src/pages/404.astro",
+    "site/src/styles/custom.css",
+    "site/test/site.test.mjs",
+    "site/tsconfig.json",
+    "src/catalog.ts",
+    "src/constants.ts",
+    "test/public-documentation.test.ts",
+    "tsconfig.build.json",
+    "tsconfig.json",
+  ]) {
+    invariant(documentationSources.includes(required), `documentation source frontier lacks ${required}`)
+  }
+  invariant(DOCUMENTATION_MANIFEST_FORMAT === "discord-mcp.docs-manifest.v1", "documentation manifest format changed")
+  invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://j-256.github.io"'), "documentation origin is invalid")
+  invariant(astroConfiguration.includes('const SITE_BASE = "/discord-mcp"'), "documentation base path is invalid")
+  for (const binding of [
+    "DOCUMENTATION_MANIFEST_FORMAT",
+    "documentationSourcePaths",
+    "DOCUMENTATION_URL",
+  ]) {
+    invariant(generator.includes(binding), `documentation generator does not use ${binding}`)
+  }
+  invariant(!generator.includes(DOCUMENTATION_URL), "documentation generator duplicates its canonical URL")
+  invariant(publicVerifier.includes("--manifest FILE"), "public documentation verifier lacks exact-artifact mode")
+  invariant(publicVerifier.includes("Exit status 0 means matching"), "public documentation verifier lacks exit semantics")
 }
 
 async function checkSourceIdentity(packageJson) {
@@ -408,7 +484,7 @@ async function checkSourceIdentity(packageJson) {
   invariant(connectorVersion === packageJson.version, "source connector version is out of sync")
   invariant(connectorNpmPackage === packageJson.name, "source npm package is out of sync")
   invariant(connectorDescription === MCP_DESCRIPTION, "source connector description is out of sync")
-  invariant(connectorWebsiteUrl === REPOSITORY_URL, "source connector website is out of sync")
+  invariant(connectorWebsiteUrl === DOCUMENTATION_URL, "source connector website is out of sync")
   invariant(
     connectorIconUrl === "https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png",
     "source connector icon URL is out of sync",
@@ -457,6 +533,9 @@ async function checkDocumentation(packageJson) {
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
   invariant(documentedVersions.every((version) => version === packageJson.version), "documentation npm versions are out of sync")
   invariant(readme.includes(`https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`), "README icon URL is out of sync")
+  invariant(readme.includes(`[Documentation portal](${DOCUMENTATION_URL}/)`), "README lacks the public documentation portal")
+  invariant(releasing.includes(`set the repository homepage to \`${DOCUMENTATION_URL}\``), "release runbook lacks the documentation homepage")
+  invariant(releasing.includes("node scripts/check-public-documentation.mjs"), "release runbook lacks public documentation verification")
   invariant(Buffer.byteLength(readme) <= README_MAX_BYTES, "README must remain a concise landing page")
   invariant((readme.match(/^# /gm) || []).length === 1, "README must contain one top-level heading")
   let previousHeading = -1
@@ -729,7 +808,7 @@ async function checkRegistryManifest(packageJson) {
     source: "github",
     url: REPOSITORY_URL,
   }, "registry repository identity is invalid")
-  invariant(server.websiteUrl === REPOSITORY_URL, "registry website is invalid")
+  invariant(server.websiteUrl === DOCUMENTATION_URL, "registry website is invalid")
   invariant(server.icons?.length === 1, "registry manifest must declare one project icon")
   const icon = server.icons[0]
   invariant(icon.src === `https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`, "registry icon URL must use the exact release tag")
@@ -780,6 +859,8 @@ async function checkContainerSource(packageJson) {
     "npm prune --omit=dev --ignore-scripts",
     `ARG VERSION=${packageJson.version}`,
     "ARG REVISION=local",
+    `org.opencontainers.image.url="${DOCUMENTATION_URL}"`,
+    "org.opencontainers.image.documentation=\"https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md\"",
     "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
     "io.modelcontextprotocol.server.name=\"io.github.j-256/discord-mcp\"",
     "ENV NODE_ENV=production",
@@ -849,6 +930,8 @@ async function checkAutomation() {
     "registry-url: https://registry.npmjs.org",
     "refs/tags/$RELEASE_TAG",
     "Verify versioned public icon",
+    "Verify exact public documentation",
+    "scripts/check-public-documentation.mjs",
     "cmp assets/discord-mcp-icon.png",
     "--proto-redir '=https'",
     "mcp-publisher_linux_amd64.tar.gz",
@@ -927,6 +1010,19 @@ async function checkAutomation() {
     invariant(workflow.includes("NPM_CONFIG_REPLACE_REGISTRY_HOST: never"), `${workflowName} must preserve lockfile registry origins`)
   }
   invariant((release.match(/uses: actions\/attest@/g) || []).length === 4, "release workflow must attest package, catalog, and image evidence")
+  invariant((release.match(/name: Verify exact public documentation/g) || []).length === 2, "every release path must verify public documentation")
+  invariant((release.match(/node scripts\/check-public-documentation\.mjs/g) || []).length === 2, "every release path must run the public documentation verifier")
+  const releaseDocumentationCheck = release.indexOf("name: Verify exact public documentation")
+  const imageJobStart = release.indexOf("\n  image:")
+  const imageDocumentationCheck = release.indexOf("name: Verify exact public documentation", imageJobStart)
+  invariant(
+    releaseDocumentationCheck > 0 && releaseDocumentationCheck < release.indexOf("npm stage publish"),
+    "non-image releases must verify documentation before publication",
+  )
+  invariant(
+    imageDocumentationCheck > imageJobStart && imageDocumentationCheck < release.indexOf("uses: docker/login-action", imageJobStart),
+    "image releases must verify documentation before registry authentication",
+  )
   invariant((release.match(/artifact-metadata: write/g) || []).length === 1, "only file attestations may write artifact metadata")
   invariant(release.includes("create-storage-record: false"), "personal image attestation must disable unsupported storage records")
   invariant((release.match(/packages: write/g) || []).length === 1, "only the image release job may write packages")
@@ -994,6 +1090,68 @@ async function checkAutomation() {
     /if:\s*\$\{\{\s*github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\s*\}\}\s*\n\s*run:\s*npm run test:evidence-links/u.test(ci),
     "external documentation evidence checks must remain scheduled or explicitly dispatched",
   )
+  const documentationJobStart = ci.indexOf("\n  documentation:")
+  const gateJobStart = ci.indexOf("\n  gate:", documentationJobStart)
+  const pagesJobStart = ci.indexOf("\n  pages:", gateJobStart)
+  invariant(
+    documentationJobStart > 0 && gateJobStart > documentationJobStart && pagesJobStart > gateJobStart,
+    "documentation publication job boundaries are invalid",
+  )
+  const documentationJob = ci.slice(documentationJobStart, gateJobStart)
+  const gateJob = ci.slice(gateJobStart, pagesJobStart)
+  const pagesJob = ci.slice(pagesJobStart)
+  for (const required of [
+    "name: Upload verified Pages artifact",
+    "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
+    "uses: actions/upload-pages-artifact@",
+    "name: github-pages",
+    "path: site/dist",
+    "retention-days: 1",
+  ]) {
+    invariant(documentationJob.includes(required), `documentation artifact publication is missing ${required}`)
+  }
+  invariant(gateJob.includes("DOCUMENTATION_RESULT"), "CI gate does not require documentation verification")
+  for (const required of [
+    "name: Publish documentation portal",
+    "needs.gate.result == 'success'",
+    "needs: gate",
+    "name: github-pages",
+    "url: ${{ steps.deployment.outputs.page_url }}",
+    "actions: read",
+    "contents: read",
+    "id-token: write",
+    "pages: write",
+    "node-version: \"24.19.0\"",
+    "package-manager-cache: false",
+    "uses: actions/configure-pages@",
+    "name: documentation-portal",
+    "path: documentation",
+    "name: Deploy exact verified Pages artifact",
+    "id: deployment",
+    "uses: actions/deploy-pages@",
+    "artifact_name: github-pages",
+    "name: Verify exact public documentation",
+    'test "${DEPLOYED_PAGE_URL%/}" = "https://j-256.github.io/discord-mcp"',
+    "--manifest documentation/generated/docs-manifest.json",
+    "--attempts 6",
+    "--delay-ms 10000",
+  ]) {
+    invariant(pagesJob.includes(required), `documentation deployment is missing ${required}`)
+  }
+  for (const forbidden of [
+    "contents: write",
+    "packages: write",
+    "secrets.",
+    "npm publish",
+    "docker/login-action",
+  ]) {
+    invariant(!pagesJob.includes(forbidden), `documentation deployment contains forbidden authority ${forbidden}`)
+  }
+  invariant((ci.match(/pages: write/g) || []).length === 1, "only the documentation deployment may write Pages")
+  invariant((ci.match(/id-token: write/g) || []).length === 1, "only the documentation deployment may use OIDC")
+  invariant((ci.match(/uses: actions\/upload-pages-artifact@/g) || []).length === 1, "CI must upload one Pages artifact")
+  invariant((ci.match(/uses: actions\/configure-pages@/g) || []).length === 1, "CI must configure Pages once")
+  invariant((ci.match(/uses: actions\/deploy-pages@/g) || []).length === 1, "CI must deploy Pages once")
   const codeowners = await readFile(join(REPOSITORY_ROOT, ".github/CODEOWNERS"), "utf8")
   for (const path of [
     "/.github/",

@@ -125,7 +125,7 @@ function validConfig(): object {
         "org.opencontainers.image.revision": REVISION,
         "org.opencontainers.image.source": "https://github.com/j-256/discord-mcp",
         "org.opencontainers.image.title": "Discord MCP",
-        "org.opencontainers.image.url": "https://github.com/j-256/discord-mcp",
+        "org.opencontainers.image.url": "https://j-256.github.io/discord-mcp",
         "org.opencontainers.image.version": VERSION,
       },
       User: "node",

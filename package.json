@@ -4,7 +4,7 @@
   "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
   "license": "AGPL-3.0-only",
   "author": "j-256",
-  "homepage": "https://github.com/j-256/discord-mcp#readme",
+  "homepage": "https://j-256.github.io/discord-mcp",
   "bugs": {
     "url": "https://github.com/j-256/discord-mcp/issues"
   },
