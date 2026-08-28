@@ -96,7 +96,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 34
+export const OPERATOR_REPORT_SCHEMA_VERSION = 35
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -181,6 +181,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   forumTagAuditPolicy: "forum-tag-audit-policy",
   forumTagChangePolicy: "forum-tag-change-policy",
   guildAccess: "guild-access",
+  guildDeparturePolicy: "guild-departure-policy",
   guildMembersIntent: "guild-members-intent",
   guildScope: "guild-scope",
   guildExpressionAuditPolicy: "guild-expression-audit-policy",
@@ -724,6 +725,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   ) {
     warnings.push("The integration-deletion toggle is enabled but deletion remains blocked because exact guild and integration allowlists are both required")
   }
+  if (config.allowGuildDepartures && config.guildDepartureGuildIds.size === 0) {
+    warnings.push("The guild-departure toggle is enabled but departure remains blocked because an exact guild allowlist is required")
+  }
   if (config.allowOnboardingAudit && config.onboardingGuildIds.size === 0) {
     warnings.push("The onboarding-audit toggle is enabled but inspection remains blocked because an exact guild allowlist is required")
   }
@@ -999,6 +1003,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Guild blueprints",
     ],
     [config.allowGuildScaffolds, "guild-scaffolds", "Guild scaffolds"],
+    [config.allowGuildDepartures, "guild-departure", "Reviewed guild departure"],
     [
       config.allowGuildTemplateAudit || config.allowGuildTemplateChanges,
       "guild-templates",
@@ -3175,6 +3180,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.integrationDeletionPolicy,
         "pass",
         `Reviewed integration deletion is constrained to ${config.integrationGuildIds.size} exact guilds and ${config.integrationIds.size} exact integrations with explicit side-effect acknowledgments, one-shot execution, and full-inventory readback`,
+      ))
+    }
+    if (!config.allowGuildDepartures) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildDeparturePolicy,
+        "pass",
+        "Reviewed guild departure is disabled",
+      ))
+    } else if (config.guildDepartureGuildIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildDeparturePolicy,
+        "warn",
+        "Guild departure is enabled, but the required exact guild allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildDeparturePolicy,
+        "pass",
+        `Reviewed guild departure is constrained to ${config.guildDepartureGuildIds.size} exact guilds with complete membership and non-owner evidence, explicit access-loss, re-entry, and quiescence acknowledgments, one-shot execution, and complete absence readback`,
       ))
     }
     if (!config.allowGuildExpressionAudit) {

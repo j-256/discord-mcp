@@ -413,6 +413,8 @@ import {
   GuildScaffoldOperationConflictError,
   GuildTemplateExecutionError,
   GuildTemplateOperationConflictError,
+  GuildDepartureExecutionError,
+  GuildDepartureOperationConflictError,
   IntegrationDeletionExecutionError,
   IntegrationDeletionOperationConflictError,
   InteractionExecutionError,
@@ -800,6 +802,8 @@ const WEBHOOK_MESSAGE_REVIEW_REASON = "Remove the superseded deployment notice"
 const WEBHOOK_MESSAGE_CONTENT = "Transient webhook deployment notice"
 const WEBHOOK_ID = "370000000000000001"
 const INTEGRATION_OPERATION_KEY = "integration-delete-attempt-0001"
+const GUILD_DEPARTURE_OPERATION_KEY = "guild-departure-attempt-0001"
+const GUILD_DEPARTURE_REVIEW_REASON = "Retire this connector installation"
 const INTEGRATION_ID = "375000000000000001"
 const INTEGRATION_APPLICATION_ID = "375000000000000002"
 const INTEGRATION_BOT_ID = "375000000000000003"
@@ -8740,6 +8744,8 @@ function fixturePolicy(): PolicyDescription {
     guildCommunityAuditEnabled: false,
     guildCommunityChangesEnabled: false,
     guildCommunityGuildIds: [],
+    guildDepartureGuildIds: [],
+    guildDeparturesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -9022,6 +9028,8 @@ function serviceFixture(overrides: {
   interactionError?: Error
   integrationDeletionError?: Error
   integrationDeletionPlanDigest?: string
+  guildDepartureError?: Error
+  guildDeparturePlanDigest?: string
   inviteDeletionError?: Error
   inviteDeletionPlanDigest?: string
   inviteCreationError?: Error
@@ -10240,6 +10248,20 @@ function serviceFixture(overrides: {
         verifiedUnchanged: true,
       }
     },
+    async executeGuildDeparture(request, planDigest) {
+      if (overrides.guildDepartureError) throw overrides.guildDepartureError
+      return {
+        activityId: "activity-guild-departure",
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId: request.guildId,
+        operationKeyHash: operationKeyHash(request.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        verifiedAbsent: true,
+      }
+    },
     async executeChannelClone(request, planDigest) {
       if (overrides.channelCloneError) throw overrides.channelCloneError
       calls.channelCloneExecute += 1
@@ -11454,6 +11476,55 @@ function serviceFixture(overrides: {
         request,
         overrides.integrationDeletionPlanDigest || DIGEST,
       )
+    },
+    async planGuildDeparture(request) {
+      return {
+        acknowledgments: {
+          accessLoss: true,
+          concurrentOperationsStopped: true,
+          reinviteRequired: true,
+        },
+        action: "leave",
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        createdAt: "2026-08-28T00:00:00.000Z",
+        digest: overrides.guildDeparturePlanDigest || DIGEST,
+        guild: {
+          id: request.guildId,
+          name: "Private guild name",
+          requesterIsOwner: false,
+        },
+        membership: {
+          botMemberVerified: true,
+          complete: true,
+          inspectedGuilds: 2,
+          pages: 1,
+          present: true,
+        },
+        operationKeyHash: operationKeyHash(request.operationKey),
+        privacy: {
+          otherGuildIdentitiesProjectedOut: true,
+          omittedFields: [
+            "guilds.otherGuildIds",
+            "guilds.otherGuildNames",
+            "guilds.otherGuildProfiles",
+            "member",
+            "permissions",
+            "rawPayloads",
+            "reviewReason",
+          ],
+          persistence: "content-free-identifiers-only",
+          rawPayloads: "omitted",
+          targetGuildName: "transient-review-only",
+        },
+        reviewReason: request.reviewReason,
+        schemaVersion: 1,
+        status: "planned",
+        warnings: [
+          "The connector bot will immediately lose access to this guild",
+          "The operation key is one-shot",
+        ],
+      }
     },
     async executeWebhookCreation(request, planDigest) {
       if (overrides.webhookCreationError) throw overrides.webhookCreationError
@@ -14161,6 +14232,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_webhook_deletion",
       "plan_guild_integration_deletion",
       "execute_guild_integration_deletion",
+      "plan_guild_departure",
+      "execute_guild_departure",
       "plan_invite_creation",
       "execute_invite_creation",
       "plan_invite_deletion",
@@ -14312,6 +14385,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const integrationDeletion = result.tools.find((tool) => (
     tool.name === "execute_guild_integration_deletion"
   ))
+  const guildDeparture = result.tools.find((tool) => (
+    tool.name === "execute_guild_departure"
+  ))
   const inviteCreation = result.tools.find((tool) => tool.name === "execute_invite_creation")
   const inviteDeletion = result.tools.find((tool) => tool.name === "execute_invite_deletion")
   const onboarding = result.tools.find((tool) => tool.name === "execute_onboarding_change")
@@ -14418,6 +14494,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     webhookDeletion,
     webhookMessageEdit,
     integrationDeletion,
+    guildDeparture,
     inviteDeletion,
     onboarding,
     widgetSettings,
@@ -23167,6 +23244,188 @@ test("MCP integration deletion stops on refusal, plan drift, uncertainty, and re
   assert.doesNotMatch(
     JSON.stringify(conflictResult),
     new RegExp(INTEGRATION_OPERATION_KEY),
+  )
+})
+
+test("MCP guild departure plans exact acknowledged privacy-safe intent", async (context) => {
+  const { client } = await connectedFixture(context)
+  const request = {
+    acknowledgeAccessLoss: true,
+    acknowledgeConcurrentOperationsStopped: true,
+    acknowledgeReinviteRequired: true,
+    guildId: GUILD_ID,
+    operationKey: GUILD_DEPARTURE_OPERATION_KEY,
+    reviewReason: GUILD_DEPARTURE_REVIEW_REASON,
+  }
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_guild_departure",
+  })
+  const extraField = await client.callTool({
+    arguments: { ...request, auditReason: AUDIT_REASON },
+    name: "plan_guild_departure",
+  })
+  const missingAcknowledgment = await client.callTool({
+    arguments: { ...request, acknowledgeAccessLoss: false },
+    name: "plan_guild_departure",
+  })
+  const shortKey = await client.callTool({
+    arguments: { ...request, operationKey: "short" },
+    name: "plan_guild_departure",
+  })
+
+  const content = structuredContent(planned)
+  assert.equal(content.status, "planned")
+  assert.equal((content.guild as Record<string, unknown>).id, GUILD_ID)
+  assert.equal(
+    (content.membership as Record<string, unknown>).complete,
+    true,
+  )
+  assert.equal(
+    (content.privacy as Record<string, unknown>).otherGuildIdentitiesProjectedOut,
+    true,
+  )
+  assert.equal(extraField.isError, true)
+  assert.equal(missingAcknowledgment.isError, true)
+  assert.equal(shortKey.isError, true)
+  assert.doesNotMatch(JSON.stringify(planned), new RegExp(GUILD_DEPARTURE_OPERATION_KEY))
+})
+
+test("MCP guild departure binds signed approval to exact consequences", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const operationKeyHashValue = operationKeyHash(GUILD_DEPARTURE_OPERATION_KEY)
+
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeAccessLoss: true,
+      acknowledgeConcurrentOperationsStopped: true,
+      acknowledgeReinviteRequired: true,
+      guildId: GUILD_ID,
+      operationKey: GUILD_DEPARTURE_OPERATION_KEY,
+      planDigest: DIGEST,
+      reviewReason: GUILD_DEPARTURE_REVIEW_REASON,
+    },
+    name: "execute_guild_departure",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    operationKeyHashValue,
+    DIGEST,
+    GUILD_DEPARTURE_REVIEW_REASON,
+  ]) {
+    assert.match(confirmationMessage, new RegExp(value))
+  }
+  assert.match(confirmationMessage, /Connector bot is guild owner: false/)
+  assert.match(confirmationMessage, /Current-guild inventory complete: true/)
+  assert.match(confirmationMessage, /Immediate access loss acknowledged: true/)
+  assert.match(confirmationMessage, /Separate re-entry acknowledged: true/)
+  assert.match(confirmationMessage, /Concurrent operations stopped: true/)
+  assert.match(confirmationMessage, /Other guild identities projected out: true/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_DEPARTURE_OPERATION_KEY))
+  assert.doesNotMatch(
+    JSON.stringify(serverMessages),
+    new RegExp(GUILD_DEPARTURE_OPERATION_KEY),
+  )
+})
+
+test("MCP guild departure stops on refusal, plan drift, uncertainty, and reuse", async (context) => {
+  const argumentsValue = {
+    acknowledgeAccessLoss: true,
+    acknowledgeConcurrentOperationsStopped: true,
+    acknowledgeReinviteRequired: true,
+    guildId: GUILD_ID,
+    operationKey: GUILD_DEPARTURE_OPERATION_KEY,
+    planDigest: DIGEST,
+    reviewReason: GUILD_DEPARTURE_REVIEW_REASON,
+  }
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+    serviceOverrides: { guildDepartureError: new Error("Unexpected execution") },
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_departure",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: {
+      guildDepartureError: new Error("Unexpected execution"),
+      guildDeparturePlanDigest: DIFFERENT_DIGEST,
+    },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_departure",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildDepartureError: new GuildDepartureExecutionError(
+        "Discord guild departure outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_departure",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-guild-departure",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(GUILD_DEPARTURE_OPERATION_KEY),
+    status: "completed",
+    timestamp: "2026-08-28T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      guildDepartureError: new GuildDepartureOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_guild_departure",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(conflictResult),
+    new RegExp(GUILD_DEPARTURE_OPERATION_KEY),
   )
 })
 

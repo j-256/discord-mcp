@@ -307,6 +307,8 @@ function status(
       guildCommunityAuditEnabled: false,
       guildCommunityChangesEnabled: false,
       guildCommunityGuildIds: [],
+      guildDepartureGuildIds: [],
+      guildDeparturesEnabled: false,
       guildSettingsAuditEnabled: false,
       guildSettingsChangesEnabled: false,
       guildSettingsGuildIds: [],
@@ -503,6 +505,7 @@ function toolService(
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
     executeGuildIntegrationDeletion: unexpected,
+    executeGuildDeparture: unexpected,
     executeForumTagChange: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteCreation: unexpected,
@@ -593,6 +596,7 @@ function toolService(
     planApplicationTestEntitlementChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
+    planGuildDeparture: unexpected,
     planSoundboardChange: unexpected,
     planAutoModerationChange: unexpected,
     planMemberNicknameChange: unexpected,
@@ -2492,6 +2496,40 @@ test("doctor and setup explain privacy-safe integration audit and deletion", asy
   assert.match(setup.warnings.join("\n"), /integration-audit toggle/)
   assert.match(setup.warnings.join("\n"), /integration-deletion toggle/)
   assert.match(omitted.warnings.join("\n"), /integrations toolset/)
+  assertDefaultSecretForwarding(setup)
+})
+
+test("doctor and setup explain reviewed guild departure", async () => {
+  const enabledPolicy = fixturePolicy({
+    capabilities: { guildDepartures: true },
+    scopes: { guildDepartureGuildIds: [GUILD_ID] },
+  })
+  const enabled = await diagnoseConnector({
+    configOverrides: enabledPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const setup = await prepareSetup({
+    configOverrides: enabledPolicy,
+    service: statusProvider(),
+  })
+  const omitted = await prepareSetup({
+    configOverrides: {
+      ...enabledPolicy,
+      tools: { toolsets: ["connector"] },
+    },
+    service: statusProvider(),
+  })
+
+  const departure = enabled.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.guildDeparturePolicy,
+  )
+  assert.equal(departure?.status, "pass")
+  assert.match(departure?.summary || "", /1 exact guilds/)
+  assert.match(departure?.summary || "", /non-owner evidence/)
+  assert.match(departure?.summary || "", /access-loss, re-entry, and quiescence/)
+  assert.match(departure?.summary || "", /complete absence readback/)
+  assert.doesNotMatch(setup.warnings.join("\n"), /guild-departure toggle/)
+  assert.match(omitted.warnings.join("\n"), /guild-departure toolset/)
   assertDefaultSecretForwarding(setup)
 })
 
@@ -6051,6 +6089,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "review_guild_application_command_change",
     "review_guild_blueprint",
     "review_guild_community_change",
+    "review_guild_departure",
     "review_guild_expression_change",
     "review_guild_incident_action_change",
     "review_guild_integration_deletion",
@@ -6182,6 +6221,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "execute_guild_application_command_change",
     "execute_guild_blueprint",
     "execute_guild_community_change",
+    "execute_guild_departure",
     "execute_guild_expression_change",
     "execute_guild_incident_action_change",
     "execute_guild_integration_deletion",

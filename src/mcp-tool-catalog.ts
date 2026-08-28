@@ -78,6 +78,7 @@ export type McpToolWorkflow =
   | "guild-settings-change"
   | "guild-template-change"
   | "integration-deletion"
+  | "guild-departure"
   | "invite-creation"
   | "invite-deletion"
   | "onboarding-change"
@@ -431,6 +432,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["bot", "cleanup", "delete", "execute", "guild", "integration", "webhook"],
     toolset: "integrations",
     workflow: "integration-deletion",
+  },
+  execute_guild_departure: {
+    keywords: ["bot", "connector", "departure", "execute", "guild", "leave", "remove"],
+    toolset: "guild-departure",
+    workflow: "guild-departure",
   },
   execute_invite_creation: {
     keywords: ["capability", "create", "execute", "finite", "invite", "private"],
@@ -1080,6 +1086,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["bot", "cleanup", "delete", "guild", "integration", "plan", "review", "webhook"],
     toolset: "integrations",
     workflow: "integration-deletion",
+  },
+  plan_guild_departure: {
+    keywords: ["bot", "connector", "departure", "guild", "leave", "plan", "remove", "review"],
+    toolset: "guild-departure",
+    workflow: "guild-departure",
   },
   plan_invite_deletion: {
     keywords: ["delete", "invite", "plan", "review", "revoke"],

@@ -130,6 +130,20 @@ const GUILD_PROFILE_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
   "timestamp",
   "verification",
 ])
+const GUILD_DEPARTURE_ACTIVITY_KEYS: ReadonlySet<string> = new Set([
+  "applicationId",
+  "botId",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "planDigest",
+  "schemaVersion",
+  "status",
+  "timestamp",
+  "verification",
+])
 const DIRECT_MESSAGE_ACTIVITY_KEYS = [
   "action",
   "channelId",
@@ -1104,6 +1118,27 @@ export interface IntegrationDeletionActivity {
   verification: "match" | null
 }
 
+export type GuildDepartureActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface GuildDepartureActivity {
+  applicationId: string
+  botId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "guild-departure"
+  operationKeyHash: string
+  planDigest: string
+  schemaVersion: number
+  status: GuildDepartureActivityStatus
+  timestamp: string
+  verification: "match" | null
+}
+
 export type InviteDeletionActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1729,6 +1764,7 @@ export type ActivityEntry =
   | GlobalApplicationCommandActivity
   | GuildApplicationCommandActivity
   | GuildCommunityActivity
+  | GuildDepartureActivity
   | GuildExpressionActivity
   | GuildIncidentActivity
   | GuildProfileActivity
@@ -4735,6 +4771,67 @@ function parseIntegrationDeletionActivity(
   }
 }
 
+function parseGuildDepartureActivity(
+  value: unknown,
+): GuildDepartureActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).length !== GUILD_DEPARTURE_ACTIVITY_KEYS.size
+    || Object.keys(record).some((key) => !GUILD_DEPARTURE_ACTIVITY_KEYS.has(key))
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "guild-departure"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.botId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.botId)
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null
+      || record.verification !== "match"
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    applicationId: record.applicationId,
+    botId: record.botId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "guild-departure",
+    operationKeyHash: record.operationKeyHash,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as GuildDepartureActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "match" | null,
+  }
+}
+
 function parseReactionModerationActivity(
   value: unknown,
 ): ReactionModerationActivity | undefined {
@@ -6827,6 +6924,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseWebhookDeletionActivity(value)
     || parseWebhookMessageActivity(value)
     || parseIntegrationDeletionActivity(value)
+    || parseGuildDepartureActivity(value)
     || parseReactionModerationActivity(value)
     || parseInviteCreationActivity(value)
     || parseInviteDeletionActivity(value)

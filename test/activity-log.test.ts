@@ -39,6 +39,7 @@ import {
   type GuildApplicationCommandActivity,
   type GuildExpressionActivity,
   type GuildCommunityActivity,
+  type GuildDepartureActivity,
   type GuildIncidentActivity,
   type GuildProfileActivity,
   type GuildPruneActivity,
@@ -1182,6 +1183,28 @@ function integrationDeletion(
     schemaVersion: 1,
     status,
     targetApplicationId: "400",
+    timestamp: `2026-08-14T00:00:0${id}.000Z`,
+    verification: status === "completed" ? "match" : null,
+  }
+}
+
+function guildDeparture(
+  id: string,
+  status: GuildDepartureActivity["status"],
+): GuildDepartureActivity {
+  return {
+    applicationId: "400",
+    botId: "500",
+    error: ["failed", "uncertain"].includes(status)
+      ? "DiscordApiError.500.unknown"
+      : null,
+    guildId: "100",
+    id,
+    kind: "guild-departure",
+    operationKeyHash: `sha256:${"7".repeat(64)}`,
+    planDigest: `hmac-sha256:${"8".repeat(64)}`,
+    schemaVersion: 1,
+    status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
   }
@@ -3799,6 +3822,71 @@ test("JSONL activity log keeps integration deletion evidence identity-safe", asy
       "schemaVersion",
       "status",
       "targetApplicationId",
+      "timestamp",
+      "verification",
+    ],
+  )
+  for (const value of privateValues) {
+    assert.equal(JSON.stringify(result).includes(value), false)
+    assert.equal(persisted.includes(value), false)
+  }
+})
+
+test("JSONL activity log keeps guild departure evidence identity-safe", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  context.after(() => rm(root, { force: true, recursive: true }))
+  const file = join(root, "activity.jsonl")
+  const store = new JsonlActivityLog(file)
+  const privateValues = [
+    "private-bot-profile",
+    "private-guild-name",
+    "private-operation-key",
+    "private-other-guild-id",
+    "private-other-guild-name",
+    "private-review-reason",
+  ]
+
+  await store.append(guildDeparture("1", "pending"))
+  await assert.rejects(
+    () => store.append({
+      ...guildDeparture("2", "completed"),
+      botProfile: privateValues[0],
+      guildName: privateValues[1],
+      operationKey: privateValues[2],
+      otherGuildId: privateValues[3],
+      otherGuildName: privateValues[4],
+      reviewReason: privateValues[5],
+    } as GuildDepartureActivity),
+    /invalid content-free shape/u,
+  )
+  await store.append(guildDeparture("2", "completed"))
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      ...guildDeparture("3", "completed"),
+      verification: null,
+    })}\n`,
+    "utf8",
+  )
+
+  const result = await store.list()
+  const persisted = await readFile(file, "utf8")
+
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.equal(result.skippedLines, 1)
+  assert.deepEqual(
+    Object.keys(result.entries[0] || {}).sort(),
+    [
+      "applicationId",
+      "botId",
+      "error",
+      "guildId",
+      "id",
+      "kind",
+      "operationKeyHash",
+      "planDigest",
+      "schemaVersion",
+      "status",
       "timestamp",
       "verification",
     ],

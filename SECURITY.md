@@ -756,6 +756,22 @@ A known Discord client refusal other than request timeout or rate limiting may s
 
 Integration-deletion activity and operation records may contain only exact guild, integration, target application, and associated bot IDs, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity ID, and sanitized error category. Never persist names, external account identities, profiles, descriptions, icon hashes, audit reasons, raw operation keys, unknown OAuth values, raw responses, permission evidence, or transport causes. Mark integration list and deletion REST operations content-sensitive so response bodies and external error details cannot enter diagnostics.
 
+## Guild departure
+
+Keep connector departure behind its own capability, dedicated `guild-departure` toolset, exact guild allowlist, and outer read-guild scope. Do not add an immediate, name-targeted, permission-inferred, or generic administration path. Require the caller to acknowledge immediate access loss, separate Discord-side re-entry, and a stopped-work window for every connector and external operation against the target guild.
+
+Verify the pinned application and bot before collecting an exact guild, exact bot member, and complete bounded current-user guild inventory. Require one unique target, strict agreement on its transient name and ownership evidence, exact bot-member identity, complete bounded bot roles, and proof that the bot is not the guild owner. Reject missing, duplicate, cursor-violating, incomplete, over-bound, malformed, or inconsistent evidence. Project every other guild identity and all raw payloads out immediately.
+
+Bind the complete normalized request, hashed one-shot key, pinned identities, bot roles, exact target and non-ownership, complete inventory shape, acknowledgments, privacy contract, transient local reason, and warnings into a process-keyed plan. Rebuild it before signed interactive confirmation, before durable coordination, and again inside the acquired claims. Require write-aware host approval and exact matching request state. A client without MCP elicitation must not execute departure.
+
+Claim every modeled guild collection for the exact guild before reserving the operation key. Those claims exclude overlapping collection-wide workflows only when connector processes share one canonical activity-state root on a local filesystem. They cannot infer every exact resource-only workflow or external Discord actor, so never present coordination as a substitute for the explicit stopped-work acknowledgment. Keep the target guild quiescent from planning until a terminal result.
+
+Reserve the one-shot key and append pending content-free activity before one non-retried `DELETE /users/@me/guilds/{guild.id}`. Accept completion only after a complete fresh current-user guild inventory proves the exact target absent. Discord accepts no audit-log reason on this route, so never send or persist the local review reason.
+
+A known pre-mutation Discord client refusal other than request timeout or rate limiting may settle as failed. Treat rate limiting, transport failure, server failure, malformed success evidence, target presence, incomplete readback, receipt-finalization failure, or any other indeterminate post-reservation result as uncertain and potentially completed. Spend every reserved key, retain unsafe durable claims, keep a process-local same-guild departure quarantine, and never retry, reinstall, invite, compensate, or roll back automatically.
+
+Departure activity and operation records may contain only the exact application, bot, and guild IDs, plan digest, operation-key hash, timestamps, fixed verification and outcome values, activity ID, and sanitized error category. Never persist guild names, other guild identities, member profiles, role names, permissions, local review reasons, raw operation keys, raw responses, or transport causes.
+
 ## Invites
 
 Keep guild invite inventory behind its own audit toggle and exact guild allowlist. The allowlist must remain a subset of any configured read-guild scope. Require verified application and bot identities, an exact guild and owner, exact connector membership, complete bounded roles and channels, a complete bounded invite inventory, and effective guild-level `MANAGE_GUILD` before returning an inventory or plan. Do not add a reduced `VIEW_AUDIT_LOG` mode because Discord withholds complete invite metadata without `MANAGE_GUILD`.

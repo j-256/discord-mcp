@@ -86,10 +86,11 @@ import type {
   DiscordRole,
   DiscordUser,
 } from "../src/types.js"
-import type {
-  WriteCoordinationIntent,
-  WriteCoordinationRunOptions,
-  WriteCoordinator,
+import {
+  WRITE_COORDINATION_GUILD_COLLECTIONS,
+  type WriteCoordinationIntent,
+  type WriteCoordinationRunOptions,
+  type WriteCoordinator,
 } from "../src/write-coordination.js"
 
 const TOKEN = "test-discord-token"
@@ -367,6 +368,7 @@ function serviceFixture(overrides: {
   guildExpressionOptions?: ConnectorServiceOptions["guildExpressionOptions"]
   guildBlueprintOptions?: ConnectorServiceOptions["guildBlueprintOptions"]
   guildCommunityOptions?: ConnectorServiceOptions["guildCommunityOptions"]
+  guildDepartureOptions?: ConnectorServiceOptions["guildDepartureOptions"]
   guildIncidentOptions?: ConnectorServiceOptions["guildIncidentOptions"]
   guildProfileOptions?: ConnectorServiceOptions["guildProfileOptions"]
   guildScaffoldOptions?: ConnectorServiceOptions["guildScaffoldOptions"]
@@ -430,6 +432,9 @@ function serviceFixture(overrides: {
     },
     async joinThread() {
       throw new Error("Unexpected thread join")
+    },
+    async leaveGuild() {
+      throw new Error("Unexpected guild departure")
     },
     async leaveThread() {
       throw new Error("Unexpected thread leave")
@@ -1209,6 +1214,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.guildCommunityOptions
         ? { guildCommunityOptions: overrides.guildCommunityOptions }
+        : {}),
+      ...(overrides.guildDepartureOptions
+        ? { guildDepartureOptions: overrides.guildDepartureOptions }
         : {}),
       ...(overrides.guildIncidentOptions
         ? { guildIncidentOptions: overrides.guildIncidentOptions }
@@ -4124,6 +4132,134 @@ test("service pins identity through privacy-safe integration audit and deletion"
     JSON.stringify(calls.activityEntries),
     /Reviewed integration cleanup|private-associated-bot|integration-service-attempt/,
   )
+})
+
+test("service pins identity and coordinates every guild collection before departure", async () => {
+  const operationStore = new MemoryOperationStore()
+  const intents: WriteCoordinationIntent[] = []
+  const writeCoordinator: WriteCoordinator = {
+    async run(intent, operation) {
+      intents.push(intent)
+      return operation()
+    },
+  }
+  const otherGuildId = "905000000000000004"
+  let left = false
+  let leaveCalls = 0
+  let inventoryCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuild(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        return {
+          ...guild(),
+          id: GUILD_ID,
+          name: "Private departure guild",
+          owner_id: "800000000000000001",
+        }
+      },
+      async getGuildMember(guildId, userId) {
+        assert.equal(guildId, GUILD_ID)
+        assert.equal(userId, BOT_ID)
+        return {
+          roles: [GUILD_ID],
+          user: bot(),
+        }
+      },
+      async leaveGuild(guildId) {
+        assert.equal(guildId, GUILD_ID)
+        leaveCalls += 1
+        left = true
+      },
+      async listCurrentUserGuilds() {
+        inventoryCalls += 1
+        return [
+          ...(!left
+            ? [{ id: GUILD_ID, name: "Private departure guild", owner: false }]
+            : []),
+          { id: otherGuildId, name: "Private unrelated guild", owner: false },
+        ]
+      },
+    },
+    configOverrides: {
+      capabilities: { guildDepartures: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { guildDepartureGuildIds: [GUILD_ID] },
+    },
+    guildDepartureOptions: {
+      clock: () => new Date("2026-08-28T00:00:00.000Z"),
+      planKey: new Uint8Array(32).fill(29),
+      randomId: () => "activity-guild-departure",
+    },
+    operationStore,
+    writeCoordinator,
+  })
+  const request = {
+    acknowledgeAccessLoss: true,
+    acknowledgeConcurrentOperationsStopped: true,
+    acknowledgeReinviteRequired: true,
+    guildId: GUILD_ID,
+    operationKey: "guild-departure-service-attempt-0001",
+    reviewReason: "Retire this connector installation",
+  }
+
+  const plan = await service.planGuildDeparture(request)
+  const result = await service.executeGuildDeparture(request, plan.digest)
+
+  assert.equal(plan.guild.id, GUILD_ID)
+  assert.equal(plan.guild.requesterIsOwner, false)
+  assert.equal(plan.membership.complete, true)
+  assert.equal(plan.membership.inspectedGuilds, 2)
+  assert.equal(plan.privacy.otherGuildIdentitiesProjectedOut, true)
+  assert.equal(result.status, "completed")
+  assert.equal(result.verifiedAbsent, true)
+  assert.equal(leaveCalls, 1)
+  assert.equal(inventoryCalls, 4)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(intents, [{
+    kind: "guild-departure",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: WRITE_COORDINATION_GUILD_COLLECTIONS.map((collection) => ({
+      collection,
+      guildId: GUILD_ID,
+      kind: "guild-collection" as const,
+    })),
+  }])
+  assert.equal(operationStore.receipt?.kind, "guild-departure")
+  assert.equal(operationStore.receipt?.resourceId, GUILD_ID)
+  const durable = JSON.stringify({
+    activity: calls.activityEntries,
+    receipt: operationStore.receipt,
+  })
+  assert.doesNotMatch(durable, /Private departure guild/)
+  assert.doesNotMatch(durable, /Private unrelated guild/)
+  assert.doesNotMatch(durable, new RegExp(otherGuildId))
+  assert.doesNotMatch(durable, /Retire this connector installation/)
+  assert.doesNotMatch(durable, /guild-departure-service-attempt-0001/)
+})
+
+test("service rejects guild departure policy before identity access", async () => {
+  const { calls, service } = serviceFixture({
+    configOverrides: {
+      readScope: { guildIds: [GUILD_ID] },
+    },
+  })
+
+  await assert.rejects(
+    service.planGuildDeparture({
+      acknowledgeAccessLoss: true,
+      acknowledgeConcurrentOperationsStopped: true,
+      acknowledgeReinviteRequired: true,
+      guildId: GUILD_ID,
+      operationKey: "guild-departure-service-attempt-0002",
+      reviewReason: "Reject before contacting Discord",
+    }),
+    /guild departure is disabled/u,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
 })
 
 test("service pins identity through capability-safe invite audit and revocation", async () => {

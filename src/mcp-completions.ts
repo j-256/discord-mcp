@@ -239,6 +239,11 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
     "integrationId",
     "integrationIds",
   ),
+  promptBinding(
+    MCP_PROMPT_NAMES.reviewGuildDeparture,
+    "guildId",
+    "guildDepartureGuildIds",
+  ),
   promptBinding(MCP_PROMPT_NAMES.reviewInviteDeletion, "guildId", "inviteGuildIds"),
   promptBinding(
     MCP_PROMPT_NAMES.reviewGuildExpressionChange,

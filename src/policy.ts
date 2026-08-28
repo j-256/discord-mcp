@@ -103,6 +103,8 @@ export interface PolicyDescription {
   guildCommunityAuditEnabled: boolean
   guildCommunityChangesEnabled: boolean
   guildCommunityGuildIds: string[]
+  guildDepartureGuildIds: string[]
+  guildDeparturesEnabled: boolean
   guildIncidentAuditEnabled: boolean
   guildIncidentChangesEnabled: boolean
   guildIncidentGuildIds: string[]
@@ -320,6 +322,7 @@ export class ScopePolicy {
   readonly #allowGateway: boolean
   readonly #allowGuildCommunityAudit: boolean
   readonly #allowGuildCommunityChanges: boolean
+  readonly #allowGuildDepartures: boolean
   readonly #allowGuildExpressionAudit: boolean
   readonly #allowGuildExpressionChanges: boolean
   readonly #allowGuildIncidentAudit: boolean
@@ -411,6 +414,7 @@ export class ScopePolicy {
   readonly #gatewayEventBufferSize: number
   readonly #guildScaffoldGuildIds: ReadonlySet<string>
   readonly #guildCommunityGuildIds: ReadonlySet<string>
+  readonly #guildDepartureGuildIds: ReadonlySet<string>
   readonly #guildExpressionGuildIds: ReadonlySet<string>
   readonly #guildExpressionRoots: readonly string[]
   readonly #guildIncidentGuildIds: ReadonlySet<string>
@@ -521,6 +525,7 @@ export class ScopePolicy {
     | "allowGateway"
     | "allowGuildCommunityAudit"
     | "allowGuildCommunityChanges"
+    | "allowGuildDepartures"
     | "allowGuildExpressionAudit"
     | "allowGuildExpressionChanges"
     | "allowGuildIncidentAudit"
@@ -630,6 +635,7 @@ export class ScopePolicy {
     | "gatewayEventBufferSize"
     | "guildScaffoldGuildIds"
     | "guildCommunityGuildIds"
+    | "guildDepartureGuildIds"
     | "guildExpressionGuildIds"
     | "guildExpressionRoots"
     | "guildIncidentGuildIds"
@@ -765,6 +771,7 @@ export class ScopePolicy {
     this.#allowGateway = config.allowGateway ?? false
     this.#allowGuildCommunityAudit = config.allowGuildCommunityAudit ?? false
     this.#allowGuildCommunityChanges = config.allowGuildCommunityChanges ?? false
+    this.#allowGuildDepartures = config.allowGuildDepartures ?? false
     this.#allowGuildExpressionAudit = config.allowGuildExpressionAudit ?? false
     this.#allowGuildExpressionChanges = config.allowGuildExpressionChanges ?? false
     this.#allowGuildIncidentAudit = config.allowGuildIncidentAudit ?? false
@@ -864,6 +871,7 @@ export class ScopePolicy {
       ?? GATEWAY_DEFAULTS.eventBufferSize
     this.#guildScaffoldGuildIds = config.guildScaffoldGuildIds ?? new Set()
     this.#guildCommunityGuildIds = config.guildCommunityGuildIds ?? new Set()
+    this.#guildDepartureGuildIds = config.guildDepartureGuildIds ?? new Set()
     this.#guildExpressionGuildIds = config.guildExpressionGuildIds ?? new Set()
     this.#guildExpressionRoots = config.guildExpressionRoots ?? []
     this.#guildIncidentGuildIds = config.guildIncidentGuildIds ?? new Set()
@@ -1091,6 +1099,9 @@ export class ScopePolicy {
         && this.#allowGuildCommunityChanges
         && this.#guildCommunityGuildIds.size > 0,
       guildCommunityGuildIds: [...this.#guildCommunityGuildIds].sort(),
+      guildDepartureGuildIds: [...this.#guildDepartureGuildIds].sort(),
+      guildDeparturesEnabled: this.#allowGuildDepartures
+        && this.#guildDepartureGuildIds.size > 0,
       guildIncidentAuditEnabled: this.#allowGuildIncidentAudit
         && this.#guildIncidentGuildIds.size > 0,
       guildIncidentChangesEnabled: this.#allowGuildIncidentAudit
@@ -1675,6 +1686,19 @@ export class ScopePolicy {
     this.assertGuildCommunityAuditable(guildId)
     if (!this.#allowGuildCommunityChanges) {
       throw new PolicyError("Discord guild Community changes are disabled by connector configuration")
+    }
+  }
+
+  assertGuildDepartureAllowed(guildId: string): void {
+    this.assertGuildAllowed(guildId)
+    if (!this.#allowGuildDepartures) {
+      throw new PolicyError("Discord guild departure is disabled by connector configuration")
+    }
+    if (this.#guildDepartureGuildIds.size === 0) {
+      throw new PolicyError("Discord guild departure requires an exact guild allowlist")
+    }
+    if (!this.#guildDepartureGuildIds.has(guildId)) {
+      throw new PolicyError(`Discord guild ${guildId} is outside the departure scope`)
     }
   }
 

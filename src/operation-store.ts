@@ -54,6 +54,7 @@ export const OPERATION_KINDS = [
   "global-application-command-change",
   "guild-application-command-change",
   "guild-community-change",
+  "guild-departure",
   "guild-expression-change",
   "guild-incident-action-change",
   "guild-profile-change",

@@ -985,6 +985,7 @@ test("file operation store isolates every durable write operation-key domain", a
   const expression = { ...receipt(), kind: "guild-expression-change" as const }
   const scaffold = { ...receipt(), kind: "guild-scaffold" as const }
   const guildCommunity = { ...receipt(), kind: "guild-community-change" as const }
+  const guildDeparture = { ...receipt(), kind: "guild-departure" as const }
   const guildSettings = { ...receipt(), kind: "guild-settings-change" as const }
   const guildIncident = { ...receipt(), kind: "guild-incident-action-change" as const }
   const integration = { ...receipt(), kind: "integration-deletion" as const }
@@ -1031,6 +1032,7 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.equal((await store.reserve(expression)).created, true)
   assert.equal((await store.reserve(scaffold)).created, true)
   assert.equal((await store.reserve(guildCommunity)).created, true)
+  assert.equal((await store.reserve(guildDeparture)).created, true)
   assert.equal((await store.reserve(guildSettings)).created, true)
   assert.equal((await store.reserve(guildIncident)).created, true)
   assert.equal((await store.reserve(integration)).created, true)
@@ -1111,6 +1113,10 @@ test("file operation store isolates every durable write operation-key domain", a
   assert.deepEqual(
     await store.get("guild-community-change", guildCommunity.operationKeyHash),
     guildCommunity,
+  )
+  assert.deepEqual(
+    await store.get("guild-departure", guildDeparture.operationKeyHash),
+    guildDeparture,
   )
   assert.deepEqual(
     await store.get("guild-settings-change", guildSettings.operationKeyHash),

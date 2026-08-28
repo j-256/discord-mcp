@@ -93,6 +93,7 @@ export interface ConnectorConfig {
   allowGuildExpressionChanges: boolean
   allowGuildCommunityAudit: boolean
   allowGuildCommunityChanges: boolean
+  allowGuildDepartures: boolean
   allowGuildIncidentAudit: boolean
   allowGuildIncidentChanges: boolean
   allowGuildProfileAudit: boolean
@@ -200,6 +201,7 @@ export interface ConnectorConfig {
   gatewayEventBufferSize: number
   guildScaffoldGuildIds: ReadonlySet<string>
   guildCommunityGuildIds: ReadonlySet<string>
+  guildDepartureGuildIds: ReadonlySet<string>
   guildExpressionGuildIds: ReadonlySet<string>
   guildExpressionRoots: readonly string[]
   guildIncidentGuildIds: ReadonlySet<string>
@@ -644,6 +646,11 @@ export function loadConnectorConfigDocument(
     "guildCommunityGuildIds",
     CONNECTOR_LIMITS.guildCommunityGuildAllowlist,
   )
+  const guildDepartureGuildIds = configScope(
+    document,
+    "guildDepartureGuildIds",
+    CONNECTOR_LIMITS.guildDepartureGuildAllowlist,
+  )
   const guildExpressionGuildIds = configScope(document, "guildExpressionGuildIds")
   const guildIncidentGuildIds = configScope(
     document,
@@ -696,6 +703,7 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("channelOrderingGuildIds"), channelOrderingGuildIds],
     [configPolicyPath("guildScaffoldGuildIds"), guildScaffoldGuildIds],
     [configPolicyPath("guildCommunityGuildIds"), guildCommunityGuildIds],
+    [configPolicyPath("guildDepartureGuildIds"), guildDepartureGuildIds],
     [configPolicyPath("guildExpressionGuildIds"), guildExpressionGuildIds],
     [configPolicyPath("guildIncidentGuildIds"), guildIncidentGuildIds],
     [configPolicyPath("guildProfileGuildIds"), guildProfileGuildIds],
@@ -847,6 +855,7 @@ export function loadConnectorConfigDocument(
   }
   const allowGuildPruneAudit = configCapability(document, "guildPruneAudit")
   const allowGuildPrunes = configCapability(document, "guildPrunes")
+  const allowGuildDepartures = configCapability(document, "guildDepartures")
   if (allowGuildPrunes && !allowGuildPruneAudit) {
     throw new ConfigurationError(
       `${configPolicyPath("allowGuildPrunes")} requires ${configPolicyPath("allowGuildPruneAudit")}`,
@@ -855,6 +864,11 @@ export function loadConnectorConfigDocument(
   if (allowGuildPruneAudit && guildPruneGuildIds.size === 0) {
     throw new ConfigurationError(
       `${configPolicyPath("allowGuildPruneAudit")} requires ${configPolicyPath("guildPruneGuildIds")}`,
+    )
+  }
+  if (allowGuildDepartures && guildDepartureGuildIds.size === 0) {
+    throw new ConfigurationError(
+      `${configPolicyPath("allowGuildDepartures")} requires ${configPolicyPath("guildDepartureGuildIds")}`,
     )
   }
   if (
@@ -1396,6 +1410,7 @@ export function loadConnectorConfigDocument(
     allowGateway,
     allowGuildCommunityAudit,
     allowGuildCommunityChanges,
+    allowGuildDepartures,
     allowGuildExpressionAudit,
     allowGuildExpressionChanges,
     allowGuildIncidentAudit,
@@ -1522,6 +1537,7 @@ export function loadConnectorConfigDocument(
     gatewayEventBufferSize: document.gateway.eventBufferSize,
     guildScaffoldGuildIds,
     guildCommunityGuildIds,
+    guildDepartureGuildIds,
     guildExpressionGuildIds,
     guildExpressionRoots: parseOwnedRoots(
       document.storage.guildExpressionRoots,

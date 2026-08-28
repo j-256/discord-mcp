@@ -1417,6 +1417,42 @@ export class IntegrationEvidenceError extends Error {
   override name = "IntegrationEvidenceError"
 }
 
+export class GuildDeparturePlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord guild membership evidence does not match the reviewed departure plan")
+    this.name = "GuildDeparturePlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class GuildDepartureOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord guild departure operation key has already been reserved")
+    this.name = "GuildDepartureOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class GuildDepartureExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "GuildDepartureExecutionError"
+    this.result = result
+  }
+}
+
+export class GuildDepartureEvidenceError extends Error {
+  override name = "GuildDepartureEvidenceError"
+}
+
 export class ApplicationEmojiPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string
