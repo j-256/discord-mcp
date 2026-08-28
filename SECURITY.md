@@ -24,6 +24,16 @@ Load a file-backed bot credential only from an absolute reference that resolves 
 
 Managed profiles use the same complete policy contract in a private per-user directory. Unsupported schema versions fail closed and no environment-policy compatibility shape is accepted. Profile removal must require exact confirmation and move a validated profile into private recoverable trash; it must never claim to revoke or modify the external Discord credential. Restore only the newest valid generation and only when no active profile has that name.
 
+## Host configuration inspection
+
+Keep static host inspection explicit, adapter-bound, release-exact, and permanently read-only. Accept one caller-selected file only when an adapter is also selected. Never search a home directory, infer a host, query a package registry, resolve a connector credential, contact Discord, start a child, edit a host or policy file, create an activity record, or expose an apply path from inspection.
+
+Read the destination only as one bounded canonical regular single-link stable JSON file. Reject symbolic path components, unsafe size, unstable identity or metadata, duplicate object keys, malformed JSON, foreign ownership, or group and world access where portable ownership and mode metadata exist. On a platform without those portable checks, report them as unverified rather than claiming a private file. Convert every filesystem and parse failure into fixed path- and content-free diagnostics.
+
+Derive the expected projection only from the selected strict policy and current installed-release activation plan. For a shared host file, compare only the exact connector-owned server entry and generated sensitive-input identities while ignoring unrelated host state. Compare a dedicated extension manifest completely. Emit only closed drift categories, expected adapter and activation identities, safe counts, fixed file-review and privacy evidence, limitations, and a domain-separated digest of that safe report. Never return or persist the selected host path, raw bytes, observed values, unrelated entries, credential material, or a digest computed from private host content.
+
+Treat a match as evidence for one stable static snapshot only. It does not prove that the host loaded or retained the file, supplied a credential, honored approval or elicitation, started the process, negotiated MCP, or reached Discord. Require regeneration and a second inspection after drift repair, then direct runtime verification through `smoke` and the host's read-only path.
+
 ## Migration planning
 
 Keep migration planning release-exact, offline, non-mutating, and separate from runtime policy. Accept only a canonical versioned source identity from the shipped manifest catalog. Never accept or read a source checkout, source configuration, MCP host configuration, active connector policy, environment value, credential file, token, Discord content, activity state, coordination record, arbitrary URL, or nearest-version alias. Do not start a process, contact a network or Discord endpoint, open a Gateway, export telemetry, create an activity record, or change the source, target, policy, host, or Discord installation while producing a plan.

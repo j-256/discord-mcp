@@ -180,6 +180,7 @@ const SECURITY_GROUPS = Object.freeze([
     titles: [
       "Credentials",
       "Unified configuration",
+      "Host configuration inspection",
       "Migration planning",
       "MCP result boundaries",
       "Exact Discord references",

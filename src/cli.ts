@@ -56,6 +56,10 @@ import {
   type HostAdapterId,
 } from "./host-adapters.js"
 import {
+  inspectHostAdapterFile,
+  type HostInspectionReport,
+} from "./host-inspection.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
@@ -275,6 +279,7 @@ export type ParsedCliArguments =
     command: "host"
     configFile?: string
     htmlFile?: string
+    inspectHostFile?: string
     json: boolean
     launcherCommand: string | undefined
     packageLaunch?: true
@@ -415,6 +420,11 @@ export interface CliDependencies {
   diagnose(options: DoctorOptions): Promise<DoctorReport>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
+  inspectHostFile(
+    plan: HostActivationPlan,
+    adapterId: HostAdapterId,
+    file: string,
+  ): HostInspectionReport
   listCoordination(activityFile: string): Promise<WriteCoordinationList>
   listProfiles(options: ProfileLocationOptions): Promise<ConnectorProfile[]>
   loadConfig(environment: NodeJS.ProcessEnv): ConnectorConfig
@@ -484,6 +494,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
+  inspectHostFile: inspectHostAdapterFile,
   listCoordination: async (auditFile) => {
     return new FileWriteCoordinator(
       writeCoordinationDirectory(auditFile),
@@ -661,6 +672,7 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
   let adapterId: HostAdapterId | undefined
   let configFile: string | undefined
   let htmlFile: string | undefined
+  let inspectHostFile: string | undefined
   let json = false
   let launcherCommand: string | undefined
   let packageLaunch = false
@@ -689,6 +701,7 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
       "--command",
       "--config",
       "--html",
+      "--inspect-host-file",
       "--name",
       "--profile",
     ].includes(argument)) {
@@ -708,6 +721,7 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
     if (argument === "--command") launcherCommand = value
     if (argument === "--config") configFile = value
     if (argument === "--html") htmlFile = value
+    if (argument === "--inspect-host-file") inspectHostFile = value
     if (argument === "--name") serverName = value
     if (argument === "--profile") profileName = value
   }
@@ -720,11 +734,15 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
   if (packageLaunch && launcherCommand !== undefined) {
     throw new ConfigurationError("Options --npx and --command are mutually exclusive")
   }
+  if (inspectHostFile && !adapterId) {
+    throw new ConfigurationError("Option --inspect-host-file requires --adapter")
+  }
   return {
     ...(adapterId ? { adapterId } : {}),
     command: "host",
     ...(configFile ? { configFile } : {}),
     ...(htmlFile ? { htmlFile } : {}),
+    ...(inspectHostFile ? { inspectHostFile } : {}),
     json,
     launcherCommand,
     ...(packageLaunch ? { packageLaunch: true as const } : {}),
@@ -1527,7 +1545,7 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "host") {
-    return `Usage: discord-mcp host (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID] [--html FILE] [--json]\n\nGenerate one exact credential-free local stdio activation plan plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launch uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog. Optional HTML exclusively creates a mode-0600 interactive guide with every adapter, copy controls, host requirements, a read-only verification request, and visible limitations. The guide contains private Discord identifiers and may contain local paths, so do not share or commit it. This command reads no credential value, contacts no network or Discord endpoint, starts no process, discovers no host, and changes no policy or host configuration. Exit status is 0 on success and 2 on command failure.`
+    return `Usage: discord-mcp host (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]\n\nGenerate one exact credential-free local stdio activation plan plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launch uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog. --inspect-host-file safely reads one explicitly selected bounded JSON file with private owner and mode checks where the platform exposes them, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. It may encounter credential material but never returns it. Optional HTML exclusively creates a mode-0600 interactive guide with every adapter, copy controls, host requirements, a read-only verification request, and visible limitations. The guide contains private Discord identifiers and may contain local paths, so do not share or commit it. The command contacts no network or Discord endpoint, starts no process, discovers no host, and changes no policy or host configuration. Exit status is 0 on exact match or generation, 1 on drift, and 2 on command failure.`
   }
   if (topic === "migrate") {
     return [
@@ -1943,6 +1961,31 @@ function renderHostActivationHtmlExport(
     "Boundary: private mode-0600 standalone HTML with memory-only checklist state and no external navigation",
     "The guide contains private Discord identifiers and may contain local paths. It contains no credential value and must not be shared or committed.",
     "No credential value was read, Discord and the network were not contacted, no browser or process was started, no host was discovered, and no policy or host configuration was changed.",
+  ].join("\n")
+}
+
+function renderHostInspection(report: HostInspectionReport): string {
+  return [
+    `Discord MCP host inspection: ${report.status}`,
+    `Inspection digest: ${report.inspectionDigest}`,
+    `Adapter: ${report.adapter.title} (${report.adapter.id})`,
+    `Adapter digest: ${report.adapter.adapterDigest}`,
+    `Activation digest: ${report.adapter.activationDigest}`,
+    `Host server name: ${report.adapter.hostServerName}`,
+    `Server entry: ${report.comparison.serverEntry}`,
+    `Sensitive inputs: ${report.comparison.matchedSensitiveInputCount}/${report.comparison.expectedSensitiveInputCount} exact`,
+    `Unrelated host state: ${report.comparison.unrelatedState}`,
+    "Differences:",
+    ...(report.comparison.differences.length > 0
+      ? report.comparison.differences.map((difference) => `- ${difference}`)
+      : ["- none"]),
+    `File review: bounded canonical regular single-link stable read; owner ${report.fileReview.owner}; access ${report.fileReview.access}`,
+    "Possible credential material was read only as part of the explicit file; no value, raw host content, host path, unrelated state, or activity record was returned or persisted.",
+    ...(report.status === "drift"
+      ? ["Next: Regenerate this exact adapter, merge only its owned projection, restart or reload the host, rerun inspection, then run smoke."]
+      : ["Next: Restart or reload the host if needed, then run smoke to verify real MCP startup and read-only Discord access."]),
+    "Limits:",
+    ...report.limitations.map((limitation) => `- ${limitation}`),
   ].join("\n")
 }
 
@@ -2866,6 +2909,9 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           })
         }
         const adapterCatalog = createHostAdapterCatalog(plan)
+        const inspection = parsed.inspectHostFile && parsed.adapterId
+          ? dependencies.inspectHostFile(plan, parsed.adapterId, parsed.inspectHostFile)
+          : undefined
         const guide = parsed.htmlFile
           ? await dependencies.exportHostActivationHtml(parsed.htmlFile, plan)
           : undefined
@@ -2875,6 +2921,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
             ? jsonReport({
                 ...plan,
                 adapterCatalog,
+                ...(inspection ? { inspection } : {}),
                 ...(guide ? { guide } : {}),
               })
             : [
@@ -2882,11 +2929,14 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
                 ...(parsed.adapterId
                   ? [renderHostAdapter(findHostAdapter(adapterCatalog, parsed.adapterId))]
                   : []),
+                ...(inspection ? [renderHostInspection(inspection)] : []),
                 ...(guide ? [renderHostActivationHtmlExport(guide)] : []),
               ].join("\n\n"),
           {},
         )
-        return CLI_EXIT_CODES.success
+        return inspection?.status === "drift"
+          ? CLI_EXIT_CODES.warning
+          : CLI_EXIT_CODES.success
       }
       case "migrate": {
         if (parsed.action === "list") {

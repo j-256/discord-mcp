@@ -32,6 +32,7 @@ const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
 const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
+const HOST_INSPECTION_FORMAT = "discord-mcp.host-inspection.v1"
 const MIGRATION_CATALOG_FORMAT = "discord-mcp.migration-catalog.v1"
 const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
 const MIGRATION_HTML_FORMAT = "discord-mcp.migration-html.v1"
@@ -106,6 +107,7 @@ const REQUIRED_FILES = [
   "dist/host-activation-html.js",
   "dist/host-activation.js",
   "dist/host-adapters.js",
+  "dist/host-inspection.js",
   "dist/index.d.ts",
   "dist/index.js",
   "dist/migration-html.js",
@@ -245,7 +247,8 @@ async function assertNeutralPackage(packageDirectory, files) {
     invariant(
       !containsSpecificReference(contents.toString("latin1"), {
         allowClientCompatibility: clientCompatibilityFiles.has(relative)
-          || relative.startsWith("dist/host-adapters."),
+          || relative.startsWith("dist/host-adapters.")
+          || relative.startsWith("dist/host-inspection."),
       }),
       `npm archive file ${relative} has model- or harness-specific branding`,
     )
@@ -387,6 +390,8 @@ assert.equal(typeof connector.createBotInstallPlan, "function")
 assert.equal(typeof connector.createHostActivationPlan, "function")
 assert.equal(typeof connector.createHostAdapterCatalog, "function")
 assert.equal(connector.HOST_ADAPTER_IDS.length, 4)
+assert.equal(typeof connector.inspectHostAdapterFile, "function")
+assert.equal(connector.HOST_INSPECTION_FORMAT, "${HOST_INSPECTION_FORMAT}")
 assert.equal(typeof connector.exportDiscordHostActivationHtml, "function")
 await connector.saveProfile(connector.createConnectorProfile({
   applicationId: "100000000000000001",
@@ -1240,6 +1245,81 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   invariant(selectedAdapter.stdout.includes("Discord MCP host adapter: Visual Studio Code (vscode)"), "installed host adapter selection did not render")
   invariant(selectedAdapter.stdout.includes("${input:discord-mcp-credential-1}"), "installed host adapter selection omitted VS Code secure input")
   invariant(!selectedAdapter.stdout.includes(DUMMY_TOKEN), "installed host adapter selection captured an ambient secret")
+  const hostConfigurationFile = join(consumer, "mcp-host.json")
+  const expectedHostConfiguration = firstHostActivation.adapterCatalog.adapters
+    .find(({ id }) => id === "mcp-json")
+  invariant(expectedHostConfiguration, "installed host activation omitted the generic MCP adapter")
+  await writeFile(hostConfigurationFile, expectedHostConfiguration.content, { mode: 0o600 })
+  const exactHostInspectionResult = await run(bin, [
+    "host",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--inspect-host-file",
+    hostConfigurationFile,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const exactHostInspection = JSON.parse(exactHostInspectionResult.stdout).inspection
+  invariant(exactHostInspection?.format === HOST_INSPECTION_FORMAT, "installed host inspection format changed")
+  invariant(exactHostInspection.status === "match", "installed exact host inspection reported drift")
+  invariant(SHA256_DIGEST_PATTERN.test(exactHostInspection.inspectionDigest), "installed host inspection digest is invalid")
+  assert.deepEqual(exactHostInspection.comparison.differences, [])
+  assert.deepEqual(exactHostInspection.fileReview, {
+    access: process.platform === "win32" ? "platform-unverified" : "owner-private",
+    bounded: true,
+    canonical: true,
+    owner: process.platform === "win32" ? "platform-unverified" : "trusted",
+    regularFile: true,
+    singleLink: true,
+    stableRead: true,
+  })
+  assert.deepEqual(exactHostInspection.privacy, {
+    activityRecordsCreated: false,
+    credentialValuesReturned: false,
+    discordContacted: false,
+    hostConfigurationChanged: false,
+    hostConfigurationRead: true,
+    hostPathReturned: false,
+    networkContacted: false,
+    possibleCredentialMaterialRead: true,
+    processStarted: false,
+    rawHostConfigurationReturned: false,
+    unrelatedHostStateReturned: false,
+  })
+  invariant(!exactHostInspectionResult.stdout.includes(hostConfigurationFile), "installed host inspection returned its selected path")
+  invariant(!exactHostInspectionResult.stdout.includes(DUMMY_TOKEN), "installed host inspection returned an ambient secret")
+  const staleHostConfiguration = structuredClone(expectedHostConfiguration.configuration)
+  staleHostConfiguration.mcpServers[firstHostActivation.launch.serverName].command = DUMMY_TOKEN
+  await writeFile(hostConfigurationFile, `${JSON.stringify(staleHostConfiguration, null, 2)}\n`)
+  const staleHostBytes = await readFile(hostConfigurationFile)
+  const staleHostInspectionResult = await run(bin, [
+    "host",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--inspect-host-file",
+    hostConfigurationFile,
+    "--json",
+  ], {
+    allowedExitCodes: [1],
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const staleHostInspection = JSON.parse(staleHostInspectionResult.stdout).inspection
+  invariant(staleHostInspection.status === "drift", "installed stale host inspection did not report drift")
+  assert.deepEqual(staleHostInspection.comparison.differences, ["command-mismatch"])
+  invariant(!staleHostInspectionResult.stdout.includes(hostConfigurationFile), "installed stale host inspection returned its selected path")
+  invariant(!staleHostInspectionResult.stdout.includes(DUMMY_TOKEN), "installed stale host inspection returned observed host content")
+  invariant((await readFile(hostConfigurationFile)).equals(staleHostBytes), "installed host inspection changed its selected file")
   const firstWorkbenchFile = join(consumer, "workbench-first.html")
   const secondWorkbenchFile = join(consumer, "workbench-second.html")
   const firstWorkbenchResult = await run(bin, [
