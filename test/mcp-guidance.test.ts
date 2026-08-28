@@ -332,6 +332,7 @@ function guidanceService(options: {
         botId: BOT_ID,
       })
     },
+    inspectApplicationActivityInstance: unexpected,
     auditApplicationSubscriptions: unexpected,
     executeBotProfileChange: unexpected,
     getCurrentBotProfile: unexpected,
@@ -3698,6 +3699,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Current-application linked-role metadata audit re-verifies pinned identity/u)
   assert.match(safety.text, /cannot select another application, prove guild role usage or user eligibility/u)
   assert.match(safety.text, /Current-application SKU audit re-verifies pinned identity/u)
+  assert.match(safety.text, /Activity-instance inspection binds one opaque ID to pinned identity/u)
   assert.match(safety.text, /Availability is not entitlement, revenue, payment, or access evidence/u)
   assert.match(safety.text, /Channel creation is additive-only/)
   assert.match(safety.text, /Channel deletion requires separate audit and change toggles/)
@@ -3785,8 +3787,9 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /No operation accepts a URL or base64 payload/)
   assert.match(safety.text, /Application emoji inventory is bound to the verified pinned current application/)
   assert.match(safety.text, /explicit global-impact acknowledgement/)
-  assert.match(safety.text, /Current application posture uses the already-required identity response/)
-  assert.match(safety.text, /owner and team profiles, URLs, raw flags, permission bitfields/)
+  assert.match(safety.text, /Application posture derives installation, default authority, intents/)
+  assert.match(safety.text, /Private or mismatched locations fail closed/)
+  assert.match(safety.text, /profiles, text, URLs, raw flags or bits/)
   assert.match(safety.text, /AutoMod inventory requires a separate exact guild allowlist/)
   assert.match(safety.text, /New rules are always disabled/)
   assert.match(safety.text, /Scheduled-event inventory requires a separate exact guild allowlist/)

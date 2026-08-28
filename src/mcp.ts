@@ -180,6 +180,7 @@ import {
 } from "./config.js"
 import {
   ADMINISTRATION_LIMITS,
+  APPLICATION_ACTIVITY_INSTANCE_LIMITS,
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   CHANNEL_CREATION_KINDS,
@@ -827,6 +828,22 @@ const canonicalPositiveSnowflakeSchema = positiveSnowflakeSchema.refine(
   "Discord snowflake must use canonical decimal form without leading zeros",
 )
 const emptyInputSchema = z.strictObject({})
+const applicationActivityInstanceInputSchema = z.strictObject({
+  channelId: positiveSnowflakeSchema.describe(
+    "Exact expected Discord guild-channel ID inside configured read scope",
+  ),
+  guildId: positiveSnowflakeSchema.describe(
+    "Exact expected Discord guild ID inside configured read scope",
+  ),
+  instanceId: z.string()
+    .min(1)
+    .max(APPLICATION_ACTIVITY_INSTANCE_LIMITS.instanceIdCharacters)
+    .regex(/^[^\s\\/#?\p{Cc}]+$/u)
+    .describe("Opaque Discord Activity instance ID supplied by the Activity client"),
+  userId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional exact user ID to test without enumerating participants"),
+})
 const applicationMonetizationPageFields = {
   after: positiveSnowflakeSchema.optional()
     .describe("Optional exact record ID passed as Discord's after cursor"),
@@ -9587,6 +9604,7 @@ export interface DiscordToolService {
   auditApplicationRoleConnectionMetadata: ConnectorService["auditApplicationRoleConnectionMetadata"]
   auditApplicationSkus: ConnectorService["auditApplicationSkus"]
   auditApplicationSubscriptions: ConnectorService["auditApplicationSubscriptions"]
+  inspectApplicationActivityInstance: ConnectorService["inspectApplicationActivityInstance"]
   getApplicationEntitlement: ConnectorService["getApplicationEntitlement"]
   auditGuildWebhooks: ConnectorService["auditGuildWebhooks"]
   captureGuildBlueprint: ConnectorService["captureGuildBlueprint"]
@@ -19580,6 +19598,31 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord application posture found ${result.findingCounts.blockers} blockers and ${result.findingCounts.warnings} warnings`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("inspect_application_activity_instance", server.registerTool(
+    "inspect_application_activity_instance",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Verify one opaque Discord Activity instance for the pinned current application and one exact expected guild channel. Scope is checked before the instance read. Returns active state, launch ID, participant count, and optional exact-user membership only after the response location matches; participant enumeration, private-channel locations, profiles, raw payloads, and unknown values are omitted and nothing is persisted.",
+      inputSchema: applicationActivityInstanceInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Inspect Discord Activity instance",
+    },
+    safeToolHandler("inspect_application_activity_instance", async (
+      input: z.infer<typeof applicationActivityInstanceInputSchema>,
+      context,
+    ) => {
+      const result = await service.inspectApplicationActivityInstance(input, {
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        result.active
+          ? `Verified active Discord Activity instance ${result.instanceId} with ${result.participantCount} participants`
+          : `Discord Activity instance ${result.instanceId} is inactive or unavailable`,
       )
     }, secrets, observability),
   ))

@@ -603,6 +603,10 @@ export class ApplicationPostureEvidenceError extends Error {
   override name = "ApplicationPostureEvidenceError"
 }
 
+export class ApplicationActivityInstanceEvidenceError extends Error {
+  override name = "ApplicationActivityInstanceEvidenceError"
+}
+
 export class ApplicationCommandAuditEvidenceError extends Error {
   override name = "ApplicationCommandAuditEvidenceError"
 }

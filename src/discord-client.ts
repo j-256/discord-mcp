@@ -1,6 +1,7 @@
 import { setTimeout as wait } from "node:timers/promises"
 
 import {
+  APPLICATION_ACTIVITY_INSTANCE_LIMITS,
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
@@ -31,6 +32,11 @@ import {
   GUILD_AFK_TIMEOUT_SECONDS,
   GUILD_SYSTEM_CHANNEL_KNOWN_FLAG_MASK,
 } from "./constants.js"
+import {
+  normalizeApplicationActivityInstanceId,
+  projectApplicationActivityInstance,
+  type DiscordApplicationActivityInstance,
+} from "./application-activity-instance.js"
 import {
   assertCompiledComponentLayout,
   type DiscordStaticComponent,
@@ -1622,6 +1628,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_application_test_entitlement",
   "delete_application_test_entitlement",
   "get_application_emoji",
+  "get_application_activity_instance",
   "get_application_entitlement",
   "get_current_user_voice_state",
   "get_guild_auto_moderation_rule",
@@ -8858,6 +8865,33 @@ export class DiscordClient {
 
   getCurrentApplication(options: RequestOptions = {}): Promise<DiscordApplication> {
     return this.#request("get_current_application", "/applications/@me", options)
+  }
+
+  async getApplicationActivityInstance(
+    applicationId: string,
+    instanceId: string,
+    options: RequestOptions = {},
+  ): Promise<DiscordApplicationActivityInstance> {
+    assertSearchSnowflake(
+      applicationId,
+      "Discord application Activity-instance application ID",
+    )
+    const normalizedInstanceId = normalizeApplicationActivityInstanceId(instanceId)
+    const response = await this.#request<unknown>(
+      "get_application_activity_instance",
+      `/applications/${applicationId}/activity-instances/${encodeURIComponent(normalizedInstanceId)}`,
+      {
+        ...options,
+        diagnosticRoute: "/applications/{application.id}/activity-instances/{instance.id}",
+        maxResponseBytes: APPLICATION_ACTIVITY_INSTANCE_LIMITS.responseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectApplicationActivityInstance(
+      response,
+      applicationId,
+      normalizedInstanceId,
+    )
   }
 
   modifyCurrentApplicationFlags(

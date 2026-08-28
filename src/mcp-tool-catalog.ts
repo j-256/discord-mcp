@@ -718,6 +718,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "avatar", "banner", "bot", "current", "profile", "username"],
     toolset: "bot-profile",
   },
+  inspect_application_activity_instance: {
+    keywords: ["activity", "application", "instance", "participant", "session", "verify"],
+    toolset: "connector",
+  },
   get_observability_status: {
     keywords: ["health", "invalid-request", "metrics", "observability", "rate-limit", "telemetry", "traces"],
     toolset: "observability",
