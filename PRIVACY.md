@@ -14,6 +14,12 @@ The offline migration planner uses shipped public manifests and the credential-f
 
 Migration reports contain public source release identities and evidence URLs, public source and target tool names, preset and recipe names, fixed placeholders, dispositions, counts, limitations, and deterministic digests. They contain no credential value, real Discord ID, local source path, username, role or channel name, message content, profile, or host-specific state. The optional mode-0600 HTML embeds the exact report but not its output path, makes no automatic request, and stores checklist and filter state only in memory. Source and Registry links navigate only when you activate them.
 
+## Host inspection evidence
+
+Host configuration inspection reads only the static JSON file the operator explicitly selects. That file may contain bot tokens or other credentials placed there by a host or operator, so the connector treats all observed bytes as private even though its own generated adapters contain references rather than token values. It returns and persists no selected host path, raw file, observed value, unrelated entry, credential material, or digest of private host bytes. The deterministic inspection digest covers only fixed classifications, safe counts, privacy and file-review evidence, limitations, and the expected adapter and activation identities.
+
+The inspector does not discover a host or home directory, resolve the connector credential, read another environment value, contact a network or Discord endpoint, start a process, edit policy or host state, create an activity or operation record, export telemetry, or retain browser state. Shared host files are projected to the connector-owned server entry and generated sensitive-input records before comparison; unrelated entries are not returned, counted, hashed, or assessed. A dedicated extension manifest is compared as a complete document because it is not a shared host configuration.
+
 ## Discord data
 
 Discord data is fetched only for an invoked operation within the exact configured scope and applicable Discord permissions. Results needed to answer the request are returned to the MCP host. The connector does not independently retain message content, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, topics, scaffold symbols, or avatars.

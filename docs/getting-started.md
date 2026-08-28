@@ -212,6 +212,15 @@ npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adap
 
 `--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify all four adapter digests against the same activation digest. The command never writes or discovers a host configuration. Merge only the generated server and input records into the documented destination and preserve unrelated entries. A file-backed credential policy causes every adapter to omit environment, input, and extension-setting secret fields because the exact policy already names the protected file.
 
+After merging the selected projection, inspect the destination directly. Replace the adapter ID and path with the host file you used; on POSIX systems make that file owner-private first:
+
+```sh
+chmod 600 /absolute/path/to/mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter vscode --inspect-host-file /absolute/path/to/mcp.json
+```
+
+Status 0 means the selected adapter's owned projection exactly matches the installed release and policy. Status 1 means drift; regenerate the same adapter, merge only its owned server and sensitive-input records, reload the host, and inspect again. The report uses fixed difference categories and never returns the selected path, observed values, raw host content, or unrelated entries. The inspector may encounter credential material already present in that explicit file, so do not point it at an untrusted document. It enforces a bounded canonical stable regular-file read, rejects symbolic and extra hard links, and verifies private ownership and mode where the platform exposes them; other platforms report those checks as unverified. It never discovers or edits a host, contacts a network or Discord endpoint, resolves the connector credential, starts a process, or creates activity state.
+
 Open the guide locally, choose the host projection, and preserve its exact command and ordered arguments. Never replace an environment or secure-input reference with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls. The adapters retain those requirements as explicit guidance when a host schema cannot encode them.
 
 The generated schema proves deterministic translation from the activation plan, not acceptance by the installed host version. Restart or reload the host, inspect its negotiated server list, and confirm that the generated host server name is available. Then use the guide's read-only verification request. If startup fails, use its structured smoke fallback before changing policy or Discord permissions.
@@ -262,6 +271,7 @@ npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
 npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter ADAPTER_ID --inspect-host-file HOST_JSON_FILE
 ```
 
 - If a bare `discord-mcp` command is not found, use the pinned `npx --yes @j-256/discord-mcp@0.1.2` prefix or install the package globally before using the bare executable.
@@ -271,7 +281,7 @@ npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html
 - If smoke fails, correct its reported layer before editing the host. Smoke exercises the same stdio server entrypoint without a model or host dependency.
 - If MCPB import fails before startup, confirm that the host supports MCPB manifest 0.3, Node.js 22 or newer, local file selection, and sensitive string inputs. Do not copy the token into the selected config.
 - If MCPB startup reports that an environment-backed credential is required, keep a file-backed policy unchanged and use the generated host adapter. Do not convert the secret file into static JSON merely to satisfy the bundle.
-- If a host says the connection closed during initialization, compare its command and arguments field by field with the private activation guide. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/cli.js serve --config FILE`.
+- If a host says the connection closed during initialization, run exact host-file inspection first. Fix only its named projection, reload the host, and require status 0 before chasing runtime causes. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/cli.js serve --config FILE`.
 - If smoke passes but the host still fails, verify that the host forwards the referenced secret, uses stdio rather than a shell prompt or HTTP transport, allows the startup timeout, and was restarted after configuration changed.
 - If the server loads but an expected tool is absent, inspect `config show`, the selected toolsets, and `tools.surface`. Tool discovery can narrow the catalog but cannot grant a tool omitted by policy.
 

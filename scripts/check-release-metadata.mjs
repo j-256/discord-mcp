@@ -142,9 +142,11 @@ async function checkNeutrality() {
     "site/src/content/docs/start/choose.mdx",
     "site/test/neutrality.test.mjs",
     "src/host-adapters.ts",
+    "src/host-inspection.ts",
     "test/cli.test.ts",
     "test/host-activation-html.test.ts",
     "test/host-adapters.test.ts",
+    "test/host-inspection.test.ts",
   ])
   const { stdout } = await run(
     "git",
@@ -589,6 +591,7 @@ async function checkDocumentation(packageJson) {
     "config validate ./discord-mcp.json",
     "doctor --config ./discord-mcp.json --online",
     "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
+    "--inspect-host-file",
     "incident-response",
     "recipe list",
     "recipe plan guild-builder",
@@ -663,6 +666,7 @@ async function checkDocumentation(packageJson) {
     "## Why each lead is material",
     "## Soundboard playback head-to-head",
     "## Bot-installation drift head-to-head",
+    "## Host configuration drift head-to-head",
     "## Migration planning head-to-head",
     "## Audited releases and source limits",
     "## Registry matches outside the scored local comparison",
@@ -751,10 +755,14 @@ async function checkDocumentation(packageJson) {
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
   invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
+  invariant(gettingStarted.includes("--inspect-host-file"), "getting-started guide lacks exact host drift inspection")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
   invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
   invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
+  invariant(reference.includes("### Host configuration drift inspection"), "complete reference lacks host drift inspection")
+  invariant(security.includes("## Host configuration inspection"), "security policy lacks host inspection requirements")
   invariant(limitations.includes("Generated adapter"), "product boundaries lack adapter-specific compatibility")
+  invariant(limitations.includes("`--inspect-host-file FILE`"), "product boundaries lack host inspection limits")
   invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
   invariant(comparison.includes("Discord MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")

@@ -19,6 +19,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
 | Use a compatible one-click MCPB host with an environment-backed token policy | Designed fit | Import one deterministic cross-platform bundle, select the complete strict policy, and enter only the token through the host's sensitive prompt |
 | Use another local MCP host or a file-backed token policy | Designed fit | `host` emits a pinned model-neutral launch contract, deterministic host adapters, and an optional private interactive activation guide |
+| Verify that one static generated host projection has not drifted | Designed fit | `host --adapter ID --inspect-host-file FILE` compares the explicitly selected JSON destination with the exact installed-release adapter and returns only fixed path- and value-free evidence |
 | Plan a switch from a scored local Discord MCP release | Designed fit | `migrate` accounts for every audited source tool and maps outcomes into target presets, recipes, tools, and trust-model changes without reading or changing either deployment |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
@@ -56,11 +57,14 @@ MCPB compatibility is a host capability, not a universal MCP requirement. The pr
 
 `--adapter ID` appends one exact adapter to human terminal output. `--json` always emits the complete adapter catalog so automation sees one stable shape. Neither mode writes or merges a destination file. File-backed credential policies omit host environment, input, and extension-setting secret fields because the protected file path is already part of the selected private policy.
 
+`--inspect-host-file FILE` requires an adapter and reads only that explicit static JSON file. Shared-host projections compare the connector-owned server entry and generated sensitive inputs while ignoring every unrelated entry; the dedicated extension projection compares its complete manifest. The inspector may encounter credential material already stored by the host, but it emits only fixed differences, safe counts, expected adapter and activation digests, and its own content-free digest. It returns no observed value, raw file, selected path, unrelated state, or hash of private host bytes, and it never edits the file. POSIX ownership and mode checks are enforced; platforms without portable metadata report those checks as unverified. A match does not prove which file the host loaded, whether it retained the file, secret availability, approval or elicitation behavior, process startup, MCP negotiation, or Discord access. Use `smoke` for the executable path and a real host read for end-to-end confirmation.
+
 | Host capability | Requirement | Behavior when absent or incomplete |
 | --- | --- | --- |
 | MCPB manifest 0.3, file selection, and sensitive string input | Required only for one-click import | Use the generated host adapter without changing the selected policy or placing a token in static JSON |
 | Local process execution over stdio | Required | The connector exposes no Streamable HTTP or hosted transport |
 | Node.js 22 or newer and the exact generated command and arguments | Required | Use `smoke --config FILE` to separate package or stdio failure from host translation failure |
+| Direct access to the generated static JSON destination | Optional for exact drift inspection | Compare manually when the host stores an opaque database, generated runtime state, or another format; the connector never discovers or extracts it |
 | Forwarding the named environment secret or preserving access to a referenced private credential file | Required | Startup fails without falling back to another token or legacy policy source |
 | MCP initialization, `tools/list`, and `tools/call` | Required | The operational server cannot negotiate or expose its typed tools |
 | A host that can accept the complete tool catalog | Required for `tools.surface: full` | Use the progressive surface only when the host reliably refreshes tools after `notifications/tools/list_changed` |

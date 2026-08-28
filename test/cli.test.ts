@@ -45,7 +45,15 @@ import type { HostActivationPlan } from "../src/host-activation.js"
 import {
   HOST_ADAPTER_CATALOG_FORMAT,
   HOST_ADAPTER_IDS,
+  createHostAdapterCatalog,
+  findHostAdapter,
+  type HostAdapterId,
 } from "../src/host-adapters.js"
+import {
+  HOST_INSPECTION_FORMAT,
+  HOST_INSPECTION_SCHEMA_VERSION,
+  type HostInspectionReport,
+} from "../src/host-inspection.js"
 import {
   MIGRATION_HTML_FORMAT,
   type DiscordMigrationHtmlExportReport,
@@ -555,6 +563,58 @@ function configWriteReport(): ConfigWriteReport {
   }
 }
 
+function hostInspectionReport(
+  plan: HostActivationPlan,
+  adapterId: HostAdapterId,
+  status: HostInspectionReport["status"] = "match",
+): HostInspectionReport {
+  const adapter = findHostAdapter(createHostAdapterCatalog(plan), adapterId)
+  const differences = status === "drift" ? ["command-mismatch" as const] : []
+  return {
+    adapter: {
+      activationDigest: adapter.activationDigest,
+      adapterDigest: adapter.adapterDigest,
+      hostServerName: adapter.hostServerName,
+      id: adapter.id,
+      title: adapter.title,
+    },
+    comparison: {
+      differences,
+      expectedSensitiveInputCount: adapterId === "vscode" ? 1 : 0,
+      matchedSensitiveInputCount: status === "match" && adapterId === "vscode" ? 1 : 0,
+      serverEntry: status === "match" ? "exact" : "drifted",
+      unrelatedState: adapterId === "gemini-extension" ? "not-applicable" : "ignored",
+    },
+    fileReview: {
+      access: "owner-private",
+      bounded: true,
+      canonical: true,
+      owner: "trusted",
+      regularFile: true,
+      singleLink: true,
+      stableRead: true,
+    },
+    format: HOST_INSPECTION_FORMAT,
+    inspectionDigest: `sha256:${"a".repeat(64)}`,
+    limitations: ["Static file inspection does not prove MCP startup."],
+    privacy: {
+      activityRecordsCreated: false,
+      credentialValuesReturned: false,
+      discordContacted: false,
+      hostConfigurationChanged: false,
+      hostConfigurationRead: true,
+      hostPathReturned: false,
+      networkContacted: false,
+      possibleCredentialMaterialRead: true,
+      processStarted: false,
+      rawHostConfigurationReturned: false,
+      unrelatedHostStateReturned: false,
+    },
+    schemaVersion: HOST_INSPECTION_SCHEMA_VERSION,
+    status,
+  }
+}
+
 function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies {
   const profile = connectorProfile()
   return {
@@ -602,6 +662,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     },
     async initializeConfig() {
       return configWriteReport()
+    },
+    inspectHostFile(plan, adapterId) {
+      return hostInspectionReport(plan, adapterId)
     },
     async listCoordination() {
       return { claims: [], schemaVersion: 1, status: "ok" }
@@ -938,6 +1001,8 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "/usr/local/bin/discord-mcp",
     "--adapter",
     "vscode",
+    "--inspect-host-file",
+    "./mcp.json",
     "--html",
     "./host-activation.html",
     "--json",
@@ -946,6 +1011,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "host",
     configFile: "/configuration/discord.json",
     htmlFile: "./host-activation.html",
+    inspectHostFile: "./mcp.json",
     json: true,
     launcherCommand: "/usr/local/bin/discord-mcp",
     serverName: "team-discord",
@@ -1238,6 +1304,16 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(
     () => parseCliArguments(["host", "--profile", "support-bot", "--adapter", "unknown"]),
     /must be one of mcp-json, cursor, vscode, gemini-extension/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "--profile",
+      "support-bot",
+      "--inspect-host-file",
+      "./mcp.json",
+    ]),
+    /--inspect-host-file requires --adapter/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2322,6 +2398,73 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
   assert.match(stdout.value(), /private mode-0600 standalone HTML/)
   assert.match(stdout.value(), /must not be shared or committed/)
   assert.match(stdout.value(), /No credential value was read/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI reports exact host inspection without returning the selected path or secret", async () => {
+  const stdout = outputStream()
+  const hostFile = "/private/host-config-containing-secret.json"
+  let receivedFile: string | undefined
+  const exitCode = await runCli({
+    args: [
+      "host",
+      "--config",
+      CONFIG_FILE,
+      "--adapter",
+      "vscode",
+      "--inspect-host-file",
+      hostFile,
+      "--json",
+    ],
+    dependencies: dependencies({
+      inspectHostFile(plan, adapterId, file) {
+        receivedFile = file
+        return hostInspectionReport(plan, adapterId)
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.equal(receivedFile, hostFile)
+  const report = JSON.parse(stdout.value())
+  assert.equal(report.inspection.format, HOST_INSPECTION_FORMAT)
+  assert.equal(report.inspection.status, "match")
+  assert.deepEqual(report.inspection.comparison.differences, [])
+  assert.equal(report.inspection.privacy.hostPathReturned, false)
+  assert.equal(report.inspection.privacy.credentialValuesReturned, false)
+  assert.equal(stdout.value().includes(hostFile), false)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI renders fixed host drift evidence and returns warning status", async () => {
+  const stdout = outputStream()
+  const exitCode = await runCli({
+    args: [
+      "host",
+      "--profile",
+      "support-bot",
+      "--adapter",
+      "cursor",
+      "--inspect-host-file",
+      "/private/stale.json",
+    ],
+    dependencies: dependencies({
+      inspectHostFile(plan, adapterId) {
+        return hostInspectionReport(plan, adapterId, "drift")
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 1)
+  assert.match(stdout.value(), /Discord MCP host inspection: drift/)
+  assert.match(stdout.value(), /- command-mismatch/)
+  assert.match(stdout.value(), /merge only its owned projection/)
+  assert.match(stdout.value(), /then run smoke/)
+  assert.doesNotMatch(stdout.value(), /\/private\/stale\.json/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
@@ -3584,9 +3727,12 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(hostHelpOutput.value(), /host \(--config FILE \| --profile NAME\)/)
   assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(hostHelpOutput.value(), /--adapter ID/)
+  assert.match(hostHelpOutput.value(), /--inspect-host-file FILE/)
   assert.match(hostHelpOutput.value(), /mcp-json, cursor, vscode, gemini-extension/)
   assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
-  assert.match(hostHelpOutput.value(), /reads no credential value/)
+  assert.match(hostHelpOutput.value(), /private owner and mode checks where the platform exposes them/)
+  assert.match(hostHelpOutput.value(), /never returns it/)
+  assert.match(hostHelpOutput.value(), /never edits the file/)
   assert.match(hostHelpOutput.value(), /discovers no host/)
   assert.match(migrateHelpOutput.value(), /migrate <action>/)
   assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
