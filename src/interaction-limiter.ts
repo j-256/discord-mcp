@@ -2,6 +2,8 @@ import { InteractionRateLimitError } from "./errors.js"
 
 const ROLLING_WINDOW_MS = 60_000
 
+export type InteractionLimiterLane = "durable" | "transient"
+
 export interface InteractionLimiterOptions {
   clock?: () => number
   maxWritesPerMinute: number
@@ -27,8 +29,12 @@ export class InteractionLimiter {
     this.#minWriteIntervalMs = options.minWriteIntervalMs
   }
 
-  reserve(channelId: string): void {
+  reserve(channelId: string, lane: InteractionLimiterLane = "durable"): void {
+    if (lane !== "durable" && lane !== "transient") {
+      throw new RangeError("Interaction limiter lane is invalid")
+    }
     const now = this.#clock()
+    const channelKey = `${lane}:${channelId}`
     const cutoff = now - ROLLING_WINDOW_MS
     this.#writeTimestamps = this.#writeTimestamps.filter((timestamp) => timestamp > cutoff)
     for (const [id, timestamp] of this.#lastWriteByChannel) {
@@ -42,7 +48,7 @@ export class InteractionLimiter {
       && oldest !== undefined
       ? oldest + ROLLING_WINDOW_MS - now
       : 0
-    const channelTimestamp = this.#lastWriteByChannel.get(channelId)
+    const channelTimestamp = this.#lastWriteByChannel.get(channelKey)
     const channelRetryMs = channelTimestamp === undefined
       ? 0
       : channelTimestamp + this.#minWriteIntervalMs - now
@@ -52,6 +58,6 @@ export class InteractionLimiter {
     }
 
     this.#writeTimestamps.push(now)
-    this.#lastWriteByChannel.set(channelId, now)
+    this.#lastWriteByChannel.set(channelKey, now)
   }
 }

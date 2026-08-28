@@ -1303,6 +1303,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["create", "message", "reply", "send", "write"],
     toolset: "interactions",
   },
+  signal_command_processing: {
+    keywords: ["command", "indicator", "processing", "response", "signal", "typing", "working"],
+    toolset: "interactions",
+  },
   send_webhook_message: {
     keywords: ["credential", "incoming", "message", "send", "webhook", "write"],
     toolset: "webhooks",

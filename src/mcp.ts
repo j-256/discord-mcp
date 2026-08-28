@@ -1428,6 +1428,14 @@ const sendMessageInputSchema = z.strictObject({
     path: ["notifyReplyAuthor"],
   },
 )
+const signalCommandProcessingInputSchema = z.strictObject({
+  channelId: positiveSnowflakeSchema.describe(
+    "Exact configured Discord channel or active thread ID",
+  ),
+  sourceMessageId: positiveSnowflakeSchema.describe(
+    "Exact recent ordinary-user message ID that explicitly mentions the verified bot",
+  ),
+})
 const editOwnMessageInputSchema = z.strictObject({
   channelId: snowflakeSchema,
   content: messageContentSchema,
@@ -9853,6 +9861,7 @@ export interface DiscordToolService {
   searchMessages: ConnectorService["searchMessages"]
   searchGuildMembers: ConnectorService["searchGuildMembers"]
   sendMessage: ConnectorService["sendMessage"]
+  signalCommandProcessing: ConnectorService["signalCommandProcessing"]
   sendWebhookMessage: ConnectorService["sendWebhookMessage"]
   editWebhookMessage: ConnectorService["editWebhookMessage"]
   verifyComponentMessage: ConnectorService["verifyComponentMessage"]
@@ -22013,6 +22022,31 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord send resolved to message ${result.messageId} in channel ${result.channelId}${replay}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("signal_command_processing", server.registerTool(
+    "signal_command_processing",
+    {
+      annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
+      description: "Show Discord's transient 10-second typing indicator only while processing one exact ordinary-user regular or reply message no more than two minutes old that explicitly mentions the verified bot. Requires exact interaction scope, a supported text channel or active thread, complete read and send permission evidence, host write approval, and shared anti-spam controls. Sends no message and persists no content or profile data.",
+      inputSchema: signalCommandProcessingInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Signal Discord command processing",
+    },
+    safeToolHandler("signal_command_processing", async (
+      input: z.infer<typeof signalCommandProcessingInputSchema>,
+      context,
+    ) => {
+      const result = await service.signalCommandProcessing(
+        input,
+        { signal: context.mcpReq.signal },
+      )
+      const replay = result.localReplay ? " from the local source ledger" : ""
+      return toolResult(
+        result,
+        `Discord command-processing signal completed for source message ${result.sourceMessageId} in channel ${result.channelId}${replay}`,
       )
     }, secrets, observability),
   ))

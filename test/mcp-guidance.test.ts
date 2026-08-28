@@ -3058,6 +3058,7 @@ function guidanceService(options: {
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
     sendMessage: unexpected,
+    signalCommandProcessing: unexpected,
     sendWebhookMessage: unexpected,
     editWebhookMessage: unexpected,
   }

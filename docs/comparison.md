@@ -197,8 +197,33 @@ The Registry matrix remains release-exact, but idea discovery also needs public 
 | [Soyouse](https://github.com/Soyouse/discord-mcp) | Multi-bot session isolation, an invalid-request monitor, raw REST pass-through, a web client, and a persistent history relay | Keep the multi-bot and shared-rate-safety lessons; reject raw endpoint authority and mandatory history persistence in favor of explicit bounded contracts |
 | [SaseQ](https://github.com/SaseQ/discord-mcp) | JDA implementation with stdio and HTTP modes, container installation, health checks, and a broad conventional tool surface | Retain transport and health-check ideas while preserving deterministic native package and MCPB installation that does not require Docker |
 | [goul4rt](https://github.com/goul4rt/mcp-discord) | Standalone or embedded discord.js operation, optional Gateway behavior, and broad monitoring and administration coverage | Do not add embeddability unless it preserves one policy source, fixed-origin REST, privacy projections, and reviewed writes |
+| [MADPANDA3D](https://github.com/MADPANDA3D/DISCORD-MCP/tree/v1.1.1) | Broad policy-wrapped administration with a raw typing-indicator action, write toggle, channel allowlist, caller confirmation, audit logging, and a non-retry test | Adopt the useful processing-feedback outcome while binding it to fresh user intent, pinned identity, complete permission evidence, a dedicated MCP contract, shared anti-spam controls, and content-free lifecycle evidence |
 | [rayenking](https://github.com/rayenking/discord-mcp) | A broad bot-token surface with full message payloads and caller-URL attachment downloads to a shared temporary directory | Retain the explicit attachment-consumption outcome while rejecting caller-supplied delivery capabilities, unbounded buffering, caller-selected paths, and local-file persistence |
 | [LawyerCord](https://github.com/SenorLawyer/LawyerCord) | A Discord-client bridge that returns downloaded attachments as native MCP image, audio, or resource-link blocks | Adopt the useful native-result idea while adding bot identity and exact policy, signed-delivery proof, protocol-budgeted streaming, signature verification, generic embedded fallback, and disk-free transient custody |
+
+### Command-bound processing-feedback head-to-head
+
+MADPANDA3D supplied the strongest direct endpoint idea in its v1.1.1 [typed operation registry](https://github.com/MADPANDA3D/DISCORD-MCP/blob/v1.1.1/src/madpanda_discord_mcp/discord_admin_api.py), which exposes `trigger_typing` through its [generic confirmed write tool](https://github.com/MADPANDA3D/DISCORD-MCP/blob/v1.1.1/src/madpanda_discord_mcp/server.py) and proves that writes are not retried in its [REST tests](https://github.com/MADPANDA3D/DISCORD-MCP/blob/v1.1.1/tests/test_discord_admin_api.py). The focused rubric follows Discord's [typing-indicator contract](https://docs.discord.com/developers/resources/channel#trigger-typing-indicator): bots generally should not call it, except to acknowledge a command whose processing is expected to take several seconds.
+
+| Command-processing feedback outcome | Discord MCP | MADPANDA3D 1.1.1 |
+| --- | --- | --- |
+| Dedicated operator intent limited to expected multi-second command processing | **Lead** | Partial |
+| One exact target channel and initiating source message | **Lead** | Not demonstrated |
+| Freshly pinned application and bot identity plus exact local interaction scope | **Lead** | Partial |
+| Ordinary non-bot, non-system, non-webhook regular or reply source | **Lead** | Not demonstrated |
+| Timestamp and snowflake creation consistency inside a fixed fresh-source window | **Lead** | Not demonstrated |
+| Verified bot direction in both parsed mentions and literal message content | **Lead** | Not demonstrated |
+| Supported active channel or thread state with exact parent and private-thread membership evidence | **Lead** | Not demonstrated |
+| Complete bounded role and overwrite inventory with effective read and send permission proof | **Lead** | Not demonstrated |
+| Dedicated strict MCP schema and truthful non-idempotent write annotation | **Lead** | Partial |
+| Source-bound concurrent and repeat-call coalescing | **Lead** | Not demonstrated |
+| Shared rolling anti-spam budget without delaying the durable response cooldown | **Lead** | Not demonstrated |
+| Pending and terminal content-free activity with sanitized failures | **Lead** | Partial |
+| One bodyless non-retried POST with exact 204-only success | **Lead** | Partial |
+| Minimal content-free result with explicit local replay and ten-second expiry semantics | **Lead** | Not demonstrated |
+| Explicit no-readback and restart-reissue limitation | **Lead** | Not demonstrated |
+
+Discord MCP's [command-bound signal](reference.md#safe-message-interactions) turns the raw endpoint into a narrow acknowledgment of one proven user intent. It never acts as arbitrary presence, a progress loop, completion evidence, or a remote wait primitive. One process coalesces the exact fresh source; a restart may repeat the transient signal, which is why the MCP contract does not claim idempotence. The implementation preserves MADPANDA3D's useful non-retry behavior while accepting only Discord's exact empty success and keeping source content, mentions, profiles, permission evidence, and response details out of results and durable state.
 
 ### Exact attachment-consumption head-to-head
 
