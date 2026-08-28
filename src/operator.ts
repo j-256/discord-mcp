@@ -72,6 +72,7 @@ import {
   type DiscordToolService,
 } from "./mcp.js"
 import {
+  createMcpToolAccessManifest,
   selectedCanonicalMcpToolNames,
   selectedMcpToolsets,
 } from "./mcp-tool-catalog.js"
@@ -95,7 +96,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 33
+export const OPERATOR_REPORT_SCHEMA_VERSION = 34
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -248,6 +249,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   stageInstanceChangePolicy: "stage-instance-change-policy",
   stageStartNotificationPolicy: "stage-start-notification-policy",
   token: "token",
+  toolAccessContract: "tool-access-contract",
   toolSurface: "tool-surface",
   threadAuditPolicy: "thread-audit-policy",
   threadChangePolicy: "thread-change-policy",
@@ -1442,6 +1444,15 @@ export async function diagnoseConnector(
       DOCTOR_CHECK_IDS.toolSurface,
       "pass",
       `MCP tool surface is ${config.mcpToolSurface} with ${config.mcpToolsets.size} of ${MCP_TOOLSET_NAMES.length} risk-separated toolsets and ${selectedCanonicalMcpToolNames(config.mcpToolsets).length} canonical tools`,
+    ))
+    const toolAccessManifest = createMcpToolAccessManifest(config.mcpToolsets)
+    const toolAccessStages = Object.entries(toolAccessManifest.stageCounts)
+      .map(([stage, count]) => `${stage}=${count}`)
+      .join(", ")
+    checks.push(check(
+      DOCTOR_CHECK_IDS.toolAccessContract,
+      "pass",
+      `Machine-readable access lifecycles cover local discovery plus every selected canonical tool (${toolAccessStages}); classifications grant no authority and target readiness remains operation-specific`,
     ))
     checks.push(check(
       DOCTOR_CHECK_IDS.readResponseBudget,

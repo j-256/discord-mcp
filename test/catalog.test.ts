@@ -44,7 +44,10 @@ import {
   isPlanReviewToolName,
 } from "../src/mcp-plan-review-app.js"
 import { DISCORD_MCP_RECEIPT_PREFIX } from "../src/mcp-output.js"
-import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
+import {
+  createMcpToolAccessManifest,
+  selectedCanonicalMcpToolNames,
+} from "../src/mcp-tool-catalog.js"
 import { stableString } from "../src/normalize.js"
 import {
   DISCORD_REST_OPERATIONS,
@@ -232,6 +235,9 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
 test("catalog serves local guidance while live resources remain isolated", async () => {
   await withCatalogClient(async (client) => {
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const toolAccess = await client.readResource({
+      uri: MCP_RESOURCE_URIS.toolAccess,
+    })
     const planReviewApp = await client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI })
     const policy = await client.readResource({ uri: MCP_RESOURCE_URIS.policy })
     const prompt = await client.getPrompt({
@@ -257,6 +263,16 @@ test("catalog serves local guidance while live resources remain isolated", async
 
     assert.equal(safety.contents.length, 1)
     assert.match("text" in safety.contents[0]! ? safety.contents[0].text : "", /review-first workflows/)
+    assert.equal(toolAccess.contents.length, 1)
+    const toolAccessContent = toolAccess.contents[0]
+    assert.ok(toolAccessContent && "text" in toolAccessContent)
+    if (!toolAccessContent || !("text" in toolAccessContent)) {
+      throw new Error("Expected tool access resource text")
+    }
+    assert.deepEqual(
+      (JSON.parse(toolAccessContent.text) as Record<string, unknown>).data,
+      createMcpToolAccessManifest(),
+    )
     assert.deepEqual(planReviewApp.contents, [{
       _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
       mimeType: MCP_PLAN_REVIEW_APP_MIME_TYPE,
@@ -294,6 +310,7 @@ test("catalog serves local guidance while live resources remain isolated", async
 test("catalog evidence digest binds the normalized advertised contract and safety response", async () => {
   let expectedContractDigest = ""
   let expectedSafetyResourceDigest = ""
+  let expectedToolAccessResourceDigest = ""
   await withCatalogClient(async (client) => {
     const [tools, prompts, resources, templates] = await Promise.all([
       client.listTools(),
@@ -302,6 +319,9 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       client.listResourceTemplates(),
     ])
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const toolAccessResource = await client.readResource({
+      uri: MCP_RESOURCE_URIS.toolAccess,
+    })
     const planReviewAppResource = await client.readResource({
       uri: MCP_PLAN_REVIEW_APP_URI,
     })
@@ -322,14 +342,17 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       planReviewAppResource,
       safetyResource: safety,
       serverCapabilities: client.getServerCapabilities(),
+      toolAccessResource,
       tools: sortedByIdentity(tools.tools, (tool) => tool.name),
     })
     expectedSafetyResourceDigest = evidenceDigest(safety)
+    expectedToolAccessResourceDigest = evidenceDigest(toolAccessResource)
   })
 
   const report = await checkDiscordCatalog()
   assert.equal(report.contractDigest, expectedContractDigest)
   assert.equal(report.safetyResourceDigest, expectedSafetyResourceDigest)
+  assert.equal(report.toolAccessResourceDigest, expectedToolAccessResourceDigest)
 })
 
 test("catalog self-check ignores hostile ambient credentials and unrelated settings", async () => {
@@ -398,7 +421,17 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
     assert.deepEqual(report.toolsetNames, [...MCP_TOOLSET_NAMES].sort())
     assert.match(report.contractDigest, SHA256_DIGEST_PATTERN)
     assert.match(report.safetyResourceDigest, SHA256_DIGEST_PATTERN)
+    assert.match(report.toolAccessResourceDigest, SHA256_DIGEST_PATTERN)
     assert.notEqual(report.contractDigest, report.safetyResourceDigest)
+    assert.notEqual(report.contractDigest, report.toolAccessResourceDigest)
+    assert.deepEqual(
+      report.accessStageCounts,
+      createMcpToolAccessManifest().stageCounts,
+    )
+    assert.equal(
+      Object.values(report.accessStageCounts).reduce((total, count) => total + count, 0),
+      report.toolCount,
+    )
     assert.deepEqual(
       report.riskClassCounts,
       Object.fromEntries(

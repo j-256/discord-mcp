@@ -17,7 +17,9 @@ import {
 } from "./exclusive-private-file.js"
 import {
   MCP_TOOL_CATALOG,
+  mcpToolAccessContract,
   type CanonicalMcpToolName,
+  type McpToolAccessContract,
 } from "./mcp-tool-catalog.js"
 import {
   MCP_TOOL_RISK_CLASSES,
@@ -52,6 +54,7 @@ export interface DiscordCatalogHtmlExportReport {
 }
 
 interface ToolMetadata {
+  access: McpToolAccessContract
   risk: string
   toolset: string
   workflow: string
@@ -86,8 +89,9 @@ function toolMetadata(name: string): ToolMetadata {
     throw new Error(`Catalog HTML tool ${name} lacks a risk classification`)
   }
   const risk = MCP_TOOL_RISK_CLASSES[name as McpToolName]
+  const access = mcpToolAccessContract(name as McpToolName)
   if (name === MCP_DISCOVERY_TOOL_NAME) {
-    return { risk, toolset: "connector", workflow: "standalone" }
+    return { access, risk, toolset: "connector", workflow: "standalone" }
   }
   if (!Object.hasOwn(MCP_TOOL_CATALOG, name)) {
     throw new Error(`Catalog HTML tool ${name} lacks discovery metadata`)
@@ -97,6 +101,7 @@ function toolMetadata(name: string): ToolMetadata {
     workflow?: string
   }
   return {
+    access,
     risk,
     toolset: metadata.toolset,
     workflow: metadata.workflow || "standalone",
@@ -129,6 +134,9 @@ function toolMarkup(
     title,
     description,
     metadata.risk,
+    metadata.access.approval,
+    metadata.access.authorizationEvidence,
+    metadata.access.stage,
     metadata.toolset,
     metadata.workflow,
   ].join(" ").toLocaleLowerCase()
@@ -137,15 +145,16 @@ function toolMarkup(
   const appBadge = ui?.resourceUri === MCP_PLAN_REVIEW_APP_URI
     ? '<span class="badge app-badge">Plan review app</span>'
     : ""
-  return `<article class="tool-card" data-tool data-search="${escapeHtml(search)}" data-risk="${escapeHtml(metadata.risk)}" data-toolset="${escapeHtml(metadata.toolset)}" data-workflow="${escapeHtml(metadata.workflow)}">
+  return `<article class="tool-card" data-tool data-search="${escapeHtml(search)}" data-access="${escapeHtml(metadata.access.stage)}" data-risk="${escapeHtml(metadata.risk)}" data-toolset="${escapeHtml(metadata.toolset)}" data-workflow="${escapeHtml(metadata.workflow)}">
   <details id="tool-${escapeHtml(tool.name)}">
     <summary>
       <span class="summary-copy"><strong>${escapeHtml(title)}</strong><code>${escapeHtml(tool.name)}</code></span>
-      <span class="badges">${appBadge}<span class="badge risk-${escapeHtml(metadata.risk)}">${escapeHtml(displayName(metadata.risk))}</span><span class="badge">${escapeHtml(metadata.toolset)}</span></span>
+      <span class="badges">${appBadge}<span class="badge risk-${escapeHtml(metadata.risk)}">${escapeHtml(displayName(metadata.risk))}</span><span class="badge">${escapeHtml(metadata.access.stage)}</span><span class="badge">${escapeHtml(metadata.toolset)}</span></span>
     </summary>
     <div class="tool-body">
       <p>${escapeHtml(description)}</p>
-      <div class="tool-meta"><span><b>Toolset</b> ${escapeHtml(metadata.toolset)}</span><span><b>Workflow</b> ${escapeHtml(metadata.workflow)}</span><a href="#tool-${escapeHtml(tool.name)}" aria-label="Link to ${escapeHtml(tool.name)}">Permalink</a></div>
+      <div class="tool-meta"><span><b>Toolset</b> ${escapeHtml(metadata.toolset)}</span><span><b>Workflow</b> ${escapeHtml(metadata.workflow)}</span><span><b>Access</b> ${escapeHtml(metadata.access.stage)}</span><span><b>Readiness</b> ${escapeHtml(metadata.access.readiness)}</span><a href="#tool-${escapeHtml(tool.name)}" aria-label="Link to ${escapeHtml(tool.name)}">Permalink</a></div>
+      <details class="contract-card"><summary><strong>Access lifecycle</strong><code>${escapeHtml(metadata.access.authorizationEvidence)}</code></summary><div><p>This static contract classifies authorization but does not prove access to a Discord target.</p><pre tabindex="0"><code>${jsonText(metadata.access)}</code></pre></div></details>
       <dl class="annotations" aria-label="MCP tool annotations">${annotationMarkup(annotations)}</dl>
       <div class="schema-grid">
         <section><h4>Input schema</h4><pre tabindex="0"><code>${jsonText(tool.inputSchema)}</code></pre></section>
@@ -203,6 +212,16 @@ function riskBars(snapshot: DiscordCatalogSnapshot): string {
   }).join("")
 }
 
+function accessBars(snapshot: DiscordCatalogSnapshot): string {
+  const total = snapshot.report.toolCount
+  return Object.entries(snapshot.report.accessStageCounts).sort(([left], [right]) => (
+    left.localeCompare(right)
+  )).map(([stage, count]) => {
+    const share = total === 0 ? 0 : (count / total) * 100
+    return `<div class="risk-row"><span>${escapeHtml(displayName(stage))}</span><div class="risk-track"><span style="--share:${share.toFixed(4)}%"></span></div><strong>${count}</strong></div>`
+  }).join("")
+}
+
 export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): string {
   const tools = snapshot.tools.map((tool) => ({
     metadata: toolMetadata(tool.name),
@@ -211,6 +230,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   const toolsets = tools.map(({ metadata }) => metadata.toolset)
   const risks = tools.map(({ metadata }) => metadata.risk)
   const workflows = tools.map(({ metadata }) => metadata.workflow)
+  const accessStages = tools.map(({ metadata }) => metadata.access.stage)
   const report = snapshot.report
   const toolsMarkup = tools.map(({ metadata, tool }) => toolMarkup(tool, metadata)).join("\n")
   const promptsMarkup = snapshot.prompts.map(promptMarkup).join("\n")
@@ -229,7 +249,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   <style>
     :root{color-scheme:light dark;--bg:#f4f6fb;--panel:#fff;--panel-2:#f8f9fd;--text:#162033;--muted:#5d687b;--line:#d8deea;--brand:#5865f2;--brand-2:#3643c8;--focus:#ffb020;--local:#6c5ce7;--read:#147d64;--interaction:#b85c00;--admin:#a13b78;--destructive:#bd2838;--shadow:0 18px 50px rgba(29,40,76,.09)}
     @media(prefers-color-scheme:dark){:root{--bg:#0d111b;--panel:#151b28;--panel-2:#101622;--text:#eef2ff;--muted:#aab4ca;--line:#30394c;--brand:#8993ff;--brand-2:#b1b7ff;--focus:#ffd166;--local:#a99cff;--read:#63d1b1;--interaction:#ffb56b;--admin:#ee8fc5;--destructive:#ff7d8a;--shadow:0 18px 50px rgba(0,0,0,.28)}}
-    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}.skip-link{position:fixed;left:1rem;top:-5rem;z-index:20;background:var(--panel);color:var(--text);padding:.7rem 1rem;border:2px solid var(--focus);border-radius:.6rem}.skip-link:focus{top:1rem}.shell{width:min(1180px,calc(100% - 2rem));margin:0 auto}.hero{padding:4.5rem 0 2.25rem}.eyebrow{margin:0 0 .5rem;color:var(--brand-2);font-size:.78rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.hero h1{max-width:850px;margin:0;font-size:clamp(2.3rem,7vw,5.4rem);line-height:.95;letter-spacing:-.055em}.lede{max-width:760px;margin:1.5rem 0 0;color:var(--muted);font-size:clamp(1rem,2vw,1.25rem)}.proof-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.75rem;margin:2rem 0}.proof{min-width:0;padding:1rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.proof strong{display:block;font-size:1.45rem}.proof span{color:var(--muted);font-size:.82rem}.guarantees{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem;margin:1rem 0 3rem}.panel{min-width:0;padding:1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.panel h2,.panel h3{margin-top:0}.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin:0;padding:0;list-style:none}.checks li{padding:.75rem;border-radius:.75rem;background:var(--panel-2)}.checks li::before{content:"✓";margin-right:.55rem;color:var(--read);font-weight:900}.digest{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.75rem;color:var(--muted)}.risk-row{display:grid;grid-template-columns:minmax(8rem,1fr) 2fr 2rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.78rem}.risk-track{height:.55rem;overflow:hidden;border-radius:999px;background:var(--line)}.risk-track span{display:block;width:var(--share);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--brand),var(--brand-2))}.sticky-nav{position:sticky;top:0;z-index:10;border-block:1px solid var(--line);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px)}.nav-inner{display:flex;align-items:center;gap:1rem;overflow:auto;padding:.65rem 0}.nav-inner a{color:var(--muted);font-weight:700;text-decoration:none;white-space:nowrap}.nav-inner a:hover{color:var(--text)}main section{scroll-margin-top:5rem}.section-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin:3.5rem 0 1rem}.section-head h2{margin:0;font-size:clamp(1.7rem,4vw,2.6rem);letter-spacing:-.035em}.section-head p{max-width:570px;margin:0;color:var(--muted)}.controls{display:grid;grid-template-columns:minmax(15rem,2fr) repeat(3,minmax(9rem,1fr));gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:1rem 1rem 0 0;background:var(--panel)}label{display:grid;gap:.35rem;color:var(--muted);font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}input,select,button{min-height:2.7rem;border:1px solid var(--line);border-radius:.65rem;background:var(--panel-2);color:var(--text);font:inherit}input,select{width:100%;padding:.55rem .7rem}input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.control-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--line);border-top:0;background:var(--panel)}.button-row{display:flex;flex-wrap:wrap;gap:.5rem}button{padding:.45rem .8rem;cursor:pointer;font-weight:750}button:hover{border-color:var(--brand);color:var(--brand-2)}#filter-status{color:var(--muted);font-size:.9rem}.tool-list{display:grid;gap:.65rem;margin-top:.75rem}.tool-card,.contract-card{border:1px solid var(--line);border-radius:.85rem;background:var(--panel);box-shadow:0 8px 25px rgba(29,40,76,.04)}.tool-card[hidden]{display:none}.tool-card details,.contract-card{overflow:hidden}.tool-card summary,.contract-card summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;cursor:pointer}.summary-copy,.contract-card summary{min-width:0}.summary-copy strong,.summary-copy code,.contract-card summary strong,.contract-card summary code{display:block}.summary-copy code,.contract-card summary code{overflow-wrap:anywhere;color:var(--muted);font-size:.76rem}.badges{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.35rem}.badge{padding:.23rem .5rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.68rem;font-weight:800;white-space:nowrap}.app-badge{color:var(--brand-2);border-color:var(--brand)}.risk-local-read{color:var(--local)}.risk-discord-read{color:var(--read)}.risk-interaction-write{color:var(--interaction)}.risk-administrative-write{color:var(--admin)}.risk-destructive-write{color:var(--destructive)}.tool-body,.contract-card>div{padding:0 1rem 1rem;border-top:1px solid var(--line)}.tool-body>p,.contract-card p{white-space:pre-wrap}.tool-meta{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.65rem .75rem;border-radius:.65rem;background:var(--panel-2);font-size:.82rem}.tool-meta a{margin-left:auto;color:var(--brand-2)}.annotations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;margin:1rem 0}.annotation{padding:.65rem;border:1px solid var(--line);border-radius:.65rem}.annotation dt{color:var(--muted);font-size:.7rem}.annotation dd{margin:0;font-weight:800}.annotation .yes{color:var(--read)}.annotation .no{color:var(--muted)}.schema-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.schema-grid h4{margin:.4rem 0}.schema-grid section{min-width:0}pre{max-height:32rem;overflow:auto;margin:.5rem 0 0;padding:1rem;border:1px solid var(--line);border-radius:.7rem;background:var(--panel-2);font-size:.74rem;line-height:1.45;tab-size:2}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}.contract-list{display:grid;gap:.65rem}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.safety{margin-bottom:4rem}.safety pre{max-height:none;white-space:pre-wrap}.empty-note{display:none;margin:1rem 0;padding:1rem;border:1px dashed var(--line);border-radius:.8rem;color:var(--muted)}.empty-note.visible{display:block}footer{padding:2rem 0 4rem;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}.skip-link{position:fixed;left:1rem;top:-5rem;z-index:20;background:var(--panel);color:var(--text);padding:.7rem 1rem;border:2px solid var(--focus);border-radius:.6rem}.skip-link:focus{top:1rem}.shell{width:min(1180px,calc(100% - 2rem));margin:0 auto}.hero{padding:4.5rem 0 2.25rem}.eyebrow{margin:0 0 .5rem;color:var(--brand-2);font-size:.78rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.hero h1{max-width:850px;margin:0;font-size:clamp(2.3rem,7vw,5.4rem);line-height:.95;letter-spacing:-.055em}.lede{max-width:760px;margin:1.5rem 0 0;color:var(--muted);font-size:clamp(1rem,2vw,1.25rem)}.proof-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.75rem;margin:2rem 0}.proof{min-width:0;padding:1rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.proof strong{display:block;font-size:1.45rem}.proof span{color:var(--muted);font-size:.82rem}.guarantees{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem;margin:1rem 0 3rem}.panel{min-width:0;padding:1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.panel h2,.panel h3{margin-top:0}.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin:0;padding:0;list-style:none}.checks li{padding:.75rem;border-radius:.75rem;background:var(--panel-2)}.checks li::before{content:"✓";margin-right:.55rem;color:var(--read);font-weight:900}.digest{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.75rem;color:var(--muted)}.risk-row{display:grid;grid-template-columns:minmax(8rem,1fr) 2fr 2rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.78rem}.risk-track{height:.55rem;overflow:hidden;border-radius:999px;background:var(--line)}.risk-track span{display:block;width:var(--share);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--brand),var(--brand-2))}.sticky-nav{position:sticky;top:0;z-index:10;border-block:1px solid var(--line);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px)}.nav-inner{display:flex;align-items:center;gap:1rem;overflow:auto;padding:.65rem 0}.nav-inner a{color:var(--muted);font-weight:700;text-decoration:none;white-space:nowrap}.nav-inner a:hover{color:var(--text)}main section{scroll-margin-top:5rem}.section-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin:3.5rem 0 1rem}.section-head h2{margin:0;font-size:clamp(1.7rem,4vw,2.6rem);letter-spacing:-.035em}.section-head p{max-width:570px;margin:0;color:var(--muted)}.controls{display:grid;grid-template-columns:minmax(15rem,2fr) repeat(4,minmax(8rem,1fr));gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:1rem 1rem 0 0;background:var(--panel)}label{display:grid;gap:.35rem;color:var(--muted);font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}input,select,button{min-height:2.7rem;border:1px solid var(--line);border-radius:.65rem;background:var(--panel-2);color:var(--text);font:inherit}input,select{width:100%;padding:.55rem .7rem}input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.control-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--line);border-top:0;background:var(--panel)}.button-row{display:flex;flex-wrap:wrap;gap:.5rem}button{padding:.45rem .8rem;cursor:pointer;font-weight:750}button:hover{border-color:var(--brand);color:var(--brand-2)}#filter-status{color:var(--muted);font-size:.9rem}.tool-list{display:grid;gap:.65rem;margin-top:.75rem}.tool-card,.contract-card{border:1px solid var(--line);border-radius:.85rem;background:var(--panel);box-shadow:0 8px 25px rgba(29,40,76,.04)}.tool-card[hidden]{display:none}.tool-card details,.contract-card{overflow:hidden}.tool-card summary,.contract-card summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;cursor:pointer}.summary-copy,.contract-card summary{min-width:0}.summary-copy strong,.summary-copy code,.contract-card summary strong,.contract-card summary code{display:block}.summary-copy code,.contract-card summary code{overflow-wrap:anywhere;color:var(--muted);font-size:.76rem}.badges{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.35rem}.badge{padding:.23rem .5rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.68rem;font-weight:800;white-space:nowrap}.app-badge{color:var(--brand-2);border-color:var(--brand)}.risk-local-read{color:var(--local)}.risk-discord-read{color:var(--read)}.risk-interaction-write{color:var(--interaction)}.risk-administrative-write{color:var(--admin)}.risk-destructive-write{color:var(--destructive)}.tool-body,.contract-card>div{padding:0 1rem 1rem;border-top:1px solid var(--line)}.tool-body>p,.contract-card p{white-space:pre-wrap}.tool-meta{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.65rem .75rem;border-radius:.65rem;background:var(--panel-2);font-size:.82rem}.tool-meta a{margin-left:auto;color:var(--brand-2)}.annotations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;margin:1rem 0}.annotation{padding:.65rem;border:1px solid var(--line);border-radius:.65rem}.annotation dt{color:var(--muted);font-size:.7rem}.annotation dd{margin:0;font-weight:800}.annotation .yes{color:var(--read)}.annotation .no{color:var(--muted)}.schema-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.schema-grid h4{margin:.4rem 0}.schema-grid section{min-width:0}pre{max-height:32rem;overflow:auto;margin:.5rem 0 0;padding:1rem;border:1px solid var(--line);border-radius:.7rem;background:var(--panel-2);font-size:.74rem;line-height:1.45;tab-size:2}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}.contract-list{display:grid;gap:.65rem}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.safety{margin-bottom:4rem}.safety pre{max-height:none;white-space:pre-wrap}.empty-note{display:none;margin:1rem 0;padding:1rem;border:1px dashed var(--line);border-radius:.8rem;color:var(--muted)}.empty-note.visible{display:block}footer{padding:2rem 0 4rem;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
     @media(max-width:860px){.proof-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.guarantees,.split,.schema-grid{grid-template-columns:minmax(0,1fr)}.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.annotations{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:560px){.shell{width:min(100% - 1rem,1180px)}.hero{padding-top:2.75rem}.proof-strip,.controls,.checks{grid-template-columns:minmax(0,1fr)}.section-head{align-items:start;flex-direction:column}.control-footer,.tool-card summary{align-items:stretch;flex-direction:column}.badges{justify-content:flex-start}.annotations{grid-template-columns:minmax(0,1fr)}.nav-inner{gap:.75rem}}
     @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
@@ -250,18 +270,19 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
       <div class="proof" role="listitem"><strong>${report.planReviewApp.linkedToolCount}</strong><span>Interactive plan reviews</span></div>
     </div>
     <div class="guarantees">
-      <section class="panel"><h2>What this proves</h2><ul class="checks"><li>Production registrations negotiated</li><li>Complete tool annotations checked</li><li>Known and unknown calls blocked identically</li><li>Policy completion routes return zero catalog IDs</li><li>Plan-review app bytes and authority fingerprinted</li><li>No credential or Discord execution available</li></ul></section>
-      <section class="panel"><h2>Risk distribution</h2>${riskBars(snapshot)}<p class="digest"><b>Contract</b><br>${escapeHtml(report.contractDigest)}<br><br><b>Safety</b><br>${escapeHtml(report.safetyResourceDigest)}<br><br><b>Plan-review HTML</b><br>${escapeHtml(report.planReviewApp.htmlDigest)}</p></section>
+      <section class="panel"><h2>What this proves</h2><ul class="checks"><li>Production registrations negotiated</li><li>Complete tool annotations checked</li><li>Every access lifecycle classified</li><li>Known and unknown calls blocked identically</li><li>Policy completion routes return zero catalog IDs</li><li>No credential or Discord execution available</li></ul></section>
+      <section class="panel"><h2>Risk distribution</h2>${riskBars(snapshot)}<h3>Access lifecycle</h3>${accessBars(snapshot)}<p class="digest"><b>Contract</b><br>${escapeHtml(report.contractDigest)}<br><br><b>Tool access</b><br>${escapeHtml(report.toolAccessResourceDigest)}<br><br><b>Safety</b><br>${escapeHtml(report.safetyResourceDigest)}<br><br><b>Plan-review HTML</b><br>${escapeHtml(report.planReviewApp.htmlDigest)}</p></section>
     </div>
   </header>
   <nav class="sticky-nav" aria-label="Contract sections"><div class="shell nav-inner"><a href="#tools">Tools</a><a href="#app">Plan-review app</a><a href="#prompts">Prompts</a><a href="#completions">Completions</a><a href="#resources">Resources</a><a href="#instructions">Instructions</a><a href="#safety">Safety</a></div></nav>
   <main id="main" class="shell">
     <section id="tools">
-      <div class="section-head"><div><p class="eyebrow">Exact callable surface</p><h2>Tools</h2></div><p>Search names and descriptions, then narrow by internal toolset, MCP risk class, or complete reviewed workflow.</p></div>
+      <div class="section-head"><div><p class="eyebrow">Exact callable surface</p><h2>Tools</h2></div><p>Search names and descriptions, then narrow by internal toolset, MCP risk class, access lifecycle, or complete reviewed workflow. Static access metadata never claims target readiness.</p></div>
       <div class="controls" role="group" aria-label="Tool filters">
         <label for="tool-search">Search<input id="tool-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search tools and capabilities"></label>
         <label for="toolset-filter">Toolset<select id="toolset-filter"><option value="">All toolsets</option>${optionMarkup(toolsets)}</select></label>
         <label for="risk-filter">Risk<select id="risk-filter"><option value="">All risk classes</option>${optionMarkup(risks)}</select></label>
+        <label for="access-filter">Access<select id="access-filter"><option value="">All access stages</option>${optionMarkup(accessStages)}</select></label>
         <label for="workflow-filter">Workflow<select id="workflow-filter"><option value="">All workflows</option>${optionMarkup(workflows)}</select></label>
       </div>
       <div class="control-footer"><span id="filter-status" role="status" aria-live="polite">${report.toolCount} of ${report.toolCount} tools shown</span><div class="button-row"><button id="reset-filters" type="button">Reset</button><button id="expand-tools" type="button">Expand visible</button><button id="collapse-tools" type="button">Collapse all</button></div></div>
@@ -305,6 +326,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
       const search = document.getElementById('tool-search');
       const toolset = document.getElementById('toolset-filter');
       const risk = document.getElementById('risk-filter');
+      const access = document.getElementById('access-filter');
       const workflow = document.getElementById('workflow-filter');
       const status = document.getElementById('filter-status');
       const empty = document.getElementById('empty-tools');
@@ -315,6 +337,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
           const matches = (!query || card.dataset.search.includes(query))
             && (!toolset.value || card.dataset.toolset === toolset.value)
             && (!risk.value || card.dataset.risk === risk.value)
+            && (!access.value || card.dataset.access === access.value)
             && (!workflow.value || card.dataset.workflow === workflow.value);
           card.hidden = !matches;
           if (matches) visible += 1;
@@ -322,13 +345,14 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
         status.textContent = visible + ' of ' + cards.length + ' tools shown';
         empty.classList.toggle('visible', visible === 0);
       };
-      for (const control of [search, toolset, risk, workflow]) {
+      for (const control of [search, toolset, risk, access, workflow]) {
         control.addEventListener(control === search ? 'input' : 'change', applyFilters);
       }
       document.getElementById('reset-filters').addEventListener('click', () => {
         search.value = '';
         toolset.value = '';
         risk.value = '';
+        access.value = '';
         workflow.value = '';
         applyFilters();
         search.focus();

@@ -1052,6 +1052,14 @@ test("doctor and setup explain progressive risk-separated MCP toolsets", async (
     toolSurface?.summary || "",
     new RegExp(`${configuredToolCount} canonical tools`),
   )
+  const toolAccessContract = doctor.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.toolAccessContract,
+  )
+  assert.equal(toolAccessContract?.status, "pass")
+  assert.match(toolAccessContract?.summary || "", /local discovery/)
+  assert.match(toolAccessContract?.summary || "", /review-plan=/)
+  assert.match(toolAccessContract?.summary || "", /review-execute=/)
+  assert.match(toolAccessContract?.summary || "", /target readiness remains operation-specific/)
   const readResponseBudget = doctor.checks.find(
     (entry) => entry.id === DOCTOR_CHECK_IDS.readResponseBudget,
   )
@@ -6020,6 +6028,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://connector/observability",
     "discord://connector/policy",
     "discord://connector/safety",
+    "discord://connector/tool-access",
     "discord://gateway/events",
     "discord://gateway/status",
     "discord://guilds",

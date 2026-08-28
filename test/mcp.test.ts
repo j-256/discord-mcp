@@ -14831,6 +14831,7 @@ test("MCP read-response budget refuses whole tool, resource, and prompt results"
 
   for (const uri of [
     MCP_RESOURCE_URIS.safety,
+    MCP_RESOURCE_URIS.toolAccess,
     MCP_RESOURCE_URIS.policy,
     MCP_RESOURCE_URIS.gatewayStatus,
     MCP_RESOURCE_URIS.nativeInteractionStatus,
@@ -14863,6 +14864,7 @@ test("minimum MCP read-response budget retains essential static and local surfac
   const results = await Promise.all([
     client.callTool({ arguments: {}, name: "get_connector_status" }),
     client.readResource({ uri: MCP_RESOURCE_URIS.safety }),
+    client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess }),
     client.readResource({ uri: MCP_RESOURCE_URIS.policy }),
     client.readResource({ uri: MCP_RESOURCE_URIS.observability }),
     client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI }),

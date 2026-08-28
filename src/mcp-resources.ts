@@ -31,9 +31,14 @@ import {
   assertMcpReadResultBudget,
   redactedJson,
 } from "./mcp-output.js"
+import { createMcpToolAccessManifest } from "./mcp-tool-catalog.js"
 import type { ConnectorService } from "./service.js"
 
-type ResourceProvenance = "discord-api" | "local-activity-log" | "local-configuration"
+type ResourceProvenance =
+  | "discord-api"
+  | "local-activity-log"
+  | "local-configuration"
+  | "local-contract"
 type ResourceTrust = "trusted-local-metadata" | "untrusted-external-data"
 
 const STATIC_RESOURCE_TTL_MS = 24 * 60 * 60 * 1_000
@@ -344,6 +349,28 @@ export function registerDiscordResources(
         uri: uri.href,
       }],
     }),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.toolAccess,
+    MCP_RESOURCE_URIS.toolAccess,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: {
+        cacheScope: "public",
+        ttlMs: STATIC_RESOURCE_TTL_MS,
+      },
+      description: "Deterministic machine-readable authorization lifecycle for every canonical tool, including reviewed workflow companions and an explicit target-specific readiness boundary.",
+      mimeType: "application/json",
+      title: "Discord tool access contract",
+    },
+    async (uri) => jsonResource(
+      uri,
+      "local-contract",
+      "trusted-local-metadata",
+      [],
+      () => createMcpToolAccessManifest(),
+    ),
   )
 
   server.registerResource(

@@ -3104,6 +3104,7 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       { name: MCP_RESOURCE_NAMES.planReviewApp, uri: MCP_RESOURCE_URIS.planReviewApp },
       { name: MCP_RESOURCE_NAMES.policy, uri: MCP_RESOURCE_URIS.policy },
       { name: MCP_RESOURCE_NAMES.safety, uri: MCP_RESOURCE_URIS.safety },
+      { name: MCP_RESOURCE_NAMES.toolAccess, uri: MCP_RESOURCE_URIS.toolAccess },
       { name: MCP_RESOURCE_NAMES.voiceRegions, uri: MCP_RESOURCE_URIS.voiceRegions },
     ].sort((a, b) => a.name.localeCompare(b.name)),
   )
@@ -3781,6 +3782,43 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /private-thread self-membership additionally requires MANAGE_THREADS for exact readback/)
   assert.match(safety.text, /never lists members, retries, rolls back, combines metadata fields/)
   assert.match(safety.text, /one-shot operation key/)
+
+  const toolAccess = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.toolAccess,
+  )
+  const toolAccessData = toolAccess.value.data as Record<string, unknown>
+  const accessEntries = toolAccessData.entries as Array<Record<string, unknown>>
+  assert.equal(
+    toolAccessData.format,
+    "discord-mcp.tool-access-manifest.v1",
+  )
+  assert.equal(toolAccessData.authorityGranted, false)
+  assert.equal(toolAccessData.discordContacted, false)
+  assert.equal(toolAccessData.readiness, "target-specific")
+  assert.equal(
+    accessEntries.some((entry) => (
+      entry.name === "execute_channel_order"
+      && entry.stage === "review-execute"
+    )),
+    true,
+  )
+  const accessStageContracts = toolAccessData.stageContracts as Record<
+    string,
+    Record<string, unknown>
+  >
+  assert.equal(
+    accessStageContracts["review-execute"]?.authorizationEvidence,
+    "fresh-plan-recheck",
+  )
+  const accessWorkflows = toolAccessData.workflows as Record<
+    string,
+    Record<string, unknown>
+  >
+  assert.deepEqual(accessWorkflows["channel-ordering"]?.execute, [
+    "execute_channel_order",
+  ])
+  assert.doesNotMatch(toolAccess.text, new RegExp(TOKEN))
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
   assert.deepEqual(

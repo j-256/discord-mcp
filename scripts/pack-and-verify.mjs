@@ -26,7 +26,7 @@ import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
-const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v1"
+const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
 const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
 const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"

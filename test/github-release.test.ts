@@ -69,7 +69,7 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
     activityRecordsCreated: false,
     credentialsRequired: false,
     discordExecution: "disabled",
-    evidenceFormat: "discord-mcp.catalog-evidence.v1",
+    evidenceFormat: "discord-mcp.catalog-evidence.v2",
     gateway: "disabled",
     observabilityExport: "disabled",
     schemaVersion: 1,
