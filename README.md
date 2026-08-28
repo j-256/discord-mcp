@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Quick start](#quick-start) | [Capability map](#capability-map) | [Safety model](#safety-model) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Documentation portal](https://j-256.github.io/discord-mcp/) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -19,7 +19,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 | Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Plan review | Every plan tool returns complete text and structured evidence and can add display-only, authority-free review in MCP Apps hosts |
-| Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, and signed-release automation |
+| Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, signed-release automation, and source-bound public documentation |
 
 Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. Read [product boundaries and host compatibility](docs/limitations.md) to decide whether the custody, privacy, approval, and recovery model fits. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and workflow-specific limitation.
 
@@ -275,6 +275,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 ## Documentation
 
+- [Verified documentation portal](https://j-256.github.io/discord-mcp/)
 - [First verified read and initialization recovery](docs/getting-started.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)
 - [Source-audited field comparison](docs/comparison.md)

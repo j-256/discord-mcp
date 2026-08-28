@@ -17,6 +17,7 @@ import { basename, join, resolve } from "node:path"
 import { Client } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 
+import { DOCUMENTATION_URL } from "./documentation-manifest.mjs"
 import {
   invariant,
   readJson,
@@ -237,7 +238,7 @@ async function inspectImage(image, packageJson, revision) {
     "org.opencontainers.image.revision": revision,
     "org.opencontainers.image.source": REPOSITORY_URL,
     "org.opencontainers.image.title": "Discord MCP",
-    "org.opencontainers.image.url": REPOSITORY_URL,
+    "org.opencontainers.image.url": DOCUMENTATION_URL,
     "org.opencontainers.image.version": packageJson.version,
   }
   assert.deepEqual(config.Labels, expectedLabels)

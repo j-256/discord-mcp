@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 
 import { canonicalJson, invariant, REPOSITORY_ROOT } from "./release-lib.mjs"
+import { DOCUMENTATION_URL } from "./documentation-manifest.mjs"
 
 const IMAGE_INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
 const IMAGE_CONFIG_MEDIA_TYPE = "application/vnd.oci.image.config.v1+json"
@@ -326,7 +327,7 @@ export function validateOciConfig(configDocument, expected) {
     "org.opencontainers.image.revision": expected.revision,
     "org.opencontainers.image.source": REPOSITORY_URL,
     "org.opencontainers.image.title": "Discord MCP",
-    "org.opencontainers.image.url": REPOSITORY_URL,
+    "org.opencontainers.image.url": DOCUMENTATION_URL,
     "org.opencontainers.image.version": expected.version,
   }
   invariant(canonicalJson(config.Labels) === canonicalJson(labels), "OCI image labels do not match the release identity")

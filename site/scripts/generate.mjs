@@ -12,6 +12,11 @@ import { dirname, join, posix, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 import { containsSpecificReference } from "../../scripts/neutrality.mjs"
+import {
+  DOCUMENTATION_MANIFEST_FORMAT,
+  DOCUMENTATION_URL,
+  documentationSourcePaths,
+} from "../../scripts/documentation-manifest.mjs"
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const SITE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..")
@@ -19,8 +24,6 @@ const REPOSITORY_ROOT = resolve(SITE_DIRECTORY, "..")
 const CONTENT_ROOT = join(SITE_DIRECTORY, "src", "content", "docs")
 const PUBLIC_ROOT = join(SITE_DIRECTORY, "public", "generated")
 const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
-const SITE_URL = "https://j-256.github.io/discord-mcp"
-const DOCS_MANIFEST_FORMAT = "discord-mcp.docs-manifest.v1"
 const TOKEN_PATTERN = /(?:mfa\.[A-Za-z0-9_-]{60,}|[A-Za-z0-9_-]{23,30}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,})/u
 const PRIVATE_PATH_PATTERN = /(?:file:\/\/\/|\/Users\/|\/home\/[A-Za-z0-9._-]+\/)/u
 const STABLE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u
@@ -291,17 +294,6 @@ const FULL_DOCUMENTS = Object.freeze([
     route: "contribute/code-of-conduct",
     source: "CODE_OF_CONDUCT.md",
   },
-])
-
-const SOURCE_PATHS = Object.freeze([
-  ...FULL_DOCUMENTS.map(({ source }) => source),
-  "docs/reference.md",
-  "SECURITY.md",
-  "discord-mcp.config.schema.json",
-  "server.json",
-  "LICENSE",
-  "assets/discord-mcp-icon.png",
-  "package.json",
 ])
 
 function invariant(condition, message) {
@@ -612,30 +604,30 @@ function llmsIndex(packageJson) {
 
 Package: ${packageJson.name}@${packageJson.version}
 Repository: ${REPOSITORY_URL}
-Documentation: ${SITE_URL}/
+Documentation: ${DOCUMENTATION_URL}/
 
 ## Start
 
-- [Choose your path](${SITE_URL}/start/choose/): Route to setup, fit, recovery, verification, or contribution
-- [First verified read](${SITE_URL}/start/getting-started/): Linear owner-managed bot setup with a read-only first outcome
-- [Fit and boundaries](${SITE_URL}/understand/boundaries/): Custody, privacy, compatibility, and operational constraints
-- [Field comparison](${SITE_URL}/understand/comparison/): Dated head-to-head rubric with direct released-source evidence
+- [Choose your path](${DOCUMENTATION_URL}/start/choose/): Route to setup, fit, recovery, verification, or contribution
+- [First verified read](${DOCUMENTATION_URL}/start/getting-started/): Linear owner-managed bot setup with a read-only first outcome
+- [Fit and boundaries](${DOCUMENTATION_URL}/understand/boundaries/): Custody, privacy, compatibility, and operational constraints
+- [Field comparison](${DOCUMENTATION_URL}/understand/comparison/): Dated head-to-head rubric with direct released-source evidence
 
 ## Safety and operation
 
-- [Safety model](${SITE_URL}/understand/safety/): Scope, exact IDs, reviewed writes, privacy, and ambiguity handling
-- [Operator path](${SITE_URL}/operate/): Evidence ladder and deliberate expansion
-- [Troubleshooting](${SITE_URL}/operate/troubleshooting/): Privacy-safe setup recovery
-- [Release verification](${SITE_URL}/operate/release-verification/): Provenance, inventory, signature, and reproducibility boundaries
+- [Safety model](${DOCUMENTATION_URL}/understand/safety/): Scope, exact IDs, reviewed writes, privacy, and ambiguity handling
+- [Operator path](${DOCUMENTATION_URL}/operate/): Evidence ladder and deliberate expansion
+- [Troubleshooting](${DOCUMENTATION_URL}/operate/troubleshooting/): Privacy-safe setup recovery
+- [Release verification](${DOCUMENTATION_URL}/operate/release-verification/): Provenance, inventory, signature, and reproducibility boundaries
 
 ## Exact references
 
-- [Reference directory](${SITE_URL}/reference/): Searchable canonical capability documentation
-- [Security details](${SITE_URL}/security/): Searchable canonical security policy
-- [Contract explorer](${SITE_URL}/generated/contract-explorer.html): Credential-free production MCP contract
-- [Contract evidence](${SITE_URL}/generated/contract-evidence.json): Deterministic catalog verification report
-- [Configuration schema](${SITE_URL}/generated/discord-mcp.config.schema.json): Strict non-secret policy schema
-- [Full machine-readable documentation](${SITE_URL}/llms-full.txt): Canonical public documents with source labels
+- [Reference directory](${DOCUMENTATION_URL}/reference/): Searchable canonical capability documentation
+- [Security details](${DOCUMENTATION_URL}/security/): Searchable canonical security policy
+- [Contract explorer](${DOCUMENTATION_URL}/generated/contract-explorer.html): Credential-free production MCP contract
+- [Contract evidence](${DOCUMENTATION_URL}/generated/contract-evidence.json): Deterministic catalog verification report
+- [Configuration schema](${DOCUMENTATION_URL}/generated/discord-mcp.config.schema.json): Strict non-secret policy schema
+- [Full machine-readable documentation](${DOCUMENTATION_URL}/llms-full.txt): Canonical public documents with source labels
 
 ## Safety constraints
 
@@ -653,8 +645,9 @@ async function main() {
   invariant(packageJson.name === "@j-256/discord-mcp", "Unexpected package identity")
   invariant(STABLE_VERSION.test(packageJson.version), "Documentation requires a stable package version")
 
+  const documentationSources = await documentationSourcePaths()
   const sourceContents = new Map()
-  for (const source of SOURCE_PATHS) {
+  for (const source of documentationSources) {
     sourceContents.set(source, await readFile(join(REPOSITORY_ROOT, source)))
   }
 
@@ -814,7 +807,7 @@ async function main() {
     join(SITE_DIRECTORY, "public", "llms-full.txt"),
   ]
   const manifest = {
-    format: DOCS_MANIFEST_FORMAT,
+    format: DOCUMENTATION_MANIFEST_FORMAT,
     outputs: await Promise.all(generatedFiles.sort().map(async (file) => ({
       path: relative(SITE_DIRECTORY, file),
       sha256: sha256(await readFile(file)),
@@ -823,7 +816,7 @@ async function main() {
       name: packageJson.name,
       version: packageJson.version,
     },
-    sources: SOURCE_PATHS.map((source) => ({
+    sources: documentationSources.map((source) => ({
       path: source,
       sha256: sha256(sourceContents.get(source)),
     })),

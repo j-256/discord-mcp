@@ -20,16 +20,17 @@ Before changing visibility:
 Before any publication:
 
 1. Make `j-256/discord-mcp` public. npm provenance and public GitHub attestations fail for a private source repository, and the workflow enforces this boundary.
-2. Set the repository description exactly to `Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `discord-mcp`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose, and leave the homepage unset until a durable project-owned documentation location exists. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
+2. Set the repository description exactly to `Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `discord-mcp`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
 3. Create or re-enable protection for `main` after the visibility change and require the `CI gate` and CodeQL checks. Require CODEOWNERS review for workflows, package metadata, registry metadata, release scripts, security policy, and community files.
-4. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
-5. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Enable repository-level immutable Releases before publishing any GitHub Release. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
-6. Enable two-factor authentication on the npm maintainer account.
-7. Confirm that the npm maintainer controls the `@j-256` scope.
-8. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
-9. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
+4. Before the first Pages deployment, follow [GitHub's publishing-source instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow): open Settings, Pages, and under Build and deployment select GitHub Actions. Restrict the `github-pages` environment to protected `main`, let the `Publish documentation portal` job deploy the exact browser-verified artifact, then run `node scripts/check-public-documentation.mjs` and require an exact result. Only after that verification succeeds, set the repository homepage to `https://j-256.github.io/discord-mcp`.
+5. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
+6. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Enable repository-level immutable Releases before publishing any GitHub Release. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
+7. Enable two-factor authentication on the npm maintainer account.
+8. Confirm that the npm maintainer controls the `@j-256` scope.
+9. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
+10. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
-The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version.
+The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version. Every release operation also requires the canonical public documentation manifest to contain that version and exact hashes for the release's documentation source frontier.
 
 ## First npm publication
 
@@ -114,8 +115,9 @@ npm run security:check
 npm run --silent sbom -- --output sbom.spdx.json
 ```
 
-3. Commit the version as a release preparation change and let CI pass on `main`.
-4. Create the exact `vMAJOR.MINOR.PATCH` tag on that commit and push the tag.
+3. Commit the version as a release preparation change and let every CI job pass on `main`, including `Publish documentation portal`.
+4. Run `node scripts/check-public-documentation.mjs` from that exact commit and require an exact result.
+5. Create the exact `vMAJOR.MINOR.PATCH` tag on that commit and push the tag.
 
 Do not include `sbom.spdx.json` from the local command in the commit. The workflow reconstructs its own SBOM and release archive.
 

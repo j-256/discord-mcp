@@ -8,7 +8,7 @@ export const CONNECTOR_NPX_ARGUMENTS = Object.freeze([
   `${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`,
 ] as const)
 export const CONNECTOR_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
-export const CONNECTOR_WEBSITE_URL = "https://github.com/j-256/discord-mcp"
+export const CONNECTOR_WEBSITE_URL = "https://j-256.github.io/discord-mcp"
 export const CONNECTOR_ICON_URL = `https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png`
 export const CONNECTOR_ICON_MIME_TYPE = "image/png"
 export const CONNECTOR_ICON_SIZES = Object.freeze(["1254x1254"] as const)

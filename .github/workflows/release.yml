@@ -76,6 +76,12 @@ jobs:
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor HEAD refs/remotes/origin/main
 
+      - name: Verify exact public documentation
+        run: |
+          node scripts/check-public-documentation.mjs \
+            --attempts 6 \
+            --delay-ms 10000
+
       - name: Verify versioned public icon
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -531,6 +537,12 @@ jobs:
           printf 'image=%s\n' "ghcr.io/j-256/discord-mcp:$version" >> "$GITHUB_OUTPUT"
           printf 'image_name=%s\n' "ghcr.io/j-256/discord-mcp" >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact public documentation
+        run: |
+          node scripts/check-public-documentation.mjs \
+            --attempts 6 \
+            --delay-ms 10000
 
       - name: Install reviewed dependencies
         run: npm run deps:locked
