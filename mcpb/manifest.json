@@ -1,0 +1,76 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "discord-mcp",
+  "display_name": "Discord MCP",
+  "version": "0.1.2",
+  "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
+  "long_description": "Use an operator-owned Discord application and bot through one strict non-secret policy file. Read operations stay exactly scoped, high-impact changes require fresh reviewed plans and signed confirmation, and durable records exclude Discord content and display data.",
+  "author": {
+    "name": "j-256",
+    "url": "https://github.com/j-256"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/j-256/discord-mcp.git"
+  },
+  "homepage": "https://j-256.github.io/discord-mcp",
+  "documentation": "https://j-256.github.io/discord-mcp/start/choose/",
+  "support": "https://github.com/j-256/discord-mcp/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/discord-mcp.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/discord-mcp.mjs",
+        "serve",
+        "--config",
+        "${user_config.config_file}"
+      ],
+      "env": {
+        "MCPB_DISCORD_BOT_SECRET": "${user_config.bot_token}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "keywords": [
+    "discord",
+    "least-privilege",
+    "mcp",
+    "model-context-protocol",
+    "moderation"
+  ],
+  "license": "AGPL-3.0-only",
+  "privacy_policies": [
+    "https://github.com/j-256/discord-mcp/blob/v0.1.2/PRIVACY.md",
+    "https://discord.com/privacy"
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=22"
+    }
+  },
+  "user_config": {
+    "config_file": {
+      "type": "file",
+      "title": "Discord MCP configuration",
+      "description": "Select one strict versioned non-secret Discord MCP JSON configuration file.",
+      "required": true
+    },
+    "bot_token": {
+      "type": "string",
+      "title": "Discord bot token",
+      "description": "Token for your own Discord bot. Never use a user token or place this value in the configuration file.",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

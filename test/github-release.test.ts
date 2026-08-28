@@ -15,6 +15,7 @@ interface ReleaseAsset {
 interface ReleaseEvidence {
   assets: ReleaseAsset[]
   format: string
+  mcpbDigest: string
   notesDigest: string
   npmIntegrity: string
   ociDigest: string
@@ -31,12 +32,14 @@ interface GitHubReleaseModule {
   findGitHubRelease(version: string, token?: string): Promise<{ release?: Record<string, unknown>; state: string }>
   prepareGitHubReleaseEvidence(input: {
     directory: string
+    mcpbDigest: string
     ociDigest: string
     output: string
     revision: string
     version: string
   }): Promise<ReleaseEvidence>
   renderGitHubReleaseNotes(input: {
+    mcpbDigest: string
     npmIntegrity: string
     ociDigest: string
     revision: string
@@ -58,6 +61,9 @@ const VERSION = "0.1.2"
 const REVISION = "a".repeat(40)
 const OCI_DIGEST = `sha256:${"b".repeat(64)}`
 const ARCHIVE_NAME = `j-256-discord-mcp-${VERSION}.tgz`
+const BUNDLE_NAME = `discord-mcp-${VERSION}.mcpb`
+const BUNDLE_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04])
+const MCPB_DIGEST = `sha256:${sha256(BUNDLE_BYTES)}`
 const NPM_INTEGRITY = `sha512-${Buffer.alloc(64, 3).toString("base64")}`
 
 function sha256(value: string | Buffer): string {
@@ -94,6 +100,7 @@ async function writeEvidenceInputs(
 ): Promise<void> {
   await mkdir(directory)
   await writeFile(join(directory, ARCHIVE_NAME), "verified npm archive")
+  await writeFile(join(directory, BUNDLE_NAME), BUNDLE_BYTES)
   await writeFile(join(directory, "catalog-evidence.json"), `${JSON.stringify(options.catalog || validCatalog())}\n`)
   await writeFile(join(directory, "sbom.spdx.json"), `${JSON.stringify(options.sbom || validSbom())}\n`)
 }
@@ -129,6 +136,7 @@ async function preparedEvidence(t: test.TestContext): Promise<{
   await writeEvidenceInputs(directory)
   const evidence = await githubRelease.prepareGitHubReleaseEvidence({
     directory,
+    mcpbDigest: MCPB_DIGEST,
     ociDigest: OCI_DIGEST,
     output,
     revision: REVISION,
@@ -143,6 +151,7 @@ async function preparedEvidence(t: test.TestContext): Promise<{
 
 test("renders deterministic release notes with exact public identities and verification commands", () => {
   const notes = githubRelease.renderGitHubReleaseNotes({
+    mcpbDigest: MCPB_DIGEST,
     npmIntegrity: NPM_INTEGRITY,
     ociDigest: OCI_DIGEST,
     revision: REVISION,
@@ -151,9 +160,12 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, new RegExp(`Discord MCP ${VERSION}`, "u"))
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
+  assert.match(notes, new RegExp(MCPB_DIGEST, "u"))
   assert.match(notes, /gh release verify v0\.1\.2/u)
   assert.match(notes, /gh release verify-asset v0\.1\.2 j-256-discord-mcp-0\.1\.2\.tgz/u)
+  assert.match(notes, /gh release verify-asset v0\.1\.2 discord-mcp-0\.1\.2\.mcpb/u)
   assert.match(notes, /gh release verify-asset v0\.1\.2 release-notes\.md/u)
+  assert.match(notes, /registers MCP Registry metadata only after this immutable Release/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)
   assert.equal(notes.endsWith("\n"), true)
@@ -185,6 +197,7 @@ test("prepares a bounded immutable release asset set from verified evidence", as
   assert.deepEqual((await readdir(directory)).sort(), [
     "SHA256SUMS",
     "catalog-evidence.json",
+    BUNDLE_NAME,
     ARCHIVE_NAME,
     "release-notes.md",
     "sbom.spdx.json",
@@ -192,12 +205,14 @@ test("prepares a bounded immutable release asset set from verified evidence", as
   assert.deepEqual(evidence.assets.map(({ name }) => name), [
     "SHA256SUMS",
     "catalog-evidence.json",
+    BUNDLE_NAME,
     ARCHIVE_NAME,
     "release-notes.md",
     "sbom.spdx.json",
   ])
   assert.equal(evidence.revision, REVISION)
   assert.equal(evidence.ociDigest, OCI_DIGEST)
+  assert.equal(evidence.mcpbDigest, MCPB_DIGEST)
   assert.equal(evidence.notesDigest, `sha256:${sha256(notes)}`)
   assert.match(evidence.npmIntegrity, /^sha512-/u)
 
@@ -205,6 +220,7 @@ test("prepares a bounded immutable release asset set from verified evidence", as
   const assetDigests = new Map(evidence.assets.map((asset) => [asset.name, asset.digest.slice("sha256:".length)]))
   assert.equal(checksums, [
     `${assetDigests.get("catalog-evidence.json")}  catalog-evidence.json`,
+    `${assetDigests.get(BUNDLE_NAME)}  ${BUNDLE_NAME}`,
     `${assetDigests.get(ARCHIVE_NAME)}  ${ARCHIVE_NAME}`,
     `${assetDigests.get("release-notes.md")}  release-notes.md`,
     `${assetDigests.get("sbom.spdx.json")}  sbom.spdx.json`,
@@ -232,6 +248,7 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
     await assert.rejects(
       githubRelease.prepareGitHubReleaseEvidence({
         directory,
+        mcpbDigest: MCPB_DIGEST,
         ociDigest: OCI_DIGEST,
         output: join(root, `evidence-${index}.json`),
         revision: REVISION,
@@ -367,7 +384,7 @@ test("validates exact draft and immutable GitHub Release records", async (t) => 
   })
   assert.equal(immutable.state, "immutable")
   assert.equal(immutable.tag, `v${VERSION}`)
-  assert.equal(immutable.assets.length, 5)
+  assert.equal(immutable.assets.length, 6)
 })
 
 test("fails closed on release identity, content, asset, URL, or immutability drift", async (t) => {

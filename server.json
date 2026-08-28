@@ -120,6 +120,14 @@
           "value": "/configuration/discord-mcp.json"
         }
       ]
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/j-256/discord-mcp/releases/download/v0.1.2/discord-mcp-0.1.2.mcpb",
+      "fileSha256": "9a8eb8161d552dff56887987bcf71f637a45a5efaee6da999bad9b03754e6ce5",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }

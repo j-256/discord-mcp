@@ -16,8 +16,8 @@ const GITHUB_API_VERSION = "2026-03-10"
 const GITHUB_REPOSITORY = "j-256/discord-mcp"
 const MCP_REGISTRY_NAME = "io.github.j-256/discord-mcp"
 const NPM_PACKAGE = "@j-256/discord-mcp"
-const RELEASE_EVIDENCE_FORMAT = "discord-mcp.github-release-evidence.v1"
-const RELEASE_EVIDENCE_SCHEMA_VERSION = 1
+const RELEASE_EVIDENCE_FORMAT = "discord-mcp.github-release-evidence.v2"
+const RELEASE_EVIDENCE_SCHEMA_VERSION = 2
 const RELEASE_NOTES_FILE = "release-notes.md"
 const RELEASE_CHECKSUM_FILE = "SHA256SUMS"
 const CATALOG_EVIDENCE_FILE = "catalog-evidence.json"
@@ -63,15 +63,26 @@ function npmArchiveName(version) {
   return `j-256-discord-mcp-${version}.tgz`
 }
 
+function mcpbArchiveName(version) {
+  assertVersion(version)
+  return `discord-mcp-${version}.mcpb`
+}
+
+function mcpbReleaseUrl(version) {
+  assertVersion(version)
+  return `https://github.com/${GITHUB_REPOSITORY}/releases/download/${releaseTag(version)}/${mcpbArchiveName(version)}`
+}
+
 function registryVersionUrl(version) {
   assertVersion(version)
   return `https://registry.modelcontextprotocol.io/v0.1/servers/${encodeURIComponent(MCP_REGISTRY_NAME)}/versions/${version}`
 }
 
-export function renderGitHubReleaseNotes({ npmIntegrity, ociDigest, revision, version }) {
+export function renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, revision, version }) {
   assertVersion(version)
   assertRevision(revision)
   assertOciDigest(ociDigest)
+  invariant(/^sha256:[0-9a-f]{64}$/.test(mcpbDigest), "GitHub Release MCPB digest is invalid")
   invariant(/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(npmIntegrity), "GitHub Release npm integrity is invalid")
   const tag = releaseTag(version)
   return [
@@ -84,17 +95,23 @@ export function renderGitHubReleaseNotes({ npmIntegrity, ociDigest, revision, ve
     `docker run --rm -i --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges:true --pids-limit=64 ghcr.io/${GITHUB_REPOSITORY}:${version} catalog --check`,
     "```",
     "",
-    "Each operational deployment requires an operator-owned Discord application and bot, one strict non-secret configuration file, and the bot token supplied through the launching secret store.",
+    `Compatible local MCP hosts can install the [one-click MCPB bundle](${mcpbReleaseUrl(version)}). The host asks for one strict non-secret configuration file and stores the bot token as a separate sensitive input.`,
     "",
-    "## Published identities",
+    "Every operational deployment requires an operator-owned Discord application and bot. No distribution includes a shared bot or credential.",
+    "",
+    "## Distribution identities",
     "",
     `- npm: [${NPM_PACKAGE}@${version}](https://www.npmjs.com/package/${NPM_PACKAGE}/v/${version}) with integrity \`${npmIntegrity}\``,
     `- OCI: \`ghcr.io/${GITHUB_REPOSITORY}@${ociDigest}\``,
+    `- MCPB: [${mcpbArchiveName(version)}](${mcpbReleaseUrl(version)}) with digest \`${mcpbDigest}\``,
     `- MCP Registry: [${MCP_REGISTRY_NAME}@${version}](${registryVersionUrl(version)})`,
+    "",
+    "The protected workflow registers MCP Registry metadata only after this immutable Release and every MCPB byte verify exactly.",
     "",
     "## Included evidence",
     "",
     `- \`${npmArchiveName(version)}\`: the exact npm archive reconstructed and attested by the protected release workflow`,
+    `- \`${mcpbArchiveName(version)}\`: the reproducible cross-platform one-click bundle with an embedded SPDX inventory, third-party notices, privacy policy, and credential-free contract evidence`,
     `- \`${CATALOG_EVIDENCE_FILE}\`: the deterministic credential-free MCP contract fingerprint`,
     `- \`${SPDX_SBOM_FILE}\`: the validated SPDX production-dependency inventory`,
     `- \`${RELEASE_NOTES_FILE}\`: the canonical notes retained as an immutable asset because GitHub permits displayed Release notes to be edited`,
@@ -108,8 +125,10 @@ export function renderGitHubReleaseNotes({ npmIntegrity, ociDigest, revision, ve
     `gh release verify ${tag} --repo ${GITHUB_REPOSITORY}`,
     `gh release download ${tag} --repo ${GITHUB_REPOSITORY}`,
     `gh release verify-asset ${tag} ${npmArchiveName(version)} --repo ${GITHUB_REPOSITORY}`,
+    `gh release verify-asset ${tag} ${mcpbArchiveName(version)} --repo ${GITHUB_REPOSITORY}`,
     `gh release verify-asset ${tag} ${RELEASE_NOTES_FILE} --repo ${GITHUB_REPOSITORY}`,
     `gh attestation verify ${npmArchiveName(version)} --repo ${GITHUB_REPOSITORY} --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/release.yml --source-ref refs/tags/${tag} --deny-self-hosted-runners`,
+    `gh attestation verify ${mcpbArchiveName(version)} --repo ${GITHUB_REPOSITORY} --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/release.yml --source-ref refs/tags/${tag} --deny-self-hosted-runners`,
     `gh attestation verify oci://ghcr.io/${GITHUB_REPOSITORY}@${ociDigest} --repo ${GITHUB_REPOSITORY} --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/release.yml --source-ref refs/tags/${tag} --deny-self-hosted-runners`,
     "shasum -a 256 -c SHA256SUMS",
     "```",
@@ -153,31 +172,40 @@ function expectedAssetNames(version) {
   return [
     RELEASE_CHECKSUM_FILE,
     CATALOG_EVIDENCE_FILE,
+    mcpbArchiveName(version),
     npmArchiveName(version),
     RELEASE_NOTES_FILE,
     SPDX_SBOM_FILE,
   ].sort()
 }
 
-export async function prepareGitHubReleaseEvidence({ directory, ociDigest, output, revision, version }) {
+export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociDigest, output, revision, version }) {
   assertVersion(version)
   assertRevision(revision)
   assertOciDigest(ociDigest)
+  invariant(/^sha256:[0-9a-f]{64}$/.test(mcpbDigest), "GitHub Release MCPB digest is invalid")
   const root = resolve(directory)
   const archiveName = npmArchiveName(version)
+  const bundleName = mcpbArchiveName(version)
   const inputNames = (await readdir(root)).sort()
   invariant(
-    canonicalJson(inputNames) === canonicalJson([CATALOG_EVIDENCE_FILE, archiveName, SPDX_SBOM_FILE].sort()),
-    "GitHub Release input directory must contain only the verified archive, catalog evidence, and SPDX SBOM",
+    canonicalJson(inputNames) === canonicalJson([CATALOG_EVIDENCE_FILE, archiveName, bundleName, SPDX_SBOM_FILE].sort()),
+    "GitHub Release input directory must contain only the verified npm archive, MCPB, catalog evidence, and SPDX SBOM",
   )
 
   const archivePath = join(root, archiveName)
+  const bundlePath = join(root, bundleName)
   const catalogPath = join(root, CATALOG_EVIDENCE_FILE)
   const sbomPath = join(root, SPDX_SBOM_FILE)
   const archive = await releaseAsset(archivePath)
+  const bundle = await releaseAsset(bundlePath)
   const catalog = await releaseAsset(catalogPath)
   const sbom = await releaseAsset(sbomPath)
   const npmIntegrity = sha512Integrity(await readFile(archivePath))
+  invariant(bundle.digest === mcpbDigest, "GitHub Release MCPB digest differs from registry metadata")
+
+  const bundleBytes = await readFile(bundlePath)
+  invariant(bundleBytes.length >= 4 && bundleBytes.readUInt32LE(0) === 0x04034b50, "GitHub Release MCPB is not a ZIP archive")
 
   const catalogDocument = await readJson(catalogPath)
   invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v2", "GitHub Release catalog evidence format is invalid")
@@ -199,21 +227,22 @@ export async function prepareGitHubReleaseEvidence({ directory, ociDigest, outpu
     "GitHub Release SBOM root package is missing",
   )
 
-  const notes = renderGitHubReleaseNotes({ npmIntegrity, ociDigest, revision, version })
+  const notes = renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, revision, version })
   const notesPath = join(root, RELEASE_NOTES_FILE)
   await writeFile(notesPath, notes, { flag: "wx" })
   const notesAsset = await releaseAsset(notesPath)
 
-  const checksums = renderSha256Sums([archive, catalog, notesAsset, sbom])
+  const checksums = renderSha256Sums([archive, bundle, catalog, notesAsset, sbom])
   const checksumPath = join(root, RELEASE_CHECKSUM_FILE)
   await writeFile(checksumPath, checksums, { flag: "wx" })
   const checksum = await releaseAsset(checksumPath)
-  const assets = [archive, catalog, notesAsset, sbom, checksum].sort(compareAssetNames)
+  const assets = [archive, bundle, catalog, notesAsset, sbom, checksum].sort(compareAssetNames)
   invariant(canonicalJson(assets.map(({ name }) => name)) === canonicalJson(expectedAssetNames(version)), "GitHub Release asset set is invalid")
 
   const evidence = {
     assets,
     format: RELEASE_EVIDENCE_FORMAT,
+    mcpbDigest,
     notesDigest: `sha256:${sha256(notes)}`,
     npmIntegrity,
     ociDigest,
@@ -259,6 +288,7 @@ function validateEvidence(evidence) {
   invariant(canonicalJson(Object.keys(evidence).sort()) === canonicalJson([
     "assets",
     "format",
+    "mcpbDigest",
     "notesDigest",
     "npmIntegrity",
     "ociDigest",
@@ -271,6 +301,7 @@ function validateEvidence(evidence) {
   assertVersion(evidence.version)
   assertRevision(evidence.revision)
   assertOciDigest(evidence.ociDigest)
+  invariant(/^sha256:[0-9a-f]{64}$/.test(evidence.mcpbDigest), "GitHub Release evidence MCPB digest is invalid")
   invariant(/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(evidence.npmIntegrity), "GitHub Release evidence npm integrity is invalid")
   invariant(/^sha256:[0-9a-f]{64}$/.test(evidence.notesDigest), "GitHub Release evidence notes digest is invalid")
   invariant(evidence.tag === releaseTag(evidence.version), "GitHub Release evidence tag is invalid")
@@ -288,6 +319,10 @@ function validateEvidence(evidence) {
   invariant(
     assets.find(({ name }) => name === RELEASE_NOTES_FILE)?.digest === evidence.notesDigest,
     "GitHub Release canonical notes digest is invalid",
+  )
+  invariant(
+    assets.find(({ name }) => name === mcpbArchiveName(evidence.version))?.digest === evidence.mcpbDigest,
+    "GitHub Release MCPB evidence digest is invalid",
   )
   return assets
 }
@@ -430,8 +465,14 @@ async function main(args) {
     invariant(options.ociDigest, "prepare requires --oci-digest")
     invariant(options.output, "prepare requires --output")
     invariant(options.revision, "prepare requires --revision")
+    const server = await readJson(join(REPOSITORY_ROOT, "server.json"))
+    const mcpbPackage = server.packages?.find(({ registryType }) => registryType === "mcpb")
+    invariant(mcpbPackage, "GitHub Release registry metadata does not declare MCPB")
+    invariant(mcpbPackage.identifier === mcpbReleaseUrl(version), "GitHub Release MCPB URL is invalid")
+    invariant(/^[0-9a-f]{64}$/.test(mcpbPackage.fileSha256), "GitHub Release registry MCPB digest is invalid")
     const evidence = await prepareGitHubReleaseEvidence({
       directory: options.directory,
+      mcpbDigest: `sha256:${mcpbPackage.fileSha256}`,
       ociDigest: options.ociDigest,
       output: options.output,
       revision: options.revision,

@@ -1,6 +1,6 @@
 # Product boundaries and host compatibility
 
-[Getting started](getting-started.md) | [Complete reference](reference.md) | [Project overview](../README.md) | [Support](../SUPPORT.md)
+[Getting started](getting-started.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md) | [Support](../SUPPORT.md)
 
 Discord MCP is designed for an operator-owned bot, a local stdio MCP host, exact least-privilege policy, transient Discord content, and review before consequential changes. This guide helps decide whether that model fits before a token is created, a host is configured, or a write capability is enabled.
 
@@ -15,7 +15,8 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Synchronize one exact child channel to its live parent category | Designed fit | A separate reviewed workflow replaces the complete overwrite set only after structural impact, connector authority, future propagation, and stopped-concurrency review |
 | Receive a private slash-command request and send bounded follow-ups without exposing Discord's Interaction credential to MCP | Designed fit | Exact allowlists, ephemeral responses, default token disposal, and rotating one-shot process-local continuations preserve custody through a fixed response sequence |
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
-| Use a local MCP host that can launch stdio and forward a secret reference | Designed fit | `host` emits a pinned model-neutral launch contract, four deterministic host adapters, and an optional private interactive activation guide |
+| Use a compatible one-click MCPB host with an environment-backed token policy | Designed fit | Import one deterministic cross-platform bundle, select the complete strict policy, and enter only the token through the host's sensitive prompt |
+| Use another local MCP host or a file-backed token policy | Designed fit | `host` emits a pinned model-neutral launch contract, deterministic host adapters, and an optional private interactive activation guide |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
 | Use a Discord user account or selfbot | Not supported | The connector accepts a Discord bot token and verifies the pinned application and bot identities |
@@ -36,6 +37,10 @@ Discord permissions remain the outer authority boundary. Local policy can only n
 
 ## MCP host compatibility
 
+The one-click MCPB path requires a host that implements manifest version 0.3, local file selection, sensitive string input, stdio launch, and the declared Node.js runtime. The same bundle supports macOS, Windows, and Linux. Its form does not duplicate policy fields: the selected strict config remains the only source for identity, scope, tools, capabilities, writes, Gateway, storage, and observability. The prompted token is mapped in memory only to the exact environment variable declared by that policy. The bundle refuses a file-backed credential policy because replacing that custody contract with an interactive secret would be an unsafe implicit migration.
+
+MCPB compatibility is a host capability, not a universal MCP requirement. The project verifies its own manifest, archive, unpacked runtime, and stdio catalogs, but cannot guarantee that every host implements MCPB inputs, file pickers, sensitive-value retention, Node.js discovery, approval, or elicitation correctly. The host and its secret store remain inside the operator's trust boundary. Use the generated adapter path when the host does not support the bundle or the policy deliberately uses a protected token file.
+
 `host --npx --config FILE --html PRIVATE_FILE` validates one policy without reading its credential and produces the canonical compatibility contract plus adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. Every adapter binds its exact JSON, destination guidance, secret strategy, requirements, limitations, and official schema source to the activation digest through its own digest. The optional mode-0600 interactive guide shows all four projections, supplies copy controls and a read-only verification request, and states its own limitations. The command intentionally does not contact Discord or the network, start a process, discover or edit a host, or open a browser. The private artifact contains Discord identifiers and may contain local paths or an encoded Cursor install URI, so it must not be shared or committed.
 
 | Generated adapter | Supported handoff | Important boundary |
@@ -49,6 +54,7 @@ Discord permissions remain the outer authority boundary. Local policy can only n
 
 | Host capability | Requirement | Behavior when absent or incomplete |
 | --- | --- | --- |
+| MCPB manifest 0.3, file selection, and sensitive string input | Required only for one-click import | Use the generated host adapter without changing the selected policy or placing a token in static JSON |
 | Local process execution over stdio | Required | The connector exposes no Streamable HTTP or hosted transport |
 | Node.js 22 or newer and the exact generated command and arguments | Required | Use `smoke --config FILE` to separate package or stdio failure from host translation failure |
 | Forwarding the named environment secret or preserving access to a referenced private credential file | Required | Startup fails without falling back to another token or legacy policy source |
@@ -110,6 +116,7 @@ These are architectural boundaries, not a backlog promise. A future capability n
 | `doctor --config FILE --online` | Pinned application and bot identity, bounded guild membership, and application posture through documented read-only calls | Message visibility, every feature permission, a host launch, or any Discord write |
 | `smoke --config FILE` | The selected packaged stdio entrypoint negotiates MCP, exposes the expected catalogs, starts configured optional runtimes, and completes its documented read-only identity path | Correct translation into a third-party host or every operational tool |
 | `host --npx --config FILE --html PRIVATE_FILE` | One exact credential-free policy-to-stdio mapping, private guide bytes, and a read-only host verification request | Correct host-specific translation, credential availability, process startup, Discord access, or host approval behavior |
+| Verified MCPB plus its checksum and attestation | Exact deterministic bundle structure, embedded dependency and privacy evidence, isolated token mapping, and an unpacked stdio catalog handshake | A particular host's import behavior, token retention, approval UX, Discord access, or freedom from software defects |
 | Default automated tests and coverage | Deterministic contracts against injected transports, malformed evidence, policy boundaries, and failure cases without contacting Discord | Universal correctness against Discord's live service or every host implementation |
 | Package and container verification | Reproducible contents, safe packaged startup, contract identity, and documented runtime constraints | Live Discord behavior or absence of software defects |
 | Provenance, SBOMs, and attestations | Artifact origin, build inputs and process claims, component inventories, and digest bindings within their documented trust model | Security certification, vulnerability absence, license compliance, or completeness |

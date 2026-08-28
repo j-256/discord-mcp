@@ -278,6 +278,11 @@ const FULL_DOCUMENTS = Object.freeze([
     source: "docs/limitations.md",
   },
   {
+    description: "Credential custody, Discord-data handling, local records, observability, operator controls, and deletion",
+    route: "understand/privacy",
+    source: "PRIVACY.md",
+  },
+  {
     description: "Dated source-audited comparison of operator outcomes across the Discord MCP field",
     route: "understand/comparison",
     source: "docs/comparison.md",
@@ -619,6 +624,7 @@ Documentation: ${DOCUMENTATION_URL}/
 - [Choose your path](${DOCUMENTATION_URL}/start/choose/): Route to setup, fit, recovery, verification, or contribution
 - [First verified read](${DOCUMENTATION_URL}/start/getting-started/): Linear owner-managed bot setup with a read-only first outcome
 - [Fit and boundaries](${DOCUMENTATION_URL}/understand/boundaries/): Custody, privacy, compatibility, and operational constraints
+- [Privacy policy](${DOCUMENTATION_URL}/understand/privacy/): Credential, Discord-data, local-record, observability, and deletion boundaries
 - [Field comparison](${DOCUMENTATION_URL}/understand/comparison/): Dated head-to-head rubric with direct released-source evidence
 
 ## Safety and operation
@@ -778,6 +784,7 @@ async function main() {
     "README.md",
     "docs/getting-started.md",
     "docs/limitations.md",
+    "PRIVACY.md",
     "docs/comparison.md",
     "docs/reference.md",
     "SECURITY.md",

@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -19,7 +19,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 | Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Plan review | Every plan tool returns complete text and structured evidence and can add display-only, authority-free review in MCP Apps hosts |
-| Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible package and hardened OCI checks, an SPDX SBOM, signed-release automation, and source-bound public documentation |
+| Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible npm and MCPB artifacts, hardened OCI checks, embedded and external SPDX evidence, signed-release automation, and source-bound public documentation |
 
 Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. Read [product boundaries and host compatibility](docs/limitations.md) to decide whether the custody, privacy, approval, and recovery model fits. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and workflow-specific limitation.
 
@@ -33,6 +33,7 @@ Requirements:
 - A Discord application with a bot user
 - One strict non-secret JSON policy file
 - The bot token available through an environment variable or protected file
+- A local stdio MCP host, with one-click MCPB import available in compatible hosts
 - Only the Discord permissions needed for the selected read or reviewed-write scope
 
 Each deployment uses a Discord application and bot controlled by that operator. Discord MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
@@ -105,11 +106,17 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
   --token-file /run/secrets/discord_bot_token
 ```
 
-The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup stores public IDs and a credential reference, never the token. The credential-free `host` command turns that policy into an exact pinned stdio contract plus deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. Its private guide adds safe secret references, digests, requirements, verification, and recovery without host mutation. Use `--adapter ID` for one terminal projection or `--json` for the complete catalog. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation.
+The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup stores public IDs and a credential reference, never the token. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation.
 
 The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or migration mode. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
+
+### Connect with the one-click bundle or a generated adapter
+
+After `smoke` succeeds, compatible MCPB hosts can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
+
+For a file-backed token or another host, `host` produces one credential-free activation contract plus deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers both paths and release verification.
 
 Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, effective read-response budget, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
 
@@ -131,9 +138,7 @@ npx --yes @j-256/discord-mcp@0.1.2 config apply \
   --confirm ACTIVE_POLICY_NAME
 ```
 
-The optional workbench validates the active schema-v2 document, then writes an exclusive private standalone editor. It embeds the complete non-secret policy, including public Discord IDs, local paths, and external secret reference names, so treat the HTML as private. Edits stay in browser memory until an explicit candidate download. The page has no secret field, network or external navigation authority, browser persistence, Discord access, active-file write, or approval authority, and it does not open a browser automatically. Its local checks and preliminary impact labels are guidance only.
-
-Planning remains authoritative. It reads two protected non-secret documents and reports every exact field change, its authority or operational impact, canonical tool additions and removals, warnings, both document digests, the complete candidate, and structured post-application checks. It never resolves a referenced secret or contacts Discord. Application rereads both files, requires the exact digest and active-policy-name confirmation, rejects identity drift or either stale document, preserves a recoverable backup, and leaves the candidate untouched. The active document remains the only policy source; there is no legacy environment fallback or migration layer.
+The private standalone workbench keeps edits in browser memory until explicit candidate download and has no secret field, network, persistence, Discord, active-file write, or approval authority. Planning remains authoritative: it reports exact changes and impacts without resolving a secret or contacting Discord. Application rereads both files, requires the fresh digest and policy-name confirmation, rejects identity or file drift, and preserves a recoverable backup. The active document remains the only policy source.
 
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
@@ -143,7 +148,7 @@ npx --yes @j-256/discord-mcp@0.1.2 activity \
   --html ./discord-mcp-activity.html
 ```
 
-The bounded review collapses each activity ID into its newest current outcome while retaining older records as superseded history. Pending, uncertain, failed, drifted, malformed, and review-required evidence produces warning exit status instead of looking like a clean run. Matching reviewed operations are joined to durable claims only through both their content-free operation-key hash and plan digest, while claims without a match in the bounded window remain explicitly labeled. The digest binds the exact collected report, while its independent-read marker avoids implying that separate local files were captured under one global state lock. The optional private standalone explorer adds search and filters but cannot contact Discord, resolve a claim, retry an operation, persist browser state, or expose the selected activity-file path. Use the separate exact-confirmation `coordination resolve` command only after stopping the owning process and checking the exact Discord state and audit log.
+The bounded review collapses each activity into its newest outcome, retains superseded history, joins durable claims only through content-free digests, and warns on every unsettled state. Its optional private explorer adds search and filters but cannot contact Discord, resolve a claim, retry an operation, or persist browser state. Use `coordination resolve` only after stopping the owner and checking the exact Discord state and audit log.
 
 Feature policy uses the same document shape. Bulk bans, bulk member-role changes, guild pruning, and other reviewed features each have separate capabilities, exact scopes, bounded limits, and documented toolsets. Single-member authority never grants batch authority. No environment-policy interface, legacy alias, fallback parser, or migration layer exists.
 
@@ -261,11 +266,12 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
+| `npm run mcpb:verify` | Byte-identical cross-platform bundles, strict ZIP metadata and contents, embedded evidence, Registry hash binding, isolated token mapping, and a real unpacked MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
 `catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, tool access lifecycles, policy-completion bindings, tool schemas and annotations, prompts, resources, templates, safety response, review app, and execution guard.
 
-Release automation verifies reproducible npm and OCI artifacts, SPDX inventories, and signed provenance, then publishes an immutable GitHub Release binding its tag, commit, and evidence. Provenance is a build receipt, an SBOM a parts list, and an attestation their exact artifact-and-issuer binding; none certifies security or completeness. See the [evidence boundaries](docs/reference.md#provenance-sbom-and-attestation-boundaries) and [release runbook](docs/releasing.md).
+Release automation verifies reproducible npm and MCPB artifacts, a hardened multi-architecture OCI image, SPDX inventories, and signed provenance, then publishes an immutable GitHub Release before registering the exact public MCPB digest. Provenance is a build receipt, an SBOM a parts list, and an attestation their exact artifact-and-issuer binding; none certifies security or completeness. See the [evidence boundaries](docs/reference.md#provenance-sbom-and-attestation-boundaries) and [release runbook](docs/releasing.md).
 
 ## Architecture
 
@@ -281,6 +287,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 - [Source-audited field comparison](docs/comparison.md)
 - [Complete operator and capability reference](docs/reference.md)
 - [Setup and operator support](SUPPORT.md)
+- [Privacy policy](PRIVACY.md)
 - [Security model and reporting](SECURITY.md)
 - [Release and independent verification runbook](docs/releasing.md)
 - [MCP Registry manifest](server.json)
@@ -298,6 +305,7 @@ npm test
 npm run test:coverage
 npm run build
 npm run pack:verify
+npm run mcpb:verify
 npm run container:verify
 npm run container:index:verify
 npm run security:check

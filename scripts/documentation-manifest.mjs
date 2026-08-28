@@ -16,6 +16,7 @@ export const DOCUMENTATION_CONTENT_PATHS = Object.freeze([
   "README.md",
   "docs/getting-started.md",
   "docs/limitations.md",
+  "PRIVACY.md",
   "docs/comparison.md",
   "SUPPORT.md",
   "docs/releasing.md",

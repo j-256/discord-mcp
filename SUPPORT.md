@@ -1,6 +1,6 @@
 # Support
 
-Discord MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation. Check [product boundaries and host compatibility](docs/limitations.md) before filing a setup issue or enabling a write capability.
+Discord MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation. Check [product boundaries and host compatibility](docs/limitations.md) and the [privacy policy](PRIVACY.md) before filing a setup issue or enabling a write capability.
 
 ## Start with offline evidence
 
@@ -11,6 +11,8 @@ discord-mcp config validate FILE
 discord-mcp doctor --config FILE
 discord-mcp catalog --check --json
 ```
+
+If MCPB import fails before startup, confirm that the host supports manifest version 0.3, Node.js 22 or newer, local file selection, and sensitive string input. Keep the token out of the selected config. A file-backed credential policy is intentionally incompatible with the bundle's prompted secret; preserve that policy and use the adapter path.
 
 If an MCP host reports that the connection closed during initialization, run `discord-mcp host --npx --config FILE --html PRIVATE_FILE` and choose the guide's common MCP JSON, Cursor, VS Code, or Gemini CLI projection. For terminal-only inspection, append the matching `--adapter ID`. Compare the host's exact command, ordered arguments, secret references, transport, requirements, and timeouts with that digest-bound projection. Do not attach the guide, adapter JSON, or Cursor install URI to an issue because they contain Discord identifiers and may contain local paths. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/cli.js serve --config FILE`, while a pinned published launch uses `npx --yes @j-256/discord-mcp@VERSION serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output. The [ordered recovery ladder](docs/getting-started.md#recovery-ladder) separates policy, credential, Discord, stdio, and host failures.
 

@@ -11,8 +11,8 @@ on:
           - candidate
           - stage
           - image
-          - register
           - github-release
+          - register
       tag:
         description: Exact stable release tag such as vMAJOR.MINOR.PATCH
         required: true
@@ -112,8 +112,17 @@ jobs:
           set -- "$RUNNER_TEMP"/release/*.tgz
           test "$#" -eq 1
           test -f "$1"
+          tarball="$1"
           test -f "$RUNNER_TEMP/release/catalog-evidence.json"
-          printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
+          node scripts/build-mcpb.mjs \
+            --catalog-evidence "$RUNNER_TEMP/release/catalog-evidence.json" \
+            --output "$RUNNER_TEMP/release"
+          set -- "$RUNNER_TEMP"/release/*.mcpb
+          test "$#" -eq 1
+          test -f "$1"
+          mcpb="$1"
+          printf 'MCPB=%s\n' "$mcpb" >> "$GITHUB_ENV"
+          printf 'TARBALL=%s\n' "$tarball" >> "$GITHUB_ENV"
           printf 'CATALOG_EVIDENCE=%s\n' "$RUNNER_TEMP/release/catalog-evidence.json" >> "$GITHUB_ENV"
 
       - name: Require a clean first-publication candidate
@@ -158,12 +167,22 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ env.CATALOG_EVIDENCE }}
+      - name: Attest reproducible MCPB
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.MCPB }}
+      - name: Attest MCPB SPDX SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.MCPB }}
+          sbom-path: ${{ runner.temp }}/release/sbom.spdx.json
       - name: Retain candidate for review
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-evidence-${{ inputs.operation }}-${{ inputs.tag }}
           path: |
             ${{ env.TARBALL }}
+            ${{ env.MCPB }}
             ${{ env.CATALOG_EVIDENCE }}
             ${{ runner.temp }}/release/sbom.spdx.json
           if-no-files-found: error
@@ -201,7 +220,28 @@ jobs:
             --json > "$state_file"
           cat "$state_file"
           registry_state="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).registryVersion" "$state_file")"
+          oci_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).ociDigest" "$state_file")"
           printf 'REGISTRY_STATE=%s\n' "$registry_state" >> "$GITHUB_ENV"
+          printf 'OCI_DIGEST=%s\n' "$oci_digest" >> "$GITHUB_ENV"
+      - name: Verify exact immutable GitHub Release before registration
+        if: ${{ inputs.operation == 'register' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          evidence="$RUNNER_TEMP/register-release-evidence.json"
+          node scripts/github-release.mjs prepare \
+            --directory "$RUNNER_TEMP/release" \
+            --oci-digest "$OCI_DIGEST" \
+            --revision "$GITHUB_SHA" \
+            --output "$evidence"
+          node scripts/github-release.mjs verify \
+            --directory "$RUNNER_TEMP/release" \
+            --evidence "$evidence" \
+            --expect immutable \
+            --revision "$GITHUB_SHA" \
+            --json > "$RUNNER_TEMP/register-release-verification.json"
+          cat "$RUNNER_TEMP/register-release-verification.json"
       - name: Authenticate to MCP Registry
         if: ${{ inputs.operation == 'register' && env.REGISTRY_STATE == 'missing' }}
         run: |
@@ -228,6 +268,17 @@ jobs:
             attempt=$((attempt + 1))
             sleep 10
           done
+      - name: Retain registration verification
+        if: ${{ inputs.operation == 'register' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: registry-verification-${{ inputs.tag }}
+          path: |
+            ${{ runner.temp }}/published-state.json
+            ${{ runner.temp }}/register-release-evidence.json
+            ${{ runner.temp }}/register-release-verification.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Verify complete public distribution for GitHub Release
         if: ${{ inputs.operation == 'github-release' }}
@@ -239,7 +290,7 @@ jobs:
             --expect-package matching \
             --expect-npm matching \
             --expect-oci matching \
-            --expect-registry matching
+            --expect-registry missing-or-matching
 
   github_release:
     name: github-release ${{ inputs.tag }}
@@ -307,7 +358,7 @@ jobs:
             --expect-package matching \
             --expect-npm matching \
             --expect-oci matching \
-            --expect-registry matching \
+            --expect-registry missing-or-matching \
             --json > "$state_file"
           cat "$state_file"
           oci_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).ociDigest" "$state_file")"
@@ -383,6 +434,7 @@ jobs:
           gh release upload "$RELEASE_TAG" \
             "$RUNNER_TEMP/release/SHA256SUMS" \
             "$RUNNER_TEMP/release/catalog-evidence.json" \
+            "$RUNNER_TEMP/release/discord-mcp-${RELEASE_TAG#v}.mcpb" \
             "$RUNNER_TEMP/release/j-256-discord-mcp-${RELEASE_TAG#v}.tgz" \
             "$RUNNER_TEMP/release/release-notes.md" \
             "$RUNNER_TEMP/release/sbom.spdx.json" \
@@ -450,6 +502,7 @@ jobs:
           for name in \
             SHA256SUMS \
             catalog-evidence.json \
+            "discord-mcp-${RELEASE_TAG#v}.mcpb" \
             "j-256-discord-mcp-${RELEASE_TAG#v}.tgz" \
             release-notes.md \
             sbom.spdx.json
