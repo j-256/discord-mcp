@@ -6,7 +6,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://j-256.github.io/discord-mcp/) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
+[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Security](SECURITY.md)
 
 ## Why this connector
 
@@ -41,7 +41,7 @@ Do not grant the bot `Administrator`. Generate the exact initial permission gran
 
 ### Optional preflight: inspect without credentials
 
-For an exact published version, inspect the real production contract and the recommended read-only preset without a token or Discord request:
+Inspect an exact release and its read-only preset without a token or Discord request:
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.2 catalog --check
@@ -49,7 +49,7 @@ npx --yes @j-256/discord-mcp@0.1.2 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.2 preset show server-observer
 ```
 
-`catalog --check` negotiates the credential-free, execution-disabled production contract and verifies that every tool call is blocked. `catalog --html FILE` writes a deterministic standalone explorer for the same tools, access lifecycles, prompts, resources, schemas, completion routes, plan-review app, and digests without an external asset, network request, credential, or identifier completion value.
+`catalog --check` verifies the credential-free, execution-disabled production contract. `catalog --html FILE` adds a release-exact inspect-to-recovery tour to the complete offline explorer, binds each live stage to negotiated evidence, states what remains unproven, and uses no external asset, runtime request, credential, or completion ID.
 
 ### Install your owner-managed bot
 
@@ -245,7 +245,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | Command | What it proves | Discord access |
 | --- | --- | --- |
 | `discord-mcp catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
-| `discord-mcp catalog --html FILE` | Searchable standalone rendering of that exact negotiated contract, including schemas, workflow and risk filters, completion routes, app source, instructions, resources, and safety guidance | None |
+| `discord-mcp catalog --html FILE` | Guided product tour and searchable rendering of the exact negotiated contract, including schemas, filters, completions, app source, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
 | `discord-mcp config workbench ACTIVE --html FILE` | Private offline in-memory editor and explicit candidate download for one validated schema-v2 policy, with no active-file write or approval authority | None |
