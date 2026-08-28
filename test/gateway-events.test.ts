@@ -110,6 +110,10 @@ test("Gateway events are disabled by default and enforce bounded reads", () => {
       privilegedIntentsRequested: false,
     },
     projections: {
+      soundboardPlayback: {
+        enabled: false,
+        scopedChannels: 0,
+      },
       voiceChannelStatus: {
         enabled: false,
         scopedChannels: 0,

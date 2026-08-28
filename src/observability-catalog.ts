@@ -1,5 +1,6 @@
 export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   add_reaction: "interaction-write",
+  check_soundboard_playback: "discord-read",
   analyze_community_activity: "discord-read",
   audit_application_commands: "discord-read",
   audit_application_entitlements: "discord-read",
@@ -189,6 +190,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   plan_guild_expression_change: "discord-read",
   plan_guild_incident_action_change: "discord-read",
   plan_guild_soundboard_change: "discord-read",
+  play_soundboard_sound: "interaction-write",
   plan_guild_template_change: "discord-read",
   plan_guild_integration_deletion: "discord-read",
   plan_guild_departure: "discord-read",
@@ -271,6 +273,7 @@ export const DISCORD_REST_OPERATIONS = Object.freeze({
   create_guild_sticker: "POST",
   create_guild_template: "POST",
   create_guild_soundboard_sound: "POST",
+  send_soundboard_sound: "POST",
   create_guild_scheduled_event: "POST",
   create_attachment_message: "POST",
   create_component_message: "POST",

@@ -383,6 +383,10 @@ import {
   DisabledGatewayVoiceChannelStatusSource,
   type GatewayVoiceChannelStatusSource,
 } from "./gateway-voice-channel-status.js"
+import {
+  DisabledGatewaySoundboardEffectSource,
+  type GatewaySoundboardEffectSource,
+} from "./gateway-soundboard-effect.js"
 import type {
   ForumPostPlan,
   ForumPostRequest,
@@ -705,6 +709,17 @@ import {
   SoundboardService,
 } from "./soundboard-service.js"
 import type {
+  SoundboardPlaybackCheckRequest,
+  SoundboardPlaybackReadiness,
+  SoundboardPlaybackRequest,
+  SoundboardPlaybackResult,
+  SoundboardPlaybackServiceOptions,
+} from "./soundboard-playback-service.js"
+import {
+  SoundboardPlaybackService,
+  soundboardPlaybackIntentKey,
+} from "./soundboard-playback-service.js"
+import type {
   StageInstanceChangeRequest,
   StageInstanceInventoryResult,
   StageInstanceLookupResult,
@@ -918,6 +933,7 @@ export interface DiscordServiceClient {
   createGuildRole: DiscordClient["createGuildRole"]
   createGuildScheduledEvent: DiscordClient["createGuildScheduledEvent"]
   createGuildSoundboardSound: DiscordClient["createGuildSoundboardSound"]
+  sendSoundboardSound: DiscordClient["sendSoundboardSound"]
   createGuildSticker: DiscordClient["createGuildSticker"]
   createGuildTemplate: DiscordClient["createGuildTemplate"]
   createStageInstance: DiscordClient["createStageInstance"]
@@ -1221,7 +1237,9 @@ export interface ConnectorServiceOptions {
     ForumTagServiceOptions,
     "clock" | "planKey" | "randomId"
   >
-  gateway?: GatewayChannelLayoutSource & Partial<GatewayVoiceChannelStatusSource>
+  gateway?: GatewayChannelLayoutSource
+    & Partial<GatewaySoundboardEffectSource>
+    & Partial<GatewayVoiceChannelStatusSource>
   guildScaffoldOptions?: Pick<
     GuildScaffoldServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1336,6 +1354,10 @@ export interface ConnectorServiceOptions {
     SoundboardServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  soundboardPlaybackOptions?: Pick<
+    SoundboardPlaybackServiceOptions,
+    "clock" | "randomId"
+  >
   stageInstanceOptions?: Pick<
     StageInstanceServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1430,6 +1452,18 @@ function voiceChannelStatusSource(
     && typeof candidate.waitForVoiceChannelStatusUpdate === "function"
   ) return candidate as GatewayChannelLayoutSource & GatewayVoiceChannelStatusSource
   return new DisabledGatewayVoiceChannelStatusSource()
+}
+
+function soundboardPlaybackSource(
+  gateway: GatewayChannelLayoutSource,
+): GatewaySoundboardEffectSource {
+  const candidate = gateway as GatewayChannelLayoutSource
+    & Partial<GatewaySoundboardEffectSource>
+  if (
+    typeof candidate.soundboardPlaybackEventsEnabled === "boolean"
+    && typeof candidate.waitForSoundboardPlaybackEvent === "function"
+  ) return candidate as GatewayChannelLayoutSource & GatewaySoundboardEffectSource
+  return new DisabledGatewaySoundboardEffectSource()
 }
 
 const DIRECT_MESSAGE_CLIENT_METHODS = [
@@ -1587,6 +1621,7 @@ export class ConnectorService {
   readonly #roleOrderingService: RoleOrderingService
   readonly #scheduledEventService: ScheduledEventService
   readonly #soundboardService: SoundboardService
+  readonly #soundboardPlaybackService: SoundboardPlaybackService
   readonly #stageInstanceService: StageInstanceService
   readonly #threadCreationService: ThreadCreationService
   readonly #threadGovernanceService: ThreadGovernanceService
@@ -1612,6 +1647,7 @@ export class ConnectorService {
       guildIds: new Set(),
     })
     const voiceChannelStatusGateway = voiceChannelStatusSource(gateway)
+    const soundboardPlaybackGateway = soundboardPlaybackSource(gateway)
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
     )
@@ -2036,6 +2072,16 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.soundboardOptions,
+    })
+    this.#soundboardPlaybackService = new SoundboardPlaybackService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      gateway: soundboardPlaybackGateway,
+      intentKey: soundboardPlaybackIntentKey(options.config.token),
+      limiter: interactionLimiter,
+      operationStore,
+      policy: this.#policy,
+      ...options.soundboardPlaybackOptions,
     })
     this.#stageInstanceService = new StageInstanceService({
       activityStore: this.#activityStore,
@@ -3652,6 +3698,19 @@ export class ConnectorService {
       identity.bot.id,
       guildId,
       soundId,
+      options,
+    )
+  }
+
+  async checkSoundboardPlayback(
+    request: SoundboardPlaybackCheckRequest,
+    options: RequestOptions = {},
+  ): Promise<SoundboardPlaybackReadiness> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#soundboardPlaybackService.check(
+      identity.application.id,
+      identity.bot.id,
+      request,
       options,
     )
   }
@@ -6879,6 +6938,40 @@ export class ConnectorService {
         identity.bot.id,
         request,
         planDigest,
+        options,
+      ),
+    )
+  }
+
+  async playSoundboardSound(
+    request: SoundboardPlaybackRequest,
+    options: RequestOptions = {},
+  ): Promise<SoundboardPlaybackResult> {
+    const expectedApplicationId = this.#config.expectedApplicationId
+    const expectedBotId = this.#config.expectedBotId
+    if (expectedApplicationId && expectedBotId) {
+      const replay = await this.#soundboardPlaybackService.replay(
+        expectedApplicationId,
+        expectedBotId,
+        request,
+      )
+      if (replay) return replay
+    }
+    const identity = await this.#verifyIdentity(options)
+    const requestDigest = this.#soundboardPlaybackService.requestDigest(
+      identity.application.id,
+      identity.bot.id,
+      request,
+    )
+    return this.#coordinateWrite(
+      "soundboard-playback",
+      request.operationKey,
+      requestDigest,
+      [writeResourceTarget("channel", request.channelId)],
+      () => this.#soundboardPlaybackService.play(
+        identity.application.id,
+        identity.bot.id,
+        request,
         options,
       ),
     )

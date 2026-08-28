@@ -1,12 +1,12 @@
 import type { ConnectorConfig } from "./config.js"
 import {
+  CONNECTOR_LIMITS,
   DISCORD_GATEWAY_INTENT_MASK,
   DISCORD_GATEWAY_INTENTS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   GATEWAY_DEFAULTS,
 } from "./constants.js"
-import { GatewayVoiceChannelStatusError } from "./errors.js"
 import type {
   GatewayChannelLayoutListener,
   GatewayChannelLayoutSnapshot,
@@ -54,11 +54,26 @@ import {
   type GatewayVoiceChannelStatusSource,
   type GatewayVoiceChannelStatusUpdate,
 } from "./gateway-voice-channel-status.js"
+import {
+  projectGatewaySoundboardEffect,
+  soundboardEffectTarget,
+  soundboardPlaybackChannelIds,
+  type GatewaySoundboardEffectEvidence,
+  type GatewaySoundboardEffectRequestOptions,
+  type GatewaySoundboardEffectSource,
+} from "./gateway-soundboard-effect.js"
+import {
+  GatewaySoundboardEffectError,
+  GatewayVoiceChannelStatusError,
+} from "./errors.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 
 export type { GatewayScheduler, GatewaySocket } from "./gateway-shard-session.js"
 
-export interface GatewayRuntime extends GatewayEventSource, GatewayVoiceChannelStatusSource {
+export interface GatewayRuntime extends
+  GatewayEventSource,
+  GatewaySoundboardEffectSource,
+  GatewayVoiceChannelStatusSource {
   start(): Promise<void>
   stop(): Promise<void>
 }
@@ -98,6 +113,8 @@ export interface DiscordGatewayOptions {
     | "memberRoleGuildIds"
     | "nativeInteractionGuildIds"
     | "onboardingGuildIds"
+    | "allowSoundboardPlayback"
+    | "soundboardPlaybackChannelIds"
   >>
   discoverGateway: (signal: AbortSignal) => Promise<GatewayBotDiscovery>
   discoverGatewayChannel: (
@@ -131,6 +148,18 @@ interface PendingVoiceChannelStatusUpdate {
   resolve: (snapshot: GatewayVoiceChannelStatusUpdate) => void
   signal?: AbortSignal
   timeoutHandle: unknown
+}
+
+interface PendingSoundboardPlaybackEvent {
+  abortListener?: () => void
+  channelId: string
+  guildId: string
+  reject: (error: Error) => void
+  resolve: (evidence: GatewaySoundboardEffectEvidence) => void
+  signal?: AbortSignal
+  soundId: string
+  timeoutHandle: unknown
+  userId: string
 }
 
 const GATEWAY_OPCODES = Object.freeze({
@@ -244,6 +273,15 @@ function voiceChannelStatusTargetKey(guildId: string, channelId: string): string
   return `${guildId}\0${channelId}`
 }
 
+function soundboardPlaybackEventTargetKey(
+  guildId: string,
+  channelId: string,
+  userId: string,
+  soundId: string,
+): string {
+  return `${guildId}\0${channelId}\0${userId}\0${soundId}`
+}
+
 function dispatchGuildId(name: string, data: unknown): string | null | undefined {
   const record = recordValue(data)
   if (!record) return undefined
@@ -275,6 +313,11 @@ export class DiscordGateway implements GatewayRuntime {
   readonly #pendingChannelInfo = new Map<string, PendingChannelInfo>()
   readonly #random: () => number
   readonly #routeChannelIds: ReadonlySet<string>
+  readonly #soundboardPlaybackChannelIds: ReadonlySet<string>
+  readonly #soundboardPlaybackEventWaiters = new Map<
+    string,
+    Set<PendingSoundboardPlaybackEvent>
+  >()
   #running = false
   readonly #scheduler: GatewayScheduler
   readonly #sessions = new Map<number, GatewayShardSession>()
@@ -291,6 +334,7 @@ export class DiscordGateway implements GatewayRuntime {
     Set<PendingVoiceChannelStatusUpdate>
   >()
   readonly #webSocketFactory: (url: string) => GatewaySocket
+  readonly soundboardPlaybackEventsEnabled: boolean
   readonly voiceChannelStatusEnabled: boolean
 
   constructor(options: DiscordGatewayOptions) {
@@ -327,10 +371,16 @@ export class DiscordGateway implements GatewayRuntime {
       channelMetadataIds: options.config.channelMetadataIds ?? new Set(),
     })
     const voiceChannelStatusEnabled = voiceChannelStatusIds.size > 0
+    const soundboardPlaybackIds = soundboardPlaybackChannelIds({
+      allowSoundboardPlayback: options.config.allowSoundboardPlayback ?? false,
+      soundboardPlaybackChannelIds: options.config.soundboardPlaybackChannelIds ?? new Set(),
+    })
+    const soundboardPlaybackEventsEnabled = soundboardPlaybackIds.size > 0
     const nativeInteractionsEnabled = options.config.allowNativeInteractions === true
     const connectionEnabled = options.config.allowGateway
       || layoutGuildIds.size > 0
       || nativeInteractionsEnabled
+      || soundboardPlaybackEventsEnabled
       || voiceChannelStatusEnabled
     const knownGuildIds = new Set(layoutGuildIds)
     const routeChannelIds = new Set<string>()
@@ -347,6 +397,7 @@ export class DiscordGateway implements GatewayRuntime {
       }
     }
     for (const channelId of voiceChannelStatusIds) routeChannelIds.add(channelId)
+    for (const channelId of soundboardPlaybackIds) routeChannelIds.add(channelId)
     if (connectionEnabled && knownGuildIds.size === 0 && routeChannelIds.size === 0) {
       throw new RangeError("Enabled Discord Gateway requires exact routing scope")
     }
@@ -364,6 +415,7 @@ export class DiscordGateway implements GatewayRuntime {
       enabled: connectionEnabled,
       eventFeedEnabled: options.config.allowGateway,
       layoutGuildIds,
+      soundboardPlaybackChannelCount: soundboardPlaybackIds.size,
       voiceChannelStatusChannelCount: voiceChannelStatusIds.size,
     })
     if (
@@ -372,6 +424,8 @@ export class DiscordGateway implements GatewayRuntime {
       || this.#eventStore.getChannelLayoutStatus().guilds.scoped !== layoutGuildIds.size
       || this.#eventStore.getStatus().projections.voiceChannelStatus.scopedChannels
         !== voiceChannelStatusIds.size
+      || this.#eventStore.getStatus().projections.soundboardPlayback.scopedChannels
+        !== soundboardPlaybackIds.size
     ) {
       throw new RangeError("Gateway runtime and event store enabled states must match")
     }
@@ -387,6 +441,8 @@ export class DiscordGateway implements GatewayRuntime {
     this.#random = options.random || Math.random
     this.#routeChannelIds = routeChannelIds
     this.#scheduler = options.scheduler || defaultScheduler()
+    this.#soundboardPlaybackChannelIds = new Set(soundboardPlaybackIds)
+    this.soundboardPlaybackEventsEnabled = soundboardPlaybackEventsEnabled
     this.#token = options.config.token
     this.#voiceChannelStatusIds = new Set(voiceChannelStatusIds)
     this.voiceChannelStatusEnabled = voiceChannelStatusEnabled
@@ -498,6 +554,65 @@ export class DiscordGateway implements GatewayRuntime {
     })
   }
 
+  waitForSoundboardPlaybackEvent(
+    guildId: string,
+    channelId: string,
+    userId: string,
+    soundId: string,
+    options: GatewaySoundboardEffectRequestOptions = {},
+  ): Promise<GatewaySoundboardEffectEvidence> {
+    try {
+      this.#assertSoundboardPlaybackTarget(guildId, channelId, userId, soundId)
+      this.#requireReadySoundboardPlaybackSession(guildId, channelId)
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    if (options.signal?.aborted) {
+      return Promise.reject(new GatewaySoundboardEffectError(
+        "Discord Gateway soundboard playback evidence was cancelled",
+      ))
+    }
+    return new Promise<GatewaySoundboardEffectEvidence>((resolve, reject) => {
+      let pending: PendingSoundboardPlaybackEvent
+      const timeoutHandle = this.#scheduler.setTimeout(() => {
+        this.#finishSoundboardPlaybackEvent(
+          pending,
+          new GatewaySoundboardEffectError(
+            "Discord Gateway soundboard playback evidence timed out",
+          ),
+        )
+      }, CONNECTOR_LIMITS.soundboardPlaybackEventTimeoutMs)
+      pending = {
+        channelId,
+        guildId,
+        reject,
+        resolve,
+        ...(options.signal ? { signal: options.signal } : {}),
+        soundId,
+        timeoutHandle,
+        userId,
+      }
+      if (options.signal) {
+        pending.abortListener = () => this.#finishSoundboardPlaybackEvent(
+          pending,
+          new GatewaySoundboardEffectError(
+            "Discord Gateway soundboard playback evidence was cancelled",
+          ),
+        )
+        options.signal.addEventListener("abort", pending.abortListener, { once: true })
+      }
+      const key = soundboardPlaybackEventTargetKey(
+        guildId,
+        channelId,
+        userId,
+        soundId,
+      )
+      const waiters = this.#soundboardPlaybackEventWaiters.get(key) ?? new Set()
+      waiters.add(pending)
+      this.#soundboardPlaybackEventWaiters.set(key, waiters)
+    })
+  }
+
   async start(): Promise<void> {
     if (!this.enabled || this.#running) return
     this.#running = true
@@ -571,11 +686,14 @@ export class DiscordGateway implements GatewayRuntime {
       shardIds: topology.activeShardIds,
     })
     this.#identifyCoordinator = identifyCoordinator
-    const intents = this.#eventFeedEnabled
+    const baseIntents = this.#eventFeedEnabled
       ? DISCORD_GATEWAY_INTENT_MASK
       : this.#eventStore.guildIntentRequired
         ? DISCORD_GATEWAY_INTENTS.guilds
         : 0
+    const intents = baseIntents | (this.soundboardPlaybackEventsEnabled
+      ? DISCORD_GATEWAY_INTENTS.guildVoiceStates
+      : 0)
 
     try {
       for (const shardId of topology.activeShardIds) {
@@ -622,6 +740,9 @@ export class DiscordGateway implements GatewayRuntime {
     this.#identifyCoordinator?.stop()
     this.#identifyCoordinator = undefined
     this.#rejectPendingVoiceEvidence("Discord Gateway voice channel status evidence stopped")
+    this.#rejectPendingSoundboardPlaybackEvidence(
+      "Discord Gateway soundboard playback evidence stopped",
+    )
     for (const session of this.#sessions.values()) session.stop()
     this.#sessions.clear()
     this.#shardStates.clear()
@@ -700,6 +821,9 @@ export class DiscordGateway implements GatewayRuntime {
     this.#rejectPendingVoiceEvidence(
       "Discord Gateway continuity changed during voice channel status evidence collection",
     )
+    this.#rejectPendingSoundboardPlaybackEvidence(
+      "Discord Gateway continuity changed during soundboard playback evidence collection",
+    )
     this.#eventStore.recordReconnect()
   }
 
@@ -713,6 +837,9 @@ export class DiscordGateway implements GatewayRuntime {
     this.#rejectPendingVoiceEvidence(
       "Discord Gateway continuity changed during voice channel status evidence collection",
     )
+    this.#rejectPendingSoundboardPlaybackEvidence(
+      "Discord Gateway continuity changed during soundboard playback evidence collection",
+    )
     this.#eventStore.recordContinuityGap()
   }
 
@@ -720,6 +847,8 @@ export class DiscordGateway implements GatewayRuntime {
     return (this.#eventFeedEnabled && EVENT_FEED_DISPATCH_NAMES.has(name))
       || (this.layoutEnabled && LAYOUT_DISPATCH_NAMES.has(name))
       || (this.#nativeInteractionsEnabled && name === "INTERACTION_CREATE")
+      || (this.soundboardPlaybackEventsEnabled
+        && name === "VOICE_CHANNEL_EFFECT_SEND")
       || (this.voiceChannelStatusEnabled && (
         name === "CHANNEL_INFO" || name === "VOICE_CHANNEL_STATUS_UPDATE"
       ))
@@ -758,6 +887,10 @@ export class DiscordGateway implements GatewayRuntime {
       this.#onVoiceChannelStatusUpdate(dispatch.data, dispatch.sequence)
       return
     }
+    if (dispatch.name === "VOICE_CHANNEL_EFFECT_SEND") {
+      this.#onSoundboardPlaybackEvent(dispatch.data, dispatch.sequence)
+      return
+    }
     if (dispatch.name === "INTERACTION_CREATE" && this.#interactionHandler) {
       try {
         void Promise.resolve(this.#interactionHandler.ingestInteraction(dispatch.data))
@@ -768,6 +901,70 @@ export class DiscordGateway implements GatewayRuntime {
       return
     }
     this.#eventStore.ingestDispatch(dispatch.name, dispatch.data)
+  }
+
+  #assertSoundboardPlaybackTarget(
+    guildId: string,
+    channelId: string,
+    userId: string,
+    soundId: string,
+  ): void {
+    if (
+      !positiveSnowflake(guildId)
+      || !positiveSnowflake(channelId)
+      || !positiveSnowflake(userId)
+      || !positiveSnowflake(soundId)
+    ) {
+      throw new RangeError(
+        "Gateway soundboard playback evidence IDs must be positive snowflakes",
+      )
+    }
+    if (
+      !this.soundboardPlaybackEventsEnabled
+      || !this.#soundboardPlaybackChannelIds.has(channelId)
+    ) {
+      throw new GatewaySoundboardEffectError(
+        "Discord channel is outside the exact Gateway soundboard playback scope",
+      )
+    }
+  }
+
+  #requireReadySoundboardPlaybackSession(
+    guildId: string,
+    channelId: string,
+  ): GatewayShardSession {
+    if (
+      !this.#running
+      || this.#terminal
+      || this.#eventStore.getStatus().connection.state !== "ready"
+      || !this.#topology
+    ) {
+      throw new GatewaySoundboardEffectError(
+        "Discord Gateway is not ready for soundboard playback evidence",
+      )
+    }
+    if (this.#channelGuildIds.get(channelId) !== guildId) {
+      throw new GatewaySoundboardEffectError(
+        "Discord Gateway soundboard playback target does not match its exact guild route",
+      )
+    }
+    let shardId: number
+    try {
+      shardId = calculateGatewayShardId(guildId, this.#topology.summary.recommendedShards)
+    } catch {
+      this.#fail("invalid-shard-routing")
+      throw new GatewaySoundboardEffectError(
+        "Discord Gateway could not route soundboard playback evidence",
+      )
+    }
+    const session = this.#sessions.get(shardId)
+    if (!session || session.state !== "ready") {
+      this.#fail("invalid-shard-routing")
+      throw new GatewaySoundboardEffectError(
+        "Discord Gateway could not route soundboard playback evidence",
+      )
+    }
+    return session
   }
 
   #assertVoiceChannelStatusTarget(guildId: string, channelId: string): void {
@@ -918,6 +1115,36 @@ export class DiscordGateway implements GatewayRuntime {
     else pending.resolve(result)
   }
 
+  #finishSoundboardPlaybackEvent(
+    pending: PendingSoundboardPlaybackEvent,
+    result: GatewaySoundboardEffectEvidence | Error,
+  ): void {
+    const key = soundboardPlaybackEventTargetKey(
+      pending.guildId,
+      pending.channelId,
+      pending.userId,
+      pending.soundId,
+    )
+    const waiters = this.#soundboardPlaybackEventWaiters.get(key)
+    if (!waiters?.delete(pending)) return
+    if (waiters.size === 0) this.#soundboardPlaybackEventWaiters.delete(key)
+    this.#scheduler.clearTimeout(pending.timeoutHandle)
+    if (pending.abortListener && pending.signal) {
+      pending.signal.removeEventListener("abort", pending.abortListener)
+    }
+    if (result instanceof Error) pending.reject(result)
+    else pending.resolve(result)
+  }
+
+  #rejectPendingSoundboardPlaybackEvidence(message: string): void {
+    const error = new GatewaySoundboardEffectError(message)
+    for (const waiters of [...this.#soundboardPlaybackEventWaiters.values()]) {
+      for (const pending of [...waiters]) {
+        this.#finishSoundboardPlaybackEvent(pending, error)
+      }
+    }
+  }
+
   #rejectPendingVoiceEvidence(message: string): void {
     const error = new GatewayVoiceChannelStatusError(message)
     for (const pending of [...this.#pendingChannelInfo.values()]) {
@@ -986,6 +1213,40 @@ export class DiscordGateway implements GatewayRuntime {
     for (const pending of [...waiters]) this.#finishVoiceChannelStatusUpdate(pending, result)
   }
 
+  #onSoundboardPlaybackEvent(data: unknown, sequence: number): void {
+    const target = soundboardEffectTarget(data)
+    if (!target || !this.#soundboardPlaybackChannelIds.has(target.channelId)) return
+    const key = soundboardPlaybackEventTargetKey(
+      target.guildId,
+      target.channelId,
+      target.userId,
+      target.soundId,
+    )
+    const waiters = this.#soundboardPlaybackEventWaiters.get(key)
+    if (!waiters || waiters.size === 0) return
+    let result: GatewaySoundboardEffectEvidence | Error
+    try {
+      result = projectGatewaySoundboardEffect({
+        channelId: target.channelId,
+        gatewaySequence: sequence,
+        guildId: target.guildId,
+        observedAt: new Date(this.#clock()).toISOString(),
+        soundId: target.soundId,
+        userId: target.userId,
+        value: data,
+      })
+    } catch (error) {
+      result = error instanceof Error
+        ? error
+        : new GatewaySoundboardEffectError(
+          "Discord Gateway soundboard playback evidence could not be projected",
+        )
+    }
+    for (const pending of [...waiters]) {
+      this.#finishSoundboardPlaybackEvent(pending, result)
+    }
+  }
+
   #fail(category: GatewayErrorCategory): void {
     if (this.#terminal) return
     this.#terminal = true
@@ -996,6 +1257,9 @@ export class DiscordGateway implements GatewayRuntime {
     this.#identifyCoordinator = undefined
     this.#rejectPendingVoiceEvidence(
       "Discord Gateway failed during voice channel status evidence collection",
+    )
+    this.#rejectPendingSoundboardPlaybackEvidence(
+      "Discord Gateway failed during soundboard playback evidence collection",
     )
     for (const session of this.#sessions.values()) session.stop()
     this.#sessions.clear()

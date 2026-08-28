@@ -249,6 +249,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   scheduledEventUserAuditPolicy: "scheduled-event-user-audit-policy",
   soundboardAuditPolicy: "soundboard-audit-policy",
   soundboardChangePolicy: "soundboard-change-policy",
+  soundboardPlaybackPolicy: "soundboard-playback-policy",
   stageInstanceAuditPolicy: "stage-instance-audit-policy",
   stageInstanceChangePolicy: "stage-instance-change-policy",
   stageStartNotificationPolicy: "stage-start-notification-policy",
@@ -894,6 +895,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
   if (config.allowSoundboardChanges && config.soundboardGuildIds.size === 0) {
     warnings.push("The soundboard-change toggle is enabled but changes remain blocked because an exact guild allowlist is required")
   }
+  if (config.allowSoundboardPlayback && config.soundboardPlaybackChannelIds.size === 0) {
+    warnings.push("The soundboard-playback toggle is enabled but playback remains blocked because an exact ordinary voice-channel allowlist is required")
+  }
   if (
     config.allowSoundboardChanges
     && config.soundboardGuildIds.size > 0
@@ -1151,9 +1155,11 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Scheduled event audit and changes",
     ],
     [
-      config.allowSoundboardAudit || config.allowSoundboardChanges,
+      config.allowSoundboardAudit
+        || config.allowSoundboardChanges
+        || config.allowSoundboardPlayback,
       "soundboard",
-      "Soundboard audit and reviewed changes",
+      "Soundboard audit, guarded playback, and reviewed changes",
     ],
     [
       config.allowStageInstanceAudit
@@ -3570,6 +3576,28 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.soundboardChangePolicy,
         "pass",
         `Reviewed soundboard changes are constrained to ${config.soundboardGuildIds.size} exact guilds and ${config.soundboardRoots.length} canonical creation roots with one-shot execution and exact metadata or absence readback`,
+      ))
+    }
+    if (!config.allowSoundboardPlayback) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardPlaybackPolicy,
+        "pass",
+        "Guarded soundboard playback is disabled",
+      ))
+    } else if (config.soundboardPlaybackChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardPlaybackPolicy,
+        "warn",
+        "Soundboard playback is enabled, but the required exact ordinary voice-channel allowlist is empty",
+      ))
+    } else {
+      const sourceScope = config.soundboardPlaybackSourceGuildIds.size === 0
+        ? "Discord default sounds only"
+        : `${config.soundboardPlaybackSourceGuildIds.size} exact custom-sound source guilds plus Discord defaults`
+      checks.push(check(
+        DOCTOR_CHECK_IDS.soundboardPlaybackPolicy,
+        "pass",
+        `Guarded soundboard playback is constrained to ${config.soundboardPlaybackChannelIds.size} exact ordinary voice channels and ${sourceScope}, with fresh permission, voice-state, and availability proof; host write approval; durable request-bound replay; cross-process channel coordination; shared anti-spam limits; one non-retried request; content-free records; and optional exact Gateway corroboration using GUILDS plus GUILD_VOICE_STATES`,
       ))
     }
     if (!config.allowStageInstanceAudit) {

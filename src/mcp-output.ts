@@ -51,8 +51,9 @@ export function redactMcpValue<T>(
 export function redactedJson(
   value: unknown,
   secrets: readonly (string | undefined)[],
+  indentation = 2,
 ): string {
-  return JSON.stringify(redactMcpValue(value, secrets), null, 2)
+  return JSON.stringify(redactMcpValue(value, secrets), null, indentation)
 }
 
 export function serializedMcpResultBytes(value: unknown): number {

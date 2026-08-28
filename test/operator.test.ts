@@ -329,6 +329,9 @@ function status(
       soundboardChangesEnabled: false,
       soundboardCreationEnabled: false,
       soundboardGuildIds: [],
+      soundboardPlaybackChannelIds: [],
+      soundboardPlaybackEnabled: false,
+      soundboardPlaybackSourceGuildIds: [],
       soundboardRootCount: 0,
       stageChannelIds: [],
       stageInstanceAuditEnabled: false,
@@ -462,7 +465,9 @@ function toolService(
   }
   return {
     addReaction: unexpected,
+    checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
+    playSoundboardSound: unexpected,
     auditApplicationCommands: unexpected,
     auditApplicationEntitlements: unexpected,
     getApplicationEntitlement: unexpected,
@@ -3878,6 +3883,46 @@ test("doctor and setup explain privacy-safe reviewed soundboard scope", async (c
   )
   assert.match(setup.warnings.join("\n"), /creation remains blocked/)
   assert.match(omitted.warnings.join("\n"), /soundboard toolset/)
+})
+
+test("doctor explains guarded exact-scope soundboard playback", async () => {
+  const customSoundPolicy = fixturePolicy({
+    capabilities: {
+      soundboardPlayback: true,
+    },
+    scopes: {
+      soundboardPlaybackChannelIds: [CHANNEL_ID],
+      soundboardPlaybackSourceGuildIds: [GUILD_ID],
+    },
+  })
+  const customSound = await diagnoseConnector({
+    configOverrides: customSoundPolicy,
+    nodeVersion: "22.14.0",
+  })
+  const defaultsOnly = await diagnoseConnector({
+    configOverrides: fixturePolicy({
+      capabilities: {
+        soundboardPlayback: true,
+      },
+      scopes: {
+        soundboardPlaybackChannelIds: [CHANNEL_ID],
+      },
+    }),
+    nodeVersion: "22.14.0",
+  })
+
+  const customSoundCheck = customSound.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardPlaybackPolicy,
+  )
+  const defaultsOnlyCheck = defaultsOnly.checks.find(
+    (entry) => entry.id === DOCTOR_CHECK_IDS.soundboardPlaybackPolicy,
+  )
+  assert.equal(customSoundCheck?.status, "pass")
+  assert.match(customSoundCheck?.summary || "", /1 exact ordinary voice channels/)
+  assert.match(customSoundCheck?.summary || "", /1 exact custom-sound source guilds/)
+  assert.match(customSoundCheck?.summary || "", /GUILDS plus GUILD_VOICE_STATES/)
+  assert.equal(defaultsOnlyCheck?.status, "pass")
+  assert.match(defaultsOnlyCheck?.summary || "", /Discord default sounds only/)
 })
 
 test("doctor and setup explain reviewed Stage-instance scope", async () => {

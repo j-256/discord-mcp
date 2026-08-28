@@ -163,6 +163,10 @@ import {
   type GatewayVoiceChannelStatusSource,
 } from "./gateway-voice-channel-status.js"
 import {
+  soundboardPlaybackChannelIds,
+  type GatewaySoundboardEffectSource,
+} from "./gateway-soundboard-effect.js"
+import {
   normalizeGuildExpressionChangeRequest,
   type GuildExpressionChangeRequest,
 } from "./guild-expression-service.js"
@@ -359,6 +363,9 @@ import {
   SoundboardExecutionError,
   SoundboardOperationConflictError,
   SoundboardPlanChangedError,
+  SoundboardPlaybackEvidenceError,
+  SoundboardPlaybackExecutionError,
+  SoundboardPlaybackOperationConflictError,
   InteractionConflictError,
   InteractionExecutionError,
   InteractionRateLimitError,
@@ -3584,11 +3591,19 @@ const soundboardLookupInputSchema = z.strictObject({
   guildId: positiveSnowflakeSchema.describe("Exact soundboard audit guild ID"),
   soundId: positiveSnowflakeSchema.describe("Exact guild soundboard sound ID"),
 })
+const soundboardPlaybackCheckInputSchema = z.strictObject({
+  channelId: positiveSnowflakeSchema.describe("Exact allowlisted ordinary voice-channel ID"),
+  soundId: positiveSnowflakeSchema.describe("Exact default or custom soundboard sound ID"),
+  sourceGuildId: positiveSnowflakeSchema.nullable().describe("Exact allowlisted custom-sound source guild ID, or null for a Discord default sound"),
+})
 const soundboardOperationKeySchema = z.string()
   .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
   .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
   .regex(IDEMPOTENCY_KEY_PATTERN)
   .describe("Unique one-shot operation key; keep unchanged through review and never reuse after reservation")
+const soundboardPlaybackInputSchema = soundboardPlaybackCheckInputSchema.extend({
+  operationKey: soundboardOperationKeySchema.describe("Unique one-shot playback key; retry only with the identical request"),
+})
 const soundboardNameSchema = z.string()
   .refine(
     (value) => [...value].length >= DISCORD_LIMITS.soundboardNameMinimumCharacters
@@ -9515,6 +9530,38 @@ const soundboardConflictReceiptSchema = z.strictObject({
   timestamp: z.iso.datetime({ offset: true }),
   verification: z.enum(["drift", "match"]).nullable(),
 })
+const soundboardPlaybackConflictReceiptSchema = z.strictObject({
+  activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN),
+  error: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable(),
+  guildId: positiveSnowflakeSchema,
+  operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN),
+  requestDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  resourceId: positiveSnowflakeSchema.nullable(),
+  status: z.enum(["completed", "failed", "pending", "uncertain"]),
+  timestamp: z.iso.datetime({ offset: true }),
+  verification: z.enum(["match"]).nullable(),
+})
+const soundboardPlaybackExecutionResultSchema = z.object({
+  activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN).optional(),
+  activityRecordError: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable().optional(),
+  channelId: positiveSnowflakeSchema.optional(),
+  error: z.string().regex(CONTENT_FREE_ERROR_PATTERN).optional(),
+  guildId: positiveSnowflakeSchema.optional(),
+  operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN).optional(),
+  operationRecordError: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable().optional(),
+  requestDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
+  retryAfterMs: z.number().int().nonnegative().nullable().optional(),
+  schemaVersion: z.literal(SCHEMA_VERSION).optional(),
+  soundId: positiveSnowflakeSchema.optional(),
+  sourceGuildId: positiveSnowflakeSchema.nullable().optional(),
+  status: z.enum([
+    "blocked-audit-failed",
+    "completed-audit-failed",
+    "completed-operation-record-failed",
+    "failed",
+    "uncertain",
+  ]),
+})
 const autoModerationConflictReceiptSchema = z.strictObject({
   activityId: z.string().regex(CONTENT_FREE_IDENTIFIER_PATTERN),
   error: z.string().regex(CONTENT_FREE_ERROR_PATTERN).nullable(),
@@ -9702,6 +9749,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  checkSoundboardPlayback: ConnectorService["checkSoundboardPlayback"]
   analyzeCommunityActivity: ConnectorService["analyzeCommunityActivity"]
   auditApplicationCommands: ConnectorService["auditApplicationCommands"]
   auditApplicationEntitlements: ConnectorService["auditApplicationEntitlements"]
@@ -9857,6 +9905,7 @@ export interface DiscordToolService {
   listStageInstances: ConnectorService["listStageInstances"]
   listVoiceRegions: ConnectorService["listVoiceRegions"]
   planMessageDeletion: ConnectorService["planMessageDeletion"]
+  playSoundboardSound: ConnectorService["playSoundboardSound"]
   planDirectMessageChange: ConnectorService["planDirectMessageChange"]
   planApplicationEmojiChange: ConnectorService["planApplicationEmojiChange"]
   planApplicationEntitlementConsumption:
@@ -11658,6 +11707,31 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
       status = "rate-limited"
     }
   }
+  if (error instanceof SoundboardPlaybackEvidenceError) {
+    status = "soundboard-playback-evidence-invalid"
+  }
+  if (error instanceof SoundboardPlaybackOperationConflictError) {
+    const receipt = soundboardPlaybackConflictReceiptSchema.safeParse(error.receipt)
+    details.receipt = receipt.success
+      ? receipt.data
+      : { status: "unavailable" }
+    status = "operation-key-conflict"
+  }
+  if (error instanceof SoundboardPlaybackExecutionError) {
+    const result = soundboardPlaybackExecutionResultSchema.safeParse(error.result)
+    details.result = result.success
+      ? result.data
+      : { status: "unavailable" }
+    if (result.success) {
+      if (result.data.status === "uncertain") status = "outcome-uncertain"
+      if (result.data.status === "failed") status = "soundboard-playback-failed"
+      if (result.data.status.startsWith("blocked-")) status = result.data.status
+      if (result.data.status.startsWith("completed-")) status = result.data.status
+    }
+    if (error.cause instanceof DiscordApiError && error.cause.status === 429) {
+      details.retryAfterMs = error.cause.retryAfterMs ?? null
+    }
+  }
   if (error instanceof AutoModerationPlanChangedError) {
     details.actualDigest = error.actualDigest
     details.expectedDigest = error.expectedDigest
@@ -11906,6 +11980,9 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
     status = "operation-key-conflict"
   }
   if (error instanceof SoundboardOperationConflictError) status = "operation-key-conflict"
+  if (error instanceof SoundboardPlaybackOperationConflictError) {
+    status = "operation-key-conflict"
+  }
   if (error instanceof AutoModerationOperationConflictError) status = "operation-key-conflict"
   if (error instanceof ScheduledEventOperationConflictError) status = "operation-key-conflict"
   if (error instanceof StageInstanceOperationConflictError) status = "operation-key-conflict"
@@ -19541,6 +19618,41 @@ function assertVoiceChannelStatusGateway(
   }
 }
 
+function isGatewaySoundboardEffectSource(
+  gateway: GatewayEventSource,
+): gateway is GatewayEventSource & GatewaySoundboardEffectSource {
+  const candidate = gateway as GatewayEventSource
+    & Partial<GatewaySoundboardEffectSource>
+  return typeof candidate.soundboardPlaybackEventsEnabled === "boolean"
+    && typeof candidate.waitForSoundboardPlaybackEvent === "function"
+}
+
+function assertSoundboardPlaybackGateway(
+  config: ConnectorConfig,
+  gateway: GatewayEventSource,
+): void {
+  const expectedChannelIds = soundboardPlaybackChannelIds(config)
+  const projection = gateway.getStatus().projections.soundboardPlayback
+  if (
+    projection.enabled !== (expectedChannelIds.size > 0)
+    || projection.scopedChannels !== expectedChannelIds.size
+  ) {
+    throw new ConfigurationError(
+      "Gateway soundboard playback scope does not match configured exact channel scope",
+    )
+  }
+  if (expectedChannelIds.size === 0) return
+  if (
+    !gateway.enabled
+    || !isGatewaySoundboardEffectSource(gateway)
+    || !gateway.soundboardPlaybackEventsEnabled
+  ) {
+    throw new ConfigurationError(
+      "Soundboard playback configuration requires an enabled exact-event Gateway source",
+    )
+  }
+}
+
 export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServer {
   const environment = options.environment || process.env
   const config = options.config || loadConnectorConfig(environment)
@@ -19555,12 +19667,17 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     bufferSize: config.gatewayEventBufferSize,
     enabled: config.allowGateway
       || guildChannelLayoutGuildIds(config).size > 0
-      || config.allowNativeInteractions,
+      || config.allowNativeInteractions
+      || soundboardPlaybackChannelIds(config).size > 0
+      || voiceChannelStatusChannelIds(config).size > 0,
     eventFeedEnabled: config.allowGateway,
     layoutGuildIds: guildChannelLayoutGuildIds(config),
+    soundboardPlaybackChannelCount: soundboardPlaybackChannelIds(config).size,
+    voiceChannelStatusChannelCount: voiceChannelStatusChannelIds(config).size,
   })
   if (!options.catalogOnly) {
     assertGuildChannelLayoutGateway(config, gateway)
+    assertSoundboardPlaybackGateway(config, gateway)
     assertVoiceChannelStatusGateway(config, gateway)
   }
   const service = options.service || new ConnectorService({
@@ -19634,7 +19751,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Discord Community audit and changes require a separate exact guild scope plus complete continuity-safe channel and permission evidence. Call audit_guild_community for privacy-minimized feature, routing, authority, and rules-access evidence. For a change, call plan_guild_community_change and review the complete current and desired routing state, preserved feature digest, dynamic ADMINISTRATOR enablement or MANAGE_GUILD routing authority, exact direct channels, @everyone rules visibility and sendability, explicit enablement acknowledgement, audit reason, one-shot operation key hash, risks, warnings, and keyed digest before execute_guild_community_change. The operation can only add COMMUNITY, never remove or edit arbitrary features, infer channels by name, grant permissions, retry, or roll back. An uncertain outcome blocks later same-guild Community changes until process restart and manual review.",
       "Guild incident-action audit and changes require a separate exact guild scope and complete known permission evidence. Call get_guild_incident_actions for exact invite and direct-message disable deadlines, presence-only raid and direct-message-spam detection, source availability, schema-drift count, and an explicit change-authority verdict, or call plan_guild_incident_action_change and review the exact requested and changed actions, complete current and desired deadlines, effects, owner or MANAGE_GUILD authority, local review reason, risks, warnings, one-shot operation key hash, and keyed digest before execute_guild_incident_action_change. Omitted actions are preserved, null clears one action early, non-null deadlines must remain in the future and no more than 24 hours ahead, the reason is not sent through an undocumented audit header, the sparse PUT is never retried, and ambiguous outcomes quarantine later same-guild incident changes.",
       "Guild profile text audit and changes require a separate exact guild scope and complete permission evidence. Call get_guild_profile for transient untrusted name and description text, presence-only media state, and an explicit change-authority verdict, or call plan_guild_profile_change and review the exact requested and changed fields, complete current and desired profile, guild-owner or MANAGE_GUILD authority, audit reason, risks, warnings, one-shot operation key hash, and keyed digest before execute_guild_profile_change. Omitted text fields and all media are preserved, empty strings never mean clear, the sparse PATCH is never retried, and profile text is never persisted or exported.",
-      "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild scope. Results project audio bytes, CDN URLs, creator profiles, and unknown raw fields out before returning data. For create, metadata update, or delete, call plan_guild_soundboard_change, review the exact identity, privacy-safe current and desired metadata, ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence, custom emoji evidence, local audio validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_guild_soundboard_change with identical inputs and the digest. Creation accepts only canonical owned local MP3 or Ogg files from dedicated roots, never URLs or base64. Playback is separate and unsupported. Never retry with the same operation key after reservation or an uncertain outcome.",
+      "Soundboard inventory requires a separate feature gate, and guild inventory requires an exact guild scope. Results project audio bytes, CDN URLs, creator profiles, and unknown raw fields out before returning data. Guarded playback is independently opt-in: call check_soundboard_playback for fresh exact channel, permission, current voice-state, source-scope, and sound-availability evidence, then call play_soundboard_sound with the identical target and a unique one-shot operation key only when playback is intended. Playback uses host write approval, durable exact-channel coordination, shared anti-spam controls, pending content-free records, one non-retried request, and optional exact Gateway corroboration; never issue a new key after an uncertain result. For create, metadata update, or delete, call plan_guild_soundboard_change, review the exact identity, privacy-safe current and desired metadata, ownership-aware CREATE_GUILD_EXPRESSIONS and MANAGE_GUILD_EXPRESSIONS evidence, custom emoji evidence, local audio validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_guild_soundboard_change with identical inputs and the digest. Creation accepts only canonical owned local MP3 or Ogg files from dedicated roots, never URLs or base64. Never retry with the same operation key after reservation or an uncertain outcome.",
       "AutoMod inventory requires a separate exact guild scope. Lists expose policy-entry counts and reference health without policy strings; exact lookup returns a complete projected policy transiently. Action-execution content and match data are never exposed or persisted. For create, disabled-rule policy update, enable-state change, or disabled-rule delete, call plan_automod_change, review the complete current and desired policy, trigger compatibility and capacity, MANAGE_GUILD and conditional MODERATE_MEMBERS evidence, every role and channel reference, alert-channel scope and visibility, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_automod_change with identical inputs and the digest. After a completed operation or process restart, call verify_automod_change with the exact caller-retained request to bind its content-free keyed receipt to fresh exact rule state. New rules are always disabled, and policy update or deletion requires a disabled rule. Never retry with the same operation key after reservation or an uncertain outcome.",
       "Scheduled event inventory requires a separate exact guild scope and projects subscriber identities, creator profiles, cover URLs and hashes, and unknown raw fields out before returning data; aggregate subscriber counts are opt-in. list_scheduled_event_users requires an additional user-audit toggle and returns bounded ascending user IDs plus bot flags only after exact event and permission verification, with member expansion disabled and no persistence. For create, metadata update, status transition, or delete, call plan_scheduled_event_change, review the exact identity, current and desired state, hosting and recurrence, future timing, entity-specific permissions and ownership, visible capacity, local cover validation when present, privacy omissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_scheduled_event_change with identical inputs and the digest. Cover changes accept only canonical owned local JPEG or non-animated PNG files from dedicated roots, never URLs or base64. Never retry with the same operation key after reservation or an uncertain outcome.",
       "Stage-instance audit requires a separate exact Stage-channel scope and returns bounded active or inactive state without speaker or audience identities. For start, topic update, or end, call plan_stage_instance_change, review the exact application, bot, guild, channel, current and desired state, guild-only privacy, complete VIEW_CHANNEL, CONNECT, MANAGE_CHANNELS, MUTE_MEMBERS, MOVE_MEMBERS, and conditional MENTION_EVERYONE evidence, notification setting, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_stage_instance_change with identical inputs and the digest. Deprecated public and scheduled-event-linked instances are read-only, writes are never retried or rolled back, and an uncertain outcome blocks later same-channel changes until process restart and manual review.",
@@ -21907,6 +22024,60 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord returned privacy-safe soundboard sound ${input.soundId} from guild ${input.guildId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("check_soundboard_playback", server.registerTool(
+    "check_soundboard_playback",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Check whether the verified bot can play one exact default or custom sound in one exact allowlisted ordinary voice channel. Fresh evidence must prove channel type and scope, complete overwrites and roles, VIEW_CHANNEL, CONNECT, SPEAK, USE_SOUNDBOARD, conditional USE_EXTERNAL_SOUNDS, the exact available sound, and the bot's current connection without server mute, server deaf, self-deaf, or suppression. Returns transient sound metadata but persists nothing.",
+      inputSchema: soundboardPlaybackCheckInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Check exact Discord soundboard playback readiness",
+    },
+    safeToolHandler("check_soundboard_playback", async (
+      input: z.infer<typeof soundboardPlaybackCheckInputSchema>,
+      context,
+    ) => {
+      const result = await service.checkSoundboardPlayback(
+        input,
+        { signal: context.mcpReq.signal },
+      )
+      return toolResult(
+        result,
+        `Discord soundboard sound ${input.soundId} is ready in voice channel ${input.channelId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("play_soundboard_sound", server.registerTool(
+    "play_soundboard_sound",
+    {
+      annotations: WRITE_ANNOTATIONS,
+      description: "Play one exact default or allowlisted custom sound in one exact allowlisted ordinary voice channel after fresh readiness proof and host write approval. Uses a one-shot request-bound operation key, durable exact-channel cross-process coordination, shared anti-spam limits, pending content-free audit, one non-retried Discord request, and optional exact Gateway event corroboration. A strict 204 response completes the request; ambiguous outcomes remain quarantined and must not be retried with a new key.",
+      inputSchema: soundboardPlaybackInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Play guarded Discord soundboard sound",
+    },
+    safeToolHandler("play_soundboard_sound", async (
+      input: z.infer<typeof soundboardPlaybackInputSchema>,
+      context,
+    ) => {
+      const result = await service.playSoundboardSound(
+        input,
+        { signal: context.mcpReq.signal },
+      )
+      const replay = result.localReplay ? " from the durable local replay ledger" : ""
+      const corroboration = result.verification === "gateway-match"
+        ? " with exact Gateway corroboration"
+        : result.verification === "response-only"
+          ? " from the strict Discord response"
+          : ""
+      return toolResult(
+        result,
+        `Discord soundboard sound ${result.soundId} resolved in voice channel ${result.channelId}${corroboration}${replay}`,
       )
     }, secrets, observability),
   ))
@@ -32172,6 +32343,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
     config.allowGateway
     || guildChannelLayoutGuildIds(config).size > 0
     || config.allowNativeInteractions
+    || soundboardPlaybackChannelIds(config).size > 0
     || voiceChannelStatusChannelIds(config).size > 0
   )) {
     const applicationId = config.expectedApplicationId
@@ -32209,8 +32381,11 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
     enabled: false,
     eventFeedEnabled: false,
     layoutGuildIds: guildChannelLayoutGuildIds(config),
+    soundboardPlaybackChannelCount: soundboardPlaybackChannelIds(config).size,
+    voiceChannelStatusChannelCount: voiceChannelStatusChannelIds(config).size,
   })
   assertGuildChannelLayoutGateway(config, gateway)
+  assertSoundboardPlaybackGateway(config, gateway)
   assertVoiceChannelStatusGateway(config, gateway)
   toolService ||= new ConnectorService({
     ...(sharedActivityStore ? { activityStore: sharedActivityStore } : {}),

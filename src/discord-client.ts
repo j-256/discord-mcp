@@ -1472,6 +1472,9 @@ export interface DiscordVoiceStateSummary {
   deaf: boolean
   guildId: string | null
   mute: boolean
+  selfDeaf: boolean
+  selfMute: boolean
+  suppressed: boolean
   unknownFieldCount: number
   userId: string
 }
@@ -1605,6 +1608,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "create_immediate_interaction_response",
   "create_guild_emoji",
   "create_guild_soundboard_sound",
+  "send_soundboard_sound",
   "create_guild_sticker",
   "create_guild_template",
   "create_channel_invite",
@@ -2952,8 +2956,14 @@ function projectVoiceState(
     } else if (record.channel_id !== null) {
       throw new RangeError("Discord voice-state channel ID is invalid")
     }
-    if (typeof record.mute !== "boolean" || typeof record.deaf !== "boolean") {
-      throw new RangeError("Discord voice-state moderation fields are invalid")
+    if (
+      typeof record.mute !== "boolean"
+      || typeof record.deaf !== "boolean"
+      || typeof record.self_deaf !== "boolean"
+      || typeof record.self_mute !== "boolean"
+      || typeof record.suppress !== "boolean"
+    ) {
+      throw new RangeError("Discord voice-state moderation and self-state fields are invalid")
     }
   } catch (error) {
     throw memberVoiceEvidenceError({ cause: error })
@@ -2963,6 +2973,9 @@ function projectVoiceState(
     deaf: record.deaf as boolean,
     guildId: typeof record.guild_id === "string" ? record.guild_id : null,
     mute: record.mute as boolean,
+    selfDeaf: record.self_deaf as boolean,
+    selfMute: record.self_mute as boolean,
+    suppressed: record.suppress as boolean,
     unknownFieldCount: countUnknownFields(record, VOICE_STATE_KEYS),
     userId: record.user_id as string,
   }
@@ -10944,6 +10957,39 @@ export class DiscordClient {
       )
     }
     return sound
+  }
+
+  async sendSoundboardSound(
+    channelId: string,
+    soundId: string,
+    sourceGuildId: string | undefined,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord soundboard playback channel ID")
+    assertPositiveSnowflake(soundId, "Discord soundboard playback sound ID")
+    if (sourceGuildId !== undefined) {
+      assertPositiveSnowflake(
+        sourceGuildId,
+        "Discord soundboard playback source guild ID",
+      )
+    }
+    await this.#request<void>(
+      "send_soundboard_sound",
+      `/channels/${channelId}/send-soundboard-sound`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        body: {
+          sound_id: soundId,
+          ...(sourceGuildId === undefined
+            ? {}
+            : { source_guild_id: sourceGuildId }),
+        },
+        diagnosticRoute: "/channels/{channel.id}/send-soundboard-sound",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async createGuildSoundboardSound(

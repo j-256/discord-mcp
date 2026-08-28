@@ -354,7 +354,9 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
+    playSoundboardSound: unexpected,
     async auditApplicationCommands(guildId) {
       calls.applicationCommands += 1
       calls.lastGuildId = guildId
@@ -2351,6 +2353,9 @@ function guidanceService(options: {
         soundboardChangesEnabled: false,
         soundboardCreationEnabled: false,
         soundboardGuildIds: [],
+        soundboardPlaybackChannelIds: [],
+        soundboardPlaybackEnabled: false,
+        soundboardPlaybackSourceGuildIds: [],
         soundboardRootCount: 0,
         stageChannelIds: [],
         stageInstanceAuditEnabled: false,

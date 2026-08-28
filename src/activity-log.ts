@@ -1379,6 +1379,28 @@ export interface SoundboardActivity {
   verification: "drift" | "match" | null
 }
 
+export type SoundboardPlaybackActivityStatus =
+  | "completed"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface SoundboardPlaybackActivity {
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "soundboard-playback"
+  operationKeyHash: string
+  requestDigest: string
+  schemaVersion: number
+  soundId: string
+  sourceGuildId: string | null
+  status: SoundboardPlaybackActivityStatus
+  timestamp: string
+  verification: "gateway-match" | "response-only" | null
+}
+
 export type WelcomeScreenActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1828,6 +1850,7 @@ export type ActivityEntry =
   | RoleOrderingActivity
   | ScheduledEventActivity
   | SoundboardActivity
+  | SoundboardPlaybackActivity
   | StageInstanceActivity
   | ThreadCreationActivity
   | ThreadGovernanceActivity
@@ -5949,6 +5972,86 @@ function parseSoundboardActivity(
   }
 }
 
+const SOUNDBOARD_PLAYBACK_ACTIVITY_KEYS = [
+  "channelId",
+  "error",
+  "guildId",
+  "id",
+  "kind",
+  "operationKeyHash",
+  "requestDigest",
+  "schemaVersion",
+  "soundId",
+  "sourceGuildId",
+  "status",
+  "timestamp",
+  "verification",
+].sort()
+
+function parseSoundboardPlaybackActivity(
+  value: unknown,
+): SoundboardPlaybackActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).sort().join("\0") !== SOUNDBOARD_PLAYBACK_ACTIVITY_KEYS.join("\0")
+    || record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "soundboard-playback"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || !["completed", "failed", "pending", "uncertain"].includes(String(record.status))
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.soundId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.soundId)
+    || !(record.sourceGuildId === null || (
+      typeof record.sourceGuildId === "string"
+      && DISCORD_SNOWFLAKE_PATTERN.test(record.sourceGuildId)
+    ))
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.requestDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.requestDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "gateway-match", "response-only"].includes(
+      record.verification as string | null,
+    )
+    || (record.status === "pending" && (
+      record.error !== null || record.verification !== null
+    ))
+    || (record.status === "completed" && (
+      record.error !== null || record.verification === null
+    ))
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null || record.verification !== null
+    ))
+  ) {
+    return undefined
+  }
+  return {
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "soundboard-playback",
+    operationKeyHash: record.operationKeyHash,
+    requestDigest: record.requestDigest,
+    schemaVersion: SCHEMA_VERSION,
+    soundId: record.soundId,
+    sourceGuildId: record.sourceGuildId as string | null,
+    status: record.status as SoundboardPlaybackActivityStatus,
+    timestamp: record.timestamp,
+    verification: record.verification as "gateway-match" | "response-only" | null,
+  }
+}
+
 function parseWelcomeScreenActivity(
   value: unknown,
 ): WelcomeScreenActivity | undefined {
@@ -7060,6 +7163,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseGuildExpressionActivity(value)
     || parseScheduledEventActivity(value)
     || parseSoundboardActivity(value)
+    || parseSoundboardPlaybackActivity(value)
     || parseWelcomeScreenActivity(value)
     || parseGuildIncidentActivity(value)
     || parseGuildProfileActivity(value)

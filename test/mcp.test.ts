@@ -467,6 +467,9 @@ import {
   ScheduledEventOperationConflictError,
   SoundboardExecutionError,
   SoundboardOperationConflictError,
+  SoundboardPlaybackEvidenceError,
+  SoundboardPlaybackExecutionError,
+  SoundboardPlaybackOperationConflictError,
   StageInstanceExecutionError,
   StageInstanceOperationConflictError,
   ThreadCreationExecutionError,
@@ -562,6 +565,7 @@ import {
   discordPermissionBitfield,
   discordPermissionNames,
   evaluateBotChannelPermissions,
+  type DiscordPermissionName,
 } from "../src/permissions.js"
 import type { PolicyDescription } from "../src/policy.js"
 import type { DiscordChannel, DiscordMessage } from "../src/types.js"
@@ -937,6 +941,7 @@ const APPLICATION_ROLE_CONNECTION_METADATA_RECORD = Object.freeze({
 } satisfies ApplicationRoleConnectionMetadataDefinition)
 const SOUNDBOARD_SOUND_ID = "391000000000000001"
 const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
+const SOUNDBOARD_PLAYBACK_OPERATION_KEY = "soundboard-playback-attempt-0001"
 const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
 const AUTOMOD_RULE_ID = "392000000000000001"
 const AUTOMOD_OPERATION_KEY = "automod-attempt-0001"
@@ -5023,6 +5028,89 @@ function projectedSoundboardSound(
   }
 }
 
+function soundboardPlaybackReadiness(
+  request: Parameters<DiscordToolService["checkSoundboardPlayback"]>[0],
+): Awaited<ReturnType<DiscordToolService["checkSoundboardPlayback"]>> {
+  const requiredPermissionNames: DiscordPermissionName[] = [
+    "VIEW_CHANNEL",
+    "CONNECT",
+    "SPEAK",
+    "USE_SOUNDBOARD",
+  ]
+  if (request.sourceGuildId !== null) {
+    requiredPermissionNames.push("USE_EXTERNAL_SOUNDS")
+  }
+  const permissions = requiredPermissionNames.reduce(
+    (value, name) => value | DISCORD_PERMISSIONS[name],
+    0n,
+  )
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      type: DISCORD_CHANNEL_TYPES.voice,
+    },
+    checkedAt: "2026-08-28T12:00:00.000Z",
+    permission: {
+      administrator: false,
+      appliedRoleIds: [GUILD_ID],
+      confidence: "complete",
+      effectivePermissionNames: [...requiredPermissionNames],
+      effectivePermissions: permissions.toString(),
+      permissionSourceChannelId: request.channelId,
+      requiredPermissionNames: [...requiredPermissionNames],
+    },
+    privacy: {
+      activityRecords: "content-free",
+      channelNames: "omitted",
+      rawPayloads: "omitted",
+      soundNames: "transient",
+      voiceProfiles: "omitted",
+    },
+    schemaVersion: SCHEMA_VERSION,
+    sound: {
+      available: true,
+      id: request.soundId,
+      name: "Reviewed sound",
+      sourceGuildId: request.sourceGuildId,
+      unknownFieldCount: 0,
+    },
+    status: "ready",
+    voice: {
+      channelId: request.channelId,
+      deaf: false,
+      guildId: GUILD_ID,
+      mute: false,
+      selfDeaf: false,
+      selfMute: false,
+      suppressed: false,
+      unknownFieldCount: 0,
+      userId: BOT_ID,
+    },
+  }
+}
+
+function soundboardPlaybackResult(
+  request: Parameters<DiscordToolService["playSoundboardSound"]>[0],
+): Awaited<ReturnType<DiscordToolService["playSoundboardSound"]>> {
+  return {
+    activityId: "activity-soundboard-playback",
+    channelId: request.channelId,
+    gatewayEvidence: null,
+    guildId: GUILD_ID,
+    localReplay: false,
+    operationKeyHash: operationKeyHash(request.operationKey),
+    requestDigest: DIGEST,
+    schemaVersion: SCHEMA_VERSION,
+    soundId: request.soundId,
+    sourceGuildId: request.sourceGuildId,
+    status: "completed",
+    verification: "response-only",
+  }
+}
+
 function soundboardPlan(
   request: SoundboardChangeRequest,
   digest = DIGEST,
@@ -8919,6 +9007,9 @@ function fixturePolicy(): PolicyDescription {
     soundboardChangesEnabled: false,
     soundboardCreationEnabled: false,
     soundboardGuildIds: [],
+    soundboardPlaybackChannelIds: [],
+    soundboardPlaybackEnabled: false,
+    soundboardPlaybackSourceGuildIds: [],
     soundboardRootCount: 0,
     stageChannelIds: [],
     stageInstanceAuditEnabled: false,
@@ -9277,6 +9368,8 @@ function serviceFixture(overrides: {
   soundboardEffect?: "change" | "none"
   soundboardError?: Error
   soundboardPlanDigest?: string
+  soundboardPlaybackCheckError?: Error
+  soundboardPlaybackError?: Error
   stageInstanceEffect?: "change" | "none"
   stageInstanceError?: Error
   stageInstancePlanDigest?: string
@@ -9367,6 +9460,14 @@ function serviceFixture(overrides: {
   const conversationRecallCalls = {
     arguments: null as Parameters<
       DiscordToolService["recallConversation"]
+    > | null,
+  }
+  const soundboardPlaybackCalls = {
+    checkArguments: null as Parameters<
+      DiscordToolService["checkSoundboardPlayback"]
+    > | null,
+    playArguments: null as Parameters<
+      DiscordToolService["playSoundboardSound"]
     > | null,
   }
   const calls = {
@@ -9535,6 +9636,8 @@ function serviceFixture(overrides: {
     soundboardGet: 0,
     soundboardGuildList: 0,
     soundboardPlan: 0,
+    soundboardPlaybackCheck: 0,
+    soundboardPlaybackPlay: 0,
     stageInstanceExecute: 0,
     stageInstanceGet: 0,
     stageInstanceList: 0,
@@ -9838,6 +9941,22 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    async checkSoundboardPlayback(...arguments_) {
+      if (overrides.soundboardPlaybackCheckError) {
+        throw overrides.soundboardPlaybackCheckError
+      }
+      calls.soundboardPlaybackCheck += 1
+      soundboardPlaybackCalls.checkArguments = arguments_
+      return soundboardPlaybackReadiness(arguments_[0])
+    },
+    async playSoundboardSound(...arguments_) {
+      if (overrides.soundboardPlaybackError) {
+        throw overrides.soundboardPlaybackError
+      }
+      calls.soundboardPlaybackPlay += 1
+      soundboardPlaybackCalls.playArguments = arguments_
+      return soundboardPlaybackResult(arguments_[0])
+    },
     async analyzeCommunityActivity(...arguments_) {
       if (overrides.communityActivityError) {
         throw overrides.communityActivityError
@@ -14027,6 +14146,7 @@ function serviceFixture(overrides: {
     guildApplicationCommandCalls,
     globalApplicationCommandCalls,
     nativeInteractionCommandCalls,
+    soundboardPlaybackCalls,
     service,
     welcomeScreenCalls,
     widgetSettingsCalls,
@@ -14532,6 +14652,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_default_soundboard_sounds",
       "list_guild_soundboard_sounds",
       "get_guild_soundboard_sound",
+      "check_soundboard_playback",
+      "play_soundboard_sound",
       "list_automod_rules",
       "get_automod_rule",
       "list_scheduled_events",
@@ -15090,6 +15212,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "list_default_soundboard_sounds",
     "list_guild_soundboard_sounds",
     "get_guild_soundboard_sound",
+    "check_soundboard_playback",
     "list_scheduled_events",
     "get_scheduled_event",
     "list_scheduled_event_users",
@@ -15323,7 +15446,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   const send = result.tools.find((tool) => tool.name === "send_message")
   const reaction = result.tools.find((tool) => tool.name === "add_reaction")
-  for (const tool of [send, reaction]) {
+  const soundboardPlayback = result.tools.find((tool) => (
+    tool.name === "play_soundboard_sound"
+  ))
+  for (const tool of [send, reaction, soundboardPlayback]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: false,
       idempotentHint: true,
@@ -15506,22 +15632,30 @@ test("minimum MCP read-response budget retains essential static and local surfac
     },
   })
 
-  const results = await Promise.all([
-    client.callTool({ arguments: {}, name: "get_connector_status" }),
-    client.readResource({ uri: MCP_RESOURCE_URIS.safety }),
-    client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess }),
-    client.readResource({ uri: MCP_RESOURCE_URIS.policy }),
-    client.readResource({ uri: MCP_RESOURCE_URIS.observability }),
-    client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI }),
-    client.getPrompt({
+  const reads = [
+    ["connector status", () => client.callTool({ arguments: {}, name: "get_connector_status" })],
+    ["safety resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.safety })],
+    ["tool access resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess })],
+    ["policy resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.policy })],
+    ["observability resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.observability })],
+    ["plan review app", () => client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI })],
+    ["summarize prompt", () => client.getPrompt({
       arguments: { channelId: CHANNEL_ID, limit: "1" },
       name: MCP_PROMPT_NAMES.summarizeChannel,
-    }),
-  ])
+    })],
+  ] as const
 
-  for (const result of results) {
+  for (const [label, read] of reads) {
+    let result
+    try {
+      result = await read()
+    } catch (error) {
+      assert.fail(`${label} failed within the minimum budget: ${String(error)}`)
+    }
+    const bytes = serializedMcpResultBytes(result)
     assert.ok(
-      serializedMcpResultBytes(result) <= MCP_READ_RESPONSE_LIMITS.minimumBytes,
+      bytes <= MCP_READ_RESPONSE_LIMITS.minimumBytes,
+      `${label} used ${bytes} UTF-8 bytes`,
     )
   }
 })
@@ -15682,6 +15816,80 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     getVoiceChannelStatus: async () => Promise.reject(new Error("not called")),
     voiceChannelStatusEnabled: true,
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
+  })
+  const server = createDiscordMcpServer({
+    config: loadFixtureConfig(configOverrides),
+    environment: { DISCORD_BOT_TOKEN: TOKEN },
+    gateway: enabled,
+    service,
+  })
+  await server.close()
+})
+
+test("MCP server requires an exact operational Gateway source for soundboard playback", async () => {
+  const configOverrides = {
+    token: TOKEN,
+    capabilities: {
+      soundboardPlayback: true,
+    },
+    identity: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      soundboardPlaybackChannelIds: [CHANNEL_ID],
+      soundboardPlaybackSourceGuildIds: [GUILD_ID],
+    },
+  }
+  const service = serviceFixture().service
+  const store = (scopedChannels: number) => new GatewayEventStore({
+    allowedChannelIds: new Set(),
+    allowedGuildIds: new Set(),
+    cursorNamespace: `soundboardplaybackscope${scopedChannels}`,
+    enabled: true,
+    eventFeedEnabled: false,
+    soundboardPlaybackChannelCount: scopedChannels,
+  })
+
+  assert.throws(
+    () => createDiscordMcpServer({
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
+      gateway: store(0),
+      service,
+    }),
+    /soundboard playback scope does not match configured exact channel scope/,
+  )
+  assert.throws(
+    () => createDiscordMcpServer({
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
+      gateway: store(1),
+      service,
+    }),
+    /requires an enabled exact-event Gateway source/,
+  )
+  const disabled = Object.assign(store(1), {
+    soundboardPlaybackEventsEnabled: false,
+    waitForSoundboardPlaybackEvent: async () => Promise.reject(new Error("not called")),
+  })
+  assert.throws(
+    () => createDiscordMcpServer({
+      config: loadFixtureConfig(configOverrides),
+      environment: { DISCORD_BOT_TOKEN: TOKEN },
+      gateway: disabled,
+      service,
+    }),
+    /requires an enabled exact-event Gateway source/,
+  )
+
+  const enabled = Object.assign(store(1), {
+    soundboardPlaybackEventsEnabled: true,
+    waitForSoundboardPlaybackEvent: async () => Promise.reject(new Error("not called")),
   })
   const server = createDiscordMcpServer({
     config: loadFixtureConfig(configOverrides),
@@ -17763,6 +17971,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     soundboardGet: 0,
     soundboardGuildList: 0,
     soundboardPlan: 0,
+    soundboardPlaybackCheck: 0,
+    soundboardPlaybackPlay: 0,
     stageInstanceExecute: 0,
     stageInstanceGet: 0,
     stageInstanceList: 0,
@@ -29824,6 +30034,219 @@ test("MCP soundboard reads expose only bounded privacy-safe evidence", async (co
   assert.equal(calls.soundboardGet, 1)
 })
 
+test("MCP soundboard playback checks exact readiness and exposes one guarded write", async (context) => {
+  const { calls, client, soundboardPlaybackCalls } = await connectedFixture(context)
+  const request = {
+    channelId: CHANNEL_ID,
+    soundId: SOUNDBOARD_SOUND_ID,
+    sourceGuildId: GUILD_ID,
+  }
+  const checked = await client.callTool({
+    arguments: request,
+    name: "check_soundboard_playback",
+  })
+  const played = await client.callTool({
+    arguments: {
+      ...request,
+      operationKey: SOUNDBOARD_PLAYBACK_OPERATION_KEY,
+    },
+    name: "play_soundboard_sound",
+  })
+  const invalid = await Promise.all([
+    client.callTool({
+      arguments: { channelId: CHANNEL_ID, soundId: SOUNDBOARD_SOUND_ID },
+      name: "check_soundboard_playback",
+    }),
+    client.callTool({
+      arguments: { ...request, unexpected: true },
+      name: "check_soundboard_playback",
+    }),
+    client.callTool({
+      arguments: { ...request, operationKey: "short" },
+      name: "play_soundboard_sound",
+    }),
+    client.callTool({
+      arguments: { ...request, sourceGuildId: "0" },
+      name: "play_soundboard_sound",
+    }),
+  ])
+
+  assert.equal(structuredContent(checked).status, "ready")
+  assert.deepEqual(
+    (structuredContent(checked).permission as Record<string, unknown>)
+      .requiredPermissionNames,
+    [
+      "VIEW_CHANNEL",
+      "CONNECT",
+      "SPEAK",
+      "USE_SOUNDBOARD",
+      "USE_EXTERNAL_SOUNDS",
+    ],
+  )
+  assert.equal(structuredContent(played).status, "completed")
+  assert.equal(structuredContent(played).verification, "response-only")
+  assert.equal(invalid.every((result) => result.isError === true), true)
+  assert.equal(calls.soundboardPlaybackCheck, 1)
+  assert.equal(calls.soundboardPlaybackPlay, 1)
+  assert.deepEqual(soundboardPlaybackCalls.checkArguments?.[0], request)
+  assert.deepEqual(soundboardPlaybackCalls.playArguments?.[0], {
+    ...request,
+    operationKey: SOUNDBOARD_PLAYBACK_OPERATION_KEY,
+  })
+  assert.equal(
+    soundboardPlaybackCalls.checkArguments?.[1]?.signal instanceof AbortSignal,
+    true,
+  )
+  assert.equal(
+    soundboardPlaybackCalls.playArguments?.[1]?.signal instanceof AbortSignal,
+    true,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(played),
+    new RegExp(SOUNDBOARD_PLAYBACK_OPERATION_KEY),
+  )
+
+  const tools = (await client.listTools()).tools
+  assert.deepEqual(listedTool(tools, "check_soundboard_playback").annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: true,
+  })
+  assert.deepEqual(listedTool(tools, "play_soundboard_sound").annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+  assert.match(
+    listedTool(tools, "play_soundboard_sound").description || "",
+    /must not be retried with a new key/,
+  )
+})
+
+test("MCP soundboard playback reports evidence, uncertainty, and replay conflicts safely", async (context) => {
+  const request = {
+    channelId: CHANNEL_ID,
+    operationKey: SOUNDBOARD_PLAYBACK_OPERATION_KEY,
+    soundId: SOUNDBOARD_SOUND_ID,
+    sourceGuildId: GUILD_ID,
+  }
+  const evidence = await connectedFixture(context, {
+    serviceOverrides: {
+      soundboardPlaybackCheckError: new SoundboardPlaybackEvidenceError(
+        "Discord soundboard playback evidence is invalid",
+      ),
+    },
+  })
+  const evidenceResult = await evidence.client.callTool({
+    arguments: {
+      channelId: request.channelId,
+      soundId: request.soundId,
+      sourceGuildId: request.sourceGuildId,
+    },
+    name: "check_soundboard_playback",
+  })
+  assert.equal(
+    structuredContent(evidenceResult).status,
+    "soundboard-playback-evidence-invalid",
+  )
+
+  const uncertain = await connectedFixture(context, {
+    serviceOverrides: {
+      soundboardPlaybackError: new SoundboardPlaybackExecutionError(
+        "Discord soundboard playback outcome is uncertain",
+        {
+          activityId: "activity-soundboard-playback",
+          activityRecordError: null,
+          channelId: CHANNEL_ID,
+          error: "DiscordApiError.500.unknown",
+          guildId: GUILD_ID,
+          operationKeyHash: OPERATION_KEY_HASH,
+          operationRecordError: null,
+          requestDigest: DIGEST,
+          retryAfterMs: null,
+          schemaVersion: SCHEMA_VERSION,
+          soundId: SOUNDBOARD_SOUND_ID,
+          sourceGuildId: GUILD_ID,
+          status: "uncertain",
+        },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: request,
+    name: "play_soundboard_sound",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const rateLimit = new DiscordApiError({
+    message: "Discord rate limited soundboard playback",
+    method: "POST",
+    retryAfterMs: 1_000,
+    route: "/channels/{channel.id}/send-soundboard-sound",
+    status: 429,
+  })
+  const rateLimited = await connectedFixture(context, {
+    serviceOverrides: {
+      soundboardPlaybackError: new SoundboardPlaybackExecutionError(
+        "Discord soundboard playback outcome is uncertain",
+        {
+          retryAfterMs: 1_000,
+          status: "uncertain",
+        },
+        { cause: rateLimit },
+      ),
+    },
+  })
+  const rateLimitedResult = await rateLimited.client.callTool({
+    arguments: request,
+    name: "play_soundboard_sound",
+  })
+  assert.equal(structuredContent(rateLimitedResult).status, "outcome-uncertain")
+  assert.equal(
+    (structuredContent(rateLimitedResult).error as Record<string, unknown>).retryAfterMs,
+    1_000,
+  )
+
+  const receipt = {
+    activityId: "activity-soundboard-playback",
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: OPERATION_KEY_HASH,
+    requestDigest: DIGEST,
+    resourceId: CHANNEL_ID,
+    status: "pending" as const,
+    timestamp: "2026-08-28T12:00:00.000Z",
+    verification: null,
+  }
+  const conflict = await connectedFixture(context, {
+    serviceOverrides: {
+      soundboardPlaybackError: new SoundboardPlaybackOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: request,
+    name: "play_soundboard_sound",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  for (const result of [
+    evidenceResult,
+    uncertainResult,
+    rateLimitedResult,
+    conflictResult,
+  ]) {
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      new RegExp(SOUNDBOARD_PLAYBACK_OPERATION_KEY),
+    )
+  }
+})
+
 test("MCP soundboard plans accept exact actions and reject transported audio", async (context) => {
   const { calls, client } = await connectedFixture(context)
   const validRequests = [{
@@ -38897,6 +39320,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
   const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
     enabled: true,
     layoutEnabled: feed.layoutEnabled,
+    soundboardPlaybackEventsEnabled: false,
     getChannelLayout: (guildId) => feed.getChannelLayout(guildId),
     getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
@@ -38912,6 +39336,9 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
     },
     subscribe: (listener) => feed.subscribe(listener),
     subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
+    async waitForSoundboardPlaybackEvent() {
+      throw new Error("Soundboard playback events are disabled")
+    },
     async waitForVoiceChannelStatusUpdate() {
       throw new Error("Voice channel status evidence is disabled")
     },
@@ -38979,6 +39406,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
     enabled: true,
     layoutEnabled: feed.layoutEnabled,
+    soundboardPlaybackEventsEnabled: false,
     getChannelLayout: (guildId) => feed.getChannelLayout(guildId),
     getChannelLayoutStatus: () => feed.getChannelLayoutStatus(),
     getStatus: () => feed.getStatus(),
@@ -38995,6 +39423,9 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
     },
     subscribe: (listener) => feed.subscribe(listener),
     subscribeChannelLayouts: (listener) => feed.subscribeChannelLayouts(listener),
+    async waitForSoundboardPlaybackEvent() {
+      throw new Error("Soundboard playback events are disabled")
+    },
     async waitForVoiceChannelStatusUpdate() {
       throw new Error("Voice channel status evidence is disabled")
     },
