@@ -19,6 +19,7 @@ import {
   COMPONENT_TEMPLATE_LIMITS,
   COMPONENT_TEMPLATE_VERSION,
 } from "./component-templates.js"
+import { COMPONENT_LINK_LIMITS } from "./component-link.js"
 import {
   AttachmentReadTooLargeError,
   errorMessage,
@@ -252,7 +253,7 @@ export function registerDiscordResources(
           "",
           "The optional Gateway feed requires pinned identity and exact local scope, requests no privileged intents, stores no Discord content, and reports cursor discontinuities instead of claiming false continuity.",
           "",
-          "One-to-one private messages are an explicit exact-user exception outside guild read scope. Reads require one configured ordinary recipient, caller-known channel and message IDs, pinned identity, and the exact two participants; return only transient plain text, static Components V2, or bounded URL-free single-attachment metadata; and omit generated component IDs, profiles, URLs, raw payloads, discovery, group DMs, Gateway events, and persistence. Send planning reads only the exact user and one explicitly requested owned local file and never opens a DM. Private-file send and reply require an independent capability and owned root, with no URL, base64, multiple file, edit, or download input. Send, reply, same-format connector-message edit, and irreversible supported-message deletion use action gates, acknowledgements, a complete-body and byte-bound keyed plan, signed approval, empty mentions, anti-spam, exact durable coordination, a request-bound schema-v2 content-free receipt retaining only format and nullable attachment size, pending activity, immutable channel and dispatch checkpoints, no automatic retry or rollback, and exact readback. Ambiguous outcomes retain their claims and require verify_direct_message_change with the exact caller-retained request without reopening or downloading the attachment.",
+          "One-to-one private messages are an explicit exact-user exception outside guild scope. Reads require one configured ordinary recipient, caller-known IDs, pinned identity, and the exact two participants. They return transient text, callback-free static Components V2, or URL-free single-attachment metadata while omitting generated and custom-ID actions, profiles, attachment URLs, raw payloads, discovery, group DMs, Gateway events, and persistence. Link destinations remain transient untrusted layout data; writes require every exact canonical HTTPS origin in scopes.componentLinkOrigins before Discord access, and the connector never fetches links or verifies redirects or final destinations. Send planning reads only the exact user and one explicitly requested owned local file and never opens a DM. Private-file send and reply require an independent capability and owned root and accept no URL, base64, multiple file, edit, or download input. Changes require action gates, acknowledgements, a complete keyed plan, signed approval, empty mentions, anti-spam, durable coordination, a request-bound schema-v2 content-free receipt, pending activity, immutable dispatch checkpoints, no automatic retry or rollback, and exact readback. Ambiguous outcomes retain their claims and require verify_direct_message_change with the exact retained request without reopening or downloading the attachment.",
           "",
           "Application posture derives installation, default authority, intents, Interaction delivery, webhooks, connector fit, and fixed findings from pinned identity. It returns only IDs, booleans, enums, named permissions, and counts; profiles, text, URLs, raw flags or bits, webhook names, unknown values, caching, and persistence are omitted.",
           "",
@@ -403,6 +404,11 @@ export function registerDiscordResources(
           verify: "verify_component_message",
         },
         limits: COMPONENT_TEMPLATE_LIMITS,
+        linkButton: {
+          configurationField: "scopes.componentLinkOrigins",
+          limits: COMPONENT_LINK_LIMITS,
+          rule: "Optional announcement and release-notes CTAs are callback-free HTTPS links; Discord planning requires every exact canonical origin",
+        },
         notificationInput: {
           default: [],
           field: "notifyUserIds",
@@ -415,6 +421,7 @@ export function registerDiscordResources(
         warnings: [
           "Template fields and compiled component text are transient untrusted content",
           "Compilation grants no Discord authority and never sends a message",
+          "The connector never fetches links or verifies redirects or final destinations",
           "Use the returned exact components in the reviewed component-message lifecycle",
         ],
       }),

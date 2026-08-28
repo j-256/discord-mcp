@@ -86,6 +86,10 @@ import {
   type ComponentLayoutInput,
 } from "./component-layout.js"
 import {
+  COMPONENT_LINK_LIMITS,
+  normalizeComponentLinkUrl,
+} from "./component-link.js"
+import {
   COMPONENT_ANNOUNCEMENT_PRIORITIES,
   COMPONENT_INCIDENT_STATUSES,
   COMPONENT_TEMPLATE_LIMITS,
@@ -1585,7 +1589,44 @@ const componentSeparatorSchema = z.strictObject({
   kind: z.literal("separator"),
   spacing: z.enum(["large", "small"]).default("small"),
 })
+const componentLinkLabelSchema = z.string()
+  .refine((value) => value.trim().length > 0, {
+    message: "link button label must not be blank",
+  })
+  .refine((value) => [...value].length <= COMPONENT_LINK_LIMITS.labelCharacters, {
+    message: `link button label must not exceed ${COMPONENT_LINK_LIMITS.labelCharacters} Unicode characters`,
+  })
+  .refine((value) => !/[\u0000-\u001F\u007F\u2028\u2029]/u.test(value), {
+    message: "link button label must be single-line text without control characters",
+  })
+  .refine((value) => {
+    try {
+      encodeURIComponent(value)
+      return true
+    } catch {
+      return false
+    }
+  }, { message: "link button label must contain valid Unicode" })
+const componentLinkUrlSchema = z.string()
+  .superRefine((value, context) => {
+    try {
+      normalizeComponentLinkUrl(value)
+    } catch (error) {
+      context.addIssue({ code: "custom", message: errorMessage(error) })
+    }
+  })
+const componentLinkButtonSchema = z.strictObject({
+  label: componentLinkLabelSchema,
+  url: componentLinkUrlSchema,
+})
+const componentLinkRowSchema = z.strictObject({
+  buttons: z.array(componentLinkButtonSchema)
+    .min(1)
+    .max(COMPONENT_LINK_LIMITS.buttonsPerRow),
+  kind: z.literal("link-row"),
+})
 const componentContainerChildSchema = z.union([
+  componentLinkRowSchema,
   componentTextSchema,
   componentSeparatorSchema,
 ])
@@ -1599,6 +1640,7 @@ const componentContainerSchema = z.strictObject({
 })
 const componentLayoutSchema = z.array(z.union([
   componentContainerSchema,
+  componentLinkRowSchema,
   componentSeparatorSchema,
   componentTextSchema,
 ]))
@@ -1677,12 +1719,17 @@ const componentTemplatePollOptionsSchema = z.array(componentTemplatePollOptionSc
   .refine((options) => (
     new Set(options.map(({ label }) => label)).size === options.length
   ), { message: "poll option labels must be unique" })
+const componentTemplateCtaSchema = z.strictObject({
+  label: componentLinkLabelSchema,
+  url: componentLinkUrlSchema,
+})
 const componentTemplateInputSchema = z.discriminatedUnion("template", [
   z.strictObject({
     body: componentTemplateTextSchema(
       "announcement body",
       COMPONENT_TEMPLATE_LIMITS.announcementBodyCharacters,
     ),
+    cta: componentTemplateCtaSchema.optional(),
     headline: componentTemplateHeadlineSchema,
     notifyUserIds: componentNotificationUserIdsSchema,
     priority: z.enum(COMPONENT_ANNOUNCEMENT_PRIORITIES),
@@ -1719,6 +1766,7 @@ const componentTemplateInputSchema = z.discriminatedUnion("template", [
   }),
   z.strictObject({
     changes: componentTemplateItemsSchema,
+    cta: componentTemplateCtaSchema.optional(),
     notifyUserIds: componentNotificationUserIdsSchema,
     releaseName: componentTemplateTextSchema(
       "release name",
@@ -6395,7 +6443,7 @@ const directMessageConfirmationRequestSchema: {
 } = {
   properties: {
     approve: {
-      description: "Set true only after reviewing the exact connector and recipient identities, one-to-one channel and target when present, transient text, static Components V2 layout, or owned local file review and reason, forced mention suppression, privacy boundary, rate limits, risks, one-shot operation key hash, and plan digest",
+      description: "Set true only after reviewing the exact connector and recipient identities, one-to-one channel and target when present, transient text, static Components V2 layout with exact link destinations and origins when present, or owned local file review and reason, forced mention suppression, privacy boundary, rate limits, risks, one-shot operation key hash, and plan digest",
       title: "Approve private message change",
       type: "boolean",
     },
@@ -8989,9 +9037,29 @@ const normalizedComponentSeparatorSchema = z.strictObject({
   kind: z.literal("separator"),
   spacing: z.enum(["large", "small"]),
 })
+const normalizedComponentLinkButtonSchema = z.strictObject({
+  label: componentLinkLabelSchema,
+  url: componentLinkUrlSchema.refine(
+    (value) => {
+      try {
+        return normalizeComponentLinkUrl(value) === value
+      } catch {
+        return false
+      }
+    },
+    { message: "link button URL must use its normalized serialization" },
+  ),
+})
+const normalizedComponentLinkRowSchema = z.strictObject({
+  buttons: z.array(normalizedComponentLinkButtonSchema)
+    .min(1)
+    .max(COMPONENT_LINK_LIMITS.buttonsPerRow),
+  kind: z.literal("link-row"),
+})
 const normalizedComponentContainerSchema = z.strictObject({
   accentColor: z.number().int().min(0).max(0xFF_FF_FF).nullable(),
   components: z.array(z.union([
+    normalizedComponentLinkRowSchema,
     normalizedComponentSeparatorSchema,
     normalizedComponentTextSchema,
   ])).min(1).max(COMPONENT_LAYOUT_LIMITS.components),
@@ -9000,6 +9068,7 @@ const normalizedComponentContainerSchema = z.strictObject({
 })
 const normalizedComponentLayoutSchema = z.array(z.union([
   normalizedComponentContainerSchema,
+  normalizedComponentLinkRowSchema,
   normalizedComponentSeparatorSchema,
   normalizedComponentTextSchema,
 ]))
@@ -9007,11 +9076,17 @@ const normalizedComponentLayoutSchema = z.array(z.union([
   .max(COMPONENT_LAYOUT_LIMITS.components)
   .superRefine((components, context) => {
     const total = components.reduce((count, component) => (
-      count + 1 + (component.kind === "container" ? component.components.length : 0)
+      count + 1 + (component.kind === "container"
+        ? component.components.reduce((childCount, child) => (
+            childCount + 1 + (child.kind === "link-row" ? child.buttons.length : 0)
+          ), 0)
+        : component.kind === "link-row"
+          ? component.buttons.length
+          : 0)
     ), 0)
     const textCharacters = components.reduce((count, component) => {
       if (component.kind === "text") return count + [...component.content].length
-      if (component.kind === "separator") return count
+      if (component.kind === "separator" || component.kind === "link-row") return count
       return count + component.components.reduce((childCount, child) => (
         childCount + (child.kind === "text" ? [...child.content].length : 0)
       ), 0)
@@ -19860,9 +19935,9 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Forum posts are public threads and retain applied tag IDs.",
       "Message interactions require a separate exact channel allowlist and suppress notifications unless exact user IDs are explicitly authorized.",
       "Reuse one stable idempotency key for every retry of the same send, especially after an uncertain result.",
-      "One-to-one private messages use an independent exact ordinary-user allowlist and never inherit guild or channel read scope. Reads require a caller-known exact DM channel and message when applicable, re-verify both participants, return transient plain text, normalized static Components V2, or bounded single-attachment metadata, and omit generated component IDs, profiles, avatars, attachment URLs, raw payloads, discovery, group DMs, persistence, and DM Gateway events. Send and reply additionally accept one owned local file only when the independent private-attachment gate and an attachment root are configured; no URL, base64, multiple-file, edit, or download path exists. For send, reply, same-format connector-message edit, or irreversible supported-message deletion, call plan_direct_message_change and review exact identities, transient complete body, file evidence when present, preview and reason, target presentation, forced empty mentions, fixed rate limits, privacy omissions, risks, one-shot key hash, and digest, then call execute_direct_message_change with identical inputs and the digest. Send planning never opens a channel. Execution requires signed approval, request-bound schema-v2 content-free evidence before contact, immutable channel and dispatch checkpoints, a non-retried mutation sequence, and exact presentation, body, attachment metadata, or absence readback. After a restart or uncertain result, call verify_direct_message_change with the exact retained request and never retry the spent key.",
+      "One-to-one private messages use an independent exact ordinary-user allowlist and never inherit guild or channel read scope. Reads require a caller-known exact DM channel and message when applicable, re-verify both participants, return transient plain text, normalized callback-free static Components V2 including reviewed link destinations, or bounded single-attachment metadata, and omit generated and custom-ID component actions, profiles, avatars, attachment URLs, raw payloads, discovery, group DMs, persistence, and DM Gateway events. Send and reply additionally accept one owned local file only when the independent private-attachment gate and an attachment root are configured; no remote-file URL, base64, multiple-file, edit, or download path exists. For send, reply, same-format connector-message edit, or irreversible supported-message deletion, call plan_direct_message_change and review exact identities, transient complete body, exact normalized link destinations and origins when present, file evidence when present, preview and reason, target presentation, forced empty mentions, fixed rate limits, privacy omissions, risks, one-shot key hash, and digest, then call execute_direct_message_change with identical inputs and the digest. Link writes require every exact origin in scopes.componentLinkOrigins before Discord access, and the connector never fetches a destination or verifies redirects. Send planning never opens a channel. Execution requires signed approval, request-bound schema-v2 content-free evidence before contact, immutable channel and dispatch checkpoints, a non-retried mutation sequence, and exact presentation, body, attachment metadata, or absence readback. After a restart or uncertain result, call verify_direct_message_change with the exact retained request and never retry the spent key.",
       "Local file attachment messages use a separate exact channel and canonical directory scope: call plan_attachment_message, review the exact path, bytes, message fields, reply, notifications, permissions, one-shot operation key hash, warnings, and keyed digest, then call execute_attachment_message with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Start with compile_component_template for one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card layout, or call preview_component_layout for a custom static layout. Compilation and preview are local, persist nothing, and grant no authority. Then call plan_component_message, review the exact create or edit target, static text, separators, containers, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. After a completed operation or process restart, call verify_component_message with the exact caller-retained request to compare its content-free keyed receipt with fresh exact Discord state. Arbitrary template sources and variables, buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
+      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Start with compile_component_template for one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card layout, or call preview_component_layout for a custom static layout. Compilation and preview are local, persist nothing, and grant no authority. Then call plan_component_message, review the exact create or edit target, static text, separators, containers, link-only action rows, normalized HTTPS destinations, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. Discord planning and execution require every link's exact origin in scopes.componentLinkOrigins; the connector never fetches links or verifies redirects. After a completed operation or process restart, call verify_component_message with the exact caller-retained request to compare its content-free keyed receipt with fresh exact Discord state. Arbitrary template sources and variables, custom-ID buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
       "Static rich-embed messages use an independent exact channel scope and require confirmed Message Content intent. Call preview_embed_message locally, then plan_embed_message and review the complete plain content, embed presentation, create or edit target, reply, notifications, complete EMBED_LINKS and send permissions, one-shot key hash, warnings, and digest. Call execute_embed_message with identical inputs only after review; edits fully replace content and embeds on one exact unpinned bot-owned default message. After completion or restart, call verify_embed_message with the exact retained request. Plain-content HTTP URLs, embed URL and remote-asset fields, attachments, providers, arbitrary embed types, automatic retries, and retry after reservation or uncertainty are unsupported; ordinary markdown links inside embed text are allowed but never fetched by the connector.",
       "Message pins use the current paginated Discord pin endpoint for reads and a separate exact channel scope for changes: call plan_message_pin, review the exact application, bot, guild, channel, message state, permissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_message_pin with identical inputs and the digest. Pin and unpin are both treated as destructive reviewed changes; never retry with the same operation key after reservation or an uncertain outcome.",
       "Announcement crossposts use a separate exact direct-channel scope and require confirmed Message Content intent: call plan_announcement_crosspost, review the exact application, bot, guild, announcement channel, default non-poll non-forwarded message, authorship-sensitive permissions, unknown follower fanout, one-shot operation key hash, warnings, and keyed digest, then call execute_announcement_crosspost with identical inputs and the digest. Execution requires signed interactive approval, sends one non-retried request, accepts only the expected CROSSPOSTED flag transition, and verifies an exact fresh readback. Never retry after reservation or an uncertain outcome.",
@@ -21535,7 +21610,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "list_direct_messages",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Read one bounded page from an exact caller-known one-to-one Discord DM channel for one separately configured ordinary user. Re-verifies pinned connector identity, exact channel participants, and recipient policy on every call. Returns plain text or supported static Components V2 layouts transiently with exact IDs, deterministic previews, presentation classification, and bounded aggregate counts, while omitting generated component IDs, profiles, avatars, attachment URLs, raw payloads, group DMs, discovery, and persistence.",
+      description: "Read one bounded page from an exact caller-known one-to-one Discord DM channel for one separately configured ordinary user. Re-verifies pinned connector identity, exact channel participants, and recipient policy on every call. Returns plain text or supported callback-free static Components V2 layouts transiently with exact IDs, deterministic previews, untrusted link destinations, presentation classification, and bounded aggregate counts, while omitting generated and custom-ID component actions, profiles, avatars, attachment URLs, raw payloads, group DMs, discovery, and persistence.",
       inputSchema: directMessageListInputSchema,
       outputSchema: toolOutputSchema,
       title: "List exact Discord private messages",
@@ -21567,7 +21642,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "get_direct_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Read one exact Discord DM message from a caller-known one-to-one channel for one separately configured ordinary user. Re-verifies pinned connector identity, exact channel participants, recipient policy, message boundary, and author identity. Returns plain text or a supported static Components V2 layout transiently with deterministic preview, presentation classification, and bounded aggregate counts while omitting generated component IDs, profiles, avatars, attachment URLs, raw payloads, discovery, and persistence.",
+      description: "Read one exact Discord DM message from a caller-known one-to-one channel for one separately configured ordinary user. Re-verifies pinned connector identity, exact channel participants, recipient policy, message boundary, and author identity. Returns plain text or a supported callback-free static Components V2 layout transiently with deterministic preview, untrusted link destinations, presentation classification, and bounded aggregate counts while omitting generated and custom-ID component actions, profiles, avatars, attachment URLs, raw payloads, discovery, and persistence.",
       inputSchema: directMessageGetInputSchema,
       outputSchema: toolOutputSchema,
       title: "Get exact Discord private message",
@@ -21599,7 +21674,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_direct_message_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan for one exact private-message send, reply, same-format edit, or irreversible deletion involving one separately configured ordinary Discord user. Send and reply accept plain text, bounded static Components V2, or one independently gated owned local file with optional text; edit remains text or Components V2 only. Re-verifies pinned identity, exact participants and message ownership when applicable, complete desired body, fresh file bytes and provenance when present, forced empty mentions, fixed anti-spam limits, privacy omissions, transient review reason, and a unique one-shot operation key without writing or persisting private content. Send planning never opens a DM channel.",
+      description: "Prepare a process-bound keyed plan for one exact private-message send, reply, same-format edit, or irreversible deletion involving one separately configured ordinary Discord user. Send and reply accept plain text, bounded static Components V2, or one independently gated owned local file with optional text; edit remains text or Components V2 only. Callback-free link rows require every exact canonical HTTPS origin in scopes.componentLinkOrigins before recipient or Discord access, expose every normalized destination in the plan, and are never fetched by the connector. Re-verifies pinned identity, exact participants and message ownership when applicable, complete desired body, fresh file bytes and provenance when present, forced empty mentions, fixed anti-spam limits, privacy omissions, transient review reason, and a unique one-shot operation key without writing or persisting private content. Send planning never opens a DM channel.",
       inputSchema: directMessagePlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan exact Discord private-message change",
@@ -21623,7 +21698,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "verify_direct_message_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Verify one exact caller-retained private-message change request against its token-keyed schema-v2 content-free operation receipt and receipt-bound exact Discord message or absence. Receipt and request matching happens before Discord or local-file access. Returns only lifecycle status, exact IDs, hashes, timestamps, and fresh match state; attachment recovery compares receipt-bound size and caller-retained metadata without reopening the local file or downloading Discord content. It never writes, reserves, scans private channels, persists or returns message content, or trusts caller-supplied recovery identities.",
+      description: "Verify one exact caller-retained private-message change request against its token-keyed schema-v2 content-free operation receipt and receipt-bound exact Discord message or absence. Receipt and request matching plus current exact link-origin policy enforcement happen before Discord or local-file access. Returns only lifecycle status, exact IDs, hashes, timestamps, and fresh match state; attachment recovery compares receipt-bound size and caller-retained metadata without reopening the local file or downloading Discord content. It never fetches links, writes, reserves, scans private channels, persists or returns message content, or trusts caller-supplied recovery identities.",
       inputSchema: directMessageVerifyInputSchema,
       outputSchema: toolOutputSchema,
       title: "Verify exact Discord private-message operation",
@@ -21647,7 +21722,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_direct_message_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
-      description: "Execute one exact reviewed private-message plain-text, static Components V2, or single owned-file send or reply, same-format text or Components V2 edit, or irreversible supported-message deletion only after a fresh matching plan and signed interactive approval. Durably coordinates exact user, channel, and message resources; reserves a schema-v2 one-shot request-bound receipt; records content-free pending evidence before contact; applies fixed anti-spam limits and empty mentions; checkpoints newly opened channels and dispatched message IDs; performs no automatic mutation retry; and requires exact presentation, body, receipt-bound attachment metadata, or absence readback. Uncertain outcomes remain quarantined for verify_direct_message_change.",
+      description: "Execute one exact reviewed private-message plain-text, static Components V2, or single owned-file send or reply, same-format text or Components V2 edit, or irreversible supported-message deletion only after a fresh matching plan, current exact link-origin enforcement, and signed interactive approval. Durably coordinates exact user, channel, and message resources; reserves a schema-v2 one-shot request-bound receipt; records content-free pending evidence before contact; applies fixed anti-spam limits and empty mentions; checkpoints newly opened channels and dispatched message IDs; performs no automatic mutation retry; and requires exact presentation, body, receipt-bound attachment metadata, or absence readback. Uncertain outcomes remain quarantined for verify_direct_message_change.",
       inputSchema: directMessageExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord private-message change",
@@ -29141,7 +29216,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "compile_component_template",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Compile one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card template into the bounded static Components V2 layout DSL. Returns exact normalized components, mention and notification review, and reviewed-workflow handoff guidance without contacting Discord, using the bot token for Discord access, granting authority, sending a message, or persisting content. Accepts no template source, arbitrary variable map, callback, remote media, attachment, or raw Discord JSON.",
+      description: "Compile one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card template into the bounded static Components V2 layout DSL. Announcement and release-notes templates may add one normalized HTTPS link-only CTA; compilation does not grant its origin authority. Returns exact normalized components, link, mention, and notification review plus reviewed-workflow handoff guidance without contacting Discord, using the bot token for Discord access, granting authority, sending a message, or persisting content. Accepts no template source, arbitrary variable map, custom ID, callback, remote media, attachment, or raw Discord JSON.",
       inputSchema: componentTemplateInputSchema,
       outputSchema: toolOutputSchema,
       title: "Compile safe Discord component template",
@@ -29161,12 +29236,13 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         components: layout,
         next: {
           executeTool: "execute_component_message",
-          instruction: "Copy components and review.notificationUserIds unchanged into plan_component_message with the caller-selected action, exact target fields, and a fresh one-shot operation key",
+          instruction: "Review every link URL, configure every exact review.linkOrigins value before Discord use, then copy components and review.notificationUserIds unchanged into plan_component_message with the caller-selected action, exact target fields, and a fresh one-shot operation key",
           planTool: "plan_component_message",
           verifyTool: "verify_component_message",
         },
         privacy: {
           compiledContent: "transient-untrusted",
+          linkDestinations: "transient-untrusted",
           persistence: "none",
           templateSource: "bundled-local",
         },
@@ -29189,7 +29265,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "preview_component_layout",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Validate and normalize one bounded static Components V2 layout locally. Returns a deterministic outline, recursive counts, aggregate Unicode text length, explicit defaults, mention notification projection, and safety warnings without contacting Discord or persisting content. Supports only Text Display, Separator, and Container nodes.",
+      description: "Validate and normalize one bounded static Components V2 layout locally. Returns a deterministic outline, recursive counts, aggregate Unicode text length, exact normalized HTTPS link destinations and origins, explicit defaults, mention notification projection, and safety warnings without contacting Discord or persisting content. Supports Text Display, Separator, Container, and callback-free link-row nodes only; local preview grants no origin authority.",
       inputSchema: componentLayoutPreviewInputSchema,
       outputSchema: toolOutputSchema,
       title: "Preview static Discord component layout",
@@ -29217,7 +29293,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan to create or edit one static Components V2 message in an exact allowlisted interaction channel. Requires confirmed Message Content intent and verifies exact application, bot, guild, active thread parent, private-thread membership, complete permissions, reply and notification policy, and an already-V2 bot-owned edit target without writing or persisting layout content.",
+      description: "Prepare a process-bound keyed plan to create or edit one static Components V2 message in an exact allowlisted interaction channel. Requires confirmed Message Content intent and every link button's exact canonical HTTPS origin in scopes.componentLinkOrigins, then verifies exact application, bot, guild, active thread parent, private-thread membership, complete permissions, reply and notification policy, and an already-V2 bot-owned edit target without writing or persisting layout content. The plan shows exact normalized URLs; the connector never fetches them or verifies redirects.",
       inputSchema: componentMessagePlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan reviewed Discord component message",
@@ -29241,7 +29317,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "verify_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Verify one exact caller-retained static Components V2 create or edit request against its content-free keyed operation receipt and the receipt-bound exact Discord message. Returns only operation status, exact IDs, hashes, timestamps, and fresh match state. It does not write, reserve an operation, append activity, consume the write limiter, persist or return component content, scan message history, or trust a caller-supplied message ID for create recovery.",
+      description: "Verify one exact caller-retained static Components V2 create or edit request against its content-free keyed operation receipt and the receipt-bound exact Discord message. Re-enforces every link button's exact configured origin before Discord access and returns only operation status, exact IDs, hashes, timestamps, and fresh match state. It does not fetch a link, write, reserve an operation, append activity, consume the write limiter, persist or return component content, scan message history, or trust a caller-supplied message ID for create recovery.",
       inputSchema: componentMessagePlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Verify Discord component message operation",
@@ -29265,7 +29341,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_component_message",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
-      description: "Create or edit one reviewed static Components V2 message after a fresh matching plan and signed interactive approval. Uses shared anti-spam limits, exact-target write coordination, a durable one-shot receipt, pending content-free audit record, one non-retried POST or PATCH, strict response validation, and exact GET readback. An exact notification-free edit no-op writes nothing and needs no approval.",
+      description: "Create or edit one reviewed static Components V2 message after a fresh matching plan, exact link-origin enforcement, and signed interactive approval. Uses shared anti-spam limits, exact-target write coordination, a durable one-shot receipt, pending content-free audit record, one non-retried POST or PATCH, strict response validation, and exact GET readback. An exact notification-free edit no-op writes nothing and needs no approval.",
       inputSchema: componentMessageExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord component message",

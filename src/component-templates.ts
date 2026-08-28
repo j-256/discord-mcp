@@ -1,10 +1,15 @@
 import {
   reviewComponentLayout,
   type ComponentContainerInput,
+  type ComponentLinkRowInput,
   type ComponentLayoutReview,
   type ComponentSeparatorInput,
   type ComponentTextInput,
 } from "./component-layout.js"
+import {
+  COMPONENT_LINK_LIMITS,
+  normalizeComponentLinkUrl,
+} from "./component-link.js"
 
 export const COMPONENT_TEMPLATE_NAMES = [
   "announcement",
@@ -43,15 +48,21 @@ export const COMPONENT_TEMPLATE_LIMITS = Object.freeze({
   summaryCharacters: 1_600,
 })
 
-export const COMPONENT_TEMPLATE_VERSION = 1
+export const COMPONENT_TEMPLATE_VERSION = 2
 
 export type ComponentTemplateName = typeof COMPONENT_TEMPLATE_NAMES[number]
 export type ComponentAnnouncementPriority =
   typeof COMPONENT_ANNOUNCEMENT_PRIORITIES[number]
 export type ComponentIncidentStatus = typeof COMPONENT_INCIDENT_STATUSES[number]
 
+export interface ComponentTemplateCtaInput {
+  label: string
+  url: string
+}
+
 export interface AnnouncementComponentTemplateInput {
   body: string
+  cta?: ComponentTemplateCtaInput
   headline: string
   priority: ComponentAnnouncementPriority
   template: "announcement"
@@ -79,6 +90,7 @@ export interface PollResultsComponentTemplateInput {
 
 export interface ReleaseNotesComponentTemplateInput {
   changes: readonly string[]
+  cta?: ComponentTemplateCtaInput
   releaseName: string
   summary: string
   template: "release-notes"
@@ -117,7 +129,7 @@ export const COMPONENT_TEMPLATE_CATALOG: readonly ComponentTemplateCatalogEntry[
     Object.freeze({
       accentBehavior: "Derived from information, important, or urgent priority",
       name: "announcement" as const,
-      optionalFields: Object.freeze([]),
+      optionalFields: Object.freeze(["cta"]),
       purpose: "Publish a clearly prioritized announcement",
       requiredFields: Object.freeze(["headline", "body", "priority"]),
     }),
@@ -138,7 +150,7 @@ export const COMPONENT_TEMPLATE_CATALOG: readonly ComponentTemplateCatalogEntry[
     Object.freeze({
       accentBehavior: "Fixed release accent",
       name: "release-notes" as const,
-      optionalFields: Object.freeze([]),
+      optionalFields: Object.freeze(["cta"]),
       purpose: "Publish a release summary and ordered change list",
       requiredFields: Object.freeze(["releaseName", "summary", "changes"]),
     }),
@@ -170,7 +182,8 @@ const COMPONENT_TEMPLATE_COLORS = Object.freeze({
 
 const TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const LINE_BREAK_PATTERN = /[\n\r\u2028\u2029]/u
-const ANNOUNCEMENT_KEYS = new Set(["body", "headline", "priority", "template"])
+const ANNOUNCEMENT_KEYS = new Set(["body", "cta", "headline", "priority", "template"])
+const CTA_KEYS = new Set(["label", "url"])
 const INCIDENT_KEYS = new Set([
   "impact",
   "nextUpdate",
@@ -181,7 +194,7 @@ const INCIDENT_KEYS = new Set([
 ])
 const POLL_KEYS = new Set(["options", "question", "template"])
 const POLL_OPTION_KEYS = new Set(["label", "votes"])
-const RELEASE_KEYS = new Set(["changes", "releaseName", "summary", "template"])
+const RELEASE_KEYS = new Set(["changes", "cta", "releaseName", "summary", "template"])
 const WELCOME_KEYS = new Set(["headline", "introduction", "steps", "template"])
 
 function record(value: unknown, path: string): Record<string, unknown> {
@@ -261,9 +274,29 @@ function separator(): ComponentSeparatorInput {
   return { divider: true, kind: "separator", spacing: "small" }
 }
 
+function cta(value: unknown, path: string): ComponentLinkRowInput | null {
+  if (value === undefined) return null
+  const input = record(value, path)
+  assertKeys(input, CTA_KEYS, path)
+  return {
+    buttons: [{
+      label: boundedText(
+        input.label,
+        `${path}.label`,
+        COMPONENT_LINK_LIMITS.labelCharacters,
+        true,
+      ),
+      url: normalizeComponentLinkUrl(input.url, `${path}.url`),
+    }],
+    kind: "link-row",
+  }
+}
+
 function container(
   accentColor: number,
-  components: readonly (ComponentTextInput | ComponentSeparatorInput)[],
+  components: readonly (
+    ComponentLinkRowInput | ComponentTextInput | ComponentSeparatorInput
+  )[],
 ): ComponentContainerInput {
   return {
     accentColor,
@@ -298,10 +331,12 @@ function announcementLayout(value: Record<string, unknown>): ComponentContainerI
     "template.body",
     COMPONENT_TEMPLATE_LIMITS.announcementBodyCharacters,
   )
+  const callToAction = cta(value.cta, "template.cta")
   return [container(COMPONENT_TEMPLATE_COLORS.announcement[priority], [
     text(`## ${headline}\n**Priority:** ${titleCase(priority)}`),
     separator(),
     text(body),
+    ...(callToAction === null ? [] : [callToAction]),
   ])]
 }
 
@@ -421,12 +456,14 @@ function releaseLayout(value: Record<string, unknown>): ComponentContainerInput[
     COMPONENT_TEMPLATE_LIMITS.summaryCharacters,
   )
   const changes = boundedTextList(value.changes, "template.changes")
+  const callToAction = cta(value.cta, "template.cta")
   return [container(COMPONENT_TEMPLATE_COLORS.release, [
     text(`## ${releaseName}\n**Release notes**`),
     separator(),
     text(summary),
     separator(),
     text(`**What's changed**\n${changes.map((change) => `- ${change}`).join("\n")}`),
+    ...(callToAction === null ? [] : [callToAction]),
   ])]
 }
 

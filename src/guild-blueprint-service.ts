@@ -899,11 +899,24 @@ function canonicalComponentLayoutInput(
   return layout.map((component) => {
     if (component.kind === "text") return { ...component }
     if (component.kind === "separator") return { ...component }
+    if (component.kind === "link-row") {
+      return {
+        buttons: component.buttons.map((button) => ({ ...button })),
+        kind: "link-row",
+      }
+    }
     return {
       ...(component.accentColor === null
         ? {}
         : { accentColor: component.accentColor }),
-      components: component.components.map((child) => ({ ...child })),
+      components: component.components.map((child) => (
+        child.kind === "link-row"
+          ? {
+              buttons: child.buttons.map((button) => ({ ...button })),
+              kind: "link-row" as const,
+            }
+          : { ...child }
+      )),
       kind: "container",
       spoiler: component.spoiler,
     }

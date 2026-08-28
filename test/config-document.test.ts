@@ -51,6 +51,7 @@ const TOKEN = "test-discord-token"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const HEADER_ALIAS = "HONEYCOMB_OTLP_HEADERS"
 const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
+const COMPONENT_LINK_ORIGIN = "https://docs.example.com"
 
 function document(
   overrides: Partial<ConnectorConfigDocument> = {},
@@ -105,6 +106,7 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
     runtime: { nativeCommandName: "discord" },
     scopes: {
       attachmentChannelIds: [CHANNEL_ID],
+      componentLinkOrigins: [COMPONENT_LINK_ORIGIN],
       interactionChannelIds: [CHANNEL_ID],
     },
     storage: {
@@ -113,6 +115,23 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
   })
   assert.deepEqual(parseConnectorConfigDocument(valid, valid.name), valid)
   assert.equal(JSON.stringify(valid).includes(TOKEN), false)
+
+  for (const componentLinkOrigins of [
+    ["http://docs.example.com"],
+    ["https://Docs.example.com"],
+    ["https://docs.example.com/"],
+    ["https://docs.example.com/path"],
+    ["https://docs.example.com", "https://docs.example.com"],
+    ["https://example.com", "https://docs.example.com"],
+  ]) {
+    assert.throws(
+      () => parseConnectorConfigDocument({
+        ...valid,
+        scopes: { ...valid.scopes, componentLinkOrigins },
+      }),
+      ConfigDocumentError,
+    )
+  }
 
   const invalid: unknown[] = [
     { ...valid, unknown: true },
@@ -241,6 +260,7 @@ test("native configuration loads only referenced secrets and rejects ambient pol
     },
     scopes: {
       attachmentChannelIds: [CHANNEL_ID],
+      componentLinkOrigins: [COMPONENT_LINK_ORIGIN],
       interactionChannelIds: [CHANNEL_ID],
     },
     storage: {
@@ -259,6 +279,7 @@ test("native configuration loads only referenced secrets and rejects ambient pol
     [applicationEmojiRoot],
   )
   assert.deepEqual([...config.attachmentChannelIds], [CHANNEL_ID])
+  assert.deepEqual([...config.componentLinkOrigins], [COMPONENT_LINK_ORIGIN])
   assert.equal(config.attachmentMaxBytes, 1_024)
   assert.equal(
     config.mcpReadResponseMaxBytes,
@@ -449,6 +470,10 @@ test("configuration metadata covers every runtime field and emits a strict schem
   for (const name of CONFIG_SCOPE_NAMES) {
     assert.equal(paths.has(`$.scopes.${name}`), true)
   }
+  assert.equal(
+    fields.find((field) => field.path === "$.scopes.componentLinkOrigins")?.kind,
+    "strings",
+  )
   for (const name of CONFIG_LIMIT_NAMES) {
     assert.equal(paths.has(`$.limits.${name}`), true)
   }

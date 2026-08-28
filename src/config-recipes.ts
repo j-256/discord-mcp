@@ -279,6 +279,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     toolsets: ["embed-messages", "interactions", "messages"],
     warnings: [
       "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the reviewed message",
+      "Outbound link buttons remain disabled until their exact canonical HTTPS origins are separately added to scopes.componentLinkOrigins; the recipe never infers or broadens destination trust",
       "Rich embeds intentionally exclude embed URL and remote-asset fields, attachments, providers, and arbitrary embed types",
       "Plain content excludes HTTP URLs so Discord cannot append an unreviewed automatic link embed; embed text may contain ordinary markdown links",
       "A newly scaffolded publication channel must be added after its exact Discord ID is known",
@@ -315,6 +316,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "All mentions and reply-author notifications are forcibly suppressed, writes are globally bounded to five per minute, and each recipient has a fixed five-second minimum interval",
       "Planning a new send never opens a DM channel; approved execution may open one before sending and checkpoints its exact ID before message dispatch",
       "Discord may reject contact because of recipient privacy, relationship, or shared-server state; the connector does not discover users, enumerate DM channels, create group DMs, or consume DM Gateway events",
+      "Outbound link buttons remain disabled until their exact canonical HTTPS origins are separately added to scopes.componentLinkOrigins; the recipe never infers or broadens destination trust",
       "Message text, component layouts, generated component IDs, previews, and transient review reasons never enter activity records or operation receipts",
     ],
   },

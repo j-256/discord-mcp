@@ -6,6 +6,7 @@ import type {
   ActivityStore,
 } from "../src/activity-log.js"
 import type {
+  DiscordLinkButtonComponent,
   DiscordStaticComponent,
 } from "../src/component-layout.js"
 import {
@@ -113,10 +114,12 @@ function withGeneratedIds(
   components: readonly DiscordStaticComponent[],
 ): unknown[] {
   let nextId = 1
-  const visit = (component: DiscordStaticComponent): Record<string, unknown> => {
+  const visit = (
+    component: DiscordLinkButtonComponent | DiscordStaticComponent,
+  ): Record<string, unknown> => {
     const id = nextId
     nextId += 1
-    if (component.type === 17) {
+    if (component.type === 1 || component.type === 17) {
       return {
         ...component,
         components: component.components.map(visit),
@@ -218,6 +221,7 @@ function editRequest(
 }
 
 function configuredPolicy(options: {
+  componentLinkOrigins?: readonly string[]
   enabled?: boolean
   interactionChannelIds?: readonly string[]
   mentionUserIds?: readonly string[]
@@ -237,6 +241,7 @@ function configuredPolicy(options: {
       allowAdministration: false,
       allowDeletions: false,
       allowInteractions: options.enabled ?? true,
+      componentLinkOrigins: new Set(options.componentLinkOrigins ?? []),
       deleteChannelIds: new Set(),
       interactionChannelIds: new Set(
         options.interactionChannelIds ?? [CHANNEL_ID],
@@ -594,6 +599,59 @@ test("component-message planning binds exact identity, permissions, and transien
     ComponentMessageEvidenceError,
   )
   assert.equal(intentMissing.events.some((event) => event.startsWith("read:")), false)
+})
+
+test("component-message planning requires every exact link origin before Discord contact", async () => {
+  const request = createRequest({
+    components: [
+      { content: "Read the guide", kind: "text" },
+      {
+        buttons: [{ label: "Guide", url: "https://docs.example.com/guide" }],
+        kind: "link-row",
+      },
+    ],
+    notifyUserIds: [],
+  })
+  const blocked = fixture()
+
+  await assert.rejects(
+    blocked.service.plan(APPLICATION_ID, BOT_ID, "enabled", request),
+    /Component link origin https:\/\/docs\.example\.com is outside the exact configured origin scope/,
+  )
+  assert.equal(blocked.events.length, 0)
+
+  const allowed = fixture({
+    policyOptions: { componentLinkOrigins: ["https://docs.example.com"] },
+  })
+  const plan = await allowed.service.plan(APPLICATION_ID, BOT_ID, "enabled", request)
+
+  assert.deepEqual(plan.target.linkOrigins, ["https://docs.example.com"])
+  assert.deepEqual(plan.target.linkUrls, ["https://docs.example.com/guide"])
+  assert.equal(plan.target.counts.actionRows, 1)
+  assert.equal(plan.target.counts.linkButtons, 1)
+  assert.equal(allowed.events[0], `read:channel:${CHANNEL_ID}`)
+  const result = await allowed.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+  assert.equal(result.status, "completed")
+  const verification = await allowed.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(verification.status, "verified")
+
+  const revoked = fixture({ operationStore: allowed.operationStore })
+  await assert.rejects(
+    revoked.service.verify(APPLICATION_ID, BOT_ID, "enabled", request),
+    /outside the exact configured origin scope/,
+  )
+  assert.deepEqual(revoked.events, [])
 })
 
 test("component-message planning rejects incomplete legacy and unsafe mention evidence", async () => {

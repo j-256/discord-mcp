@@ -278,6 +278,8 @@ export interface DirectMessagePlan {
   createdAt: string
   current: DirectMessageView | null
   desired: {
+    linkOrigins: string[]
+    linkUrls: string[]
     message: NormalizedDirectMessageBody | null
     preview: string | null
     replyToMessageId: string | null
@@ -1435,6 +1437,14 @@ export class DirectMessageService {
   }
 
   #assertActionPolicy(request: NormalizedDirectMessageChangeRequest): void {
+    if (
+      request.action !== "delete"
+      && request.message.kind === "components-v2"
+    ) {
+      this.#policy.assertComponentLinkOrigins(
+        reviewComponentLayout(request.message.components, []).linkOrigins,
+      )
+    }
     if (request.action === "send" || request.action === "reply") {
       if (request.message.kind === "attachment") {
         this.#policy.assertDirectMessageAttachmentAllowed(request.recipientId)
@@ -1554,6 +1564,9 @@ export class DirectMessageService {
         ? "none"
         : "change"
     const desiredMessage = request.action === "delete" ? null : request.message
+    const desiredComponentReview = desiredMessage?.kind === "components-v2"
+      ? reviewComponentLayout(desiredMessage.components, [])
+      : null
     const desiredPreview = desiredMessage === null
       ? null
       : directMessageBodyPreview(desiredMessage)
@@ -1571,7 +1584,7 @@ export class DirectMessageService {
       risks.push("Deletion is irreversible and the connector performs no rollback")
     }
     const warnings = [
-      "Message text, component layouts, file paths, attachment metadata, previews, and review text are transient and never enter durable records",
+      "Message text, component layouts, link destinations, file paths, attachment metadata, previews, and review text are transient and never enter durable records",
       "All mentions are suppressed, including reply-author notifications",
       "A 429 or ambiguous transport outcome quarantines the exact operation for review",
     ]
@@ -1586,7 +1599,13 @@ export class DirectMessageService {
     ) {
       warnings.push(
         "Components V2 is irreversible for each created private message and same-format edits cannot remove it",
-        "The static layout registers no button, select, modal, media, file, or callback authority",
+        ...(desiredComponentReview !== null && desiredComponentReview.linkUrls.length > 0
+          ? [
+              "Link buttons use exact configured HTTPS origins, open externally, and grant no callback authority",
+              "The connector does not fetch links or verify redirects or final destinations",
+              "The static layout registers no custom-ID button, select, modal, media, file, or callback authority",
+            ]
+          : ["The static layout registers no button, select, modal, media, file, or callback authority"]),
       )
     }
     if (
@@ -1624,6 +1643,8 @@ export class DirectMessageService {
       channel,
       current,
       desired: {
+        linkOrigins: desiredComponentReview?.linkOrigins ?? [],
+        linkUrls: desiredComponentReview?.linkUrls ?? [],
         message: desiredMessage,
         preview: desiredPreview,
         replyToMessageId: desiredReply,
@@ -1661,6 +1682,8 @@ export class DirectMessageService {
       createdAt: this.#clock().toISOString(),
       current,
       desired: {
+        linkOrigins: desiredComponentReview?.linkOrigins ?? [],
+        linkUrls: desiredComponentReview?.linkUrls ?? [],
         message: desiredMessage,
         preview: desiredPreview,
         replyToMessageId: desiredReply,

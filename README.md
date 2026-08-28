@@ -229,8 +229,9 @@ Discord permissions are the outer boundary. Connector policy narrows that author
 
 - Production traffic uses fixed Discord REST and vetted Gateway origins; runtime configuration cannot redirect credentials
 - Each Gateway shard counts every successful outbound event in one rolling connection budget, bounds caller-command pressure below reserved lifecycle capacity, and discards queued exact-ID requests on every connection boundary
-- Exact guild, channel, role, member, and feature allowlists constrain each surface independently
-- Every guild tool rejects direct and group-direct channels. The dedicated private-message tools instead require an independent exact ordinary-user allowlist and caller-known one-to-one channel IDs, support only plain text or bounded static Components V2, suppress all mentions, use fixed anti-spam limits, and provide no discovery, bulk targeting, interactive components, arbitrary embed URLs, or Gateway feed
+- Exact scopes cover guilds, channels, roles, members, features, and HTTPS link origins
+- Guild tools reject DMs. Private-message tools require an independent exact ordinary-user allowlist and caller-known one-to-one channel IDs, support only plain text or bounded static Components V2, suppress mentions, enforce fixed anti-spam limits, and provide no discovery, bulk targeting, callback-bearing components, arbitrary embed URLs, or Gateway feed
+- Components V2 links require exact HTTPS origins; the connector never fetches them or follows redirects
 - Discord names, messages, embeds, components, filenames, URLs, and other remote text are treated as untrusted data rather than instructions
 - Discord content may be returned transiently when explicitly requested, but it is not cached, journaled, exported, or persisted by the connector
 - New invite codes and URLs are delivered only through a caller-selected exclusive private file; MCP results, lifecycle records, errors, logs, and telemetry remain bearer-capability-free

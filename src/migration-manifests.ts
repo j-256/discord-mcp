@@ -593,12 +593,12 @@ const CAPPYEO_GROUPS = Object.freeze([
   {
     disposition: "review-required",
     id: "components",
-    instruction: "Compile a typed bundled template when it fits or rebuild the bounded layout locally, then review, execute, and verify the exact message operation.",
+    instruction: "Compile a typed bundled template when it fits or rebuild the bounded layout locally, inspect every link destination, configure each exact canonical HTTPS origin, then review, execute, and verify the exact message operation.",
     outcome: "Components v2 composition and delivery",
     recipes: ["channel-publisher"],
     sourcePrefixes: ["components_v2_"],
     targetTools: ["compile_component_template", "preview_component_layout", "plan_component_message", "execute_component_message", "verify_component_message"],
-    trustChange: "A free-form or interpolated component send becomes typed local compilation or a schema-bounded preview followed by a reviewed one-shot lifecycle.",
+    trustChange: "A free-form or interpolated component send becomes typed local compilation or a schema-bounded callback-free preview, exact first-hop link-origin policy, and a reviewed one-shot lifecycle.",
   },
   {
     disposition: "review-required",

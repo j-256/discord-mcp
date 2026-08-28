@@ -111,7 +111,7 @@ function policy(capabilities: {
   deletion?: boolean
   delivery?: boolean
   editing?: boolean
-} = {}, attachmentRoots: readonly string[] = []): ScopePolicy {
+} = {}, attachmentRoots: readonly string[] = [], componentLinkOrigins: readonly string[] = []): ScopePolicy {
   return new ScopePolicy(loadFixtureConfig({
     capabilities: {
       directMessageAudit: capabilities.audit ?? false,
@@ -121,6 +121,7 @@ function policy(capabilities: {
       directMessageEditing: capabilities.editing ?? false,
     },
     scopes: {
+      componentLinkOrigins,
       directMessageUserIds: [RECIPIENT_ID],
     },
     storage: { attachmentRoots },
@@ -575,7 +576,7 @@ test("direct-message requests are closed and require action-specific acknowledge
         kind: "components-v2",
       },
     } as unknown as DirectMessageChangeRequest),
-    /kind must be container, separator, or text/,
+    /kind must be container, link-row, separator, or text/,
   )
   assert.throws(
     () => normalizeDirectMessageChangeRequest({
@@ -655,6 +656,62 @@ test("direct-message send planning remains read-only and profile-minimized", asy
     assert.deepEqual(calls, ["get-application", "get-current-user", "get-user"])
     assert.doesNotMatch(JSON.stringify(plan), /Private Application|Connector Profile/)
     assert.equal(plan.recipient.id, RECIPIENT_ID)
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test("direct-message Components V2 links require exact origins before Discord contact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-link-plan-"))
+  try {
+    const base = componentSendRequest()
+    if (base.action !== "send") assert.fail("Expected a direct-message send request")
+    const request: DirectMessageChangeRequest = {
+      ...base,
+      message: {
+        components: [
+          { content: "Read the guide", kind: "text" },
+          {
+            buttons: [{ label: "Guide", url: "https://docs.example.com/guide" }],
+            kind: "link-row",
+          },
+        ],
+        kind: "components-v2",
+      },
+    }
+    const blockedCalls: string[] = []
+    const blocked = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({ calls: blockedCalls }),
+      operationStore: new FileOperationStore(directory),
+      policy: policy({ delivery: true }),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+
+    await assert.rejects(
+      blocked.plan(APPLICATION_ID, BOT_ID, request),
+      /Component link origin https:\/\/docs\.example\.com is outside the exact configured origin scope/,
+    )
+    assert.deepEqual(blockedCalls, [])
+
+    const allowedCalls: string[] = []
+    const allowed = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({ calls: allowedCalls }),
+      operationStore: new FileOperationStore(directory),
+      policy: policy({ delivery: true }, [], ["https://docs.example.com"]),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const plan = await allowed.plan(APPLICATION_ID, BOT_ID, request)
+
+    assert.equal(plan.status, "planned")
+    assert.deepEqual(plan.desired.linkOrigins, ["https://docs.example.com"])
+    assert.deepEqual(plan.desired.linkUrls, ["https://docs.example.com/guide"])
+    assert.match(plan.desired.preview ?? "", /https:\/\/docs\.example\.com\/guide/)
+    assert.ok(plan.warnings.some((warning) => warning.includes("verify redirects")))
+    assert.deepEqual(allowedCalls, ["get-application", "get-current-user", "get-user"])
   } finally {
     await rm(directory, { force: true, recursive: true })
   }
@@ -853,7 +910,7 @@ test("direct-message owned-file execution rejects byte drift before durable or D
   }
 })
 
-test("direct-message reads expose content and bounded counts without profiles or URLs", async () => {
+test("direct-message reads expose content and bounded counts without profiles or attachment URLs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-read-"))
   try {
     const message = rawMessage({
@@ -922,6 +979,46 @@ test("direct-message reads normalize static Components V2 and quarantine unsuppo
     assert.deepEqual(message.componentLayout, componentBody().components)
     assert.doesNotMatch(JSON.stringify(message.componentLayout), /"id"/)
 
+    const linked = new DirectMessageService({
+      activityStore: new MemoryActivityStore(),
+      client: clientFixture({
+        message: rawComponentMessage(COMPONENT_TEXT, {
+          components: [
+            { content: COMPONENT_TEXT, id: 1, type: 10 },
+            {
+              components: [{
+                disabled: false,
+                id: 3,
+                label: "Reviewed guide",
+                style: 5,
+                type: 2,
+                url: "https://docs.example.com/guide",
+              }],
+              id: 2,
+              type: 1,
+            },
+          ],
+        }),
+      }),
+      operationStore: new FileOperationStore(directory),
+      policy: policy({ audit: true }),
+      verificationKey: directMessageVerificationKey(TOKEN),
+      writeCoordinator: PASSTHROUGH_COORDINATOR,
+    })
+    const linkedView = await linked.get(
+      APPLICATION_ID,
+      BOT_ID,
+      RECIPIENT_ID,
+      CHANNEL_ID,
+      MESSAGE_ID,
+    )
+    assert.equal(linkedView.presentation, "static-components-v2")
+    assert.match(
+      JSON.stringify(linkedView.componentLayout),
+      /https:\/\/docs\.example\.com\/guide/,
+    )
+    assert.doesNotMatch(JSON.stringify(linkedView.componentLayout), /"id"/)
+
     for (const unsupportedMessage of [
       rawComponentMessage(COMPONENT_TEXT, {
         components: [{
@@ -959,7 +1056,7 @@ test("direct-message reads normalize static Components V2 and quarantine unsuppo
   }
 })
 
-test("direct-message reads project one bounded attachment without URLs", async () => {
+test("direct-message reads project one bounded attachment without attachment URLs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-read-"))
   try {
     const message = rawAttachmentMessage({

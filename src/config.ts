@@ -193,6 +193,7 @@ export interface ConnectorConfig {
   channelDeletionIds: ReadonlySet<string>
   channelMetadataIds: ReadonlySet<string>
   channelOrderingGuildIds: ReadonlySet<string>
+  componentLinkOrigins: ReadonlySet<string>
   deleteChannelIds: ReadonlySet<string>
   directMessageUserIds: ReadonlySet<string>
   embedMessageChannelIds: ReadonlySet<string>
@@ -565,6 +566,7 @@ export function loadConnectorConfigDocument(
     "channelOrderingGuildIds",
     CONNECTOR_LIMITS.channelOrderingGuildAllowlist,
   )
+  const componentLinkOrigins = configScope(document, "componentLinkOrigins")
   const attachmentChannelIds = configScope(document, "attachmentChannelIds")
   const announcementCrosspostChannelIds = configScope(document, "announcementCrosspostChannelIds")
   const messageForwardSourceChannelIds = configScope(
@@ -1564,6 +1566,7 @@ export function loadConnectorConfigDocument(
     channelDeletionIds,
     channelMetadataIds,
     channelOrderingGuildIds,
+    componentLinkOrigins,
     deleteChannelIds,
     directMessageUserIds,
     embedMessageChannelIds,

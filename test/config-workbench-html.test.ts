@@ -145,6 +145,15 @@ test("configuration workbench renders a deterministic complete offline editor", 
     payload.fields.find((field) => field.path === "$.tools.surface")?.constraints.enumValues,
     ["full", "progressive"],
   )
+  assert.deepEqual(
+    payload.fields.find((field) => field.path === "$.scopes.componentLinkOrigins")?.constraints,
+    {
+      maxItems: 100,
+      maxLength: 512,
+      pattern: "^https:\\/\\/[^/?#@\\s]+$",
+    },
+  )
+  assert.match(html, /Every entry must be an exact canonical HTTPS origin/)
 })
 
 test("configuration workbench base64 payload contains hostile non-secret paths without HTML execution", () => {

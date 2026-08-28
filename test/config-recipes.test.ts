@@ -152,6 +152,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     channelPublisher.requirements.botPermissions.includes("ADMINISTRATOR"),
     false,
   )
+  assert.equal(
+    channelPublisher.warnings.some((warning) => warning.includes("scopes.componentLinkOrigins")),
+    true,
+  )
   const expectedPermissions = channelPublisher.requirements.botPermissions.reduce(
     (permissions, name) => permissions | DISCORD_PERMISSIONS[name],
     0n,
@@ -177,6 +181,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "plan_direct_message_change",
     "verify_direct_message_change",
   ])
+  assert.equal(
+    directMessenger.warnings.some((warning) => warning.includes("scopes.componentLinkOrigins")),
+    true,
+  )
   assert.deepEqual(directMessenger.requirements.scope, {
     kind: "user",
     maximum: CONNECTOR_LIMITS.directMessageUserAllowlist,
