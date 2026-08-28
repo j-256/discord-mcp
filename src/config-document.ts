@@ -172,6 +172,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "guildExpressionChanges",
   "guildCommunityAudit",
   "guildCommunityChanges",
+  "guildDepartures",
   "guildIncidentAudit",
   "guildIncidentChanges",
   "guildProfileAudit",
@@ -278,6 +279,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "forumTagChannelIds",
   "guildScaffoldGuildIds",
   "guildCommunityGuildIds",
+  "guildDepartureGuildIds",
   "guildExpressionGuildIds",
   "guildIncidentGuildIds",
   "guildProfileGuildIds",
@@ -493,6 +495,8 @@ const APPLICATION_TEST_ENTITLEMENT_USER_SCOPE_DESCRIPTION = "Exact user benefici
 const GUILD_COMMUNITY_AUDIT_CAPABILITY_DESCRIPTION = "Enable privacy-minimized Discord Community routing and authority audits"
 const GUILD_COMMUNITY_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed monotonic Community enablement and exact routing changes"
 const GUILD_COMMUNITY_SCOPE_DESCRIPTION = "Exact guild ID allowlist for Discord Community audit and reviewed changes"
+const GUILD_DEPARTURES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild connector departure with access-loss, re-entry, and quiescence acknowledgments"
+const GUILD_DEPARTURE_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed connector departure"
 const MEMBER_VERIFICATION_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-member changes to Discord's named BYPASSES_VERIFICATION state"
 const MEMBER_VERIFICATION_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed member verification-bypass changes"
 
@@ -502,6 +506,9 @@ function capabilityDescription(documentKey: string): string {
   }
   if (documentKey === "guildCommunityChanges") {
     return GUILD_COMMUNITY_CHANGES_CAPABILITY_DESCRIPTION
+  }
+  if (documentKey === "guildDepartures") {
+    return GUILD_DEPARTURES_CAPABILITY_DESCRIPTION
   }
   if (documentKey === "applicationMonetizationAudit") {
     return APPLICATION_MONETIZATION_AUDIT_CAPABILITY_DESCRIPTION
@@ -593,6 +600,9 @@ function capabilityDescription(documentKey: string): string {
 function scopeDescription(documentKey: string): string {
   if (documentKey === "guildCommunityGuildIds") {
     return GUILD_COMMUNITY_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "guildDepartureGuildIds") {
+    return GUILD_DEPARTURE_SCOPE_DESCRIPTION
   }
   if (documentKey === "applicationEntitlementGuildIds") {
     return APPLICATION_ENTITLEMENT_GUILD_SCOPE_DESCRIPTION

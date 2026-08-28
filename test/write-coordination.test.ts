@@ -36,9 +36,11 @@ import {
 } from "../src/operation-store.js"
 import {
   FileWriteCoordinator,
+  WRITE_COORDINATION_GUILD_COLLECTIONS,
   writeApplicationCollectionTarget,
   writeCoordinationTargetHash,
   writeGuildCollectionTarget,
+  writeGuildDepartureTargets,
   writeResourceTarget,
   type WriteCoordinationIntent,
   type WriteCoordinationTarget,
@@ -303,6 +305,68 @@ test("coordination isolates guild Community changes to the exact collection", as
       targets: [writeResourceTarget("channel", CHANNEL_ID)],
     }, async () => "unsafe"),
     /requires the exact Community collection target/u,
+  )
+})
+
+test("guild departure claims every modeled collection for one exact guild", async (context) => {
+  const { coordinator, directory } = await fixture(context)
+  const targets = writeGuildDepartureTargets(GUILD_ID)
+
+  assert.deepEqual(
+    targets,
+    WRITE_COORDINATION_GUILD_COLLECTIONS.map((collection) => ({
+      collection,
+      guildId: GUILD_ID,
+      kind: "guild-collection",
+    })),
+  )
+  const claimCount = await coordinator.run(intent(targets, {
+    kind: "guild-departure",
+  }), async () => (await claimFiles(directory)).length)
+
+  assert.equal(claimCount, WRITE_COORDINATION_GUILD_COLLECTIONS.length)
+  assert.deepEqual(await claimFiles(directory), [])
+
+  const blockedTarget = writeGuildCollectionTarget("channels", GUILD_ID)
+  await writeStaleClaim({ directory, targets: [blockedTarget] })
+  const blockingCoordinator = new FileWriteCoordinator(
+    directory,
+    new MemoryOperationStore(),
+    { processAlive: (pid) => pid === DEAD_PID },
+  )
+  let callbackCalled = false
+  await assert.rejects(
+    () => blockingCoordinator.run(intent(targets, {
+      kind: "guild-departure",
+      operationKey: OTHER_OPERATION_KEY,
+    }), async () => {
+      callbackCalled = true
+      return "unsafe"
+    }),
+    WriteCoordinationConflictError,
+  )
+  assert.equal(callbackCalled, false)
+  await assert.rejects(
+    () => coordinator.run(intent(targets.slice(1), {
+      kind: "guild-departure",
+      operationKey: OTHER_OPERATION_KEY,
+    }), async () => "unsafe"),
+    /requires .* targets for guild-departure/u,
+  )
+  await assert.rejects(
+    () => coordinator.run(intent(targets.map((target, index) => (
+      index === 0 && target.kind === "guild-collection"
+        ? { ...target, guildId: "100000000000000002" }
+        : target
+    )), {
+      kind: "guild-departure",
+      operationKey: OTHER_OPERATION_KEY,
+    }), async () => "unsafe"),
+    /requires every modeled collection for one exact guild/u,
+  )
+  assert.throws(
+    () => writeGuildDepartureTargets("invalid"),
+    /target is invalid/u,
   )
 })
 

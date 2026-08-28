@@ -333,24 +333,25 @@ function normalizeTargets(
   values: readonly WriteCoordinationTarget[] | unknown,
   kind: OperationKind,
 ): WriteCoordinationTarget[] {
-  const maximum = kind === "message-deletion"
-    ? MAX_DELETION_TARGETS
-    : kind === "bulk-guild-ban"
-      ? MAX_BULK_GUILD_BAN_TARGETS
-      : kind === "bulk-member-role-change"
-        ? MAX_BULK_MEMBER_ROLE_TARGETS
-      : kind === "guild-prune"
-        ? CONNECTOR_LIMITS.guildPruneIncludeRoles + 2
-        : kind === "role-deletion"
-          ? MAX_ROLE_DELETION_TARGETS
-          : MAX_TARGETS
-  const minimum = kind === "bulk-guild-ban"
-    ? 3
-    : kind === "bulk-member-role-change"
-      ? 4
-    : kind === "guild-prune"
-      ? 2
-      : 1
+  let maximum = MAX_TARGETS
+  let minimum = 1
+  if (kind === "message-deletion") {
+    maximum = MAX_DELETION_TARGETS
+  } else if (kind === "bulk-guild-ban") {
+    maximum = MAX_BULK_GUILD_BAN_TARGETS
+    minimum = 3
+  } else if (kind === "bulk-member-role-change") {
+    maximum = MAX_BULK_MEMBER_ROLE_TARGETS
+    minimum = 4
+  } else if (kind === "guild-prune") {
+    maximum = CONNECTOR_LIMITS.guildPruneIncludeRoles + 2
+    minimum = 2
+  } else if (kind === "role-deletion") {
+    maximum = MAX_ROLE_DELETION_TARGETS
+  } else if (kind === "guild-departure") {
+    maximum = WRITE_COORDINATION_GUILD_COLLECTIONS.length
+    minimum = WRITE_COORDINATION_GUILD_COLLECTIONS.length
+  }
   if (!Array.isArray(values) || values.length < minimum || values.length > maximum) {
     throw new WriteCoordinationStateError(
       `Discord write coordination requires ${minimum}-${maximum} targets for ${kind}`,
@@ -436,6 +437,29 @@ function normalizeTargets(
     throw new WriteCoordinationStateError(
       "Discord guild prune coordination requires one member collection and exact roles",
     )
+  }
+  if (kind === "guild-departure") {
+    const targets = [...byDescriptor.values()]
+    const guildIds = new Set(targets.map((target) => (
+      target.kind === "guild-collection" ? target.guildId : null
+    )))
+    const collections = new Set(targets.map((target) => (
+      target.kind === "guild-collection" ? target.collection : null
+    )))
+    if (
+      byDescriptor.size !== WRITE_COORDINATION_GUILD_COLLECTIONS.length
+      || targets.some((target) => target.kind !== "guild-collection")
+      || guildIds.size !== 1
+      || guildIds.has(null)
+      || collections.size !== WRITE_COORDINATION_GUILD_COLLECTIONS.length
+      || WRITE_COORDINATION_GUILD_COLLECTIONS.some(
+        (collection) => !collections.has(collection),
+      )
+    ) {
+      throw new WriteCoordinationStateError(
+        "Discord guild departure coordination requires every modeled collection for one exact guild",
+      )
+    }
   }
   if (isApplicationOperationKind(kind) && byDescriptor.size !== 1) {
     throw new WriteCoordinationStateError(
@@ -655,6 +679,14 @@ export function writeGuildCollectionTarget(
   guildId: string,
 ): WriteCoordinationTarget {
   return parseTarget({ collection, guildId, kind: "guild-collection" })
+}
+
+export function writeGuildDepartureTargets(
+  guildId: string,
+): WriteCoordinationTarget[] {
+  return WRITE_COORDINATION_GUILD_COLLECTIONS.map(
+    (collection) => writeGuildCollectionTarget(collection, guildId),
+  )
 }
 
 export function writeApplicationCollectionTarget(

@@ -1653,6 +1653,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_channel_webhooks",
   "list_guild_auto_moderation_rules",
   "list_global_application_commands",
+  "list_current_user_guilds",
   "list_guild_application_command_permissions",
   "list_guild_application_commands",
   "list_guild_emojis",
@@ -1661,6 +1662,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_stickers",
   "list_guild_templates",
   "list_guild_scheduled_event_users",
+  "leave_guild",
   "leave_thread",
   "list_reaction_users",
   "modify_application_emoji",
@@ -9634,6 +9636,24 @@ export class DiscordClient {
       with_counts: false,
     })}`
     return this.#request("list_current_user_guilds", route, options)
+  }
+
+  async leaveGuild(
+    guildId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(guildId, "Discord departure guild ID")
+    await this.#request<void>(
+      "leave_guild",
+      `/users/@me/guilds/${guildId}`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/users/@me/guilds/{guild.id}",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async listVoiceRegions(

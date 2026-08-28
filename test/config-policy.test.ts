@@ -306,6 +306,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     guildCommunityAuditEnabled: false,
     guildCommunityChangesEnabled: false,
     guildCommunityGuildIds: [],
+    guildDepartureGuildIds: [],
+    guildDeparturesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -1597,6 +1599,59 @@ test("configuration and policy isolate integration audit and exact-ID deletion",
   )
 })
 
+test("configuration and policy isolate reviewed guild departure", () => {
+  const config = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { guildDepartures: true },
+    readScope: { guildIds: [GUILD_ID] },
+    scopes: { guildDepartureGuildIds: [GUILD_ID] },
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(config)
+
+  assert.equal(config.allowGuildDepartures, true)
+  assert.deepEqual([...config.guildDepartureGuildIds], [GUILD_ID])
+  enabled.assertGuildDepartureAllowed(GUILD_ID)
+  assert.deepEqual(
+    {
+      guildDepartureGuildIds: enabled.describe().guildDepartureGuildIds,
+      guildDeparturesEnabled: enabled.describe().guildDeparturesEnabled,
+    },
+    {
+      guildDepartureGuildIds: [GUILD_ID],
+      guildDeparturesEnabled: true,
+    },
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    readScope: { guildIds: [GUILD_ID] },
+    scopes: { guildDepartureGuildIds: [GUILD_ID] },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertGuildDepartureAllowed(GUILD_ID),
+    /guild departure is disabled/,
+  )
+  assert.throws(
+    () => enabled.assertGuildDepartureAllowed(OTHER_GUILD_ID),
+    /outside the configured read scope/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { guildDepartures: true },
+    }, { homeDirectory: "/test/home" }),
+    /requires .*guildDepartureGuildIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { guildDepartureGuildIds: [OTHER_GUILD_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /guildDepartureGuildIds.*subset/,
+  )
+})
+
 test("configuration and policy require an exact administration guild and protect exact users", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -1758,6 +1813,8 @@ test("configuration and policy require an exact administration guild and protect
     guildCommunityAuditEnabled: false,
     guildCommunityChangesEnabled: false,
     guildCommunityGuildIds: [],
+    guildDepartureGuildIds: [],
+    guildDeparturesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],
@@ -5710,6 +5767,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     guildCommunityAuditEnabled: false,
     guildCommunityChangesEnabled: false,
     guildCommunityGuildIds: [],
+    guildDepartureGuildIds: [],
+    guildDeparturesEnabled: false,
     guildSettingsAuditEnabled: false,
     guildSettingsChangesEnabled: false,
     guildSettingsGuildIds: [],

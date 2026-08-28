@@ -344,6 +344,7 @@ import {
   DeletionPlanChangedError,
   GlobalApplicationCommandPlanChangedError,
   GuildApplicationCommandPlanChangedError,
+  GuildDeparturePlanChangedError,
   GuildPrunePlanChangedError,
   GuildScaffoldPlanChangedError,
   IntegrationDeletionPlanChangedError,
@@ -417,6 +418,16 @@ import {
   GuildScaffoldService,
   normalizeGuildScaffoldRequest,
 } from "./guild-scaffold-service.js"
+import type {
+  GuildDeparturePlan,
+  GuildDepartureRequest,
+  GuildDepartureResult,
+  GuildDepartureServiceOptions,
+} from "./guild-departure-service.js"
+import {
+  GuildDepartureService,
+  normalizeGuildDepartureRequest,
+} from "./guild-departure-service.js"
 import type {
   GuildTemplateChangePlan,
   GuildTemplateChangeRequest,
@@ -834,6 +845,7 @@ import {
   FileWriteCoordinator,
   writeApplicationCollectionTarget,
   writeCoordinationDirectory,
+  writeGuildDepartureTargets,
   writeGuildCollectionTarget,
   writeResourceTarget,
   type WriteCoordinationRunOptions,
@@ -1008,6 +1020,7 @@ export interface DiscordServiceClient {
   listPrivateArchivedThreads: DiscordClient["listPrivateArchivedThreads"]
   listPublicArchivedThreads: DiscordClient["listPublicArchivedThreads"]
   listVoiceRegions: DiscordClient["listVoiceRegions"]
+  leaveGuild: DiscordClient["leaveGuild"]
   leaveThread: DiscordClient["leaveThread"]
   modifyGuildMemberTimeout: DiscordClient["modifyGuildMemberTimeout"]
   modifyApplicationEmoji: DiscordClient["modifyApplicationEmoji"]
@@ -1223,6 +1236,10 @@ export interface ConnectorServiceOptions {
   >
   integrationOptions?: Pick<
     IntegrationServiceOptions,
+    "clock" | "planKey" | "randomId"
+  >
+  guildDepartureOptions?: Pick<
+    GuildDepartureServiceOptions,
     "clock" | "planKey" | "randomId"
   >
   inviteOptions?: Pick<
@@ -1549,6 +1566,7 @@ export class ConnectorService {
   readonly #guildBlueprintService: GuildBlueprintService
   readonly #forumPostService: ForumPostService
   readonly #forumTagService: ForumTagService
+  readonly #guildDepartureService: GuildDepartureService
   readonly #guildScaffoldService: GuildScaffoldService
   readonly #guildExpressionService: GuildExpressionService
   readonly #guildCommunityService: GuildCommunityService
@@ -1915,6 +1933,13 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.integrationOptions,
+    })
+    this.#guildDepartureService = new GuildDepartureService({
+      activityStore: this.#activityStore,
+      client: this.#client,
+      operationStore,
+      policy: this.#policy,
+      ...options.guildDepartureOptions,
     })
     this.#onboardingService = new OnboardingService({
       activityStore: this.#activityStore,
@@ -3854,6 +3879,21 @@ export class ConnectorService {
     )
     const identity = await this.#verifyIdentity(options)
     return this.#integrationService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async planGuildDeparture(
+    request: GuildDepartureRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildDeparturePlan> {
+    const normalized = normalizeGuildDepartureRequest(request)
+    this.#policy.assertGuildDepartureAllowed(normalized.guildId)
+    const identity = await this.#verifyIdentity(options)
+    return this.#guildDepartureService.plan(
       identity.application.id,
       identity.bot.id,
       request,
@@ -6286,6 +6326,44 @@ export class ConnectorService {
       planDigest,
       targets,
       () => this.#integrationService.execute(
+        identity.application.id,
+        identity.bot.id,
+        request,
+        planDigest,
+        options,
+      ),
+    )
+  }
+
+  async executeGuildDeparture(
+    request: GuildDepartureRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<GuildDepartureResult> {
+    const normalized = normalizeGuildDepartureRequest(request)
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord guild departure plan digest is invalid")
+    }
+    this.#policy.assertGuildDepartureAllowed(normalized.guildId)
+    const identity = await this.#verifyIdentity(options)
+    const coordinationPlan = await this.#guildDepartureService.plan(
+      identity.application.id,
+      identity.bot.id,
+      request,
+      options,
+    )
+    if (coordinationPlan.digest !== planDigest) {
+      throw new GuildDeparturePlanChangedError(
+        planDigest,
+        coordinationPlan.digest,
+      )
+    }
+    return this.#coordinateWrite(
+      "guild-departure",
+      request.operationKey,
+      planDigest,
+      writeGuildDepartureTargets(normalized.guildId),
+      () => this.#guildDepartureService.execute(
         identity.application.id,
         identity.bot.id,
         request,

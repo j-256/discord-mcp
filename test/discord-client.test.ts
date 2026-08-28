@@ -1340,6 +1340,110 @@ test("Discord client enforces pagination bounds outside the MCP adapter", () => 
   )
 })
 
+test("Discord client leaves one exact guild with a non-retried empty DELETE", async () => {
+  const requests: Array<{
+    body: unknown
+    method: string
+    url: string
+  }> = []
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body ?? null,
+        method: init?.method ?? "GET",
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    token: TOKEN,
+  })
+
+  await client.leaveGuild("100")
+
+  assert.deepEqual(requests, [{
+    body: null,
+    method: "DELETE",
+    url: `${API_BASE_URL}/users/@me/guilds/100`,
+  }])
+  await assert.rejects(client.leaveGuild("bad"), /departure guild ID/)
+
+  let rateLimitedAttempts = 0
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      rateLimitedAttempts += 1
+      return new Response(JSON.stringify({
+        message: "rate limited",
+        retry_after: 0.001,
+      }), {
+        headers: { "Content-Type": "application/json" },
+        status: 429,
+      })
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      throw new Error("Guild departure must not retry")
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.leaveGuild("100"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  assert.equal(rateLimitedAttempts, 1)
+})
+
+test("Discord client suppresses guild-inventory and departure failure details", async () => {
+  const privateMarker = "private-guild-membership-detail"
+  const refused = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => new Response(
+      JSON.stringify({ code: 50_013, message: privateMarker }),
+      { status: 403 },
+    ),
+    token: TOKEN,
+  })
+
+  for (const operation of [
+    () => refused.listCurrentUserGuilds({ after: "900" }),
+    () => refused.leaveGuild("100"),
+  ]) {
+    await assert.rejects(
+      operation,
+      (error: unknown) => (
+        error instanceof DiscordApiError
+        && error.message.includes("request failed")
+        && !error.message.includes(privateMarker)
+        && error.cause === undefined
+      ),
+    )
+  }
+
+  const unavailable = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      throw new Error(privateMarker)
+    },
+    token: TOKEN,
+  })
+  for (const operation of [
+    () => unavailable.listCurrentUserGuilds({ after: "900" }),
+    () => unavailable.leaveGuild("100"),
+  ]) {
+    await assert.rejects(
+      operation,
+      (error: unknown) => (
+        error instanceof Error
+        && error.name === "DiscordTransportError"
+        && error.cause === undefined
+        && error.message.includes("request failed")
+        && !error.message.includes(privateMarker)
+      ),
+    )
+  }
+})
+
 test("Discord client encodes native guild search filters as repeated bounded query values", async () => {
   let requestUrl = ""
   const client = new DiscordClient({

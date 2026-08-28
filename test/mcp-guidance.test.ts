@@ -763,6 +763,7 @@ function guidanceService(options: {
     executeGuildExpressionChange: unexpected,
     executeGuildTemplateChange: unexpected,
     executeGuildIntegrationDeletion: unexpected,
+    executeGuildDeparture: unexpected,
     executeSoundboardChange: unexpected,
     executeInviteCreation: unexpected,
     executeInviteDeletion: unexpected,
@@ -790,6 +791,7 @@ function guidanceService(options: {
     planGlobalApplicationCommandChange: unexpected,
     planGuildTemplateChange: unexpected,
     planGuildIntegrationDeletion: unexpected,
+    planGuildDeparture: unexpected,
     getApplicationEmoji: unexpected,
     planThreadChange: unexpected,
     getGuildExpression: unexpected,
@@ -2232,6 +2234,8 @@ function guidanceService(options: {
         guildCommunityAuditEnabled: (options.guildCommunityGuildIds?.length ?? 0) > 0,
         guildCommunityChangesEnabled: false,
         guildCommunityGuildIds: [...(options.guildCommunityGuildIds ?? [])],
+        guildDepartureGuildIds: [],
+        guildDeparturesEnabled: false,
         guildSettingsAuditEnabled: false,
         guildSettingsChangesEnabled: false,
         guildSettingsGuildIds: [],
@@ -5255,6 +5259,31 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(integrationDeletion, /50-object ambiguity/)
   assert.match(integrationDeletion, /webhook and bot consequences/)
   assert.match(webhookDeletion, /credential and private-field omissions/)
+
+  const guildDeparture = promptText(await client.getPrompt({
+    arguments: {
+      acknowledgeAccessLoss: "true",
+      acknowledgeConcurrentOperationsStopped: "true",
+      acknowledgeReinviteRequired: "true",
+      guildId: GUILD_ID,
+      operationKey: OPERATION_KEY,
+      reviewReason: "Retire this connector installation",
+    },
+    name: MCP_PROMPT_NAMES.reviewGuildDeparture,
+  }))
+  assert.deepEqual(JSON.parse(guildDeparture.split("\n")[1] || ""), {
+    acknowledgeAccessLoss: true,
+    acknowledgeConcurrentOperationsStopped: true,
+    acknowledgeReinviteRequired: true,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    reviewReason: "Retire this connector installation",
+  })
+  assert.match(guildDeparture, /Call only plan_guild_departure/)
+  assert.match(guildDeparture, /Do not call execute_guild_departure/)
+  assert.match(guildDeparture, /complete current-guild inventory/)
+  assert.match(guildDeparture, /every guild write collection/)
+  assert.match(guildDeparture, /quarantines uncertain outcomes/)
 
   const inviteCreation = promptText(await client.getPrompt({
     arguments: {
