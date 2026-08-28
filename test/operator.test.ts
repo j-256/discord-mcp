@@ -295,6 +295,7 @@ function status(
       channelOrderingAuditEnabled: false,
       channelOrderingChangesEnabled: false,
       channelOrderingGuildIds: [],
+      componentLinkOrigins: [],
       deleteChannelIds: [],
       deletionsEnabled: false,
       directMessageAttachmentsEnabled: false,
@@ -1203,6 +1204,7 @@ test("doctor and setup explain effective interaction policy without Discord writ
   )
   assert.equal(interaction?.status, "pass")
   assert.match(interaction?.summary || "", /12-write rolling budget/)
+  assert.match(interaction?.summary || "", /0 exact link origins/)
   assert.equal(
     warning.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.interactionPolicy)?.status,
     "warn",

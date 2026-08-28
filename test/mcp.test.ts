@@ -6187,6 +6187,8 @@ function componentMessagePlan(
     target: {
       counts: review.counts,
       layout: review.layout,
+      linkOrigins: review.linkOrigins,
+      linkUrls: review.linkUrls,
       messageId: request.messageId ?? null,
       preview: review.preview,
       suppressedUserMentionIds: review.suppressedUserMentionIds,
@@ -8951,6 +8953,7 @@ function fixturePolicy(): PolicyDescription {
     channelOrderingAuditEnabled: false,
     channelOrderingChangesEnabled: false,
     channelOrderingGuildIds: [],
+    componentLinkOrigins: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     directMessageAttachmentsEnabled: false,
@@ -9753,6 +9756,8 @@ function serviceFixture(overrides: {
       createdAt: "2026-08-25T00:00:01.000Z",
       current,
       desired: {
+        linkOrigins: desiredReview?.linkOrigins ?? [],
+        linkUrls: desiredReview?.linkUrls ?? [],
         message: desiredMessage,
         preview: desiredReview?.preview ?? null,
         replyToMessageId: request.action === "reply"
@@ -20649,6 +20654,10 @@ test("MCP component template compilation is typed, local, and workflow-ready", a
   const compiled = await client.callTool({
     arguments: {
       changes: ["Added typed local templates", `Notify <@${USER_ID}>`],
+      cta: {
+        label: "Release details",
+        url: "https://Docs.example.com/releases/latest",
+      },
       notifyUserIds: [USER_ID],
       releaseName: "Discord MCP 1.0",
       summary: "A reviewed release.",
@@ -20682,11 +20691,19 @@ test("MCP component template compilation is typed, local, and workflow-ready", a
     messageMutation: "impossible",
     writeAuthorityGranted: false,
   })
-  assert.deepEqual(result.template, { name: "release-notes", version: 1 })
+  assert.deepEqual(result.template, { name: "release-notes", version: 2 })
   assert.equal((result.components as unknown[]).length, 1)
   assert.deepEqual(
     (result.review as Record<string, unknown>).notificationUserIds,
     [USER_ID],
+  )
+  assert.deepEqual(
+    (result.review as Record<string, unknown>).linkOrigins,
+    ["https://docs.example.com"],
+  )
+  assert.deepEqual(
+    (result.review as Record<string, unknown>).linkUrls,
+    ["https://docs.example.com/releases/latest"],
   )
   assert.equal(
     (result.next as Record<string, unknown>).planTool,
@@ -20694,6 +20711,7 @@ test("MCP component template compilation is typed, local, and workflow-ready", a
   )
   assert.deepEqual(result.privacy, {
     compiledContent: "transient-untrusted",
+    linkDestinations: "transient-untrusted",
     persistence: "none",
     templateSource: "bundled-local",
   })

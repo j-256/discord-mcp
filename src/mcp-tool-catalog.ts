@@ -270,7 +270,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "guild-blueprint",
   },
   compile_component_template: {
-    keywords: ["announcement", "card", "component", "incident", "layout", "local", "poll", "release", "template", "welcome", "v2"],
+    keywords: ["announcement", "button", "card", "component", "cta", "incident", "layout", "link", "local", "poll", "release", "template", "welcome", "v2"],
     toolset: "interactions",
     workflow: "component-message",
   },
@@ -293,7 +293,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "attachment-message",
   },
   execute_component_message: {
-    keywords: ["component", "create", "edit", "execute", "layout", "message", "v2"],
+    keywords: ["button", "component", "create", "edit", "execute", "layout", "link", "message", "v2"],
     toolset: "interactions",
     workflow: "component-message",
   },
@@ -978,7 +978,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "attachment-message",
   },
   plan_component_message: {
-    keywords: ["component", "create", "edit", "layout", "message", "plan", "review", "v2"],
+    keywords: ["button", "component", "create", "edit", "layout", "link", "message", "plan", "review", "v2"],
     toolset: "interactions",
     workflow: "component-message",
   },
@@ -1271,7 +1271,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "connector",
   },
   preview_component_layout: {
-    keywords: ["component", "layout", "local", "message", "preview", "validate", "v2"],
+    keywords: ["button", "component", "layout", "link", "local", "message", "preview", "validate", "v2"],
     toolset: "interactions",
     workflow: "component-message",
   },

@@ -2324,6 +2324,7 @@ function guidanceService(options: {
         channelOrderingAuditEnabled: false,
         channelOrderingChangesEnabled: false,
         channelOrderingGuildIds: [],
+        componentLinkOrigins: [],
         deleteChannelIds: [],
         deletionsEnabled: false,
         directMessageAttachmentsEnabled: false,

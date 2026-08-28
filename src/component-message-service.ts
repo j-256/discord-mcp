@@ -222,6 +222,8 @@ export interface ComponentMessagePlan {
   target: {
     counts: ComponentLayoutCounts
     layout: NormalizedComponentLayout
+    linkOrigins: string[]
+    linkUrls: string[]
     messageId: string | null
     preview: string
     suppressedUserMentionIds: string[]
@@ -1302,6 +1304,7 @@ export class ComponentMessageService {
     options: RequestOptions,
   ): Promise<BuiltComponentMessagePlan> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
+    this.#policy.assertComponentLinkOrigins(request.review.linkOrigins)
     const state = await this.#state(botId, intent, request, options)
     const writeRequired = request.action === "create"
       || state.current === null
@@ -1325,7 +1328,7 @@ export class ComponentMessageService {
             "The operation key cannot be reused after reservation, including after an uncertain outcome",
           ]
         : ["The exact notification-free edit is a record-free no-op that does not reserve the operation key"]),
-      "Durable records omit component text, component trees, generated component IDs, notification IDs, URLs, raw payloads, and the raw operation key",
+      "Durable records omit component text, component trees, link destinations, generated component IDs, notification IDs, raw payloads, and the raw operation key",
     ]
     const currentSnapshot = state.current === null
       ? null
@@ -1423,6 +1426,8 @@ export class ComponentMessageService {
       target: {
         counts: request.review.counts,
         layout: request.components,
+        linkOrigins: request.review.linkOrigins,
+        linkUrls: request.review.linkUrls,
         messageId: request.messageId,
         preview: request.review.preview,
         suppressedUserMentionIds: request.review.suppressedUserMentionIds,
@@ -1458,6 +1463,7 @@ export class ComponentMessageService {
     options: RequestOptions = {},
   ): Promise<ComponentMessageVerificationResult> {
     const normalized = normalizeComponentMessageRequest(request)
+    this.#policy.assertComponentLinkOrigins(normalized.review.linkOrigins)
     if (intent !== "enabled") {
       throw evidenceError(
         "Discord component-message verification requires confirmed Message Content intent",

@@ -316,6 +316,14 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
     }
     return value.startsWith('/') && !/(?:^|\/)\.\.?(?:\/|$)/.test(value) && !/\/\//.test(value);
   };
+  const canonicalHttpsOrigin = (value) => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'https:' && !parsed.username && !parsed.password && parsed.pathname === '/' && !parsed.search && !parsed.hash && value === parsed.origin;
+    } catch {
+      return false;
+    }
+  };
   const patternError = (pattern, value, label) => pattern && !(new RegExp(pattern)).test(value) ? label : '';
   const validateField = (field, value, raw) => {
     const found = [];
@@ -333,6 +341,9 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
       if (constraints.maxItems !== undefined && values.length > constraints.maxItems) found.push('Use no more than ' + constraints.maxItems + ' values');
       if (field.kind === 'snowflakes' && constraints.pattern && values.some((entry) => !(new RegExp(constraints.pattern)).test(entry))) found.push('Every entry must be a Discord snowflake');
       if (field.kind === 'paths' && values.some((entry) => !absoluteCanonicalPath(entry))) found.push('Every entry must be an absolute canonical path');
+      if (field.kind === 'strings' && constraints.pattern && values.some((entry) => !(new RegExp(constraints.pattern)).test(entry))) found.push('Every entry must match the required format');
+      if (field.kind === 'strings' && constraints.maxLength !== undefined && values.some((entry) => entry.length > constraints.maxLength)) found.push('Every entry must use no more than ' + constraints.maxLength + ' characters');
+      if (field.path === '$.scopes.componentLinkOrigins' && values.some((entry) => !canonicalHttpsOrigin(entry))) found.push('Every entry must be an exact canonical HTTPS origin');
       if (field.path === '$.tools.toolsets' && values.some((entry) => !payload.toolsets.includes(entry))) found.push('Select only known toolsets');
     }
     if (field.kind === 'path' && !absoluteCanonicalPath(String(value))) found.push('Enter an absolute canonical path');

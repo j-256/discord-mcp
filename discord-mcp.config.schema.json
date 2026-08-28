@@ -1122,6 +1122,16 @@
           },
           "description": "Exact Discord ID allowlist for channel ordering guild ids"
         },
+        "componentLinkOrigins": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^https:\\/\\/[^/?#@\\s]+$"
+          },
+          "description": "Exact canonical HTTPS origin allowlist for Components V2 link buttons"
+        },
         "deleteChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
@@ -1714,7 +1724,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Exact per-feature Discord ID allowlists"
+      "description": "Exact per-feature Discord ID and HTTPS origin allowlists"
     },
     "storage": {
       "default": {},

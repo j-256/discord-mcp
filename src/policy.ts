@@ -76,6 +76,7 @@ export interface PolicyDescription {
   channelOrderingAuditEnabled: boolean
   channelOrderingChangesEnabled: boolean
   channelOrderingGuildIds: string[]
+  componentLinkOrigins: string[]
   deleteChannelIds: string[]
   deletionsEnabled: boolean
   directMessageAuditEnabled: boolean
@@ -411,6 +412,7 @@ export class ScopePolicy {
   readonly #channelDeletionIds: ReadonlySet<string>
   readonly #channelMetadataIds: ReadonlySet<string>
   readonly #channelOrderingGuildIds: ReadonlySet<string>
+  readonly #componentLinkOrigins: ReadonlySet<string>
   readonly #interactionChannelIds: ReadonlySet<string>
   readonly #interactionMaxWritesPerMinute: number
   readonly #interactionMinWriteIntervalMs: number
@@ -623,6 +625,7 @@ export class ScopePolicy {
     | "announcementSubscriptionTargetChannelIds"
     | "channelMetadataIds"
     | "channelOrderingGuildIds"
+    | "componentLinkOrigins"
     | "attachmentChannelIds"
     | "attachmentMaxBytes"
     | "attachmentRoots"
@@ -877,6 +880,7 @@ export class ScopePolicy {
     this.#channelDeletionIds = config.channelDeletionIds ?? new Set()
     this.#channelMetadataIds = config.channelMetadataIds ?? new Set()
     this.#channelOrderingGuildIds = config.channelOrderingGuildIds ?? new Set()
+    this.#componentLinkOrigins = config.componentLinkOrigins ?? new Set()
     this.#interactionChannelIds = config.interactionChannelIds
     this.#interactionMaxWritesPerMinute = config.interactionMaxWritesPerMinute
     this.#interactionMinWriteIntervalMs = config.interactionMinWriteIntervalMs
@@ -1079,6 +1083,7 @@ export class ScopePolicy {
         && this.#allowChannelOrderingChanges
         && this.#channelOrderingGuildIds.size > 0,
       channelOrderingGuildIds: [...this.#channelOrderingGuildIds].sort(),
+      componentLinkOrigins: [...this.#componentLinkOrigins].sort(),
       deleteChannelIds: [...this.#deleteChannelIds].sort(),
       deletionsEnabled: this.#allowDeletions && this.#deleteChannelIds.size > 0,
       directMessageAuditEnabled: this.#allowDirectMessageAudit
@@ -3183,6 +3188,16 @@ export class ScopePolicy {
     for (const userId of userIds) {
       if (!this.#mentionUserIds.has(userId)) {
         throw new PolicyError(`Discord user ${userId} is outside the notification scope`)
+      }
+    }
+  }
+
+  assertComponentLinkOrigins(origins: readonly string[]): void {
+    for (const origin of origins) {
+      if (!this.#componentLinkOrigins.has(origin)) {
+        throw new PolicyError(
+          `Component link origin ${origin} is outside the exact configured origin scope`,
+        )
       }
     }
   }

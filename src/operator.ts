@@ -2509,7 +2509,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
         "pass",
-        `Message interactions and reviewed static component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
+        `Message interactions and reviewed static component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users, ${config.componentLinkOrigins.size} exact link origins, and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
     if (!config.allowEmbedMessages) {

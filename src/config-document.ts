@@ -18,6 +18,10 @@ import { TextDecoder } from "node:util"
 import { z } from "zod"
 
 import {
+  COMPONENT_LINK_LIMITS,
+  canonicalComponentLinkOrigin,
+} from "./component-link.js"
+import {
   CONNECTOR_LIMITS,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_LIMITS,
@@ -274,6 +278,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "channelCloneSourceIds",
   "channelMetadataIds",
   "channelOrderingGuildIds",
+  "componentLinkOrigins",
   "deleteChannelIds",
   "directMessageUserIds",
   "embedMessageChannelIds",
@@ -614,6 +619,9 @@ function capabilityDescription(documentKey: string): string {
 }
 
 function scopeDescription(documentKey: string): string {
+  if (documentKey === "componentLinkOrigins") {
+    return "Exact canonical HTTPS origin allowlist for Components V2 link buttons"
+  }
   if (documentKey === "guildCommunityGuildIds") {
     return GUILD_COMMUNITY_SCOPE_DESCRIPTION
   }
@@ -723,28 +731,47 @@ const capabilityShape = Object.fromEntries(
   ]),
 ) as Record<string, z.ZodOptional<z.ZodBoolean>>
 
+const componentLinkOriginSchema = z.string()
+  .max(COMPONENT_LINK_LIMITS.urlCharacters)
+  .regex(/^https:\/\/[^/?#@\s]+$/u)
+  .refine((value) => {
+    try {
+      canonicalComponentLinkOrigin(value)
+      return true
+    } catch {
+      return false
+    }
+  }, "must be an exact canonical HTTPS origin without a path, query, fragment, credentials, or trailing slash")
+
 const scopeShape = Object.fromEntries(
   CONFIG_SCOPE_NAMES.map((name) => [
     name,
-    snowflakeArraySchema(
-      0,
-      name === "directMessageUserIds"
-        ? CONNECTOR_LIMITS.directMessageUserAllowlist
-        : name === "applicationEntitlementGuildIds"
-          || name === "applicationEntitlementUserIds"
-          || name === "applicationSubscriptionUserIds"
-          || name === "applicationConsumableEntitlementUserIds"
-          || name === "applicationTestEntitlementGuildIds"
-          || name === "applicationTestEntitlementUserIds"
-          ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
-          : name === "applicationMonetizationSkuIds"
-            || name === "applicationConsumableEntitlementSkuIds"
-            || name === "applicationTestEntitlementSkuIds"
-            ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
-            : name === "memberRoleIds" || name === "bulkMemberRoleIds"
-              ? CONNECTOR_LIMITS.memberRoleAllowlist
-              : CONFIG_SCOPE_ENTRIES,
-    )
+    (name === "componentLinkOrigins"
+      ? z.array(componentLinkOriginSchema)
+        .max(COMPONENT_LINK_LIMITS.origins)
+        .refine(
+          (values) => canonicalArray(values),
+          "must contain unique origins in canonical order",
+        )
+      : snowflakeArraySchema(
+        0,
+        name === "directMessageUserIds"
+          ? CONNECTOR_LIMITS.directMessageUserAllowlist
+          : name === "applicationEntitlementGuildIds"
+            || name === "applicationEntitlementUserIds"
+            || name === "applicationSubscriptionUserIds"
+            || name === "applicationConsumableEntitlementUserIds"
+            || name === "applicationTestEntitlementGuildIds"
+            || name === "applicationTestEntitlementUserIds"
+            ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
+            : name === "applicationMonetizationSkuIds"
+              || name === "applicationConsumableEntitlementSkuIds"
+              || name === "applicationTestEntitlementSkuIds"
+              ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
+              : name === "memberRoleIds" || name === "bulkMemberRoleIds"
+                ? CONNECTOR_LIMITS.memberRoleAllowlist
+                : CONFIG_SCOPE_ENTRIES,
+      ))
       .describe(scopeDescription(name))
       .optional(),
   ]),
@@ -871,7 +898,7 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
   schemaVersion: z.literal(CONFIG_DOCUMENT_SCHEMA_VERSION)
     .describe("Configuration format version"),
   scopes: z.strictObject(scopeShape)
-    .describe("Exact per-feature Discord ID allowlists")
+    .describe("Exact per-feature Discord ID and HTTPS origin allowlists")
     .default({}),
   storage: z.strictObject(storageShape)
     .describe("Local content-free activity and owned-file paths")
@@ -1540,7 +1567,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     ...CONFIG_SCOPE_NAMES.map((name) => ({
       defaultValue: [],
       description: scopeDescription(name),
-      kind: "snowflakes" as const,
+      kind: name === "componentLinkOrigins" ? "strings" as const : "snowflakes" as const,
       path: `$.scopes.${name}`,
       required: false,
     })),

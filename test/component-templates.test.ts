@@ -138,6 +138,40 @@ test("projects mentions through the existing notification review", () => {
   assert.ok(result.review.warnings.some((warning) => warning.includes("without notification")))
 })
 
+test("adds one reviewed link-only CTA to announcement and release templates", () => {
+  const fixtures = [
+    {
+      body: "Read the complete maintenance plan.",
+      cta: { label: "Maintenance guide", url: "https://Docs.example.com/guide" },
+      headline: "Maintenance",
+      priority: "important",
+      template: "announcement",
+    },
+    {
+      changes: ["Added link-only CTAs"],
+      cta: { label: "Release details", url: "https://example.com/releases/latest" },
+      releaseName: "Version 2",
+      summary: "A safer release.",
+      template: "release-notes",
+    },
+  ] as const
+
+  for (const fixture of fixtures) {
+    const result = compileComponentTemplate(fixture)
+    const container = result.review.layout[0]
+    assert.equal(container?.kind, "container")
+    if (container?.kind !== "container") assert.fail("Expected a container")
+    const actionRow = container.components.at(-1)
+    assert.equal(actionRow?.kind, "link-row")
+    if (actionRow?.kind !== "link-row") assert.fail("Expected a link row")
+    assert.equal(actionRow.buttons.length, 1)
+    assert.equal(result.review.counts.actionRows, 1)
+    assert.equal(result.review.counts.linkButtons, 1)
+    assert.deepEqual(result.review.linkOrigins, [new URL(fixture.cta.url).origin])
+    assert.ok(result.review.warnings.some((warning) => warning.includes("verify redirects")))
+  }
+})
+
 test("publishes a complete immutable local template catalog", () => {
   assert.deepEqual(
     COMPONENT_TEMPLATE_CATALOG.map((entry) => entry.name),
@@ -194,6 +228,26 @@ test("rejects unknown templates, fields, multiline labels, and malformed text", 
       template: "announcement",
     }),
     /body contains unsupported control characters/,
+  )
+  assert.throws(
+    () => compileComponentTemplate({
+      body: "Body",
+      cta: { customId: "callback", label: "Unsafe", url: "https://example.com" },
+      headline: "Headline",
+      priority: "information",
+      template: "announcement",
+    }),
+    /template\.cta contains unsupported fields: customId/,
+  )
+  assert.throws(
+    () => compileComponentTemplate({
+      changes: ["Change"],
+      cta: { label: "Unsafe", url: "http://example.com" },
+      releaseName: "Release",
+      summary: "Summary",
+      template: "release-notes",
+    }),
+    /template\.cta\.url must use HTTPS/,
   )
 })
 

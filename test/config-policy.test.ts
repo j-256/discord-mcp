@@ -265,6 +265,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     channelOrderingAuditEnabled: false,
     channelOrderingChangesEnabled: false,
     channelOrderingGuildIds: [],
+    componentLinkOrigins: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     directMessageAttachmentsEnabled: false,
@@ -1777,6 +1778,7 @@ test("configuration and policy require an exact administration guild and protect
     channelOrderingAuditEnabled: false,
     channelOrderingChangesEnabled: false,
     channelOrderingGuildIds: [],
+    componentLinkOrigins: [],
     deleteChannelIds: [],
     deletionsEnabled: false,
     directMessageAttachmentsEnabled: false,
@@ -5782,6 +5784,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     channelOrderingAuditEnabled: false,
     channelOrderingChangesEnabled: false,
     channelOrderingGuildIds: [],
+    componentLinkOrigins: [],
     deleteChannelIds: [CHANNEL_ID],
     deletionsEnabled: true,
     directMessageAttachmentsEnabled: false,
@@ -6667,6 +6670,7 @@ test("scope policy requires exact interaction channels and exact notification us
       guildIds: [GUILD_ID],
     },
     scopes: {
+      componentLinkOrigins: ["https://docs.example.com"],
       interactionChannelIds: [OTHER_CHANNEL_ID],
       mentionUserIds: [USER_ID],
     },
@@ -6681,6 +6685,11 @@ test("scope policy requires exact interaction channels and exact notification us
   assert.throws(
     () => policy.assertNotificationUsers(["400000000000000002"]),
     /outside the notification scope/,
+  )
+  policy.assertComponentLinkOrigins(["https://docs.example.com"])
+  assert.throws(
+    () => policy.assertComponentLinkOrigins(["https://example.com"]),
+    /outside the exact configured origin scope/,
   )
 })
 
