@@ -3,6 +3,7 @@ import {
   type DiscordCatalogSnapshot,
 } from "./catalog.js"
 import {
+  CONNECTOR_NPM_PACKAGE,
   MCP_DISCOVERY_TOOL_NAME,
   SCHEMA_VERSION,
 } from "./constants.js"
@@ -26,7 +27,7 @@ import {
   type McpToolName,
 } from "./observability-catalog.js"
 
-export const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
+export const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v2"
 
 const ANNOTATION_NAMES = [
   "readOnlyHint",
@@ -59,6 +60,24 @@ interface ToolMetadata {
   toolset: string
   workflow: string
 }
+
+interface TourToolRequirement {
+  name: CanonicalMcpToolName
+  stage: McpToolAccessContract["stage"]
+}
+
+interface TourToolEvidence {
+  metadata: ToolMetadata
+  tool: DiscordCatalogSnapshot["tools"][number]
+}
+
+const TOUR_PROMPT_NAME = "route_discord_goal"
+const TOUR_TOOL_REQUIREMENTS = Object.freeze({
+  activity: { name: "list_activity", stage: "local" },
+  execute: { name: "execute_channel_creation", stage: "review-execute" },
+  plan: { name: "plan_channel_creation", stage: "review-plan" },
+  read: { name: "list_channels", stage: "live-read" },
+} satisfies Record<string, TourToolRequirement>)
 
 const CATALOG_HTML_FILE_MESSAGES = Object.freeze({
   exists: "Catalog HTML target already exists; choose a new path or move the existing file",
@@ -106,6 +125,140 @@ function toolMetadata(name: string): ToolMetadata {
     toolset: metadata.toolset,
     workflow: metadata.workflow || "standalone",
   }
+}
+
+function requiredTourTool(
+  tools: readonly TourToolEvidence[],
+  requirement: TourToolRequirement,
+): TourToolEvidence {
+  const evidence = tools.find(({ tool }) => tool.name === requirement.name)
+  if (!evidence) {
+    throw new Error(`Catalog guided tour tool ${requirement.name} is unavailable`)
+  }
+  if (evidence.metadata.access.stage !== requirement.stage) {
+    throw new Error(`Catalog guided tour tool ${requirement.name} has an unexpected access stage`)
+  }
+  return evidence
+}
+
+function requiredTourPrompt(
+  snapshot: DiscordCatalogSnapshot,
+): DiscordCatalogSnapshot["prompts"][number] {
+  const prompt = snapshot.prompts.find(({ name }) => name === TOUR_PROMPT_NAME)
+  if (!prompt) throw new Error(`Catalog guided tour prompt ${TOUR_PROMPT_NAME} is unavailable`)
+  return prompt
+}
+
+function tourToolLink(
+  evidence: TourToolEvidence,
+  label: string,
+): string {
+  return `<a class="tour-contract-link" href="#tool-${escapeHtml(evidence.tool.name)}"><span>${escapeHtml(label)}</span><code>${escapeHtml(evidence.tool.name)}</code><strong>${escapeHtml(evidence.metadata.access.stage)}</strong></a>`
+}
+
+function tourPromptLink(
+  prompt: DiscordCatalogSnapshot["prompts"][number],
+): string {
+  return `<a class="tour-contract-link" href="#prompt-${escapeHtml(prompt.name)}"><span>Negotiated prompt</span><code>${escapeHtml(prompt.name)}</code><strong>prompt</strong></a>`
+}
+
+function tourTab(
+  identifier: string,
+  number: number,
+  label: string,
+  selected = false,
+): string {
+  return `<button id="tour-tab-${identifier}" type="button" role="tab" aria-label="${escapeHtml(`Step ${number}: ${label}`)}" aria-controls="tour-panel-${identifier}" aria-selected="${selected ? "true" : "false"}" tabindex="${selected ? "0" : "-1"}" data-tour-tab><span>${number}</span><strong>${escapeHtml(label)}</strong></button>`
+}
+
+function tourPanel(
+  identifier: string,
+  number: number,
+  title: string,
+  summary: string,
+  body: string,
+  selected = false,
+): string {
+  return `<section id="tour-panel-${identifier}" class="tour-panel" role="tabpanel" aria-labelledby="tour-tab-${identifier}" tabindex="0"${selected ? "" : " hidden"}>
+  <p class="eyebrow">Step ${number}</p>
+  <h3>${escapeHtml(title)}</h3>
+  <p class="tour-summary">${escapeHtml(summary)}</p>
+  ${body}
+</section>`
+}
+
+function guidedTourMarkup(
+  snapshot: DiscordCatalogSnapshot,
+  tools: readonly TourToolEvidence[],
+): string {
+  const routePrompt = requiredTourPrompt(snapshot)
+  const read = requiredTourTool(tools, TOUR_TOOL_REQUIREMENTS.read)
+  const plan = requiredTourTool(tools, TOUR_TOOL_REQUIREMENTS.plan)
+  const execute = requiredTourTool(tools, TOUR_TOOL_REQUIREMENTS.execute)
+  const activity = requiredTourTool(tools, TOUR_TOOL_REQUIREMENTS.activity)
+  const packageSpec = `${CONNECTOR_NPM_PACKAGE}@${snapshot.report.serverVersion}`
+  const tabs = [
+    tourTab("inspect", 1, "Inspect", true),
+    tourTab("scope", 2, "Scope"),
+    tourTab("route", 3, "Route"),
+    tourTab("read", 4, "Read"),
+    tourTab("review", 5, "Review"),
+    tourTab("execute", 6, "Execute"),
+    tourTab("recover", 7, "Recover"),
+  ].join("")
+  const panels = [
+    tourPanel(
+      "inspect",
+      1,
+      "Inspect the shipped contract",
+      "Negotiate and fingerprint the production registrations before creating a bot or granting Discord access.",
+      `<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} catalog --check`)}</code></pre><div class="tour-proof-grid"><div><b>This artifact proves</b><span>Exact tools, access stages, prompts, resources, completions, review-app bytes, safety guidance, and execution blocking</span></div><div><b>It deliberately cannot prove</b><span>Bot identity, target permissions, live Discord state, or any operation outcome</span></div></div>`,
+      true,
+    ),
+    tourPanel(
+      "scope",
+      2,
+      "Create a narrow read-only boundary",
+      "Start with one owner-managed bot, one verified guild, one strict non-secret policy, and one external token secret.",
+      `<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} setup --npx --config ./discord-mcp.json --preset server-observer --guild-id YOUR_GUILD_ID`)}</code></pre><div class="tour-proof-grid"><div><b>Authority starts absent</b><span>The read-only preset cannot enable writes, Gateway access, telemetry export, activity persistence, or Message Content access</span></div><div><b>Live setup must prove</b><span>The application, bot, guild membership, selected credential source, and actual Discord permissions</span></div></div>`,
+    ),
+    tourPanel(
+      "route",
+      3,
+      "Start from the operator outcome",
+      "A prompt-capable client can route one goal into bounded discovery, a read, or at most a reviewed plan without granting mutation authority.",
+      `${tourPromptLink(routePrompt)}<div class="tour-proof-grid"><div><b>Prompt contract</b><span>${escapeHtml(routePrompt.description || "No prompt description advertised")}</span></div><div><b>Authority boundary</b><span>Prompt text guides tool selection but cannot expand policy, approve a plan, or execute a write</span></div></div>`,
+    ),
+    tourPanel(
+      "read",
+      4,
+      "Prove the first live read",
+      "Inventory the exact configured guild through the real MCP path before enabling any write workflow.",
+      `${tourToolLink(read, "Negotiated read tool")}<div class="tour-proof-grid"><div><b>Static contract</b><span>Bounded live read with exact input and output schemas, Discord-read annotation, and target-specific readiness requirements</span></div><div><b>Live result must prove</b><span>Pinned identity, policy scope, guild ownership, Discord permission, response validity, and the host's result handling</span></div></div>`,
+    ),
+    tourPanel(
+      "review",
+      5,
+      "Produce a complete change plan",
+      "Additive channel creation first gathers fresh identity, collision, capacity, parent, visibility, and permission evidence without mutating Discord.",
+      `${tourToolLink(plan, "Negotiated plan tool")}<div class="tour-proof-grid"><div><b>Review surface</b><span>The same complete text and structured plan can optionally render in the display-only <a href="#app">plan-review MCP App</a></span></div><div><b>No write yet</b><span>The plan digest and signed request state describe exact reviewed evidence but do not authorize execution by themselves</span></div></div>`,
+    ),
+    tourPanel(
+      "execute",
+      6,
+      "Approve one exact mutation",
+      "Execution accepts only the identical request and fresh digest after host write approval and signed interactive confirmation.",
+      `${tourToolLink(execute, "Negotiated execution tool")}<div class="tour-proof-grid"><div><b>Before dispatch</b><span>Final fresh-plan match, durable coordination, one-shot reservation, and pending content-free activity</span></div><div><b>After dispatch</b><span>One non-retried Discord request, strict response validation, exact readback, and explicit drift or uncertainty</span></div></div>`,
+    ),
+    tourPanel(
+      "recover",
+      7,
+      "Settle ambiguity without guessing",
+      "Content-free activity and durable claims separate completed, failed, drifting, and uncertain outcomes while preserving operator control.",
+      `${tourToolLink(activity, "Negotiated local evidence tool")}<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} coordination list --config ./discord-mcp.json`)}</code></pre><div class="tour-proof-grid"><div><b>Evidence retains</b><span>Exact identifiers where permitted, hashes, timestamps, stages, outcomes, and sanitized error categories</span></div><div><b>Evidence excludes</b><span>Messages, names, topics, URLs, reasons, raw operation keys, credentials, and transport response bodies</span></div></div>`,
+    ),
+  ].join("")
+  return `<div class="tour-tabs" role="tablist" aria-label="Guided product tour steps">${tabs}</div><div class="tour-panels">${panels}</div>`
 }
 
 function optionMarkup(values: readonly string[]): string {
@@ -166,7 +319,7 @@ function toolMarkup(
 }
 
 function promptMarkup(prompt: DiscordCatalogSnapshot["prompts"][number]): string {
-  return `<details class="contract-card"><summary><strong>${escapeHtml(prompt.title || prompt.name)}</strong><code>${escapeHtml(prompt.name)}</code></summary><div><p>${escapeHtml(prompt.description || "No description advertised")}</p><pre tabindex="0"><code>${jsonText(prompt)}</code></pre></div></details>`
+  return `<details id="prompt-${escapeHtml(prompt.name)}" class="contract-card"><summary><strong>${escapeHtml(prompt.title || prompt.name)}</strong><code>${escapeHtml(prompt.name)}</code></summary><div><p>${escapeHtml(prompt.description || "No description advertised")}</p><pre tabindex="0"><code>${jsonText(prompt)}</code></pre></div></details>`
 }
 
 function resourceMarkup(resource: DiscordCatalogSnapshot["resources"][number]): string {
@@ -232,6 +385,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   const workflows = tools.map(({ metadata }) => metadata.workflow)
   const accessStages = tools.map(({ metadata }) => metadata.access.stage)
   const report = snapshot.report
+  const tourMarkup = guidedTourMarkup(snapshot, tools)
   const toolsMarkup = tools.map(({ metadata, tool }) => toolMarkup(tool, metadata)).join("\n")
   const promptsMarkup = snapshot.prompts.map(promptMarkup).join("\n")
   const completionsMarkup = report.completionBindings.map(completionMarkup).join("\n")
@@ -244,13 +398,13 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; media-src 'none'; object-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'">
-  <meta name="description" content="Credential-free, release-exact Discord MCP contract explorer">
+  <meta name="description" content="Credential-free, release-exact Discord MCP product tour and contract explorer">
   <title>Discord MCP Contract Explorer ${escapeHtml(report.serverVersion)}</title>
   <style>
-    :root{color-scheme:light dark;--bg:#f4f6fb;--panel:#fff;--panel-2:#f8f9fd;--text:#162033;--muted:#5d687b;--line:#d8deea;--brand:#5865f2;--brand-2:#3643c8;--focus:#ffb020;--local:#6c5ce7;--read:#147d64;--interaction:#b85c00;--admin:#a13b78;--destructive:#bd2838;--shadow:0 18px 50px rgba(29,40,76,.09)}
-    @media(prefers-color-scheme:dark){:root{--bg:#0d111b;--panel:#151b28;--panel-2:#101622;--text:#eef2ff;--muted:#aab4ca;--line:#30394c;--brand:#8993ff;--brand-2:#b1b7ff;--focus:#ffd166;--local:#a99cff;--read:#63d1b1;--interaction:#ffb56b;--admin:#ee8fc5;--destructive:#ff7d8a;--shadow:0 18px 50px rgba(0,0,0,.28)}}
-    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}.skip-link{position:fixed;left:1rem;top:-5rem;z-index:20;background:var(--panel);color:var(--text);padding:.7rem 1rem;border:2px solid var(--focus);border-radius:.6rem}.skip-link:focus{top:1rem}.shell{width:min(1180px,calc(100% - 2rem));margin:0 auto}.hero{padding:4.5rem 0 2.25rem}.eyebrow{margin:0 0 .5rem;color:var(--brand-2);font-size:.78rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.hero h1{max-width:850px;margin:0;font-size:clamp(2.3rem,7vw,5.4rem);line-height:.95;letter-spacing:-.055em}.lede{max-width:760px;margin:1.5rem 0 0;color:var(--muted);font-size:clamp(1rem,2vw,1.25rem)}.proof-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.75rem;margin:2rem 0}.proof{min-width:0;padding:1rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.proof strong{display:block;font-size:1.45rem}.proof span{color:var(--muted);font-size:.82rem}.guarantees{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem;margin:1rem 0 3rem}.panel{min-width:0;padding:1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.panel h2,.panel h3{margin-top:0}.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin:0;padding:0;list-style:none}.checks li{padding:.75rem;border-radius:.75rem;background:var(--panel-2)}.checks li::before{content:"✓";margin-right:.55rem;color:var(--read);font-weight:900}.digest{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.75rem;color:var(--muted)}.risk-row{display:grid;grid-template-columns:minmax(8rem,1fr) 2fr 2rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.78rem}.risk-track{height:.55rem;overflow:hidden;border-radius:999px;background:var(--line)}.risk-track span{display:block;width:var(--share);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--brand),var(--brand-2))}.sticky-nav{position:sticky;top:0;z-index:10;border-block:1px solid var(--line);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px)}.nav-inner{display:flex;align-items:center;gap:1rem;overflow:auto;padding:.65rem 0}.nav-inner a{color:var(--muted);font-weight:700;text-decoration:none;white-space:nowrap}.nav-inner a:hover{color:var(--text)}main section{scroll-margin-top:5rem}.section-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin:3.5rem 0 1rem}.section-head h2{margin:0;font-size:clamp(1.7rem,4vw,2.6rem);letter-spacing:-.035em}.section-head p{max-width:570px;margin:0;color:var(--muted)}.controls{display:grid;grid-template-columns:minmax(15rem,2fr) repeat(4,minmax(8rem,1fr));gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:1rem 1rem 0 0;background:var(--panel)}label{display:grid;gap:.35rem;color:var(--muted);font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}input,select,button{min-height:2.7rem;border:1px solid var(--line);border-radius:.65rem;background:var(--panel-2);color:var(--text);font:inherit}input,select{width:100%;padding:.55rem .7rem}input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.control-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--line);border-top:0;background:var(--panel)}.button-row{display:flex;flex-wrap:wrap;gap:.5rem}button{padding:.45rem .8rem;cursor:pointer;font-weight:750}button:hover{border-color:var(--brand);color:var(--brand-2)}#filter-status{color:var(--muted);font-size:.9rem}.tool-list{display:grid;gap:.65rem;margin-top:.75rem}.tool-card,.contract-card{border:1px solid var(--line);border-radius:.85rem;background:var(--panel);box-shadow:0 8px 25px rgba(29,40,76,.04)}.tool-card[hidden]{display:none}.tool-card details,.contract-card{overflow:hidden}.tool-card summary,.contract-card summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;cursor:pointer}.summary-copy,.contract-card summary{min-width:0}.summary-copy strong,.summary-copy code,.contract-card summary strong,.contract-card summary code{display:block}.summary-copy code,.contract-card summary code{overflow-wrap:anywhere;color:var(--muted);font-size:.76rem}.badges{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.35rem}.badge{padding:.23rem .5rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.68rem;font-weight:800;white-space:nowrap}.app-badge{color:var(--brand-2);border-color:var(--brand)}.risk-local-read{color:var(--local)}.risk-discord-read{color:var(--read)}.risk-interaction-write{color:var(--interaction)}.risk-administrative-write{color:var(--admin)}.risk-destructive-write{color:var(--destructive)}.tool-body,.contract-card>div{padding:0 1rem 1rem;border-top:1px solid var(--line)}.tool-body>p,.contract-card p{white-space:pre-wrap}.tool-meta{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.65rem .75rem;border-radius:.65rem;background:var(--panel-2);font-size:.82rem}.tool-meta a{margin-left:auto;color:var(--brand-2)}.annotations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;margin:1rem 0}.annotation{padding:.65rem;border:1px solid var(--line);border-radius:.65rem}.annotation dt{color:var(--muted);font-size:.7rem}.annotation dd{margin:0;font-weight:800}.annotation .yes{color:var(--read)}.annotation .no{color:var(--muted)}.schema-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.schema-grid h4{margin:.4rem 0}.schema-grid section{min-width:0}pre{max-height:32rem;overflow:auto;margin:.5rem 0 0;padding:1rem;border:1px solid var(--line);border-radius:.7rem;background:var(--panel-2);font-size:.74rem;line-height:1.45;tab-size:2}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}.contract-list{display:grid;gap:.65rem}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.safety{margin-bottom:4rem}.safety pre{max-height:none;white-space:pre-wrap}.empty-note{display:none;margin:1rem 0;padding:1rem;border:1px dashed var(--line);border-radius:.8rem;color:var(--muted)}.empty-note.visible{display:block}footer{padding:2rem 0 4rem;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
-    @media(max-width:860px){.proof-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.guarantees,.split,.schema-grid{grid-template-columns:minmax(0,1fr)}.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.annotations{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    :root{color-scheme:light dark;--bg:#f4f6fb;--panel:#fff;--panel-2:#f8f9fd;--text:#162033;--muted:#5d687b;--line:#d8deea;--brand:#5865f2;--brand-2:#3643c8;--on-brand:#fff;--focus:#ffb020;--local:#6c5ce7;--read:#147d64;--interaction:#b85c00;--admin:#a13b78;--destructive:#bd2838;--shadow:0 18px 50px rgba(29,40,76,.09)}
+    @media(prefers-color-scheme:dark){:root{--bg:#0d111b;--panel:#151b28;--panel-2:#101622;--text:#eef2ff;--muted:#aab4ca;--line:#30394c;--brand:#8993ff;--brand-2:#b1b7ff;--on-brand:#0d111b;--focus:#ffd166;--local:#a99cff;--read:#63d1b1;--interaction:#ffb56b;--admin:#ee8fc5;--destructive:#ff7d8a;--shadow:0 18px 50px rgba(0,0,0,.28)}}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}.skip-link{position:fixed;left:1rem;top:-5rem;z-index:20;background:var(--panel);color:var(--text);padding:.7rem 1rem;border:2px solid var(--focus);border-radius:.6rem}.skip-link:focus{top:1rem}.shell{width:min(1180px,calc(100% - 2rem));margin:0 auto}.hero{padding:4.5rem 0 2.25rem}.eyebrow{margin:0 0 .5rem;color:var(--brand-2);font-size:.78rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.hero h1{max-width:850px;margin:0;font-size:clamp(2.3rem,7vw,5.4rem);line-height:.95;letter-spacing:-.055em}.lede{max-width:760px;margin:1.5rem 0 0;color:var(--muted);font-size:clamp(1rem,2vw,1.25rem)}.hero-link{display:inline-flex;margin-top:1.25rem;padding:.7rem 1rem;border:1px solid var(--brand-2);border-radius:.7rem;background:var(--brand-2);color:var(--on-brand);font-weight:800;text-decoration:none}.hero-link:hover{box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-2) 30%,transparent)}.proof-strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.75rem;margin:2rem 0}.proof{min-width:0;padding:1rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.proof strong{display:block;font-size:1.45rem}.proof span{color:var(--muted);font-size:.82rem}.guarantees{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem;margin:1rem 0 3rem}.panel{min-width:0;padding:1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--panel);box-shadow:var(--shadow)}.panel h2,.panel h3{margin-top:0}.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;margin:0;padding:0;list-style:none}.checks li{padding:.75rem;border-radius:.75rem;background:var(--panel-2)}.checks li::before{content:"✓";margin-right:.55rem;color:var(--read);font-weight:900}.digest{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.75rem;color:var(--muted)}.risk-row{display:grid;grid-template-columns:minmax(8rem,1fr) 2fr 2rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.78rem}.risk-track{height:.55rem;overflow:hidden;border-radius:999px;background:var(--line)}.risk-track span{display:block;width:var(--share);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--brand),var(--brand-2))}.sticky-nav{position:sticky;top:0;z-index:10;border-block:1px solid var(--line);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px)}.nav-inner{display:flex;align-items:center;gap:1rem;overflow:auto;padding:.65rem 0}.nav-inner a{color:var(--muted);font-weight:700;text-decoration:none;white-space:nowrap}.nav-inner a:hover{color:var(--text)}main section{scroll-margin-top:5rem}.section-head{display:flex;align-items:end;justify-content:space-between;gap:1rem;margin:3.5rem 0 1rem}.section-head h2{margin:0;font-size:clamp(1.7rem,4vw,2.6rem);letter-spacing:-.035em}.section-head p{max-width:570px;margin:0;color:var(--muted)}.tour-tabs{display:flex;overflow-x:auto;border:1px solid var(--line);border-radius:1rem 1rem 0 0;background:var(--panel);scroll-snap-type:x proximity}.tour-tabs button{display:flex;flex:1 0 8rem;align-items:center;justify-content:center;gap:.45rem;border:0;border-right:1px solid var(--line);border-radius:0;background:transparent;scroll-snap-align:start}.tour-tabs button:last-child{border-right:0}.tour-tabs button span{display:grid;width:1.55rem;height:1.55rem;place-items:center;border:1px solid var(--line);border-radius:50%;color:var(--muted);font-size:.72rem}.tour-tabs button[aria-selected="true"]{background:var(--panel-2);color:var(--brand-2)}.tour-tabs button[aria-selected="true"] span{border-color:var(--brand-2);background:var(--brand-2);color:var(--on-brand)}.tour-panels{border:1px solid var(--line);border-top:0;border-radius:0 0 1rem 1rem;background:var(--panel);box-shadow:var(--shadow)}.tour-panel{min-height:25rem;padding:clamp(1.1rem,3vw,2rem)}.tour-panel[hidden]{display:none}.tour-panel h3{max-width:800px;margin:.1rem 0 .6rem;font-size:clamp(1.5rem,4vw,2.3rem);letter-spacing:-.03em}.tour-summary{max-width:800px;margin:0 0 1.25rem;color:var(--muted);font-size:1.05rem}.tour-proof-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-top:1rem}.tour-proof-grid div{display:grid;gap:.35rem;padding:1rem;border-radius:.8rem;background:var(--panel-2)}.tour-proof-grid span{color:var(--muted)}.tour-contract-link{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:.8rem;background:var(--panel-2);color:var(--text);text-decoration:none}.tour-contract-link:hover{border-color:var(--brand)}.tour-contract-link span{font-weight:800}.tour-contract-link code{overflow-wrap:anywhere;color:var(--brand-2)}.tour-contract-link strong{padding:.22rem .5rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.7rem}.controls{display:grid;grid-template-columns:minmax(15rem,2fr) repeat(4,minmax(8rem,1fr));gap:.75rem;padding:1rem;border:1px solid var(--line);border-radius:1rem 1rem 0 0;background:var(--panel)}label{display:grid;gap:.35rem;color:var(--muted);font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}input,select,button{min-height:2.7rem;border:1px solid var(--line);border-radius:.65rem;background:var(--panel-2);color:var(--text);font:inherit}input,select{width:100%;padding:.55rem .7rem}input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible,pre:focus-visible,[role="tabpanel"]:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.control-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--line);border-top:0;background:var(--panel)}.button-row{display:flex;flex-wrap:wrap;gap:.5rem}button{padding:.45rem .8rem;cursor:pointer;font-weight:750}button:hover{border-color:var(--brand);color:var(--brand-2)}#filter-status{color:var(--muted);font-size:.9rem}.tool-list{display:grid;gap:.65rem;margin-top:.75rem}.tool-card,.contract-card{border:1px solid var(--line);border-radius:.85rem;background:var(--panel);box-shadow:0 8px 25px rgba(29,40,76,.04)}.tool-card[hidden]{display:none}.tool-card details,.contract-card{overflow:hidden}.tool-card summary,.contract-card summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;cursor:pointer}.summary-copy,.contract-card summary{min-width:0}.summary-copy strong,.summary-copy code,.contract-card summary strong,.contract-card summary code{display:block}.summary-copy code,.contract-card summary code{overflow-wrap:anywhere;color:var(--muted);font-size:.76rem}.badges{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.35rem}.badge{padding:.23rem .5rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.68rem;font-weight:800;white-space:nowrap}.app-badge{color:var(--brand-2);border-color:var(--brand)}.risk-local-read{color:var(--local)}.risk-discord-read{color:var(--read)}.risk-interaction-write{color:var(--interaction)}.risk-administrative-write{color:var(--admin)}.risk-destructive-write{color:var(--destructive)}.tool-body,.contract-card>div{padding:0 1rem 1rem;border-top:1px solid var(--line)}.tool-body>p,.contract-card p{white-space:pre-wrap}.tool-meta{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:.65rem .75rem;border-radius:.65rem;background:var(--panel-2);font-size:.82rem}.tool-meta a{margin-left:auto;color:var(--brand-2)}.annotations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;margin:1rem 0}.annotation{padding:.65rem;border:1px solid var(--line);border-radius:.65rem}.annotation dt{color:var(--muted);font-size:.7rem}.annotation dd{margin:0;font-weight:800}.annotation .yes{color:var(--read)}.annotation .no{color:var(--muted)}.schema-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.schema-grid h4{margin:.4rem 0}.schema-grid section{min-width:0}pre{max-height:32rem;overflow:auto;margin:.5rem 0 0;padding:1rem;border:1px solid var(--line);border-radius:.7rem;background:var(--panel-2);font-size:.74rem;line-height:1.45;tab-size:2}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}.contract-list{display:grid;gap:.65rem}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.safety{margin-bottom:4rem}.safety pre{max-height:none;white-space:pre-wrap}.empty-note{display:none;margin:1rem 0;padding:1rem;border:1px dashed var(--line);border-radius:.8rem;color:var(--muted)}.empty-note.visible{display:block}footer{padding:2rem 0 4rem;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
+    @media(max-width:860px){.proof-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.guarantees,.split,.schema-grid{grid-template-columns:minmax(0,1fr)}.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.annotations{grid-template-columns:repeat(2,minmax(0,1fr))}.tour-proof-grid{grid-template-columns:minmax(0,1fr)}}
     @media(max-width:560px){.shell{width:min(100% - 1rem,1180px)}.hero{padding-top:2.75rem}.proof-strip,.controls,.checks{grid-template-columns:minmax(0,1fr)}.section-head{align-items:start;flex-direction:column}.control-footer,.tool-card summary{align-items:stretch;flex-direction:column}.badges{justify-content:flex-start}.annotations{grid-template-columns:minmax(0,1fr)}.nav-inner{gap:.75rem}}
     @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
   </style>
@@ -261,6 +415,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
     <p class="eyebrow">Credential-free release inspection</p>
     <h1>Discord MCP Contract Explorer</h1>
     <p class="lede">A self-contained view of the exact MCP contract negotiated from version ${escapeHtml(report.serverVersion)}. This artifact cannot execute a tool, contact Discord, read a credential, expose completion IDs, open the Gateway, export telemetry, or create an activity record.</p>
+    <a class="hero-link" href="#tour">Start the guided product tour</a>
     <div class="proof-strip" role="list" aria-label="Catalog summary">
       <div class="proof" role="listitem"><strong>${report.toolCount}</strong><span>Exact tools</span></div>
       <div class="proof" role="listitem"><strong>${report.promptCount}</strong><span>Prompts</span></div>
@@ -274,8 +429,12 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
       <section class="panel"><h2>Risk distribution</h2>${riskBars(snapshot)}<h3>Access lifecycle</h3>${accessBars(snapshot)}<p class="digest"><b>Contract</b><br>${escapeHtml(report.contractDigest)}<br><br><b>Tool access</b><br>${escapeHtml(report.toolAccessResourceDigest)}<br><br><b>Safety</b><br>${escapeHtml(report.safetyResourceDigest)}<br><br><b>Plan-review HTML</b><br>${escapeHtml(report.planReviewApp.htmlDigest)}</p></section>
     </div>
   </header>
-  <nav class="sticky-nav" aria-label="Contract sections"><div class="shell nav-inner"><a href="#tools">Tools</a><a href="#app">Plan-review app</a><a href="#prompts">Prompts</a><a href="#completions">Completions</a><a href="#resources">Resources</a><a href="#instructions">Instructions</a><a href="#safety">Safety</a></div></nav>
+  <nav class="sticky-nav" aria-label="Contract sections"><div class="shell nav-inner"><a href="#tour">Tour</a><a href="#tools">Tools</a><a href="#app">Plan-review app</a><a href="#prompts">Prompts</a><a href="#completions">Completions</a><a href="#resources">Resources</a><a href="#instructions">Instructions</a><a href="#safety">Safety</a></div></nav>
   <main id="main" class="shell">
+    <section id="tour">
+      <div class="section-head"><div><p class="eyebrow">Release-exact workflow map</p><h2>Guided product tour</h2></div><p>Follow one safe operator journey from package inspection through a verified read, reviewed change, and ambiguity recovery. This is negotiated contract evidence, not a recording or simulated Discord response.</p></div>
+      ${tourMarkup}
+    </section>
     <section id="tools">
       <div class="section-head"><div><p class="eyebrow">Exact callable surface</p><h2>Tools</h2></div><p>Search names and descriptions, then narrow by internal toolset, MCP risk class, access lifecycle, or complete reviewed workflow. Static access metadata never claims target readiness.</p></div>
       <div class="controls" role="group" aria-label="Tool filters">
@@ -322,6 +481,30 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   <script>
     (() => {
       'use strict';
+      const tourTabs = Array.from(document.querySelectorAll('[data-tour-tab]'));
+      const tourPanels = tourTabs.map((tab) => document.getElementById(tab.getAttribute('aria-controls')));
+      const selectTourTab = (index, moveFocus) => {
+        for (const [candidateIndex, tab] of tourTabs.entries()) {
+          const selected = candidateIndex === index;
+          tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+          tab.tabIndex = selected ? 0 : -1;
+          tourPanels[candidateIndex].hidden = !selected;
+        }
+        if (moveFocus) tourTabs[index].focus();
+      };
+      for (const [index, tab] of tourTabs.entries()) {
+        tab.addEventListener('click', () => selectTourTab(index, false));
+        tab.addEventListener('keydown', (event) => {
+          let nextIndex;
+          if (event.key === 'ArrowRight') nextIndex = (index + 1) % tourTabs.length;
+          else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tourTabs.length) % tourTabs.length;
+          else if (event.key === 'Home') nextIndex = 0;
+          else if (event.key === 'End') nextIndex = tourTabs.length - 1;
+          if (nextIndex === undefined) return;
+          event.preventDefault();
+          selectTourTab(nextIndex, true);
+        });
+      }
       const cards = Array.from(document.querySelectorAll('[data-tool]'));
       const search = document.getElementById('tool-search');
       const toolset = document.getElementById('toolset-filter');
@@ -373,6 +556,13 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
         }
         const target = document.getElementById(identifier);
         if (target && target.tagName === 'DETAILS') target.open = true;
+        if (target && target.matches('[data-tour-tab]')) {
+          selectTourTab(tourTabs.indexOf(target), false);
+        }
+        if (target && target.matches('[role="tabpanel"]')) {
+          const tab = document.getElementById(target.getAttribute('aria-labelledby'));
+          selectTourTab(tourTabs.indexOf(tab), false);
+        }
       };
       addEventListener('hashchange', openHash);
       openHash();

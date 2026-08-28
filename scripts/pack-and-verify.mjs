@@ -27,7 +27,7 @@ import { containsSpecificReference } from "./neutrality.mjs"
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
-const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v1"
+const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v2"
 const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
 const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v1"
@@ -839,6 +839,15 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   )
   const catalogHtml = firstCatalogHtmlBytes.toString("utf8")
   invariant(catalogHtml.includes(CATALOG_HTML_FORMAT), "installed catalog HTML format changed")
+  invariant(catalogHtml.includes('id="tour"'), "installed catalog HTML omitted the guided tour")
+  invariant(
+    catalogHtml.includes('href="#prompt-route_discord_goal"')
+      && catalogHtml.includes('href="#tool-list_channels"')
+      && catalogHtml.includes('href="#tool-plan_channel_creation"')
+      && catalogHtml.includes('href="#tool-execute_channel_creation"')
+      && catalogHtml.includes('href="#tool-list_activity"'),
+    "installed catalog HTML guided tour is not bound to its exact contract evidence",
+  )
   invariant(catalogHtml.includes('id="completions"'), "installed catalog HTML omitted completions")
   invariant(catalogHtml.includes(catalog.contractDigest), "installed catalog HTML contract digest changed")
   invariant(catalogHtml.includes(catalog.safetyResourceDigest), "installed catalog HTML safety digest changed")

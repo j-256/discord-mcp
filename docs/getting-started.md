@@ -221,7 +221,7 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 
 ## Continue deliberately
 
-- Inspect the complete credential-free contract with `catalog --check` or `catalog --html FILE`
+- Take the release-exact credential-free guided tour and inspect the complete contract with `catalog --html FILE`, or verify only its deterministic evidence with `catalog --check`
 - Switch to `channel-reader` only when exact-channel message access is required
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`
 - Plan and review a recipe before applying it to the active policy

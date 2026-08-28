@@ -124,6 +124,7 @@ async function main() {
 
       await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("link", { name: "Get a verified read" }).count(), 1)
+      assert.equal(await page.getByRole("link", { name: "Take the verified product tour" }).count(), 1)
       assert.match(await page.locator(".release-context").innerText(), /@j-256\/discord-mcp@[0-9]+\.[0-9]+\.[0-9]+/u)
       await page.keyboard.press("Tab")
       assert.equal(await page.locator(":focus").innerText(), "Skip to content")
@@ -143,6 +144,19 @@ async function main() {
 
       await page.goto(`${BASE_URL}/generated/contract-explorer.html`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Discord MCP Contract Explorer")
+      const scopeTab = page.getByRole("tab", { name: /Scope/u })
+      const routeTab = page.getByRole("tab", { name: /Route/u })
+      const recoverTab = page.getByRole("tab", { name: /Recover/u })
+      const inspectTab = page.getByRole("tab", { name: /Inspect/u })
+      await scopeTab.click()
+      assert.equal(await scopeTab.getAttribute("aria-selected"), "true")
+      assert.equal(await page.getByRole("heading", { name: "Create a narrow read-only boundary" }).isVisible(), true)
+      await scopeTab.press("ArrowRight")
+      assert.equal(await routeTab.getAttribute("aria-selected"), "true")
+      await routeTab.press("End")
+      assert.equal(await recoverTab.getAttribute("aria-selected"), "true")
+      await recoverTab.press("Home")
+      assert.equal(await inspectTab.getAttribute("aria-selected"), "true")
       await page.getByRole("searchbox", { name: "Search" }).fill("delete")
       assert.match(await page.getByRole("status").innerText(), /tools shown/u)
       await assertAccessible(page, "/generated/contract-explorer.html")
@@ -174,6 +188,16 @@ async function main() {
         "Comparison matrix does not provide bounded horizontal scrolling on mobile",
       )
       await assertAccessible(page, "/understand/comparison/ mobile")
+
+      await page.goto(`${BASE_URL}/generated/contract-explorer.html#tour`, { waitUntil: "networkidle" })
+      const explorerOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      assert.ok(explorerOverflow <= 1, `Contract explorer overflows the mobile viewport by ${explorerOverflow}px`)
+      const tourTabs = page.getByRole("tablist", { name: "Guided product tour steps" })
+      assert.ok(
+        await tourTabs.evaluate((tabs) => tabs.scrollWidth > tabs.clientWidth),
+        "Guided product tour does not provide bounded horizontal scrolling on mobile",
+      )
+      await assertAccessible(page, "/generated/contract-explorer.html mobile")
 
       assert.deepEqual(remoteRequests, [], "Documentation made remote runtime requests")
       assert.deepEqual(pageFailures, [], "Documentation raised page errors")

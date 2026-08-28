@@ -50,6 +50,19 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
   assert.match(html, /default-src 'none'/)
   assert.match(html, /img-src 'none'/)
   assert.match(html, /id="tool-search"/)
+  assert.match(html, /id="tour"/)
+  assert.match(html, /Guided product tour/)
+  assert.match(html, /role="tablist" aria-label="Guided product tour steps"/)
+  assert.match(html, /role="tab" aria-label="Step 1: Inspect"/)
+  assert.match(html, /role="tabpanel"/)
+  assert.match(html, /This is negotiated contract evidence, not a recording or simulated Discord response/)
+  assert.match(html, /href="#prompt-route_discord_goal"/)
+  assert.match(html, /href="#tool-list_channels"/)
+  assert.match(html, /href="#tool-plan_channel_creation"/)
+  assert.match(html, /href="#tool-execute_channel_creation"/)
+  assert.match(html, /href="#tool-list_activity"/)
+  assert.match(html, /setup --npx --config \.\/discord-mcp\.json --preset server-observer/)
+  assert.match(html, /coordination list --config \.\/discord-mcp\.json/)
   assert.match(html, /id="toolset-filter"/)
   assert.match(html, /id="risk-filter"/)
   assert.match(html, /id="access-filter"/)
@@ -82,6 +95,7 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
     assert.match(html, new RegExp(`<code>${tool.name}</code>`))
   }
   for (const prompt of snapshot.prompts) {
+    assert.match(html, new RegExp(`id="prompt-${prompt.name}"`))
     assert.match(html, new RegExp(`<code>${prompt.name}</code>`))
   }
   for (const resource of snapshot.resources) {
@@ -97,6 +111,24 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
       assert.ok(html.includes(escaped(field)), field)
     }
   }
+})
+
+test("catalog HTML guided tour fails closed when required negotiated evidence is absent", async () => {
+  const snapshot = await inspectDiscordCatalog()
+  assert.throws(
+    () => renderDiscordCatalogHtml({
+      ...snapshot,
+      tools: snapshot.tools.filter(({ name }) => name !== "list_channels"),
+    }),
+    /guided tour tool list_channels is unavailable/u,
+  )
+  assert.throws(
+    () => renderDiscordCatalogHtml({
+      ...snapshot,
+      prompts: snapshot.prompts.filter(({ name }) => name !== "route_discord_goal"),
+    }),
+    /guided tour prompt route_discord_goal is unavailable/u,
+  )
 })
 
 test("catalog HTML escapes negotiated text and schema values before embedding them", async () => {

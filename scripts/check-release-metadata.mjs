@@ -548,6 +548,7 @@ async function checkDocumentation(packageJson) {
   }
   for (const required of [
     "[Complete reference](docs/reference.md)",
+    "[Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour)",
     "--preset server-observer",
     "preset install server-observer",
     "--config ./discord-mcp.json",
@@ -564,6 +565,7 @@ async function checkDocumentation(packageJson) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
   invariant(reference.includes("preset install server-observer"), "complete reference lacks preset-derived bot installation")
+  invariant(reference.includes("guided product tour and searchable standalone explorer"), "complete reference lacks the guided catalog tour")
   invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks additive recipe inspection")
   invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
   invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
@@ -608,6 +610,7 @@ async function checkDocumentation(packageJson) {
     "dist/index.js",
     "environment.forward",
     "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
+    "release-exact credential-free guided tour",
   ]) {
     invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
   }
@@ -626,6 +629,8 @@ async function checkDocumentation(packageJson) {
     "Different fit",
     "Not auditable",
     "official Registry's complete current Discord search",
+    "captioned live walkthrough",
+    "credential-free offline tour bound to required negotiated prompts, tools, and access stages",
   ]) {
     invariant(comparison.includes(required), `field comparison is missing ${required}`)
   }
