@@ -75,6 +75,7 @@ const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 const STATIC_RESOURCE_URI = "discord://connector/safety"
 const REQUIRED_FILES = [
   "LICENSE",
+  "PRIVACY.md",
   "README.md",
   "SECURITY.md",
   "discord-mcp.config.schema.json",
@@ -95,6 +96,7 @@ const REQUIRED_FILES = [
 ]
 const STATIC_FILES = new Set([
   "LICENSE",
+  "PRIVACY.md",
   "README.md",
   "SECURITY.md",
   "discord-mcp.config.schema.json",

@@ -45,10 +45,11 @@ npm test
 npm run test:coverage
 npm run build
 npm run pack:verify
+npm run mcpb:verify
 npm run security:check
 ```
 
-Run `npm run container:verify` and `npm run container:index:verify` when changing container, package, release, runtime, dependency, or Registry behavior. Default tests must use injected transports and must not contact Discord.
+Run `npm run mcpb:verify` when changing runtime, package, dependency, privacy, catalog, bundle, release, or Registry behavior. Run `npm run container:verify` and `npm run container:index:verify` when changing container, package, release, runtime, dependency, or Registry behavior. Default tests must use injected transports and must not contact Discord.
 
 The documentation portal keeps its build dependencies outside the published server package. For a portal or canonical documentation change, install both lockfiles, build the server contract used by the generator, install the pinned browser once, and run the complete portal verifier:
 

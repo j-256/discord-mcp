@@ -75,11 +75,15 @@ jobs:
           set -eu
           mkdir -p "$RUNNER_TEMP/package"
           npm run pack:verify -- --output "$RUNNER_TEMP/package"
+          node scripts/build-mcpb.mjs \
+            --catalog-evidence "$RUNNER_TEMP/package/catalog-evidence.json" \
+            --output "$RUNNER_TEMP/package"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-node-${{ matrix.node }}
           path: |
             ${{ runner.temp }}/package/*.tgz
+            ${{ runner.temp }}/package/*.mcpb
             ${{ runner.temp }}/package/catalog-evidence.json
           if-no-files-found: error
           retention-days: 1
@@ -162,6 +166,14 @@ jobs:
           for candidate in "$@"
           do
             cmp "$evidence_reference" "$candidate"
+          done
+          set -- packages/package-node-*/*.mcpb
+          test "$#" -eq 3
+          bundle_reference="$1"
+          shift
+          for candidate in "$@"
+          do
+            cmp "$bundle_reference" "$candidate"
           done
           cmp "$evidence_reference" container/catalog-evidence.json
 

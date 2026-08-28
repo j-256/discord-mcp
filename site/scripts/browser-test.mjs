@@ -23,6 +23,7 @@ const TEST_PATHS = [
   "/start/getting-started/",
   "/understand/boundaries/",
   "/understand/comparison/",
+  "/understand/privacy/",
   "/reference/",
   "/reference/capabilities/foundations/safety-model/",
   "/security/",

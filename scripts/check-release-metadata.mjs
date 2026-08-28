@@ -92,6 +92,10 @@ const EXPECTED_DEPENDENCIES = {
 }
 const EXPECTED_DEV_DEPENDENCIES = {
   "@types/node": "26.2.0",
+  ajv: "8.20.0",
+  "ajv-formats": "3.0.1",
+  esbuild: "0.28.2",
+  fflate: "0.8.3",
   tsx: "4.23.12",
   typescript: "7.0.2",
 }
@@ -182,6 +186,7 @@ const EXPECTED_PACKAGE_FILES = [
   "docs/reference.md",
   "docs/releasing.md",
   "SUPPORT.md",
+  "PRIVACY.md",
   "server.json",
 ]
 
@@ -315,6 +320,7 @@ async function checkPackageAndLock() {
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     mcp: "node dist/cli.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
+    "mcpb:verify": "npm run build && node scripts/build-mcpb.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     prepack: "npm run config:schema:check && npm run metadata:check && npm run build",
     "probe:live": "node dist/cli.js doctor --online --json",
@@ -415,6 +421,7 @@ async function checkDocumentationPortal() {
     "README.md",
     "docs/getting-started.md",
     "docs/limitations.md",
+    "PRIVACY.md",
     "docs/comparison.md",
     "SUPPORT.md",
     "docs/releasing.md",
@@ -682,7 +689,9 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
   invariant(limitations.includes("Generated adapter"), "product boundaries lack adapter-specific compatibility")
   invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
-  invariant(comparison.includes("packaged one-click MCPB remains a distinct distribution advantage"), "field comparison hides the remaining packaged-client advantage")
+  invariant(comparison.includes("Discord MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
+  invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")
+  invariant(comparison.includes("executes the unpacked server handshake"), "field comparison lacks bundle execution evidence")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
@@ -720,6 +729,7 @@ async function checkDocumentation(packageJson) {
 async function checkCommunityFiles() {
   const contributing = await readFile(join(REPOSITORY_ROOT, "CONTRIBUTING.md"), "utf8")
   const conduct = await readFile(join(REPOSITORY_ROOT, "CODE_OF_CONDUCT.md"), "utf8")
+  const privacy = await readFile(join(REPOSITORY_ROOT, "PRIVACY.md"), "utf8")
   const support = await readFile(join(REPOSITORY_ROOT, "SUPPORT.md"), "utf8")
   const issueDirectory = join(REPOSITORY_ROOT, ".github/ISSUE_TEMPLATE")
   const bugReport = await readFile(join(issueDirectory, "bug_report.yml"), "utf8")
@@ -734,6 +744,7 @@ async function checkCommunityFiles() {
   const files = new Map([
     ["CONTRIBUTING.md", contributing],
     ["CODE_OF_CONDUCT.md", conduct],
+    ["PRIVACY.md", privacy],
     ["SUPPORT.md", support],
     [".github/ISSUE_TEMPLATE/bug_report.yml", bugReport],
     [".github/ISSUE_TEMPLATE/feature_request.yml", featureRequest],
@@ -786,6 +797,19 @@ async function checkCommunityFiles() {
   }
   invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
   invariant(support.includes("discord-mcp host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
+  invariant(privacy.startsWith("# Privacy policy\n"), "privacy policy heading is invalid")
+  for (const required of [
+    "## Credentials",
+    "## Discord data",
+    "## Local records and observability",
+    "## Control and deletion",
+    "does not provide a hosted service, shared bot, advertising, analytics",
+    "does not print, persist, return, or include the token",
+    "The connector does not independently retain message content",
+    "Your MCP host, model provider, terminal, operating system, Discord",
+  ]) {
+    invariant(privacy.includes(required), `privacy policy is missing ${required}`)
+  }
   for (const [name, form] of [
     ["bug report", bugReport],
     ["feature proposal", featureRequest],
@@ -829,6 +853,52 @@ async function checkCommunityFiles() {
   }
 }
 
+async function checkMcpbSource(packageJson) {
+  const manifest = await readJson(join(REPOSITORY_ROOT, "mcpb", "manifest.json"))
+  const reproducibleBuild = await readJson(
+    join(REPOSITORY_ROOT, "mcpb", "reproducible-build.json"),
+  )
+  const sourceGuide = await readFile(join(REPOSITORY_ROOT, "mcpb", "README.md"), "utf8")
+  const {
+    MCPB_ARCHIVE_ENTRIES,
+    mcpbArchiveName,
+    validateMcpbManifest,
+  } = await import("./mcpb-artifact.mjs")
+  await validateMcpbManifest(manifest, packageJson)
+  assertEqual(MCPB_ARCHIVE_ENTRIES, [
+    "LICENSE",
+    "PRIVACY.md",
+    "icon.png",
+    "manifest.json",
+    "server/THIRD_PARTY_NOTICES.md",
+    "server/catalog-evidence.json",
+    "server/discord-mcp.mjs",
+    "server/discord-mcp.mjs.LEGAL.txt",
+    "server/sbom.spdx.json",
+  ], "MCPB archive allowlist is invalid")
+  invariant(
+    mcpbArchiveName(packageJson.version) === `discord-mcp-${packageJson.version}.mcpb`,
+    "MCPB archive name is invalid",
+  )
+  assertEqual(Object.keys(reproducibleBuild), ["sourceDateEpoch"], "MCPB reproducible build metadata is invalid")
+  invariant(
+    Number.isSafeInteger(reproducibleBuild.sourceDateEpoch)
+      && reproducibleBuild.sourceDateEpoch >= 315_532_800,
+    "MCPB reproducible build epoch is invalid",
+  )
+  const sourceDate = new Date(reproducibleBuild.sourceDateEpoch * 1_000)
+  invariant(
+    Number.isFinite(sourceDate.valueOf())
+      && sourceDate.getUTCHours() === 0
+      && sourceDate.getUTCMinutes() === 0
+      && sourceDate.getUTCSeconds() === 0,
+    "MCPB reproducible build epoch must select a UTC day boundary",
+  )
+  invariant(sourceGuide.startsWith("# MCPB source contract\n"), "MCPB source guide heading is invalid")
+  invariant(sourceGuide.includes("modelcontextprotocol/mcpb/blob/v2.1.2"), "MCPB source guide lacks the pinned official schema source")
+  invariant(sourceGuide.includes("model-neutral projection"), "MCPB source guide lacks its neutrality boundary")
+}
+
 async function checkRegistryManifest(packageJson) {
   const server = await readJson(join(REPOSITORY_ROOT, "server.json"))
   invariant(server.$schema === REGISTRY_SCHEMA, "registry manifest schema is invalid")
@@ -855,8 +925,8 @@ async function checkRegistryManifest(packageJson) {
   invariant(iconSize === ICON_SIZE, "project icon dimensions changed")
   assertEqual(icon.sizes, [iconSize], "registry icon size does not match the PNG")
 
-  invariant(server.packages?.length === 2, "registry manifest must declare npm and OCI packages")
-  assertEqual(server.packages.map(({ registryType }) => registryType), ["npm", "oci"], "registry package order is invalid")
+  invariant(server.packages?.length === 3, "registry manifest must declare npm, OCI, and MCPB packages")
+  assertEqual(server.packages.map(({ registryType }) => registryType), ["npm", "oci", "mcpb"], "registry package order is invalid")
   const npmPackage = server.packages[0]
   invariant(npmPackage.registryType === "npm", "npm registry package type is invalid")
   invariant(npmPackage.registryBaseUrl === NPM_REGISTRY, "npm registry package origin is invalid")
@@ -875,6 +945,24 @@ async function checkRegistryManifest(packageJson) {
   assertEqual(ociPackage.runtimeArguments, OCI_RUNTIME_ARGUMENTS, "OCI runtime arguments are invalid")
   for (const forbidden of ["fileSha256", "registryBaseUrl", "version"]) {
     invariant(ociPackage[forbidden] === undefined, `OCI registry package must omit ${forbidden}`)
+  }
+  const mcpbPackage = server.packages[2]
+  invariant(mcpbPackage.registryType === "mcpb", "MCPB registry package type is invalid")
+  invariant(
+    mcpbPackage.identifier === `https://github.com/j-256/discord-mcp/releases/download/v${packageJson.version}/discord-mcp-${packageJson.version}.mcpb`,
+    "MCPB registry package URL is out of sync",
+  )
+  invariant(/^[0-9a-f]{64}$/.test(mcpbPackage.fileSha256), "MCPB registry package digest is invalid")
+  assertEqual(mcpbPackage.transport, { type: "stdio" }, "MCPB registry transport must remain stdio")
+  for (const forbidden of [
+    "environmentVariables",
+    "packageArguments",
+    "registryBaseUrl",
+    "runtimeArguments",
+    "runtimeHint",
+    "version",
+  ]) {
+    invariant(mcpbPackage[forbidden] === undefined, `MCPB registry package must omit ${forbidden}`)
   }
   assertEqual(npmPackage.environmentVariables, [REGISTRY_TOKEN_INPUT], "npm registry inputs are invalid")
   assertEqual(ociPackage.environmentVariables, [REGISTRY_TOKEN_INPUT], "OCI registry inputs are invalid")
@@ -972,8 +1060,11 @@ async function checkAutomation() {
     "test \"$(uname -m)\" = \"x86_64\"",
     "mcp-publisher 1.8.1 ",
     "Attest catalog evidence",
+    "Attest reproducible MCPB",
+    "Attest MCPB SPDX SBOM",
     "Attest exact OCI image provenance",
     "Verify complete public distribution for GitHub Release",
+    "Verify exact immutable GitHub Release before registration",
     "Verify exact tag and prepare immutable release evidence",
     "Create an absent release as an editable draft",
     "Reconcile and verify the editable draft",
@@ -994,6 +1085,7 @@ async function checkAutomation() {
     "gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz",
     "subject-name: ${{ steps.release.outputs.image_name }}",
     "catalog-evidence.json",
+    "discord-mcp-${RELEASE_TAG#v}.mcpb",
     "container-evidence.json",
     "ghcr.io/j-256/discord-mcp:$version",
     "linux/amd64,linux/arm64",
@@ -1034,16 +1126,19 @@ async function checkAutomation() {
   const ociLayoutVerifier = await readFile(join(REPOSITORY_ROOT, "scripts/verify-oci-layout.mjs"), "utf8")
   const ociRegistry = await readFile(join(REPOSITORY_ROOT, "scripts/oci-registry.mjs"), "utf8")
   const githubReleaseHelper = await readFile(join(REPOSITORY_ROOT, "scripts/github-release.mjs"), "utf8")
+  const mcpbBuilder = await readFile(join(REPOSITORY_ROOT, "scripts/build-mcpb.mjs"), "utf8")
   invariant(release.includes(SBOM_GENERATOR_IMAGE), "release workflow does not pin its SBOM generator")
   invariant(ociRegistry.includes(SBOM_GENERATOR_IMAGE), "OCI utilities do not pin their SBOM generator")
   invariant(ociLayoutVerifier.includes("SBOM_GENERATOR_IMAGE"), "OCI preflight does not use the pinned SBOM generator")
   invariant(!githubReleaseHelper.includes("/immutable-releases"), "GitHub Release automation must not require unavailable repository administration authority")
+  invariant(mcpbBuilder.includes("MCPB artifact digest differs from server.json"), "MCPB builder must bind output to Registry metadata")
+  invariant(mcpbBuilder.includes("--allow-registry-mismatch"), "MCPB builder lacks the explicit release-preparation escape hatch")
   for (const workflowName of ["ci.yml", "release.yml"]) {
     const workflow = await readFile(join(workflowsDirectory, workflowName), "utf8")
     invariant(workflow.includes("NPM_CONFIG_REGISTRY: https://registry.npmjs.org"), `${workflowName} must pin the npm registry`)
     invariant(workflow.includes("NPM_CONFIG_REPLACE_REGISTRY_HOST: never"), `${workflowName} must preserve lockfile registry origins`)
   }
-  invariant((release.match(/uses: actions\/attest@/g) || []).length === 4, "release workflow must attest package, catalog, and image evidence")
+  invariant((release.match(/uses: actions\/attest@/g) || []).length === 6, "release workflow must attest package, MCPB, catalog, and image evidence")
   invariant((release.match(/name: Verify exact public documentation/g) || []).length === 2, "every release path must verify public documentation")
   invariant((release.match(/node scripts\/check-public-documentation\.mjs/g) || []).length === 2, "every release path must run the public documentation verifier")
   const releaseDocumentationCheck = release.indexOf("name: Verify exact public documentation")
@@ -1078,7 +1173,7 @@ async function checkAutomation() {
     "--expect-package matching",
     "--expect-npm matching",
     "--expect-oci matching",
-    "--expect-registry matching",
+    "--expect-registry missing-or-matching",
     "--expect draft",
     "--expect immutable",
     "--draft=false",
@@ -1089,6 +1184,11 @@ async function checkAutomation() {
   ]) {
     invariant(githubReleaseJob.includes(required), `immutable GitHub Release job is missing ${required}`)
   }
+  invariant(
+    release.indexOf("Verify exact immutable GitHub Release before registration")
+      < release.indexOf('"$RUNNER_TEMP/mcp-publisher" publish server.json'),
+    "Registry publication must follow immutable GitHub Release verification",
+  )
   for (const forbidden of [
     "attestations: write",
     "artifact-metadata: write",
@@ -1107,6 +1207,8 @@ async function checkAutomation() {
     (ci.match(/catalog-evidence\.json/g) || []).length >= 2,
     "CI must retain and compare catalog evidence across runtimes",
   )
+  invariant(ci.includes("set -- packages/package-node-*/*.mcpb"), "CI must collect every runtime's MCPB")
+  invariant(ci.includes('cmp "$bundle_reference" "$candidate"'), "CI must compare MCPB bytes across runtimes")
   invariant(ci.includes("name: Hardened OCI image"), "CI must verify the hardened OCI image")
   invariant(ci.includes("cmp \"$evidence_reference\" container/catalog-evidence.json"), "CI must compare package and container contracts")
   for (const required of [
@@ -1214,6 +1316,7 @@ await checkNeutrality()
 await checkSourceIdentity(packageJson)
 await checkDocumentation(packageJson)
 await checkCommunityFiles()
+await checkMcpbSource(packageJson)
 await checkRegistryManifest(packageJson)
 await checkContainerSource(packageJson)
 await checkAutomation()
