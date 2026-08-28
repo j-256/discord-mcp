@@ -15,6 +15,11 @@ import {
   SCHEMA_VERSION,
 } from "./constants.js"
 import {
+  COMPONENT_TEMPLATE_CATALOG,
+  COMPONENT_TEMPLATE_LIMITS,
+  COMPONENT_TEMPLATE_VERSION,
+} from "./component-templates.js"
+import {
   AttachmentReadTooLargeError,
   errorMessage,
   PolicyError,
@@ -367,6 +372,54 @@ export function registerDiscordResources(
         uri: uri.href,
       }],
     }),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.componentTemplates,
+    MCP_RESOURCE_URIS.componentTemplates,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: {
+        cacheScope: "public",
+        ttlMs: STATIC_RESOURCE_TTL_MS,
+      },
+      description: "Versioned local catalog for typed bundled Components V2 templates and their authority-free compile-to-review lifecycle.",
+      mimeType: "application/json",
+      title: "Discord component template catalog",
+    },
+    async (uri) => jsonResource(
+      uri,
+      "local-contract",
+      "trusted-local-metadata",
+      [],
+      () => ({
+        authorityGranted: false,
+        compilerTool: "compile_component_template",
+        discordContacted: false,
+        lifecycle: {
+          compile: "compile_component_template",
+          execute: "execute_component_message",
+          plan: "plan_component_message",
+          verify: "verify_component_message",
+        },
+        limits: COMPONENT_TEMPLATE_LIMITS,
+        notificationInput: {
+          default: [],
+          field: "notifyUserIds",
+          rule: "Unique exact user IDs that are visibly mentioned in compiled text",
+        },
+        persistence: "none",
+        templateDiscriminator: "template",
+        templateVersion: COMPONENT_TEMPLATE_VERSION,
+        templates: COMPONENT_TEMPLATE_CATALOG,
+        warnings: [
+          "Template fields and compiled component text are transient untrusted content",
+          "Compilation grants no Discord authority and never sends a message",
+          "Use the returned exact components in the reviewed component-message lifecycle",
+        ],
+      }),
+      0,
+    ),
   )
 
   server.registerResource(

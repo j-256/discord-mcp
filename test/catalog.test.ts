@@ -235,6 +235,9 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
 test("catalog serves local guidance while live resources remain isolated", async () => {
   await withCatalogClient(async (client) => {
     const safety = await client.readResource({ uri: MCP_RESOURCE_URIS.safety })
+    const componentTemplates = await client.readResource({
+      uri: MCP_RESOURCE_URIS.componentTemplates,
+    })
     const toolAccess = await client.readResource({
       uri: MCP_RESOURCE_URIS.toolAccess,
     })
@@ -263,6 +266,13 @@ test("catalog serves local guidance while live resources remain isolated", async
 
     assert.equal(safety.contents.length, 1)
     assert.match("text" in safety.contents[0]! ? safety.contents[0].text : "", /review-first workflows/)
+    assert.equal(componentTemplates.contents.length, 1)
+    assert.match(
+      "text" in componentTemplates.contents[0]!
+        ? componentTemplates.contents[0].text
+        : "",
+      /compile_component_template/,
+    )
     assert.equal(toolAccess.contents.length, 1)
     const toolAccessContent = toolAccess.contents[0]
     assert.ok(toolAccessContent && "text" in toolAccessContent)

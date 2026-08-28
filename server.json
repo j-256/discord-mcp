@@ -124,7 +124,7 @@
     {
       "registryType": "mcpb",
       "identifier": "https://github.com/j-256/discord-mcp/releases/download/v0.1.2/discord-mcp-0.1.2.mcpb",
-      "fileSha256": "ce1abe96be5b2d7c84cbeb9c755e9ba470898b5810390686ce3f6d0ac0cbdc26",
+      "fileSha256": "c5f9fa02608234475af729e2b2e156f01ff191eb5b100a2332e7c7af2514727f",
       "transport": {
         "type": "stdio"
       }

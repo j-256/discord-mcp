@@ -14818,6 +14818,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_forum_post",
       "plan_thread_creation",
       "execute_thread_creation",
+      "compile_component_template",
       "preview_component_layout",
       "plan_component_message",
       "verify_component_message",
@@ -15481,6 +15482,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     readOnlyHint: false,
   })
   assert.deepEqual(
+    listedTool(result.tools, "compile_component_template").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
+  assert.deepEqual(
     listedTool(result.tools, "preview_component_layout").annotations,
     {
       destructiveHint: false,
@@ -15665,6 +15675,7 @@ test("MCP read-response budget refuses whole tool, resource, and prompt results"
 
   for (const uri of [
     MCP_RESOURCE_URIS.safety,
+    MCP_RESOURCE_URIS.componentTemplates,
     MCP_RESOURCE_URIS.toolAccess,
     MCP_RESOURCE_URIS.policy,
     MCP_RESOURCE_URIS.gatewayStatus,
@@ -15698,6 +15709,7 @@ test("minimum MCP read-response budget retains essential static and local surfac
   const reads = [
     ["connector status", () => client.callTool({ arguments: {}, name: "get_connector_status" })],
     ["safety resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.safety })],
+    ["component template resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.componentTemplates })],
     ["tool access resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess })],
     ["policy resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.policy })],
     ["observability resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.observability })],
@@ -16472,6 +16484,7 @@ test("progressive discovery enables the complete reviewed component-message work
   }))
 
   assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "compile_component_template",
     "execute_component_message",
     "plan_component_message",
     "preview_component_layout",
@@ -16480,6 +16493,7 @@ test("progressive discovery enables the complete reviewed component-message work
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
+      "compile_component_template",
       "preview_component_layout",
       "plan_component_message",
       "verify_component_message",
@@ -20628,6 +20642,67 @@ test("MCP attachment messages expose uncertain and one-shot conflict outcomes sa
     receipt,
   )
   assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(ATTACHMENT_OPERATION_KEY))
+})
+
+test("MCP component template compilation is typed, local, and workflow-ready", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const compiled = await client.callTool({
+    arguments: {
+      changes: ["Added typed local templates", `Notify <@${USER_ID}>`],
+      notifyUserIds: [USER_ID],
+      releaseName: "Discord MCP 1.0",
+      summary: "A reviewed release.",
+      template: "release-notes",
+    },
+    name: "compile_component_template",
+  })
+  const unknownField = await client.callTool({
+    arguments: {
+      body: "Body",
+      headline: "Announcement",
+      priority: "information",
+      source: "https://example.com/template.json",
+      template: "announcement",
+    },
+    name: "compile_component_template",
+  })
+  const badPoll = await client.callTool({
+    arguments: {
+      options: [{ label: "Only one", votes: 1 }],
+      question: "Choose",
+      template: "poll-results",
+    },
+    name: "compile_component_template",
+  })
+
+  const result = structuredContent(compiled)
+  assert.equal(result.status, "compiled")
+  assert.deepEqual(result.authority, {
+    discordContacted: false,
+    messageMutation: "impossible",
+    writeAuthorityGranted: false,
+  })
+  assert.deepEqual(result.template, { name: "release-notes", version: 1 })
+  assert.equal((result.components as unknown[]).length, 1)
+  assert.deepEqual(
+    (result.review as Record<string, unknown>).notificationUserIds,
+    [USER_ID],
+  )
+  assert.equal(
+    (result.next as Record<string, unknown>).planTool,
+    "plan_component_message",
+  )
+  assert.deepEqual(result.privacy, {
+    compiledContent: "transient-untrusted",
+    persistence: "none",
+    templateSource: "bundled-local",
+  })
+  assert.equal(unknownField.isError, true)
+  assert.equal(badPoll.isError, true)
+  assert.equal(calls.componentMessagePreview, 0)
+  assert.equal(calls.componentMessagePlan, 0)
+  assert.equal(calls.componentMessageVerify, 0)
+  assert.equal(calls.componentMessageExecute, 0)
 })
 
 test("MCP component layout preview is local, strict, and recursively bounded", async (context) => {

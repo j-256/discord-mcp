@@ -73,6 +73,8 @@ The file is created exclusively with mode `0600`. It contains the exact plan, so
 
 `review-required` means the outcome exists but its authority, input, result, or failure model materially changes. Immediate source writes commonly become a plan and execute pair with exact local scope, permission and hierarchy proof, signed approval, durable coordination, non-retry behavior, exact readback, and ambiguity quarantine. Review the named target tools and enable only the required recipe or workbench fields.
 
+Cappyeo's bundled component-template send maps to `compile_component_template` before the ordinary component-message lifecycle. Select one typed local template and supply its named fields, or rebuild a custom static layout with `preview_component_layout`; never copy a source `vars` map, custom ID, remote URL, or raw component tree into the target request. Compilation sends nothing and grants no authority. Copy its exact returned `components` and reviewed notification IDs into `plan_component_message`, then retain the exact request through execution and verification.
+
 `intentionally-excluded` means no connector equivalent is offered. For example, connector-owned AI calls and unrelated third-party emoji search stay outside this model-neutral Discord boundary. Keep reasoning in the MCP host or selected model provider and send only the deliberate Discord operation to the connector.
 
 ## Follow the staged path

@@ -3286,6 +3286,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         name: MCP_RESOURCE_NAMES.botInstallations,
         uri: MCP_RESOURCE_URIS.botInstallations,
       },
+      {
+        name: MCP_RESOURCE_NAMES.componentTemplates,
+        uri: MCP_RESOURCE_URIS.componentTemplates,
+      },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
       { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
@@ -4052,6 +4056,31 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /private-thread self-membership additionally requires MANAGE_THREADS for exact readback/)
   assert.match(safety.text, /never lists members, retries, rolls back, combines metadata fields/)
   assert.match(safety.text, /one-shot operation key/)
+
+  const componentTemplates = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.componentTemplates,
+  )
+  const componentTemplateData = componentTemplates.value.data as Record<string, unknown>
+  assert.equal(componentTemplateData.authorityGranted, false)
+  assert.equal(componentTemplateData.discordContacted, false)
+  assert.equal(componentTemplateData.compilerTool, "compile_component_template")
+  assert.equal((componentTemplateData.templates as unknown[]).length, 5)
+  assert.deepEqual(componentTemplateData.notificationInput, {
+    default: [],
+    field: "notifyUserIds",
+    rule: "Unique exact user IDs that are visibly mentioned in compiled text",
+  })
+  assert.equal(componentTemplateData.templateDiscriminator, "template")
+  assert.equal(
+    (componentTemplateData.lifecycle as Record<string, unknown>).plan,
+    "plan_component_message",
+  )
+  assert.equal(componentTemplates.value.provenance, "local-contract")
+  assert.equal(
+    (componentTemplates.value.trust as Record<string, unknown>).classification,
+    "trusted-local-metadata",
+  )
 
   const toolAccess = await readJsonResource(
     client,
