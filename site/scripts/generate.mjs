@@ -60,7 +60,7 @@ const REFERENCE_GROUPS = Object.freeze([
     ],
   },
   {
-    description: "Bounded community, search, attachment, member, ban, thread, and forum reads",
+    description: "Bounded community, live recall, search, attachment, member, ban, thread, and forum reads",
     label: "Read and discovery",
     slug: "read-and-discovery",
     titles: [

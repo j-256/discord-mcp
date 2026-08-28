@@ -698,6 +698,7 @@ function toolService(
     planRoleDeletion: unexpected,
     planRoleOrder: unexpected,
     readMessages: unexpected,
+    recallConversation: unexpected,
     removeOwnReaction: unexpected,
     searchMessages: unexpected,
     searchGuildMembers: unexpected,
@@ -6098,6 +6099,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "author_guild_blueprint",
     "find_guild_members",
     "inspect_guild_ban",
+    "recall_discord_conversation",
     "review_announcement_crosspost",
     "review_announcement_subscription",
     "review_application_commands",
@@ -6476,9 +6478,10 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 7)
+  assert.equal(report.toolCount, 8)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
+    "recall_discord_conversation",
     "route_discord_goal",
     "search_guild_messages",
     "summarize_channel",
@@ -6490,6 +6493,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "list_activity",
     "read_message_attachment",
     "read_messages",
+    "recall_conversation",
     "search_messages",
   ])
 })

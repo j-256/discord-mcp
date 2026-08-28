@@ -1287,6 +1287,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["context", "around", "channel", "history", "list", "message", "read", "surrounding", "window"],
     toolset: "messages",
   },
+  recall_conversation: {
+    keywords: ["conversation", "lost", "memory", "recall", "remember", "search", "vague"],
+    toolset: "messages",
+  },
   remove_own_reaction: {
     keywords: ["emoji", "own", "reaction", "remove", "undo"],
     toolset: "interactions",
@@ -1506,9 +1510,9 @@ export function createMcpToolAccessManifest(
     status: "ok",
     toolsetNames: selectedToolsets,
     warnings: [
-      "Static access contracts classify the authorization lifecycle and never prove access to a Discord target",
-      "Curated presets and recipes declare setup permissions while each external tool or reviewed plan evaluates exact operation-specific evidence",
-      "Every write remains subject to its local policy, target, approval, freshness, rate, recovery, and verification gates",
+      "Static access contracts classify authorization and never prove target access",
+      "Presets declare setup permissions; every tool or plan checks exact operation evidence",
+      "Every write still enforces policy, target, approval, freshness, rate, recovery, and verification",
     ],
     workflows,
   }

@@ -1206,6 +1206,81 @@ const searchInputSchema = z.strictObject({
     })
   }
 })
+const conversationRecallInputSchema = z.strictObject({
+  after: z.iso.datetime({ offset: true })
+    .max(64)
+    .optional()
+    .describe("Optional lower timestamp bound with an explicit UTC offset"),
+  authorIds: z.array(canonicalPositiveSnowflakeSchema)
+    .min(1)
+    .max(CONNECTOR_LIMITS.searchFilterIds)
+    .refine((values) => new Set(values).size === values.length, {
+      message: "authorIds must be unique",
+    })
+    .optional()
+    .describe("Optional exact author ID boundary"),
+  before: z.iso.datetime({ offset: true })
+    .max(64)
+    .optional()
+    .describe("Optional upper timestamp bound with an explicit UTC offset"),
+  channelIds: z.array(canonicalPositiveSnowflakeSchema)
+    .min(1)
+    .max(CONNECTOR_LIMITS.searchFilterIds)
+    .refine((values) => new Set(values).size === values.length, {
+      message: "channelIds must be unique",
+    })
+    .optional()
+    .describe("Optional exact locally readable channel or thread ID boundary"),
+  contextRadius: z.number()
+    .int()
+    .min(1)
+    .max(CONNECTOR_LIMITS.conversationRecallContextRadius)
+    .default(CONNECTOR_LIMITS.conversationRecallContextRadiusDefault)
+    .describe("Current messages to request on each side of a ranked target"),
+  guildId: canonicalPositiveSnowflakeSchema.describe("Exact permitted Discord guild ID"),
+  limit: z.number()
+    .int()
+    .min(1)
+    .max(CONNECTOR_LIMITS.conversationRecallMatches)
+    .default(CONNECTOR_LIMITS.conversationRecallMatches)
+    .describe("Maximum ranked targets with freshly verified context"),
+  searchPhrases: z.array(
+    z.string()
+      .min(1)
+      .max(DISCORD_LIMITS.searchContentCharacters)
+      .refine((value) => value.trim() === value, {
+        message: "search phrases must not have surrounding whitespace",
+      })
+      .refine((value) => !/[\u0000-\u001F\u007F]/u.test(value), {
+        message: "search phrases must not contain controls",
+      }),
+  )
+    .min(1)
+    .max(CONNECTOR_LIMITS.conversationRecallPhrases)
+    .refine((values) => new Set(values).size === values.length, {
+      message: "searchPhrases must be unique",
+    })
+    .refine(
+      (values) => values.reduce((total, value) => total + value.length, 0)
+        <= CONNECTOR_LIMITS.conversationRecallPhraseCharactersTotal,
+      { message: "searchPhrases exceed the total character budget" },
+    )
+    .describe("Distinct literal variants of the same remembered conversation"),
+  slop: z.number()
+    .int()
+    .min(0)
+    .max(DISCORD_LIMITS.searchSlop)
+    .default(CONNECTOR_LIMITS.conversationRecallSlopDefault)
+    .describe("Discord content-search word-distance allowance"),
+}).superRefine((input, context) => {
+  if (input.after && input.before && Date.parse(input.after) >= Date.parse(input.before)) {
+    context.addIssue({
+      code: "custom",
+      message: "after must precede before",
+      path: ["after"],
+    })
+  }
+})
 const activeThreadInputSchema = z.strictObject({
   guildId: snowflakeSchema,
   limit: z.number().int().min(1).max(CONNECTOR_LIMITS.activeThreads)
@@ -9857,6 +9932,7 @@ export interface DiscordToolService {
   previewComponentLayout: ConnectorService["previewComponentLayout"]
   previewEmbedMessage: ConnectorService["previewEmbedMessage"]
   readMessages: ConnectorService["readMessages"]
+  recallConversation: ConnectorService["recallConversation"]
   removeOwnReaction: ConnectorService["removeOwnReaction"]
   searchMessages: ConnectorService["searchMessages"]
   searchGuildMembers: ConnectorService["searchGuildMembers"]
@@ -19533,8 +19609,8 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Guild audit-log reads omit embedded Discord objects plus all change and option values, redact non-snowflake targets, persist nothing, and include reasons only by explicit opt-in.",
       "Guild ban audit uses a separate exact guild scope and complete BAN_MEMBERS evidence. It returns minimized user profiles, omits reasons by default, persists nothing, and requires exact user IDs for lookup.",
       "Member-directory reads require a separate exact guild allowlist, and member listing additionally requires the Guild Members privileged intent. They return bounded privacy-minimized records, persist nothing, and never turn a display name into a write target.",
-      "Prompts render validated read-only or plan-only workflows and never perform service calls themselves.",
-      "Native search requires a substantive filter and may report that Discord is still indexing.",
+      "Prompts are validated, read-only or plan-only, and never call services.",
+      "Native search requires a filter and may report indexing.",
       "Forum posts are public threads and retain applied tag IDs.",
       "Message interactions require a separate exact channel allowlist and suppress notifications unless exact user IDs are explicitly authorized.",
       "Reuse one stable idempotency key for every retry of the same send, especially after an uncertain result.",
@@ -21100,6 +21176,39 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       const summary = "messages" in result
         ? `Discord search returned ${result.messages.length} messages in guild ${input.guildId}`
         : `Discord is indexing guild ${input.guildId}; retry after ${result.retryAfterMs} ms`
+      return toolResult(result, summary)
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("recall_conversation", server.registerTool(
+    "recall_conversation",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Recall a vaguely remembered Discord conversation in one permitted guild. Searches one to five caller-supplied literal phrase variants through Discord's official relevance endpoint, fuses duplicate candidates, ranks phrase coverage and reciprocal rank, then refetches bounded current context around each target. Phrase text, names, profiles, raw payloads, and Discord content are never persisted. Requires Message Content intent and Read Message History; this is not semantic or archival search.",
+      inputSchema: conversationRecallInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Recall a Discord conversation",
+    },
+    safeToolHandler("recall_conversation", async (
+      input: z.infer<typeof conversationRecallInputSchema>,
+      context,
+    ) => {
+      const result = await service.recallConversation({
+        ...(input.after ? { after: input.after } : {}),
+        ...(input.authorIds ? { authorIds: input.authorIds } : {}),
+        ...(input.before ? { before: input.before } : {}),
+        ...(input.channelIds ? { channelIds: input.channelIds } : {}),
+        contextRadius: input.contextRadius,
+        guildId: input.guildId,
+        limit: input.limit,
+        searchPhrases: input.searchPhrases,
+        slop: input.slop,
+      }, {
+        signal: context.mcpReq.signal,
+      })
+      const summary = result.status === "indexing"
+        ? `Discord is indexing guild ${input.guildId}; retry after ${result.retryAfterMs} ms`
+        : `Discord recall returned ${result.matches.length} ranked conversations in guild ${input.guildId}`
       return toolResult(result, summary)
     }, secrets, observability),
   ))

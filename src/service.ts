@@ -611,8 +611,9 @@ import {
   normalizeChannel,
   normalizeGuild,
   normalizeMessage,
-  normalizeSearchMessage,
 } from "./normalize.js"
+import type { ConversationRecallRequest } from "./message-search-service.js"
+import { MessageSearchService } from "./message-search-service.js"
 import { evaluateBotChannelPermissions } from "./permissions.js"
 import type {
   AuditChannelRoleAccessRequest,
@@ -880,7 +881,6 @@ import type {
   DiscordApplication,
   DiscordChannel,
   DiscordGuild,
-  DiscordMessageSearchIndexing,
   DiscordMessage,
   DiscordThreadList,
   DiscordUser,
@@ -1391,40 +1391,6 @@ function assertConnectorLimit(
   }
 }
 
-function hasSearchFilter(options: GuildMessageSearchOptions): boolean {
-  return Boolean(
-    options.content?.trim()
-    || options.channelIds?.length
-    || options.authorIds?.length
-    || options.authorTypes?.length
-    || options.mentionUserIds?.length
-    || options.mentionRoleIds?.length
-    || options.repliedToUserIds?.length
-    || options.repliedToMessageIds?.length
-    || options.has?.length
-    || options.embedTypes?.length
-    || options.embedProviders?.length
-    || options.linkHostnames?.length
-    || options.attachmentFilenames?.length
-    || options.attachmentExtensions?.length
-    || options.minId
-    || options.maxId
-    || options.pinned !== undefined
-    || options.mentionEveryone !== undefined
-  )
-}
-
-function searchIndexing(
-  value: DiscordMessageSearchIndexing | unknown,
-): value is DiscordMessageSearchIndexing {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && "code" in value
-    && value.code === 110000,
-  )
-}
-
 function isThreadType(type: number): boolean {
   const threadTypes: readonly number[] = [
     DISCORD_CHANNEL_TYPES.announcementThread,
@@ -1588,6 +1554,7 @@ export class ConnectorService {
   readonly #onboardingService: OnboardingService
   readonly #messagePinService: MessagePinService
   readonly #messageForwardingService: MessageForwardingService
+  readonly #messageSearchService: MessageSearchService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberNicknameService: MemberNicknameService
   readonly #memberRoleService: MemberRoleService
@@ -1707,6 +1674,10 @@ export class ConnectorService {
       policy: this.#policy,
     })
     this.#communityActivityService = new CommunityActivityService({
+      client: this.#client,
+      policy: this.#policy,
+    })
+    this.#messageSearchService = new MessageSearchService({
       client: this.#client,
       policy: this.#policy,
     })
@@ -3088,81 +3059,15 @@ export class ConnectorService {
     options: GuildMessageSearchOptions = {},
   ) {
     await this.#verifyIdentity(options)
-    this.#policy.assertGuildAllowed(guildId)
-    if (!hasSearchFilter(options)) {
-      throw new ConfigurationError("Discord message search requires at least one substantive filter")
-    }
-    const channelIds = this.#policy.constrainSearchChannelIds(
-      options.channelIds,
-      DISCORD_LIMITS.searchChannelIds,
-    )
-    const response = await this.#client.searchGuildMessages(guildId, {
-      ...options,
-      ...(channelIds ? { channelIds } : {}),
-    })
-    if (searchIndexing(response)) {
-      return {
-        documentsIndexed: response.documents_indexed ?? null,
-        guildId,
-        retryAfterMs: Math.max(0, Math.ceil(response.retry_after * 1_000)),
-        schemaVersion: SCHEMA_VERSION,
-        status: "indexing" as const,
-      }
-    }
+    return this.#messageSearchService.search(guildId, options)
+  }
 
-    const responseThreads = (response.threads || []).filter((thread) => (
-      !thread.guild_id || thread.guild_id === guildId
-    ))
-    const threadParents = new Map(
-      responseThreads.map((thread) => [thread.id, thread.parent_id ?? null]),
-    )
-    const outboundChannelIds = channelIds ? new Set(channelIds) : undefined
-    const messagesById = new Map<string, DiscordMessage>()
-    for (const message of response.messages.flat()) {
-      if (message.guild_id && message.guild_id !== guildId) continue
-      const parentId = threadParents.get(message.channel_id)
-      if (
-        outboundChannelIds
-        && !outboundChannelIds.has(message.channel_id)
-        && !(parentId && outboundChannelIds.has(parentId))
-      ) continue
-      if (!this.#policy.channelIdReadable(
-        message.channel_id,
-        parentId,
-      )) continue
-      if (!messagesById.has(message.id)) messagesById.set(message.id, message)
-    }
-    const requestedLimit = options.limit ?? DISCORD_LIMITS.guildMessageSearch
-    const messages = [...messagesById.values()]
-      .slice(0, requestedLimit)
-      .map((message) => normalizeSearchMessage(message, guildId))
-    const returnedChannelIds = new Set(messages.map((message) => message.channelId))
-    const threads = responseThreads
-      .filter((thread) => returnedChannelIds.has(thread.id))
-      .filter((thread) => this.#policy.channelIdReadable(thread.id, thread.parent_id))
-      .map((thread) => normalizedGuildChannel(thread, guildId))
-    const offset = options.offset ?? 0
-    const candidateNextOffset = offset + requestedLimit
-    const nextOffset = candidateNextOffset <= DISCORD_LIMITS.searchOffset
-      && candidateNextOffset < response.total_results
-      ? candidateNextOffset
-      : null
-    return {
-      documentsIndexed: response.documents_indexed ?? null,
-      doingDeepHistoricalIndex: response.doing_deep_historical_index,
-      guildId,
-      messages,
-      page: {
-        nextOffset,
-        offset,
-        requestedLimit,
-        returned: messages.length,
-        totalResultsEstimate: response.total_results,
-      },
-      schemaVersion: SCHEMA_VERSION,
-      status: "ok" as const,
-      threads,
-    }
+  async recallConversation(
+    request: ConversationRecallRequest,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#messageSearchService.recall(request, options)
   }
 
   async listActiveThreads(
