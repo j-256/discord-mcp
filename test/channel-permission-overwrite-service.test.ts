@@ -8,14 +8,19 @@ import type {
 import {
   ChannelPermissionOverwriteService,
   normalizeChannelPermissionOverwriteRequest,
+  normalizeChannelPermissionSyncRequest,
   type ChannelPermissionOverwriteRequest,
   type ChannelPermissionOverwriteServiceOptions,
+  type ChannelPermissionSyncRequest,
 } from "../src/channel-permission-overwrite-service.js"
 import { DISCORD_CHANNEL_TYPES } from "../src/constants.js"
 import {
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
   ChannelPermissionOverwritePlanChangedError,
+  ChannelPermissionSyncExecutionError,
+  ChannelPermissionSyncOperationConflictError,
+  ChannelPermissionSyncPlanChangedError,
   DiscordApiError,
   PolicyError,
 } from "../src/errors.js"
@@ -45,9 +50,11 @@ const CHANNEL_ID = "600000000000000001"
 const PARENT_ID = "600000000000000002"
 const OPERATION_KEY = "permission-overwrite-operation-0001"
 const AUDIT_REASON = "Reviewed private-channel access / case 42"
+const SYNC_OPERATION_KEY = "permission-sync-operation-0001"
 const NOW = "2026-08-21T00:00:00.000Z"
 
 const BOT_PERMISSIONS = DISCORD_PERMISSIONS.VIEW_CHANNEL
+  | DISCORD_PERMISSIONS.MANAGE_CHANNELS
   | DISCORD_PERMISSIONS.MANAGE_ROLES
   | DISCORD_PERMISSIONS.SEND_MESSAGES
   | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
@@ -108,6 +115,20 @@ function request(
   } as ChannelPermissionOverwriteRequest
 }
 
+function syncRequest(
+  overrides: Partial<ChannelPermissionSyncRequest> = {},
+): ChannelPermissionSyncRequest {
+  return {
+    acknowledgeConcurrentPermissionChangesStopped: true,
+    acknowledgeFutureParentPropagation: true,
+    acknowledgeOverwriteReplacement: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    operationKey: SYNC_OPERATION_KEY,
+    ...overrides,
+  } as ChannelPermissionSyncRequest
+}
+
 function policy(options: {
   channels?: readonly string[]
   enabled?: boolean
@@ -122,12 +143,14 @@ function policy(options: {
     allowDeletions: false,
     allowInteractions: false,
     allowPermissionOverwrites: options.enabled ?? true,
+    allowPermissionSyncs: options.enabled ?? true,
     deleteChannelIds: new Set(),
     interactionChannelIds: new Set(),
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 0,
     mentionUserIds: new Set(),
     permissionOverwriteChannelIds: new Set(options.channels || [CHANNEL_ID]),
+    permissionSyncChannelIds: new Set(options.channels || [CHANNEL_ID]),
     protectedUserIds: new Set(options.protectedUsers || []),
   })
 }
@@ -175,6 +198,7 @@ interface FixtureState {
   mutationUpdatesState: boolean
   parent: DiscordChannel
   readbackError: unknown
+  readbackStarted: (() => void) | null
   roles: DiscordRole[]
   targetMember: DiscordGuildMember
 }
@@ -202,6 +226,7 @@ function fixture(options: {
       type: DISCORD_CHANNEL_TYPES.category,
     }),
     readbackError: undefined,
+    readbackStarted: null,
     roles: [
       role(GUILD_ID, 0n, 0, "@everyone"),
       role(BOT_ROLE_ID, BOT_PERMISSIONS, 20, "connector"),
@@ -258,9 +283,21 @@ function fixture(options: {
         ]
       }
     },
+    async replaceChannelPermissionOverwrites(channelId, overwrites, reason) {
+      events.push(`write:sync:${channelId}:${reason}`)
+      state.mutationStarted?.()
+      if (state.mutationGate) await state.mutationGate
+      if (state.mutationError) throw state.mutationError
+      mutationCompleted = true
+      if (state.mutationUpdatesState) {
+        state.channel.permission_overwrites = overwrites.map((value) => ({ ...value }))
+      }
+      return { ...state.channel }
+    },
     async getChannel(channelId) {
       events.push(`read:channel:${channelId}${mutationCompleted ? ":readback" : ""}`)
       if (mutationCompleted && state.readbackError) throw state.readbackError
+      if (mutationCompleted) state.readbackStarted?.()
       return channelId === PARENT_ID ? state.parent : state.channel
     },
     async getGuild() {
@@ -302,6 +339,296 @@ function apiError(status: number): DiscordApiError {
     status,
   })
 }
+
+function permissionSyncFixture(options: {
+  policy?: ScopePolicy
+  state?: Partial<FixtureState>
+} = {}) {
+  return fixture({
+    ...(options.policy ? { policy: options.policy } : {}),
+    state: {
+      channel: channel({
+        parent_id: PARENT_ID,
+        permission_overwrites: [overwrite(
+          TARGET_ROLE_ID,
+          0,
+          0n,
+          DISCORD_PERMISSIONS.SEND_MESSAGES,
+        )],
+      }),
+      parent: channel({
+        id: PARENT_ID,
+        parent_id: null,
+        permission_overwrites: [overwrite(
+          TARGET_ROLE_ID,
+          0,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL,
+        )],
+        type: DISCORD_CHANNEL_TYPES.category,
+      }),
+      ...options.state,
+    },
+  })
+}
+
+test("permission-sync normalization requires an exact request and all literal acknowledgments", () => {
+  const normalized = normalizeChannelPermissionSyncRequest(syncRequest())
+
+  assert.match(normalized.operationKeyHash, /^sha256:[a-f0-9]{64}$/)
+  assert.equal(normalized.acknowledgeFutureParentPropagation, true)
+  assert.throws(
+    () => normalizeChannelPermissionSyncRequest(syncRequest({
+      acknowledgeOverwriteReplacement: false as true,
+    })),
+    /complete overwrite replacement/,
+  )
+  assert.throws(
+    () => normalizeChannelPermissionSyncRequest({
+      ...syncRequest(),
+      extra: true,
+    } as ChannelPermissionSyncRequest),
+    /only the documented fields/,
+  )
+})
+
+test("permission-sync plan exposes the complete structural delta without fetching member profiles", async () => {
+  const setup = permissionSyncFixture()
+
+  const plan = await setup.service.planSync(
+    APPLICATION_ID,
+    BOT_ID,
+    syncRequest(),
+  )
+
+  assert.equal(plan.action, "replace")
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.parent.id, PARENT_ID)
+  assert.deepEqual(plan.overwriteCounts, {
+    changed: 1,
+    currentChild: 1,
+    parent: 1,
+  })
+  assert.equal(plan.changes[0]?.targetId, TARGET_ROLE_ID)
+  assert.equal(plan.changes[0]?.roleName, "reviewers")
+  assert.equal(plan.authority.currentChild.manageChannels, true)
+  assert.equal(plan.authority.prospectiveChild.manageRoles, true)
+  assert.deepEqual(plan.privacy, {
+    memberProfilesFetched: false,
+    persistedOverwriteTargets: false,
+    targetImpactAnalysis: "structural-only",
+  })
+  assert.equal(setup.events.includes(`read:member:${TARGET_USER_ID}`), false)
+})
+
+test("permission-sync rejects changed protected-member overwrites without fetching a profile", async () => {
+  const setup = permissionSyncFixture({
+    policy: policy({ protectedUsers: [TARGET_USER_ID] }),
+    state: {
+      channel: channel({
+        parent_id: PARENT_ID,
+        permission_overwrites: [overwrite(
+          TARGET_USER_ID,
+          1,
+          0n,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL,
+        )],
+      }),
+    },
+  })
+
+  await assert.rejects(
+    setup.service.planSync(APPLICATION_ID, BOT_ID, syncRequest()),
+    PolicyError,
+  )
+  assert.equal(setup.events.includes(`read:member:${TARGET_USER_ID}`), false)
+})
+
+test("permission-sync no-op proves an already synchronized child without reserving the key", async () => {
+  const parentOverwrites = [overwrite(
+    TARGET_ROLE_ID,
+    0,
+    DISCORD_PERMISSIONS.VIEW_CHANNEL,
+  )]
+  const setup = permissionSyncFixture({
+    state: {
+      channel: channel({
+        parent_id: PARENT_ID,
+        permission_overwrites: parentOverwrites.map((value) => ({ ...value })),
+      }),
+      parent: channel({
+        id: PARENT_ID,
+        permission_overwrites: parentOverwrites,
+        type: DISCORD_CHANNEL_TYPES.category,
+      }),
+    },
+  })
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+
+  const result = await setup.service.executeSync(
+    APPLICATION_ID,
+    BOT_ID,
+    requestValue,
+    plan.digest,
+  )
+
+  assert.equal(plan.status, "already-synchronized")
+  assert.equal(result.status, "already-synchronized")
+  assert.equal(result.activityId, null)
+  assert.equal(setup.events.some((event) => event.startsWith("operation:")), false)
+  assert.equal(setup.events.some((event) => event.startsWith("write:")), false)
+})
+
+test("permission-sync records pending state before one write and verifies exact synchronization", async () => {
+  const setup = permissionSyncFixture()
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+
+  const result = await setup.service.executeSync(
+    APPLICATION_ID,
+    BOT_ID,
+    requestValue,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.responseMatched, true)
+  assert.equal(result.synchronized, true)
+  assert.equal(result.parentBaselineMatched, true)
+  assert.equal(result.evidenceMatched, true)
+  const pendingIndex = setup.events.indexOf("activity:pending")
+  const writeIndex = setup.events.findIndex((event) => event.startsWith("write:sync:"))
+  assert.ok(pendingIndex >= 0)
+  assert.ok(writeIndex > pendingIndex)
+  assert.equal(setup.events.filter((event) => event.startsWith("write:sync:")).length, 1)
+  assert.equal(setup.activities.length, 2)
+  const serialized = JSON.stringify(setup.activities)
+  assert.equal(serialized.includes(TARGET_ROLE_ID), false)
+  assert.equal(serialized.includes("reviewers"), false)
+  assert.equal(serialized.includes(AUDIT_REASON), false)
+})
+
+test("permission-sync reports completed-with-drift after exact sync when support evidence changes", async () => {
+  const setup = permissionSyncFixture()
+  setup.state.readbackStarted = () => {
+    setup.state.roles = setup.state.roles.map((value) => (
+      value.id === TARGET_ROLE_ID
+        ? { ...value, name: "renamed-reviewers" }
+        : value
+    ))
+  }
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+
+  const result = await setup.service.executeSync(
+    APPLICATION_ID,
+    BOT_ID,
+    requestValue,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed-with-drift")
+  assert.equal(result.synchronized, true)
+  assert.equal(result.responseMatched, true)
+  assert.equal(result.parentBaselineMatched, true)
+  assert.equal(result.evidenceMatched, false)
+  assert.equal(setup.activities.at(-1)?.status, "completed-with-drift")
+})
+
+test("permission-sync rejects a stale parent snapshot before reserving or writing", async () => {
+  const setup = permissionSyncFixture()
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+  setup.state.parent.permission_overwrites = []
+
+  await assert.rejects(
+    setup.service.executeSync(
+      APPLICATION_ID,
+      BOT_ID,
+      requestValue,
+      plan.digest,
+    ),
+    ChannelPermissionSyncPlanChangedError,
+  )
+  assert.equal(setup.events.some((event) => event.startsWith("operation:")), false)
+  assert.equal(setup.events.some((event) => event.startsWith("write:")), false)
+})
+
+test("permission-sync quarantines a response that does not prove the reviewed replacement", async () => {
+  const setup = permissionSyncFixture({
+    state: { mutationUpdatesState: false },
+  })
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+
+  await assert.rejects(
+    setup.service.executeSync(
+      APPLICATION_ID,
+      BOT_ID,
+      requestValue,
+      plan.digest,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ChannelPermissionSyncExecutionError)
+      assert.equal((error.result as { status: string }).status, "uncertain")
+      return true
+    },
+  )
+  assert.equal(setup.events.filter((event) => event.startsWith("write:sync:")).length, 1)
+})
+
+test("permission-sync treats a pre-response rate limit as uncertain and never retries", async () => {
+  const setup = permissionSyncFixture({
+    state: { mutationError: apiError(429) },
+  })
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+
+  await assert.rejects(
+    setup.service.executeSync(
+      APPLICATION_ID,
+      BOT_ID,
+      requestValue,
+      plan.digest,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ChannelPermissionSyncExecutionError)
+      assert.equal((error.result as { status: string }).status, "uncertain")
+      return true
+    },
+  )
+  assert.equal(setup.events.filter((event) => event.startsWith("write:sync:")).length, 1)
+})
+
+test("permission-sync rejects unknown parent permission bits and spent operation keys", async () => {
+  const unknownSetup = permissionSyncFixture({
+    state: {
+      parent: channel({
+        id: PARENT_ID,
+        permission_overwrites: [overwrite(TARGET_ROLE_ID, 0, 1n << 63n)],
+        type: DISCORD_CHANNEL_TYPES.category,
+      }),
+    },
+  })
+  await assert.rejects(
+    unknownSetup.service.planSync(APPLICATION_ID, BOT_ID, syncRequest()),
+    /unknown to this build/,
+  )
+
+  const setup = permissionSyncFixture()
+  const requestValue = syncRequest()
+  const plan = await setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue)
+  await setup.service.executeSync(
+    APPLICATION_ID,
+    BOT_ID,
+    requestValue,
+    plan.digest,
+  )
+  await assert.rejects(
+    setup.service.planSync(APPLICATION_ID, BOT_ID, requestValue),
+    ChannelPermissionSyncOperationConflictError,
+  )
+})
 
 test("permission-overwrite normalization canonicalizes named deltas and hashes the operation key", () => {
   const normalized = normalizeChannelPermissionOverwriteRequest(request({

@@ -46,6 +46,7 @@ export const OPERATION_KINDS = [
   "channel-metadata-change",
   "channel-ordering",
   "channel-permission-overwrite",
+  "channel-permission-sync",
   "component-message",
   "embed-message",
   "direct-message-change",

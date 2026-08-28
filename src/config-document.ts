@@ -206,6 +206,7 @@ export const CONFIG_CAPABILITY_NAMES = Object.freeze([
   "onboardingChanges",
   "pinManagement",
   "permissionOverwrites",
+  "permissionSyncs",
   "pollAudit",
   "pollCreation",
   "pollEnding",
@@ -312,6 +313,7 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "pollChannelIds",
   "reactionChannelIds",
   "permissionOverwriteChannelIds",
+  "permissionSyncChannelIds",
   "roleCreationGuildIds",
   "roleConfigurationIds",
   "roleDeletionIds",
@@ -499,6 +501,8 @@ const GUILD_DEPARTURES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-guild con
 const GUILD_DEPARTURE_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed connector departure"
 const MEMBER_VERIFICATION_CHANGES_CAPABILITY_DESCRIPTION = "Enable reviewed exact-member changes to Discord's named BYPASSES_VERIFICATION state"
 const MEMBER_VERIFICATION_GUILD_SCOPE_DESCRIPTION = "Exact guild ID allowlist for reviewed member verification-bypass changes"
+const PERMISSION_SYNCS_CAPABILITY_DESCRIPTION = "Enable reviewed complete parent-category permission synchronization with explicit replacement and future-propagation acknowledgment"
+const PERMISSION_SYNC_SCOPE_DESCRIPTION = "Exact direct child channel ID allowlist for reviewed parent-category permission synchronization"
 
 function capabilityDescription(documentKey: string): string {
   if (documentKey === "guildCommunityAudit") {
@@ -594,6 +598,9 @@ function capabilityDescription(documentKey: string): string {
   if (documentKey === "memberVerificationChanges") {
     return MEMBER_VERIFICATION_CHANGES_CAPABILITY_DESCRIPTION
   }
+  if (documentKey === "permissionSyncs") {
+    return PERMISSION_SYNCS_CAPABILITY_DESCRIPTION
+  }
   return `Enable ${humanizeConfigKey(documentKey)} policy`
 }
 
@@ -669,6 +676,9 @@ function scopeDescription(documentKey: string): string {
   }
   if (documentKey === "memberVerificationGuildIds") {
     return MEMBER_VERIFICATION_GUILD_SCOPE_DESCRIPTION
+  }
+  if (documentKey === "permissionSyncChannelIds") {
+    return PERMISSION_SYNC_SCOPE_DESCRIPTION
   }
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }

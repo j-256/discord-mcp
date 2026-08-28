@@ -1545,6 +1545,30 @@ export interface ChannelPermissionOverwriteActivity {
   verification: "drift" | "match" | null
 }
 
+export type ChannelPermissionSyncActivityStatus =
+  | "completed"
+  | "completed-with-drift"
+  | "failed"
+  | "pending"
+  | "uncertain"
+
+export interface ChannelPermissionSyncActivity {
+  applicationId: string
+  botId: string
+  channelId: string
+  error: string | null
+  guildId: string
+  id: string
+  kind: "channel-permission-sync"
+  operationKeyHash: string
+  parentChannelId: string
+  planDigest: string
+  schemaVersion: number
+  status: ChannelPermissionSyncActivityStatus
+  timestamp: string
+  verification: "drift" | "match" | null
+}
+
 export type ChannelMetadataActivityStatus =
   | "completed"
   | "completed-with-drift"
@@ -1755,6 +1779,7 @@ export type ActivityEntry =
   | ChannelMetadataActivity
   | ChannelOrderingActivity
   | ChannelPermissionOverwriteActivity
+  | ChannelPermissionSyncActivity
   | ComponentMessageActivity
   | EmbedMessageActivity
   | DeletionActivity
@@ -3784,6 +3809,73 @@ function parseChannelPermissionOverwriteActivity(
     status: record.status as ChannelPermissionOverwriteActivityStatus,
     targetId: record.targetId,
     targetType: record.targetType as "member" | "role",
+    timestamp: record.timestamp,
+    verification: record.verification as "drift" | "match" | null,
+  }
+}
+
+function parseChannelPermissionSyncActivity(
+  value: unknown,
+): ChannelPermissionSyncActivity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (
+    record.schemaVersion !== SCHEMA_VERSION
+    || record.kind !== "channel-permission-sync"
+    || typeof record.id !== "string"
+    || !CONTENT_FREE_IDENTIFIER_PATTERN.test(record.id)
+    || typeof record.timestamp !== "string"
+    || Number.isNaN(Date.parse(record.timestamp))
+    || ![
+      "completed",
+      "completed-with-drift",
+      "failed",
+      "pending",
+      "uncertain",
+    ].includes(String(record.status))
+    || typeof record.applicationId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.applicationId)
+    || typeof record.botId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.botId)
+    || typeof record.guildId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.guildId)
+    || typeof record.channelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.channelId)
+    || typeof record.parentChannelId !== "string"
+    || !DISCORD_SNOWFLAKE_PATTERN.test(record.parentChannelId)
+    || typeof record.operationKeyHash !== "string"
+    || !OPERATION_KEY_HASH_PATTERN.test(record.operationKeyHash)
+    || typeof record.planDigest !== "string"
+    || !REVIEWED_PLAN_DIGEST_PATTERN.test(record.planDigest)
+    || !(record.error === null || (
+      typeof record.error === "string"
+      && CONTENT_FREE_ERROR_PATTERN.test(record.error)
+    ))
+    || ![null, "drift", "match"].includes(record.verification as string | null)
+    || (record.status === "pending" && (
+      record.error !== null
+      || record.verification !== null
+    ))
+    || (record.status === "completed" && record.verification !== "match")
+    || (record.status === "completed-with-drift" && record.verification !== "drift")
+    || (["failed", "uncertain"].includes(String(record.status)) && (
+      record.error === null
+      || record.verification !== null
+    ))
+  ) return undefined
+  return {
+    applicationId: record.applicationId,
+    botId: record.botId,
+    channelId: record.channelId,
+    error: record.error,
+    guildId: record.guildId,
+    id: record.id,
+    kind: "channel-permission-sync",
+    operationKeyHash: record.operationKeyHash,
+    parentChannelId: record.parentChannelId,
+    planDigest: record.planDigest,
+    schemaVersion: SCHEMA_VERSION,
+    status: record.status as ChannelPermissionSyncActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "drift" | "match" | null,
   }
@@ -6904,6 +6996,7 @@ function parseActivityEntry(value: unknown): ActivityEntry | undefined {
     || parseChannelOrderingActivity(value)
     || parseForumTagActivity(value)
     || parseChannelPermissionOverwriteActivity(value)
+    || parseChannelPermissionSyncActivity(value)
     || parseMessagePinActivity(value)
     || parseApplicationEntitlementActivity(value)
     || parseApplicationEmojiActivity(value)

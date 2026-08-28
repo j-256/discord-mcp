@@ -161,6 +161,8 @@ import type {
 import type {
   ChannelPermissionOverwritePlan,
   ChannelPermissionOverwriteRequest,
+  ChannelPermissionSyncPlan,
+  ChannelPermissionSyncRequest,
 } from "../src/channel-permission-overwrite-service.js"
 import type {
   DeletionPlan,
@@ -392,6 +394,8 @@ import {
   ChannelOrderingOperationConflictError,
   ChannelPermissionOverwriteExecutionError,
   ChannelPermissionOverwriteOperationConflictError,
+  ChannelPermissionSyncExecutionError,
+  ChannelPermissionSyncOperationConflictError,
   ComponentMessageExecutionError,
   ComponentMessageOperationConflictError,
   DeletionExecutionError,
@@ -794,6 +798,7 @@ const MEMBER_ROLE_OPERATION_KEY = "member-role-attempt-0001"
 const MEMBER_VOICE_OPERATION_KEY = "member-voice-attempt-0001"
 const THREAD_GOVERNANCE_OPERATION_KEY = "thread-governance-attempt-0001"
 const PERMISSION_OVERWRITE_OPERATION_KEY = "permission-overwrite-attempt-0001"
+const PERMISSION_SYNC_OPERATION_KEY = "permission-sync-attempt-0001"
 const WEBHOOK_OPERATION_KEY = "webhook-delete-attempt-0001"
 const WEBHOOK_CHANGE_OPERATION_KEY = "webhook-change-attempt-0001"
 const WEBHOOK_CREATION_OPERATION_KEY = "webhook-create-attempt-0001"
@@ -5565,6 +5570,98 @@ function permissionOverwritePlan(
   }
 }
 
+function permissionSyncPlan(
+  request: ChannelPermissionSyncRequest,
+  digest = DIGEST,
+  action: "none" | "replace" = "replace",
+): ChannelPermissionSyncPlan {
+  const permissionBits = (
+    DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    | DISCORD_PERMISSIONS.MANAGE_ROLES
+  ).toString()
+  const parentOverwrite = {
+    allow: DISCORD_PERMISSIONS.VIEW_CHANNEL.toString(),
+    allowPermissions: ["VIEW_CHANNEL" as const],
+    deny: "0",
+    denyPermissions: [],
+    targetId: ROLE_ID,
+    targetType: "role" as const,
+    unknownAllow: "0",
+    unknownDeny: "0",
+  }
+  const currentOverwrite = action === "none"
+    ? parentOverwrite
+    : {
+        allow: "0",
+        allowPermissions: [],
+        deny: DISCORD_PERMISSIONS.SEND_MESSAGES.toString(),
+        denyPermissions: ["SEND_MESSAGES" as const],
+        targetId: ROLE_ID,
+        targetType: "role" as const,
+        unknownAllow: "0",
+        unknownDeny: "0",
+      }
+  const authority = {
+    confidence: "complete" as const,
+    effectivePermissions: permissionBits,
+    manageChannels: true,
+    manageRoles: true,
+    viewChannel: true,
+  }
+  return {
+    acknowledgments: {
+      concurrentPermissionChangesStopped: true,
+      futureParentPropagation: true,
+      overwriteReplacement: true,
+    },
+    action,
+    applicationId: APPLICATION_ID,
+    auditReason: request.auditReason,
+    authority: {
+      currentChild: authority,
+      parent: authority,
+      prospectiveChild: authority,
+    },
+    botId: BOT_ID,
+    changes: action === "none" ? [] : [{
+      after: parentOverwrite,
+      before: currentOverwrite,
+      roleName: "Private role name",
+      targetId: ROLE_ID,
+      targetType: "role",
+    }],
+    channel: normalizeChannel(rawChannel({
+      id: request.channelId,
+      parent_id: PARENT_ID,
+      permission_overwrites: [],
+    })),
+    createdAt: "2026-08-28T00:00:00.000Z",
+    digest,
+    guild: { id: GUILD_ID, name: "Private guild name" },
+    operationKeyHash: operationKeyHash(request.operationKey),
+    overwriteCounts: {
+      changed: action === "none" ? 0 : 1,
+      currentChild: 1,
+      parent: 1,
+    },
+    parent: normalizeChannel(rawChannel({
+      id: PARENT_ID,
+      parent_id: null,
+      permission_overwrites: [],
+      type: DISCORD_CHANNEL_TYPES.category,
+    })),
+    privacy: {
+      memberProfilesFetched: false,
+      persistedOverwriteTargets: false,
+      targetImpactAnalysis: "structural-only",
+    },
+    schemaVersion: 1,
+    status: action === "none" ? "already-synchronized" : "planned",
+    warnings: ["One-shot reviewed complete parent-category permission sync"],
+  }
+}
+
 function moderationPlan(digest = DIGEST) {
   return {
     action: "kick" as const,
@@ -8818,6 +8915,8 @@ function fixturePolicy(): PolicyDescription {
     onboardingGuildIds: [],
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
+    permissionSyncChannelIds: [],
+    permissionSyncsEnabled: false,
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
@@ -9088,6 +9187,9 @@ function serviceFixture(overrides: {
   permissionOverwriteAction?: "delete" | "none" | "put"
   permissionOverwriteError?: Error
   permissionOverwritePlanDigest?: string
+  permissionSyncAction?: "none" | "replace"
+  permissionSyncError?: Error
+  permissionSyncPlanDigest?: string
   planDigest?: string
   policy?: PolicyDescription
   pollCreationError?: Error
@@ -9324,6 +9426,8 @@ function serviceFixture(overrides: {
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
+    permissionSyncExecute: 0,
+    permissionSyncPlan: 0,
     plan: 0,
     pollCreationExecute: 0,
     pollCreationPlan: 0,
@@ -11889,6 +11993,29 @@ function serviceFixture(overrides: {
         targetType: request.targetType,
       }
     },
+    async executeChannelPermissionSync(request, planDigest) {
+      if (overrides.permissionSyncError) throw overrides.permissionSyncError
+      calls.permissionSyncExecute += 1
+      const planned = permissionSyncPlan(
+        request,
+        planDigest,
+        overrides.permissionSyncAction,
+      )
+      return {
+        activityId: planned.action === "none" ? null : "activity-permission-sync",
+        channelId: request.channelId,
+        evidenceMatched: true,
+        guildId: GUILD_ID,
+        operationKeyHash: planned.operationKeyHash,
+        parentBaselineMatched: true,
+        parentChannelId: PARENT_ID,
+        planDigest,
+        responseMatched: true,
+        schemaVersion: 1,
+        status: planned.action === "none" ? "already-synchronized" : "completed",
+        synchronized: true,
+      }
+    },
     async executeForumPost(request, planDigest) {
       if (overrides.forumPostError) throw overrides.forumPostError
       calls.forumPostExecute += 1
@@ -13307,6 +13434,14 @@ function serviceFixture(overrides: {
         overrides.permissionOverwriteAction,
       )
     },
+    async planChannelPermissionSync(request) {
+      calls.permissionSyncPlan += 1
+      return permissionSyncPlan(
+        request,
+        overrides.permissionSyncPlanDigest || DIGEST,
+        overrides.permissionSyncAction,
+      )
+    },
     async planForumPost(request) {
       calls.forumPostPlan += 1
       return forumPostPlan(
@@ -14283,6 +14418,8 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_forum_tag_change",
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
+      "plan_channel_permission_sync",
+      "execute_channel_permission_sync",
       "plan_channel_creation",
       "execute_channel_creation",
       "plan_forum_post",
@@ -14436,6 +14573,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const permissionOverwrite = result.tools.find((tool) => (
     tool.name === "execute_channel_permission_overwrite"
   ))
+  const permissionSync = result.tools.find((tool) => (
+    tool.name === "execute_channel_permission_sync"
+  ))
   const administration = result.tools.find((tool) => (
     tool.name === "execute_member_moderation"
   ))
@@ -14512,6 +14652,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     channelMetadata,
     voiceChannelStatus,
     permissionOverwrite,
+    permissionSync,
     administration,
     guildPrune,
     memberNickname,
@@ -14731,6 +14872,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "plan_channel_metadata_change",
     "plan_voice_channel_status_change",
     "plan_channel_permission_overwrite",
+    "plan_channel_permission_sync",
     "plan_message_pin",
     "plan_announcement_crosspost",
     "plan_message_forward",
@@ -16751,6 +16893,30 @@ test("progressive discovery enables the complete reviewed permission-overwrite w
   )
 })
 
+test("progressive discovery enables the complete reviewed parent-category permission-sync workflow", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
+  })
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { query: "execute_channel_permission_sync" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(discovery.newlyEnabledToolNames, [
+    "execute_channel_permission_sync",
+    "plan_channel_permission_sync",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "plan_channel_permission_sync",
+      "execute_channel_permission_sync",
+      "discover_discord_tools",
+    ],
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: {
@@ -17051,6 +17217,8 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     permissionOverwriteExecute: 0,
     permissionOverwriteList: 0,
     permissionOverwritePlan: 0,
+    permissionSyncExecute: 0,
+    permissionSyncPlan: 0,
     plan: 0,
     pollCreationExecute: 0,
     pollCreationPlan: 0,
@@ -30262,6 +30430,187 @@ test("MCP channel permission changes stop on no-op, refusal, drift, uncertainty,
     JSON.stringify(conflictResult),
     new RegExp(PERMISSION_OVERWRITE_OPERATION_KEY),
   )
+})
+
+test("MCP parent-category permission-sync plans require every literal acknowledgement and no arbitrary source", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const argumentsValue = {
+    acknowledgeConcurrentPermissionChangesStopped: true,
+    acknowledgeFutureParentPropagation: true,
+    acknowledgeOverwriteReplacement: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    operationKey: PERMISSION_SYNC_OPERATION_KEY,
+  }
+  const planned = await client.callTool({
+    arguments: argumentsValue,
+    name: "plan_channel_permission_sync",
+  })
+  const missingAcknowledgement = await client.callTool({
+    arguments: {
+      ...argumentsValue,
+      acknowledgeFutureParentPropagation: undefined,
+    },
+    name: "plan_channel_permission_sync",
+  })
+  const arbitrarySource = await client.callTool({
+    arguments: { ...argumentsValue, sourceChannelId: PARENT_ID },
+    name: "plan_channel_permission_sync",
+  })
+
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(
+    (structuredContent(planned).overwriteCounts as Record<string, unknown>).changed,
+    1,
+  )
+  assert.equal(missingAcknowledgement.isError, true)
+  assert.equal(arbitrarySource.isError, true)
+  assert.equal(calls.permissionSyncPlan, 1)
+})
+
+test("MCP parent-category permission sync binds signed approval to the complete structural transition", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      acknowledgeConcurrentPermissionChangesStopped: true,
+      acknowledgeFutureParentPropagation: true,
+      acknowledgeOverwriteReplacement: true,
+      auditReason: AUDIT_REASON,
+      channelId: CHANNEL_ID,
+      operationKey: PERMISSION_SYNC_OPERATION_KEY,
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_permission_sync",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.permissionSyncPlan, 1)
+  assert.equal(calls.permissionSyncExecute, 1)
+  for (const value of [
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    CHANNEL_ID,
+    PARENT_ID,
+    ROLE_ID,
+    operationKeyHash(PERMISSION_SYNC_OPERATION_KEY),
+    DIGEST,
+  ]) assert.match(confirmationMessage, new RegExp(value))
+  assert.match(confirmationMessage, /complete permission-overwrite set/)
+  assert.match(confirmationMessage, /Future parent propagation acknowledgement: true/)
+  assert.match(confirmationMessage, /Concurrent permission changes stopped acknowledgement: true/)
+  assert.match(confirmationMessage, /structural-only/)
+  assert.match(confirmationMessage, /does not analyze every real member/)
+  assert.match(confirmationMessage, /untrusted/)
+  assert.doesNotMatch(confirmationMessage, new RegExp(PERMISSION_SYNC_OPERATION_KEY))
+  assert.doesNotMatch(JSON.stringify(serverMessages), new RegExp(PERMISSION_SYNC_OPERATION_KEY))
+})
+
+test("MCP parent-category permission sync stops on no-op, refusal, drift, uncertainty, and conflicts", async (context) => {
+  const argumentsValue = {
+    acknowledgeConcurrentPermissionChangesStopped: true,
+    acknowledgeFutureParentPropagation: true,
+    acknowledgeOverwriteReplacement: true,
+    auditReason: AUDIT_REASON,
+    channelId: CHANNEL_ID,
+    operationKey: PERMISSION_SYNC_OPERATION_KEY,
+    planDigest: DIGEST,
+  }
+  let noOpConfirmations = 0
+  const noOp = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      noOpConfirmations += 1
+      return { action: "cancel" }
+    },
+    serviceOverrides: { permissionSyncAction: "none" },
+  })
+  const noOpResult = await noOp.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_sync",
+  })
+  assert.equal(structuredContent(noOpResult).status, "already-synchronized")
+  assert.equal(noOpConfirmations, 0)
+  assert.equal(noOp.calls.permissionSyncExecute, 1)
+
+  const declined = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const declinedResult = await declined.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_sync",
+  })
+  assert.equal(structuredContent(declinedResult).status, "confirmation-declined")
+  assert.equal(declined.calls.permissionSyncExecute, 0)
+
+  let changedConfirmations = 0
+  const changed = await connectedFixture(context, {
+    elicitationHandler: async () => {
+      changedConfirmations += 1
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { permissionSyncPlanDigest: DIFFERENT_DIGEST },
+  })
+  const changedResult = await changed.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_sync",
+  })
+  assert.equal(structuredContent(changedResult).status, "plan-changed")
+  assert.equal(changedResult.isError, true)
+  assert.equal(changedConfirmations, 0)
+
+  const approve = async () => ({
+    action: "accept" as const,
+    content: { approve: true },
+  })
+  const uncertain = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      permissionSyncError: new ChannelPermissionSyncExecutionError(
+        "Discord parent-category permission-sync outcome is uncertain",
+        { status: "uncertain" },
+      ),
+    },
+  })
+  const uncertainResult = await uncertain.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_sync",
+  })
+  assert.equal(structuredContent(uncertainResult).status, "outcome-uncertain")
+
+  const receipt = {
+    activityId: "activity-permission-sync",
+    channelId: CHANNEL_ID,
+    error: null,
+    guildId: GUILD_ID,
+    operationKeyHash: operationKeyHash(PERMISSION_SYNC_OPERATION_KEY),
+    status: "completed",
+    timestamp: "2026-08-28T00:00:00.000Z",
+    verification: "match",
+  }
+  const conflict = await connectedFixture(context, {
+    elicitationHandler: approve,
+    serviceOverrides: {
+      permissionSyncError: new ChannelPermissionSyncOperationConflictError(receipt),
+    },
+  })
+  const conflictResult = await conflict.client.callTool({
+    arguments: argumentsValue,
+    name: "execute_channel_permission_sync",
+  })
+  assert.equal(structuredContent(conflictResult).status, "operation-key-conflict")
+  assert.deepEqual(
+    (structuredContent(conflictResult).error as Record<string, unknown>).receipt,
+    receipt,
+  )
+  assert.doesNotMatch(JSON.stringify(conflictResult), new RegExp(PERMISSION_SYNC_OPERATION_KEY))
 })
 
 test("MCP channel creation plans bounded additive types and rejects category settings", async (context) => {

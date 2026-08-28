@@ -2097,6 +2097,38 @@ export class ChannelPermissionOverwriteExecutionError extends Error {
   }
 }
 
+export class ChannelPermissionSyncPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord child and parent permission snapshots do not match the reviewed synchronization plan")
+    this.name = "ChannelPermissionSyncPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
+export class ChannelPermissionSyncOperationConflictError extends Error {
+  readonly receipt: unknown
+
+  constructor(receipt: unknown) {
+    super("Discord parent-category permission-sync operation key has already been reserved")
+    this.name = "ChannelPermissionSyncOperationConflictError"
+    this.receipt = receipt
+  }
+}
+
+export class ChannelPermissionSyncExecutionError extends Error {
+  readonly result: unknown
+
+  constructor(message: string, result: unknown, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ChannelPermissionSyncExecutionError"
+    this.result = result
+  }
+}
+
 export class RoleCreationPlanChangedError extends Error {
   readonly actualDigest: string
   readonly expectedDigest: string

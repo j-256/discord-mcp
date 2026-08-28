@@ -173,6 +173,8 @@ export interface PolicyDescription {
   onboardingGuildIds: string[]
   permissionOverwriteChannelIds: string[]
   permissionOverwritesEnabled: boolean
+  permissionSyncChannelIds: string[]
+  permissionSyncsEnabled: boolean
   protectedUserCount: number
   pinChannelIds: string[]
   pinManagementEnabled: boolean
@@ -312,6 +314,7 @@ export class ScopePolicy {
   readonly #allowOnboardingAudit: boolean
   readonly #allowOnboardingChanges: boolean
   readonly #allowPermissionOverwrites: boolean
+  readonly #allowPermissionSyncs: boolean
   readonly #allowPinManagement: boolean
   readonly #allowPollAudit: boolean
   readonly #allowPollCreation: boolean
@@ -449,6 +452,7 @@ export class ScopePolicy {
   readonly #mcpReadResponseMaxBytes: number
   readonly #onboardingGuildIds: ReadonlySet<string>
   readonly #permissionOverwriteChannelIds: ReadonlySet<string>
+  readonly #permissionSyncChannelIds: ReadonlySet<string>
   readonly #protectedUserIds: ReadonlySet<string>
   readonly #pinChannelIds: ReadonlySet<string>
   readonly #pollChannelIds: ReadonlySet<string>
@@ -555,6 +559,7 @@ export class ScopePolicy {
     | "allowOnboardingChanges"
     | "allowGuildScaffolds"
     | "allowPermissionOverwrites"
+    | "allowPermissionSyncs"
     | "allowPinManagement"
     | "allowPollAudit"
     | "allowPollCreation"
@@ -673,6 +678,7 @@ export class ScopePolicy {
     | "mcpReadResponseMaxBytes"
     | "onboardingGuildIds"
     | "permissionOverwriteChannelIds"
+    | "permissionSyncChannelIds"
     | "pinChannelIds"
     | "pollChannelIds"
     | "reactionChannelIds"
@@ -761,6 +767,7 @@ export class ScopePolicy {
     this.#allowOnboardingAudit = config.allowOnboardingAudit ?? false
     this.#allowOnboardingChanges = config.allowOnboardingChanges ?? false
     this.#allowPermissionOverwrites = config.allowPermissionOverwrites ?? false
+    this.#allowPermissionSyncs = config.allowPermissionSyncs ?? false
     this.#allowPinManagement = config.allowPinManagement ?? false
     this.#allowPollAudit = config.allowPollAudit ?? false
     this.#allowPollCreation = config.allowPollCreation ?? false
@@ -907,6 +914,7 @@ export class ScopePolicy {
       ?? MCP_READ_RESPONSE_DEFAULTS.maxBytes
     this.#onboardingGuildIds = config.onboardingGuildIds ?? new Set()
     this.#permissionOverwriteChannelIds = config.permissionOverwriteChannelIds ?? new Set()
+    this.#permissionSyncChannelIds = config.permissionSyncChannelIds ?? new Set()
     this.#protectedUserIds = config.protectedUserIds
     this.#pinChannelIds = config.pinChannelIds ?? new Set()
     this.#pollChannelIds = config.pollChannelIds ?? new Set()
@@ -1229,6 +1237,9 @@ export class ScopePolicy {
       permissionOverwriteChannelIds: [...this.#permissionOverwriteChannelIds].sort(),
       permissionOverwritesEnabled: this.#allowPermissionOverwrites
         && this.#permissionOverwriteChannelIds.size > 0,
+      permissionSyncChannelIds: [...this.#permissionSyncChannelIds].sort(),
+      permissionSyncsEnabled: this.#allowPermissionSyncs
+        && this.#permissionSyncChannelIds.size > 0,
       protectedUserCount: this.#protectedUserIds.size,
       pinChannelIds: [...this.#pinChannelIds].sort(),
       pinManagementEnabled: this.#allowPinManagement && this.#pinChannelIds.size > 0,
@@ -3030,6 +3041,20 @@ export class ScopePolicy {
     }
     if (!this.#permissionOverwriteChannelIds.has(channel.id)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the permission-overwrite scope`)
+    }
+    return guildId
+  }
+
+  assertChannelPermissionSyncAllowed(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowPermissionSyncs) {
+      throw new PolicyError("Discord parent-category permission synchronization is disabled by connector configuration")
+    }
+    if (this.#permissionSyncChannelIds.size === 0) {
+      throw new PolicyError("Discord parent-category permission synchronization requires an explicit channel allowlist")
+    }
+    if (!this.#permissionSyncChannelIds.has(channel.id)) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the parent-category permission-sync scope`)
     }
     return guildId
   }

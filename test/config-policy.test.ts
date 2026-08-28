@@ -102,6 +102,7 @@ test("configuration parses bounded scope and deletion controls", () => {
       interactions: true,
       memberDirectory: true,
       permissionOverwrites: true,
+      permissionSyncs: true,
       pinManagement: true,
     },
     identity: {
@@ -125,6 +126,7 @@ test("configuration parses bounded scope and deletion controls", () => {
       mentionUserIds: [USER_ID],
       memberDirectoryGuildIds: [GUILD_ID],
       permissionOverwriteChannelIds: [CHANNEL_ID],
+      permissionSyncChannelIds: [CHANNEL_ID],
       pinChannelIds: [CHANNEL_ID],
       protectedUserIds: [USER_ID],
     },
@@ -164,6 +166,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.deepEqual([...config.memberRoleIds], [])
   assert.equal(config.allowPermissionOverwrites, true)
   assert.deepEqual([...config.permissionOverwriteChannelIds], [CHANNEL_ID])
+  assert.equal(config.allowPermissionSyncs, true)
+  assert.deepEqual([...config.permissionSyncChannelIds], [CHANNEL_ID])
   assert.equal(config.allowPinManagement, true)
   assert.deepEqual([...config.pinChannelIds], [CHANNEL_ID])
   assert.equal(config.allowRoleCreation, false)
@@ -380,6 +384,8 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
+    permissionSyncChannelIds: [],
+    permissionSyncsEnabled: false,
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,
@@ -1887,6 +1893,8 @@ test("configuration and policy require an exact administration guild and protect
     mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
+    permissionSyncChannelIds: [],
+    permissionSyncsEnabled: false,
     protectedUserCount: 1,
     pinChannelIds: [],
     pinManagementEnabled: false,
@@ -5475,6 +5483,52 @@ test("configuration and policy isolate permission overwrites to exact readable c
   assert.deepEqual(enabled.describe().permissionOverwriteChannelIds, [CHANNEL_ID])
 })
 
+test("configuration and policy isolate parent-category permission sync to an exact opt-in child scope", () => {
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      capabilities: { permissionSyncs: true },
+      readScope: { channelIds: [CHANNEL_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /permissionSyncChannelIds/,
+  )
+  assert.throws(
+    () => loadConnectorConfig({
+      token: TOKEN,
+      readScope: { channelIds: [CHANNEL_ID] },
+      scopes: { permissionSyncChannelIds: [OTHER_CHANNEL_ID] },
+    }, { homeDirectory: "/test/home" }),
+    /must be a subset/,
+  )
+
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    readScope: { channelIds: [CHANNEL_ID] },
+    scopes: { permissionSyncChannelIds: [CHANNEL_ID] },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertChannelPermissionSyncAllowed(channel()),
+    /permission synchronization is disabled/,
+  )
+
+  const enabledConfig = loadConnectorConfig({
+    token: TOKEN,
+    capabilities: { permissionSyncs: true },
+    readScope: { channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID] },
+    scopes: { permissionSyncChannelIds: [CHANNEL_ID] },
+  }, { homeDirectory: "/test/home" })
+  const enabled = new ScopePolicy(enabledConfig)
+  assert.equal(enabledConfig.allowPermissionSyncs, true)
+  assert.deepEqual([...enabledConfig.permissionSyncChannelIds], [CHANNEL_ID])
+  assert.equal(enabled.assertChannelPermissionSyncAllowed(channel()), GUILD_ID)
+  assert.throws(
+    () => enabled.assertChannelPermissionSyncAllowed(channel({ id: OTHER_CHANNEL_ID })),
+    /outside the parent-category permission-sync scope/,
+  )
+  assert.equal(enabled.describe().permissionSyncsEnabled, true)
+  assert.deepEqual(enabled.describe().permissionSyncChannelIds, [CHANNEL_ID])
+})
+
 test("configuration rejects interaction channels outside exact read scope and invalid guard limits", () => {
   assert.throws(
     () => loadConnectorConfig({
@@ -5841,6 +5895,8 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     mcpReadResponseMaxBytes: 1_048_576,
     permissionOverwriteChannelIds: [],
     permissionOverwritesEnabled: false,
+    permissionSyncChannelIds: [],
+    permissionSyncsEnabled: false,
     protectedUserCount: 0,
     pinChannelIds: [],
     pinManagementEnabled: false,

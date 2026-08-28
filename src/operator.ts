@@ -226,6 +226,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   guildSettingsChangePolicy: "guild-settings-change-policy",
   observability: "observability",
   permissionOverwritePolicy: "permission-overwrite-policy",
+  permissionSyncPolicy: "permission-sync-policy",
   pollAuditPolicy: "poll-audit-policy",
   pollCreationPolicy: "poll-creation-policy",
   pollEndPolicy: "poll-end-policy",
@@ -582,6 +583,9 @@ function policyWarnings(config: ConnectorConfig): string[] {
     && config.permissionOverwriteChannelIds.size === 0
   ) {
     warnings.push("The permission-overwrite toggle is enabled but channel permission changes remain blocked because an exact channel allowlist is required")
+  }
+  if (config.allowPermissionSyncs && config.permissionSyncChannelIds.size === 0) {
+    warnings.push("The parent-category permission-sync toggle is enabled but synchronization remains blocked because an exact direct child-channel allowlist is required")
   }
   if (config.allowForumPosts && config.forumPostChannelIds.size === 0) {
     warnings.push("The forum-post toggle is enabled but forum-post creation remains blocked because no forum-channel allowlist is configured")
@@ -1113,6 +1117,7 @@ function policyWarnings(config: ConnectorConfig): string[] {
       "Native poll audit and reviewed changes",
     ],
     [config.allowPermissionOverwrites, "permission-overwrites", "Channel permission overwrites"],
+    [config.allowPermissionSyncs, "permission-sync", "Parent-category permission synchronization"],
     [config.allowRoleCreation, "role-creation", "Role creation"],
     [config.allowRoleConfiguration, "role-configuration", "Role configuration"],
     [
@@ -2235,6 +2240,25 @@ export async function diagnoseConnector(
         DOCTOR_CHECK_IDS.permissionOverwritePolicy,
         "pass",
         `Reviewed channel permission-overwrite changes are constrained to ${config.permissionOverwriteChannelIds.size} exact channels with named deltas, one-shot execution, and full-set readback`,
+      ))
+    }
+    if (!config.allowPermissionSyncs) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.permissionSyncPolicy,
+        "pass",
+        "Reviewed parent-category permission synchronization is disabled",
+      ))
+    } else if (config.permissionSyncChannelIds.size === 0) {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.permissionSyncPolicy,
+        "warn",
+        "Parent-category permission synchronization is enabled, but the required exact direct child-channel allowlist is empty",
+      ))
+    } else {
+      checks.push(check(
+        DOCTOR_CHECK_IDS.permissionSyncPolicy,
+        "pass",
+        `Reviewed parent-category permission synchronization is constrained to ${config.permissionSyncChannelIds.size} exact direct child channels with complete child and parent overwrite review, protected-member checks, connector continuity proof, signed approval, one-shot non-retried replacement, and exact synchronized-state readback`,
       ))
     }
     if (!config.allowRoleCreation) {
