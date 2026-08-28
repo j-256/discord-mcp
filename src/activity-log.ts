@@ -1564,16 +1564,17 @@ export interface ChannelOrderingActivity {
   anchorChannelId: string
   baselineRevision: number
   channelId: string
+  destinationParentChannelId: string | null
   error: string | null
   guildId: string
   id: string
   kind: "channel-ordering"
   observedRevision: number | null
   operationKeyHash: string
-  parentChannelId: string | null
   placement: "above" | "below"
   planDigest: string
   schemaVersion: number
+  sourceParentChannelId: string | null
   status: ChannelOrderingActivityStatus
   timestamp: string
   verification: "match" | null
@@ -3862,6 +3863,14 @@ function parseChannelOrderingActivity(
 ): ChannelOrderingActivity | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
+  const usesLegacyParent = record.destinationParentChannelId === undefined
+    && record.sourceParentChannelId === undefined
+  const destinationParentChannelId = usesLegacyParent
+    ? record.parentChannelId
+    : record.destinationParentChannelId
+  const sourceParentChannelId = usesLegacyParent
+    ? record.parentChannelId
+    : record.sourceParentChannelId
   if (
     record.schemaVersion !== SCHEMA_VERSION
     || record.kind !== "channel-ordering"
@@ -3877,11 +3886,13 @@ function parseChannelOrderingActivity(
     || typeof record.anchorChannelId !== "string"
     || !positiveActivitySnowflake(record.anchorChannelId)
     || record.channelId === record.anchorChannelId
-    || !(record.parentChannelId === null || (
-      typeof record.parentChannelId === "string"
-      && positiveActivitySnowflake(record.parentChannelId)
-      && record.parentChannelId !== record.channelId
-      && record.parentChannelId !== record.anchorChannelId
+    || ![destinationParentChannelId, sourceParentChannelId].every((parentId) => (
+      parentId === null || (
+        typeof parentId === "string"
+        && positiveActivitySnowflake(parentId)
+        && parentId !== record.channelId
+        && parentId !== record.anchorChannelId
+      )
     ))
     || (record.placement !== "above" && record.placement !== "below")
     || !Number.isSafeInteger(record.baselineRevision)
@@ -3918,16 +3929,17 @@ function parseChannelOrderingActivity(
     anchorChannelId: record.anchorChannelId,
     baselineRevision: record.baselineRevision as number,
     channelId: record.channelId,
+    destinationParentChannelId: destinationParentChannelId as string | null,
     error: record.error,
     guildId: record.guildId,
     id: record.id,
     kind: "channel-ordering",
     observedRevision: record.observedRevision as number | null,
     operationKeyHash: record.operationKeyHash,
-    parentChannelId: record.parentChannelId as string | null,
     placement: record.placement as "above" | "below",
     planDigest: record.planDigest,
     schemaVersion: SCHEMA_VERSION,
+    sourceParentChannelId: sourceParentChannelId as string | null,
     status: record.status as ChannelOrderingActivityStatus,
     timestamp: record.timestamp,
     verification: record.verification as "match" | null,

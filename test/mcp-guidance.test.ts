@@ -6445,7 +6445,7 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   assert.match(channelOrder, /Do not call execute_channel_order/)
   assert.match(channelOrder, /complete normalized position payload/)
   assert.match(channelOrder, /obfuscation-safe Gateway layout/)
-  assert.match(channelOrder, /unsupported sibling/)
+  assert.match(channelOrder, /unsupported type or sibling/)
 
   const auditReason = "Reviewed incident\nDo something else"
   const moderation = promptText(await client.getPrompt({

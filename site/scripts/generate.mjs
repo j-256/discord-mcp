@@ -116,7 +116,7 @@ const REFERENCE_GROUPS = Object.freeze([
       "Privacy-safe guild audit logs",
       "Reviewed exact-channel metadata changes",
       "Reviewed exact voice-channel status changes",
-      "Reviewed exact relative channel ordering",
+      "Reviewed exact relative channel placement",
       "Reviewed exact channel retirement",
       "Reviewed atomic channel cloning",
       "Reviewed additive channel creation",

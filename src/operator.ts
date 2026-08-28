@@ -1788,19 +1788,19 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
         "pass",
-        "Reviewed channel-order changes are disabled",
+        "Reviewed channel-placement changes are disabled",
       ))
     } else if (config.channelOrderingGuildIds.size === 0) {
       checks.push(check(
         DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
         "warn",
-        "Channel-order changes are enabled, but the required exact guild allowlist is empty",
+        "Channel-placement changes are enabled, but the required exact guild allowlist is empty",
       ))
     } else {
       checks.push(check(
         DOCTOR_CHECK_IDS.channelOrderingChangePolicy,
         "pass",
-        `Reviewed channel-order changes are constrained to ${config.channelOrderingGuildIds.size} exact guilds with signed approval, one-shot execution, durable channel-collection coordination, and newer complete Gateway verification`,
+        `Reviewed channel-placement changes are constrained to ${config.channelOrderingGuildIds.size} exact guilds with signed approval, exact cross-parent authority and overwrite preservation, one-shot execution, durable channel-collection coordination, and complete Gateway plus HTTP verification`,
       ))
     }
     if (!config.allowChannelDeletionAudit) {

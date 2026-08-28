@@ -491,6 +491,7 @@ function channelOrdering(
     anchorChannelId: "251",
     baselineRevision: 4,
     channelId: "250",
+    destinationParentChannelId: "200",
     error: ["failed", "uncertain"].includes(status)
       ? "DiscordApiError.500.unknown"
       : null,
@@ -499,10 +500,10 @@ function channelOrdering(
     kind: "channel-ordering",
     observedRevision: status === "completed" ? 5 : null,
     operationKeyHash: `sha256:${"8".repeat(64)}`,
-    parentChannelId: "200",
     placement: "above",
     planDigest: `hmac-sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
+    sourceParentChannelId: "200",
     status,
     timestamp: `2026-08-14T00:00:0${id}.000Z`,
     verification: status === "completed" ? "match" : null,
@@ -2414,7 +2415,13 @@ test("JSONL activity log keeps channel-ordering evidence content-free", async (c
       },
       {
         ...channelOrdering("6", "completed"),
-        parentChannelId: "250",
+        destinationParentChannelId: "250",
+      },
+      {
+        ...channelOrdering("7", "completed"),
+        destinationParentChannelId: undefined,
+        parentChannelId: "200",
+        sourceParentChannelId: undefined,
       },
     ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
     "utf8",
@@ -2423,7 +2430,7 @@ test("JSONL activity log keeps channel-ordering evidence content-free", async (c
   const result = await store.list()
   const persisted = await readFile(file, "utf8")
 
-  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["7", "2", "1"])
   assert.equal(result.skippedLines, 4)
   assert.deepEqual(
     Object.keys(result.entries[0] || {}).sort(),
@@ -2431,16 +2438,17 @@ test("JSONL activity log keeps channel-ordering evidence content-free", async (c
       "anchorChannelId",
       "baselineRevision",
       "channelId",
+      "destinationParentChannelId",
       "error",
       "guildId",
       "id",
       "kind",
       "observedRevision",
       "operationKeyHash",
-      "parentChannelId",
       "placement",
       "planDigest",
       "schemaVersion",
+      "sourceParentChannelId",
       "status",
       "timestamp",
       "verification",

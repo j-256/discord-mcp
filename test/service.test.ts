@@ -3231,6 +3231,110 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
   assert.equal(writeCoordinator.intents.length, 48)
 })
 
+test("service coordinates cross-parent channel placement through both exact parents", async () => {
+  const sourceParentId = "400000000000000010"
+  const destinationParentId = "400000000000000011"
+  const connectorRoleId = "700000000000000010"
+  const orderedChannels = [
+    channel({
+      id: sourceParentId,
+      name: "source",
+      parent_id: null,
+      position: 0,
+      type: DISCORD_CHANNEL_TYPES.category,
+    }),
+    channel({
+      id: destinationParentId,
+      name: "destination",
+      parent_id: null,
+      position: 1,
+      type: DISCORD_CHANNEL_TYPES.category,
+    }),
+    channel({
+      id: CHANNEL_ID,
+      name: "target",
+      parent_id: sourceParentId,
+      position: 0,
+    }),
+    channel({
+      id: OTHER_CHANNEL_ID,
+      name: "anchor",
+      parent_id: destinationParentId,
+      position: 0,
+    }),
+  ]
+  const gateway = completeChannelGateway(orderedChannels)
+  const writeCoordinator = new CapturingWriteCoordinator()
+  const { service } = serviceFixture({
+    client: {
+      async getGuild() {
+        return { ...guild(), owner_id: "800000000000000001" }
+      },
+      async getGuildChannels() {
+        return orderedChannels
+      },
+      async getGuildMember() {
+        return {
+          roles: [connectorRoleId],
+          user: bot(),
+        }
+      },
+      async getGuildRoles() {
+        return [
+          role(GUILD_ID, DISCORD_PERMISSIONS.VIEW_CHANNEL, "@everyone"),
+          {
+            ...role(
+              connectorRoleId,
+              DISCORD_PERMISSIONS.MANAGE_CHANNELS,
+              "connector",
+            ),
+            managed: true,
+            position: 1,
+            tags: { bot_id: BOT_ID },
+          },
+        ]
+      },
+    },
+    configOverrides: {
+      capabilities: {
+        channelOrderingAudit: true,
+        channelOrderingChanges: true,
+      },
+      gateway: { enabled: true },
+      readScope: { guildIds: [GUILD_ID] },
+      scopes: { channelOrderingGuildIds: [GUILD_ID] },
+    },
+    gateway,
+    writeCoordinator,
+  })
+  const request = {
+    anchorChannelId: OTHER_CHANNEL_ID,
+    auditReason: "reviewed",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: "cross-parent-coordination-operation-0001",
+    placement: "above" as const,
+  }
+  const plan = await service.planChannelOrder(request)
+
+  await assert.rejects(
+    () => service.executeChannelOrder(request, plan.digest),
+    (error: unknown) => error === writeCoordinator.stop,
+  )
+  assert.deepEqual(writeCoordinator.intents, [{
+    kind: "channel-ordering",
+    operationKeyHash: operationKeyHash(request.operationKey),
+    planDigest: plan.digest,
+    targets: [
+      { id: CHANNEL_ID, kind: "channel" },
+      { id: OTHER_CHANNEL_ID, kind: "channel" },
+      { id: sourceParentId, kind: "channel" },
+      { id: destinationParentId, kind: "channel" },
+      { collection: "channels", guildId: GUILD_ID, kind: "guild-collection" },
+    ],
+  }])
+})
+
 test("service coordinates global application commands by the exact application-wide collection", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
   const { service } = serviceFixture({

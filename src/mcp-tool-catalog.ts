@@ -291,7 +291,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "voice-channel-status-change",
   },
   execute_channel_order: {
-    keywords: ["above", "below", "channel", "execute", "layout", "order", "position"],
+    keywords: ["above", "below", "category", "channel", "execute", "layout", "move", "order", "parent", "position", "reparent"],
     toolset: "channel-ordering",
     workflow: "channel-ordering",
   },
@@ -896,7 +896,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "voice-channel-status-change",
   },
   plan_channel_order: {
-    keywords: ["above", "below", "channel", "layout", "order", "plan", "position", "review"],
+    keywords: ["above", "below", "category", "channel", "layout", "move", "order", "parent", "plan", "position", "reparent", "review"],
     toolset: "channel-ordering",
     workflow: "channel-ordering",
   },
