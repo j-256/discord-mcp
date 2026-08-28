@@ -205,6 +205,11 @@ export interface GuildPageOptions extends RequestOptions {
   limit?: number
 }
 
+export interface DiscordGuildMembershipPage {
+  discardedFieldCount: number
+  guildIds: string[]
+}
+
 export interface GuildAuditLogPageOptions extends RequestOptions {
   actionType?: number
   actorUserId?: string
@@ -8522,6 +8527,38 @@ function compareDiscordSnowflakes(left: string, right: string): number {
   return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
 }
 
+function projectCurrentUserGuildMembershipPage(
+  value: unknown,
+  maximumGuilds: number,
+): DiscordGuildMembershipPage {
+  const invalid = (): DiscordTransportError => new DiscordTransportError(
+    "Discord returned invalid bot guild-membership evidence",
+    "discord-client-error",
+  )
+  if (!Array.isArray(value) || value.length > maximumGuilds) throw invalid()
+  const guildIds: string[] = []
+  const seenGuildIds = new Set<string>()
+  let discardedFieldCount = 0
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw invalid()
+    const record = item as Record<string, unknown>
+    const guildId = record.id
+    if (
+      typeof guildId !== "string"
+      || !DISCORD_SNOWFLAKE_PATTERN.test(guildId)
+      || BigInt(guildId) < 1n
+      || BigInt(guildId) > DISCORD_SNOWFLAKE_MAX
+      || BigInt(guildId).toString() !== guildId
+      || seenGuildIds.has(guildId)
+    ) throw invalid()
+    seenGuildIds.add(guildId)
+    guildIds.push(guildId)
+    discardedFieldCount += Object.keys(record).filter((key) => key !== "id").length
+    if (!Number.isSafeInteger(discardedFieldCount)) throw invalid()
+  }
+  return { discardedFieldCount, guildIds }
+}
+
 function projectBulkGuildBanResponse(
   value: unknown,
   requestedUserIds: readonly string[],
@@ -9780,6 +9817,34 @@ export class DiscordClient {
       with_counts: false,
     })}`
     return this.#request("list_current_user_guilds", route, options)
+  }
+
+  async listCurrentUserGuildMemberships(
+    options: GuildPageOptions = {},
+  ): Promise<DiscordGuildMembershipPage> {
+    assertBoundedLimit(
+      options.limit,
+      DISCORD_LIMITS.currentUserGuilds,
+      "Discord guild-membership page limit",
+    )
+    assertExclusiveCursors({ after: options.after, before: options.before })
+    const limit = options.limit ?? DISCORD_LIMITS.currentUserGuilds
+    const route = `/users/@me/guilds${queryString({
+      after: options.after,
+      before: options.before,
+      limit,
+      with_counts: false,
+    })}`
+    const response = await this.#request<unknown>(
+      "list_current_user_guilds",
+      route,
+      {
+        ...options,
+        maxResponseBytes: DISCORD_LIMITS.currentUserGuildResponseBytes,
+        suppressFailureCause: true,
+      },
+    )
+    return projectCurrentUserGuildMembershipPage(response, limit)
   }
 
   async leaveGuild(

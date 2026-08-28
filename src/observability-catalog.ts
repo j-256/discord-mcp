@@ -3,6 +3,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   check_soundboard_playback: "discord-read",
   analyze_community_activity: "discord-read",
   audit_application_commands: "discord-read",
+  audit_bot_installations: "discord-read",
   audit_application_entitlements: "discord-read",
   audit_application_posture: "discord-read",
   audit_application_role_connection_metadata: "discord-read",

@@ -54,6 +54,14 @@ Project the response before returning it. Permit only verified IDs, booleans, fi
 
 Keep per-context installation defaults separate from legacy defaults. Report Administrator and unknown authority explicitly. Treat outgoing-webhook and Gateway Interaction delivery as mutually exclusive, require only the privileged intents selected connector capabilities need, and warn about unused Presence intent without enabling a presence workload. Findings and remediation text must come from a fixed local vocabulary, never from Discord-provided text.
 
+## Bot installation drift
+
+Audit installed guild membership only through an authenticated current application and bot already verified against the exact configured identities. Enumerate the Get Current User Guilds endpoint from an explicit zero cursor in fixed maximum-size pages with approximate member and presence counts disabled. Bound every response body, page, total installed-guild count, discarded-field count, and returned result before use.
+
+Project each guild object to one unique canonical positive ID at the REST boundary. Never return, persist, log, trace, or retain guild names, icons, ownership, permissions, features, member or presence counts, unknown values, raw payloads, transport details, or partial pages. Fail the whole audit on malformed evidence, duplicates within or across pages, a non-advancing cursor, an unsafe bound, or any request failure. Require an empty terminator after an exact full local bound.
+
+Compare the complete verified installed set with the configuration's exact guild read scope and return only sorted configured, installed, installed-in-scope, missing, and unexpected IDs plus fixed completeness and privacy evidence. Treat unexpected installation visibility as diagnostic evidence, never as authority. Do not expand local scope, rewrite policy, resolve display metadata, leave a guild, perform another mutation, create an activity or operation record, open the Gateway, or persist the result. Missing configured installations must fail online setup and verification; unexpected installations must remain an explicit warning for deliberate operator remediation. Describe multi-page evidence as a bounded completed enumeration, not an atomic Discord snapshot or proof of channel access, effective permission, consent, future membership, or write authority.
+
 ## Application Activity instances
 
 Inspect Activity instances only for the configured and verified current application and bot. Accept one bounded opaque instance ID plus one exact expected guild and channel already inside ordinary read scope, and optionally one exact user ID for a boolean membership answer. Accept no caller-selected application, participant enumeration, private-channel target, display name, profile, token, URL, Gateway dependency, cache, write, activity record, operation receipt, telemetry payload, or persistent file.

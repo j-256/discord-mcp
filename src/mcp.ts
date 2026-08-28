@@ -9752,6 +9752,7 @@ export interface DiscordToolService {
   checkSoundboardPlayback: ConnectorService["checkSoundboardPlayback"]
   analyzeCommunityActivity: ConnectorService["analyzeCommunityActivity"]
   auditApplicationCommands: ConnectorService["auditApplicationCommands"]
+  auditBotInstallations: ConnectorService["auditBotInstallations"]
   auditApplicationEntitlements: ConnectorService["auditApplicationEntitlements"]
   auditApplicationRoleConnectionMetadata: ConnectorService["auditApplicationRoleConnectionMetadata"]
   auditApplicationSkus: ConnectorService["auditApplicationSkus"]
@@ -20121,6 +20122,31 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     safeToolHandler("get_connector_status", async (_input: z.infer<typeof emptyInputSchema>, context) => {
       const result = await service.getStatus({ signal: context.mcpReq.signal })
       return toolResult(result, `Discord connector verified application ${result.application.id} and bot ${result.bot.id}`)
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("audit_bot_installations", server.registerTool(
+    "audit_bot_installations",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Verify pinned application and bot identity, scan the complete bounded current guild membership from an explicit zero cursor, and compare exact installed IDs with configured outer guild scope. Returns missing and unexpected IDs while omitting guild names, icons, permissions, features, member counts, presence counts, and raw payloads; persists nothing and grants no authority outside scope.",
+      inputSchema: emptyInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Audit Discord bot installations",
+    },
+    safeToolHandler("audit_bot_installations", async (
+      _input: z.infer<typeof emptyInputSchema>,
+      context,
+    ) => {
+      const result = await service.auditBotInstallations({
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        result.drift.detected
+          ? `Discord bot installation drift found ${result.drift.missingConfiguredGuildIds.length} missing configured guilds and ${result.drift.unexpectedGuildIds.length} unexpected guilds`
+          : `Discord bot installations exactly match ${result.configuredGuildIds.length} configured guilds`,
+      )
     }, secrets, observability),
   ))
 

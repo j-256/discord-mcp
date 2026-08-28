@@ -224,6 +224,7 @@ function rawRole(id = ROLE_ID): DiscordRole {
 interface GuidanceCalls {
   activity: number
   attachmentReads: number
+  botInstallations: number
   applicationCommands: number
   applicationRoleConnectionMetadata: number
   applicationSkus: number
@@ -295,6 +296,7 @@ function guidanceService(options: {
   const calls: GuidanceCalls = {
     activity: 0,
     attachmentReads: 0,
+    botInstallations: 0,
     applicationCommands: 0,
     applicationRoleConnectionMetadata: 0,
     applicationSkus: 0,
@@ -365,6 +367,35 @@ function guidanceService(options: {
         botId: BOT_ID,
         guildId,
       })
+    },
+    async auditBotInstallations() {
+      calls.botInstallations += 1
+      return {
+        completeness: {
+          complete: true as const,
+          maximumGuilds: 400,
+          pageSize: 200,
+          pagesRead: 1,
+        },
+        configuredGuildIds: [GUILD_ID],
+        discardedGuildFieldCount: 4,
+        drift: {
+          detected: false,
+          missingConfiguredGuildIds: [],
+          unexpectedGuildIds: [],
+        },
+        identity: { applicationId: APPLICATION_ID, botId: BOT_ID },
+        installedGuildIds: [GUILD_ID],
+        installedInScopeGuildIds: [GUILD_ID],
+        privacy: {
+          guildMetadata: "id-only" as const,
+          memberAndPresenceCounts: "not-requested" as const,
+          persistence: "none" as const,
+          rawPayloads: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "complete" as const,
+      }
     },
     auditApplicationEntitlements: unexpected,
     getApplicationEntitlement: unexpected,
@@ -3145,6 +3176,7 @@ async function connectedFixture(
 function totalCalls(calls: GuidanceCalls): number {
   return calls.activity
     + calls.attachmentReads
+    + calls.botInstallations
     + calls.applicationCommands
     + calls.applicationRoleConnectionMetadata
     + calls.applicationSkus
@@ -3249,6 +3281,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
       {
         name: MCP_RESOURCE_NAMES.applicationSkus,
         uri: MCP_RESOURCE_URIS.applicationSkus,
+      },
+      {
+        name: MCP_RESOURCE_NAMES.botInstallations,
+        uri: MCP_RESOURCE_URIS.botInstallations,
       },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
@@ -3474,6 +3510,47 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
     true,
   )
   assert.equal(totalCalls(calls), 0)
+})
+
+test("MCP installation guidance audits one complete ID-only inventory", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const resource = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.botInstallations,
+  )
+  const data = resource.value.data as Record<string, unknown>
+  assert.deepEqual(data.configuredGuildIds, [GUILD_ID])
+  assert.deepEqual(data.installedGuildIds, [GUILD_ID])
+  assert.deepEqual(data.installedInScopeGuildIds, [GUILD_ID])
+  assert.deepEqual(data.drift, {
+    detected: false,
+    missingConfiguredGuildIds: [],
+    unexpectedGuildIds: [],
+  })
+  assert.deepEqual(data.privacy, {
+    guildMetadata: "id-only",
+    memberAndPresenceCounts: "not-requested",
+    persistence: "none",
+    rawPayloads: "omitted",
+  })
+  assert.equal(
+    (resource.value.trust as Record<string, unknown>).classification,
+    "untrusted-external-data",
+  )
+  assert.equal(calls.botInstallations, 1)
+
+  const prompt = await client.getPrompt({
+    arguments: {},
+    name: MCP_PROMPT_NAMES.auditBotInstallations,
+  })
+  const text = promptText(prompt)
+  assert.match(text, /Call audit_bot_installations exactly once/u)
+  assert.match(text, /missing configured guild ID/u)
+  assert.match(text, /Do not resolve or infer guild names/u)
+  assert.match(text, /Do not call list_guilds, guild departure/u)
+  assert.equal(calls.botInstallations, 1)
+  assert.equal(totalCalls(calls), 1)
 })
 
 test("MCP guidance completes exact configured IDs without service calls", async (context) => {

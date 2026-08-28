@@ -18,6 +18,8 @@ If an MCP host reports that the connection closed during initialization, run `di
 
 Run `doctor --online` or another live probe only with a bot and guild you control and only when its documented Discord reads are acceptable. Do not publish raw probe output.
 
+If online doctor reports `guild-installation-drift`, review the exact IDs privately in Discord and the selected policy. A missing configured guild means the pinned bot is not installed there; an unexpected guild means the same bot is installed outside local read scope, not that the connector can act there. Remove an unintended installation through Discord, or add an intended guild to policy only through ordinary scope review, then rerun the audit after membership changes settle. Do not post the private IDs in an issue.
+
 ## Choose a route
 
 - Use the operator-question form for setup, policy, Discord permission or intent, MCP host, diagnostic, recovery, package, or container questions

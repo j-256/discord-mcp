@@ -438,6 +438,25 @@ export function registerDiscordResources(
   )
 
   server.registerResource(
+    MCP_RESOURCE_NAMES.botInstallations,
+    MCP_RESOURCE_URIS.botInstallations,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "Complete bounded ID-only comparison of the verified bot's installed Discord guilds with exact configured outer guild scope. Approximate counts are not requested, guild metadata is projected out before return, and nothing is persisted.",
+      mimeType: "application/json",
+      title: "Discord bot installation drift",
+    },
+    (uri, context) => jsonResource(
+      uri,
+      "discord-api",
+      "untrusted-external-data",
+      secrets,
+      () => service.auditBotInstallations({ signal: context.mcpReq.signal }),
+    ),
+  )
+
+  server.registerResource(
     MCP_RESOURCE_NAMES.guilds,
     MCP_RESOURCE_URIS.guilds,
     {

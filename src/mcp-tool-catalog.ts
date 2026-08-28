@@ -212,6 +212,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["application", "audit", "command", "context", "exposure", "install", "permission", "security", "slash"],
     toolset: "connector",
   },
+  audit_bot_installations: {
+    keywords: ["audit", "bot", "drift", "guild", "install", "scope", "server", "unexpected"],
+    toolset: "connector",
+  },
   audit_application_entitlements: {
     keywords: ["access", "application", "audit", "beneficiary", "entitlement", "monetization", "sku"],
     toolset: "application-monetization",

@@ -6,6 +6,7 @@ export const MCP_RESOURCE_NAMES = Object.freeze({
   applicationPosture: "application_posture",
   applicationRoleConnectionMetadata: "application_role_connection_metadata",
   applicationSkus: "application_skus",
+  botInstallations: "bot_installations",
   defaultSoundboard: "default_soundboard_sounds",
   guilds: "scoped_guilds",
   gatewayEvents: "gateway_events",
@@ -27,6 +28,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
   applicationPosture: "discord://application/posture",
   applicationRoleConnectionMetadata: "discord://application/role-connection-metadata",
   applicationSkus: "discord://application/skus",
+  botInstallations: "discord://connector/installations",
   defaultSoundboard: "discord://soundboard/defaults",
   guilds: "discord://guilds",
   gatewayEvents: "discord://gateway/events",
@@ -135,6 +137,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 })
 
 export const MCP_PROMPT_NAMES = Object.freeze({
+  auditBotInstallations: "audit_bot_installations",
   authorGuildBlueprint: "author_guild_blueprint",
   findGuildMembers: "find_guild_members",
   inspectGuildBan: "inspect_guild_ban",
@@ -226,6 +229,7 @@ type ToolsetBoundMcpPromptName = Exclude<
 >
 
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
+  [MCP_PROMPT_NAMES.auditBotInstallations]: "connector",
   [MCP_PROMPT_NAMES.authorGuildBlueprint]: "guild-blueprints",
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectGuildBan]: "bans",

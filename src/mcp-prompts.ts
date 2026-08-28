@@ -874,6 +874,7 @@ const inspectGuildBanPromptSchema = z.strictObject({
 const reviewApplicationCommandsPromptSchema = z.strictObject({
   guildId: positiveSnowflakeSchema.describe("Exact Discord guild ID"),
 })
+const auditBotInstallationsPromptSchema = z.strictObject({})
 const reviewApplicationRoleConnectionMetadataPromptSchema = z.strictObject({})
 const reviewApplicationMonetizationPromptSchema = z.strictObject({
   limit: decimalIntegerSchema(
@@ -3118,6 +3119,28 @@ export function registerDiscordPrompts(
         ],
       ),
       "Safe model-neutral Discord goal routing",
+      secrets,
+    ),
+  )
+  if (toolsets.has("connector")) server.registerPrompt(
+    MCP_PROMPT_NAMES.auditBotInstallations,
+    {
+      argsSchema: auditBotInstallationsPromptSchema,
+      description: "Compare the verified bot's complete bounded guild installation inventory with exact configured outer scope without resolving guild metadata, writing, or persisting Discord data.",
+      title: "Audit Discord bot installations",
+    },
+    () => userPrompt(
+      promptText(
+        {},
+        [
+          "1. Call audit_bot_installations exactly once with an empty input object.",
+          "2. Report the configured, installed, and installed-in-scope counts, then list every missing configured guild ID and unexpected guild ID exactly as returned. Do not resolve or infer guild names, owners, icons, permissions, features, member counts, presence counts, or any other omitted metadata.",
+          "3. State whether the complete bounded inventory exactly matches configured outer scope. Treat completeness, discarded-field count, request bound, and privacy projection as evidence, not authority to read an unexpected guild.",
+          "4. When drift exists, recommend removing an unintended bot installation or deliberately adding its exact ID through normal configuration review. Do not call list_guilds, guild departure, administration, configuration mutation, or any other read or write tool.",
+          "5. Stop after this audit. Persist no identifiers or Discord data.",
+        ],
+      ),
+      "Read-only privacy-safe Discord bot installation review",
       secrets,
     ),
   )
