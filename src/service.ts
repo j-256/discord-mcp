@@ -8,6 +8,10 @@ import {
   type ApplicationCommandAuditResult,
 } from "./application-command-audit-service.js"
 import {
+  BotInstallationAuditService,
+  type BotInstallationAuditResult,
+} from "./bot-installation-audit-service.js"
+import {
   ApplicationActivityInstanceService,
   type ApplicationActivityInstanceInspectionResult,
   type ApplicationActivityInstanceRequest,
@@ -1035,6 +1039,7 @@ export interface DiscordServiceClient {
   listApplicationEntitlements: DiscordClient["listApplicationEntitlements"]
   listApplicationSubscriptions: DiscordClient["listApplicationSubscriptions"]
   listCurrentUserGuilds: DiscordClient["listCurrentUserGuilds"]
+  listCurrentUserGuildMemberships: DiscordClient["listCurrentUserGuildMemberships"]
   listGuildAutoModerationRules: DiscordClient["listGuildAutoModerationRules"]
   listGuildApplicationCommands: DiscordClient["listGuildApplicationCommands"]
   listGuildApplicationCommandsWithLocalizations: DiscordClient["listGuildApplicationCommandsWithLocalizations"]
@@ -1535,11 +1540,12 @@ export function applicationPostureRequirementsForConfig(
   }
 }
 
-export const CONNECTOR_STATUS_SCHEMA_VERSION = 2
+export const CONNECTOR_STATUS_SCHEMA_VERSION = 3
 
 export const CONNECTOR_STATUS_PRIVACY = Object.freeze({
   applicationProfileText: "omitted" as const,
   botProfileText: "omitted" as const,
+  guildMetadata: "id-only" as const,
   localPaths: "omitted" as const,
   persistence: "none" as const,
   rawPayloads: "omitted" as const,
@@ -1565,6 +1571,7 @@ export class ConnectorService {
   readonly #applicationMonetizationAuditService: ApplicationMonetizationAuditService
   readonly #applicationIntentService: ApplicationIntentService
   readonly #botProfileService: BotProfileService
+  readonly #botInstallationAuditService: BotInstallationAuditService
   readonly #componentMessageService: ComponentMessageService
   readonly #communityActivityService: CommunityActivityService
   readonly #embedMessageService: EmbedMessageService
@@ -1641,6 +1648,10 @@ export class ConnectorService {
       token: options.config.token,
     })
     this.#policy = options.policy || new ScopePolicy(options.config)
+    this.#botInstallationAuditService = new BotInstallationAuditService({
+      client: this.#client,
+      configuredGuildIds: options.config.allowedGuildIds,
+    })
     this.#activityStore = options.activityStore || new JsonlActivityLog(options.config.auditFile)
     const gateway = options.gateway ?? new GatewayChannelLayoutStore({
       enabled: false,
@@ -2331,11 +2342,11 @@ export class ConnectorService {
   async getStatus(options: RequestOptions = {}) {
     const identity = await this.#verifyIdentity(options)
     const applicationPosture = this.#applicationPosture(identity)
-    const guilds = await this.#client.listCurrentUserGuilds({
-      limit: DISCORD_LIMITS.currentUserGuilds,
-      ...options,
-    })
-    const scopedGuilds = this.#policy.filterGuilds(guilds)
+    const installationAudit = await this.#botInstallationAuditService.audit(
+      identity.application.id,
+      identity.bot.id,
+      options,
+    )
     return {
       application: {
         guildMembersIntent: applicationPosture.privilegedIntents.guildMembers,
@@ -2346,10 +2357,7 @@ export class ConnectorService {
       bot: {
         id: identity.bot.id,
       },
-      guildPage: {
-        accessible: guilds.length,
-        inScope: scopedGuilds.length,
-      },
+      installationAudit,
       policy: this.describePolicy(),
       privacy: CONNECTOR_STATUS_PRIVACY,
       schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
@@ -2365,6 +2373,17 @@ export class ConnectorService {
         sharedStateRootRequired: true,
       },
     }
+  }
+
+  async auditBotInstallations(
+    options: RequestOptions = {},
+  ): Promise<BotInstallationAuditResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#botInstallationAuditService.audit(
+      identity.application.id,
+      identity.bot.id,
+      options,
+    )
   }
 
   async getApplicationPosture(

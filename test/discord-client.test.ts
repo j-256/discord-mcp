@@ -1461,6 +1461,91 @@ test("Discord client enforces pagination bounds outside the MCP adapter", () => 
     () => client.listCurrentUserGuilds({ limit: 201 }),
     /between 1 and 200/,
   )
+  assert.rejects(
+    () => client.listCurrentUserGuildMemberships({ limit: 201 }),
+    /between 1 and 200/,
+  )
+})
+
+test("Discord client projects bot guild membership to IDs at the REST boundary", async () => {
+  const privateGuildName = "private-guild-name"
+  let requestUrl = ""
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input) => {
+      requestUrl = String(input)
+      return jsonResponse([
+        {
+          features: ["COMMUNITY"],
+          icon: "private-icon",
+          id: "100",
+          name: privateGuildName,
+          permissions: "8",
+        },
+        {
+          approximate_member_count: 99,
+          id: "200",
+          name: "another-private-name",
+        },
+      ])
+    },
+    token: TOKEN,
+  })
+
+  const result = await client.listCurrentUserGuildMemberships({
+    after: "0",
+    limit: DISCORD_LIMITS.currentUserGuilds,
+  })
+
+  assert.equal(
+    requestUrl,
+    `${API_BASE_URL}/users/@me/guilds?after=0&limit=200&with_counts=false`,
+  )
+  assert.deepEqual(result, {
+    discardedFieldCount: 6,
+    guildIds: ["100", "200"],
+  })
+  assert.equal(JSON.stringify(result).includes(privateGuildName), false)
+  assert.equal(JSON.stringify(result).includes("private-icon"), false)
+})
+
+test("Discord client rejects malformed bot guild-membership evidence", async () => {
+  const invalidResponses: unknown[] = [
+    {},
+    [null],
+    [{ id: "0" }],
+    [{ id: "001" }],
+    [{ id: "100" }, { id: "100" }],
+    [{ id: "18446744073709551616" }],
+  ]
+  for (const response of invalidResponses) {
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => jsonResponse(response),
+      token: TOKEN,
+    })
+    await assert.rejects(
+      client.listCurrentUserGuildMemberships({ limit: 2 }),
+      (error: unknown) => (
+        error instanceof Error
+        && error.name === "DiscordTransportError"
+        && /invalid bot guild-membership evidence/.test(error.message)
+      ),
+    )
+  }
+
+  const oversizedPage = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse([
+      { id: "100" },
+      { id: "200" },
+    ]),
+    token: TOKEN,
+  })
+  await assert.rejects(
+    oversizedPage.listCurrentUserGuildMemberships({ limit: 1 }),
+    /invalid bot guild-membership evidence/,
+  )
 })
 
 test("Discord client leaves one exact guild with a non-retried empty DELETE", async () => {
@@ -1530,6 +1615,7 @@ test("Discord client suppresses guild-inventory and departure failure details", 
 
   for (const operation of [
     () => refused.listCurrentUserGuilds({ after: "900" }),
+    () => refused.listCurrentUserGuildMemberships({ after: "900" }),
     () => refused.leaveGuild("100"),
   ]) {
     await assert.rejects(
@@ -1552,6 +1638,7 @@ test("Discord client suppresses guild-inventory and departure failure details", 
   })
   for (const operation of [
     () => unavailable.listCurrentUserGuilds({ after: "900" }),
+    () => unavailable.listCurrentUserGuildMemberships({ after: "900" }),
     () => unavailable.leaveGuild("100"),
   ]) {
     await assert.rejects(

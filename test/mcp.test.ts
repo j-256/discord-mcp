@@ -52,6 +52,10 @@ import {
   WELCOME_SCREEN_LIMITS,
 } from "../src/constants.js"
 import {
+  BOT_INSTALLATION_AUDIT_PRIVACY,
+  BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+} from "../src/bot-installation-audit-service.js"
+import {
   normalizeBulkGuildBanRequest,
   type BulkGuildBanPlan,
   type BulkGuildBanRequest,
@@ -9972,6 +9976,32 @@ function serviceFixture(overrides: {
         guildId,
       })
     },
+    async auditBotInstallations() {
+      return {
+        completeness: {
+          complete: true as const,
+          maximumGuilds: 400,
+          pageSize: 200,
+          pagesRead: 1,
+        },
+        configuredGuildIds: [GUILD_ID],
+        discardedGuildFieldCount: 2,
+        drift: {
+          detected: false,
+          missingConfiguredGuildIds: [],
+          unexpectedGuildIds: [],
+        },
+        identity: {
+          applicationId: "500000000000000001",
+          botId: "600000000000000001",
+        },
+        installedGuildIds: [GUILD_ID],
+        installedInScopeGuildIds: [GUILD_ID],
+        privacy: BOT_INSTALLATION_AUDIT_PRIVACY,
+        schemaVersion: BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+        status: "complete" as const,
+      }
+    },
     async auditApplicationEntitlements(...arguments_) {
       if (overrides.applicationEntitlementError) {
         throw overrides.applicationEntitlementError
@@ -13236,7 +13266,30 @@ function serviceFixture(overrides: {
         },
         applicationPosture,
         bot: { id: "600000000000000001" },
-        guildPage: { accessible: 1, inScope: 1 },
+        installationAudit: {
+          completeness: {
+            complete: true as const,
+            maximumGuilds: 400,
+            pageSize: 200,
+            pagesRead: 1,
+          },
+          configuredGuildIds: [GUILD_ID],
+          discardedGuildFieldCount: 2,
+          drift: {
+            detected: false,
+            missingConfiguredGuildIds: [],
+            unexpectedGuildIds: [],
+          },
+          identity: {
+            applicationId: "500000000000000001",
+            botId: "600000000000000001",
+          },
+          installedGuildIds: [GUILD_ID],
+          installedInScopeGuildIds: [GUILD_ID],
+          privacy: BOT_INSTALLATION_AUDIT_PRIVACY,
+          schemaVersion: BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+          status: "complete" as const,
+        },
         policy: fixturePolicy(),
         privacy: CONNECTOR_STATUS_PRIVACY,
         schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
@@ -14578,6 +14631,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_application_subscriptions",
       "get_application_entitlement",
       "get_connector_status",
+      "audit_bot_installations",
       "parse_discord_reference",
       "get_observability_status",
       "get_gateway_status",
@@ -14817,6 +14871,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "list_activity",
       "discover_discord_tools",
     ],
+  )
+  assert.deepEqual(
+    listedTool(result.tools, "audit_bot_installations").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
   )
   const deletion = result.tools.find((tool) => tool.name === "delete_messages")
   const messagePin = result.tools.find((tool) => tool.name === "execute_message_pin")
@@ -17418,6 +17481,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "audit_application_role_connection_metadata",
       "audit_application_skus",
       "get_connector_status",
+      "audit_bot_installations",
       "parse_discord_reference",
       "analyze_community_activity",
       "read_messages",
@@ -17432,6 +17496,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
     (await client.listPrompts()).prompts.map(({ name }) => name),
     [
       "route_discord_goal",
+      "audit_bot_installations",
       "review_application_commands",
       "review_application_role_connection_metadata",
       "review_application_skus",
@@ -18649,6 +18714,11 @@ test("MCP Activity-instance inspection is exact-scope, count-only, and strict", 
 test("MCP status and safety resource disclose durable coordination boundaries", async (context) => {
   const { client } = await connectedFixture(context)
 
+  const installationAudit = structuredContent(await client.callTool({
+    arguments: {},
+    name: "audit_bot_installations",
+  }))
+
   const commands = structuredContent(await client.callTool({
     arguments: { guildId: GUILD_ID },
     name: "audit_application_commands",
@@ -18675,6 +18745,13 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
     messageContentIntent: "enabled",
   })
   assert.deepEqual(status.bot, { id: "600000000000000001" })
+  assert.deepEqual(status.installationAudit, installationAudit)
+  assert.deepEqual(installationAudit.drift, {
+    detected: false,
+    missingConfiguredGuildIds: [],
+    unexpectedGuildIds: [],
+  })
+  assert.deepEqual(installationAudit.privacy, BOT_INSTALLATION_AUDIT_PRIVACY)
   assert.deepEqual(status.privacy, CONNECTOR_STATUS_PRIVACY)
   assert.equal(status.schemaVersion, CONNECTOR_STATUS_SCHEMA_VERSION)
   assert.equal("auditFile" in status, false)

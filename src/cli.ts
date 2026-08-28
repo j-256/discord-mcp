@@ -1730,8 +1730,10 @@ function renderCoordinationResolution(report: WriteCoordinationResolution): stri
 function renderSetup(report: SetupReport): string {
   const lines = [
     `Discord MCP setup verified application ${report.applicationId} and bot ${report.botId}`,
-    `Accessible guilds on first page: ${report.guildsAccessibleOnFirstPage}`,
-    `In-scope guilds on first page: ${report.guildsInScopeOnFirstPage}`,
+    `Configured guild installations: ${report.configuredGuildCount}`,
+    `Installed guilds: ${report.installedGuildCount}`,
+    `Installed in-scope guilds: ${report.installedInScopeGuildCount}`,
+    `Unexpected guild installations: ${report.unexpectedGuildCount}`,
     `Tool surface: ${report.toolSurface}`,
     `Toolsets: ${report.toolsets.join(", ")}`,
   ]

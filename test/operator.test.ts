@@ -12,6 +12,10 @@ import {
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
 import {
+  BOT_INSTALLATION_AUDIT_PRIVACY,
+  BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+} from "../src/bot-installation-audit-service.js"
+import {
   projectApplicationPosture,
   type ApplicationPostureResult,
 } from "../src/application-posture.js"
@@ -57,6 +61,7 @@ const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
+const OTHER_GUILD_ID = "300000000000000002"
 const CHANNEL_ID = "400000000000000001"
 const SOURCE_CHANNEL_ID = "400000000000000002"
 const ROLE_ID = "500000000000000001"
@@ -167,6 +172,7 @@ function status(
   messageContentIntent: "disabled" | "enabled" | "unknown" = "enabled",
   guildMembersIntent: "disabled" | "enabled" | "unknown" = "enabled",
   posture?: ApplicationPostureResult,
+  configuredGuildIds: readonly string[] = [GUILD_ID],
 ): Awaited<ReturnType<ConnectorService["getStatus"]>> {
   const projectedPosture = projectApplicationPosture({
     bot_public: false,
@@ -199,9 +205,29 @@ function status(
     bot: {
       id: BOT_ID,
     },
-    guildPage: {
-      accessible: 2,
-      inScope,
+    installationAudit: {
+      completeness: {
+        complete: true,
+        maximumGuilds: 400,
+        pageSize: 200,
+        pagesRead: 1,
+      },
+      configuredGuildIds: [...configuredGuildIds],
+      discardedGuildFieldCount: 2,
+      drift: {
+        detected: inScope !== configuredGuildIds.length,
+        missingConfiguredGuildIds: configuredGuildIds.slice(inScope),
+        unexpectedGuildIds: [],
+      },
+      identity: {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+      },
+      installedGuildIds: [...configuredGuildIds.slice(0, inScope)],
+      installedInScopeGuildIds: [...configuredGuildIds.slice(0, inScope)],
+      privacy: BOT_INSTALLATION_AUDIT_PRIVACY,
+      schemaVersion: BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+      status: "complete",
     },
     policy: {
       administrationEnabled: false,
@@ -469,6 +495,7 @@ function toolService(
     analyzeCommunityActivity: unexpected,
     playSoundboardSound: unexpected,
     auditApplicationCommands: unexpected,
+    auditBotInstallations: unexpected,
     auditApplicationEntitlements: unexpected,
     getApplicationEntitlement: unexpected,
     auditApplicationRoleConnectionMetadata: unexpected,
@@ -5133,8 +5160,11 @@ test("doctor verifies identity online and redacts online failures", async () => 
   assert.deepEqual(verified.identity, {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
-    guildsAccessibleOnFirstPage: 2,
-    guildsInScopeOnFirstPage: 1,
+    configuredGuildCount: 1,
+    installedGuildCount: 1,
+    installedInScopeGuildCount: 1,
+    missingConfiguredGuildCount: 0,
+    unexpectedGuildCount: 0,
   })
   assert.equal(verified.status, "ok")
   assert.equal(failed.status, "error")
@@ -5661,7 +5691,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
       configOverrides: fixturePolicy(),
       service: statusProvider(0),
     }),
-    /no accessible guilds/,
+    /missing 1 of 1 exact configured guild installations/,
   )
 })
 
@@ -5736,12 +5766,22 @@ test("preset setup saves resolved read-only authority and forwards only its cred
       profileDirectory,
       profileName: "partial-scope",
       preset: {
-        guildIds: [GUILD_ID, "300000000000000002"],
+        guildIds: [GUILD_ID, OTHER_GUILD_ID],
         name: "server-observer",
       },
-      service: statusProvider(1),
+      service: {
+        async getStatus() {
+          return status(
+            1,
+            "enabled",
+            "enabled",
+            undefined,
+            [GUILD_ID, OTHER_GUILD_ID],
+          )
+        },
+      },
     }),
-    /access 1 of 2 exact preset guilds/,
+    /missing 1 of 2 exact configured guild installations/,
   )
 })
 
@@ -6141,6 +6181,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
+    "audit_bot_installations",
     "author_guild_blueprint",
     "find_guild_members",
     "inspect_guild_ban",
@@ -6224,6 +6265,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://application/role-connection-metadata",
     "discord://application/skus",
     "discord://connector/activity",
+    "discord://connector/installations",
     "discord://connector/observability",
     "discord://connector/policy",
     "discord://connector/safety",
@@ -6398,7 +6440,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
       configOverrides: fixturePolicy(),
       service: toolServiceWithoutScopedGuilds(),
     }),
-    /no accessible guilds/,
+    /incomplete configured guild installations/,
   )
 })
 
@@ -6568,6 +6610,23 @@ test("MCP smoke rejects connector status disclosure and altered privacy evidence
     {
       ...safeStatus,
       privacy: undefined,
+    },
+    {
+      ...safeStatus,
+      installationAudit: {
+        ...safeStatus.installationAudit,
+        completeness: {
+          ...safeStatus.installationAudit.completeness,
+          pagesRead: 2,
+        },
+      },
+    },
+    {
+      ...safeStatus,
+      installationAudit: {
+        ...safeStatus.installationAudit,
+        configuredGuildIds: [OTHER_GUILD_ID],
+      },
     },
   ] as unknown as Array<Awaited<ReturnType<ConnectorService["getStatus"]>>>
 

@@ -45,6 +45,7 @@ import {
   CONNECTOR_WEBSITE_URL,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+  DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
   MCP_DISCOVERY_TOOL_NAME,
@@ -52,6 +53,11 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
+import {
+  BOT_INSTALLATION_AUDIT_LIMITS,
+  BOT_INSTALLATION_AUDIT_PRIVACY,
+  BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+} from "./bot-installation-audit-service.js"
 import { DiscordClient } from "./discord-client.js"
 import { DiscordGateway, type GatewayRuntime } from "./discord-gateway.js"
 import {
@@ -96,7 +102,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 
-export const OPERATOR_REPORT_SCHEMA_VERSION = 35
+export const OPERATOR_REPORT_SCHEMA_VERSION = 36
 export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
@@ -116,12 +122,39 @@ const CONNECTOR_STATUS_KEYS = Object.freeze([
   "application",
   "applicationPosture",
   "bot",
-  "guildPage",
+  "installationAudit",
   "policy",
   "privacy",
   "schemaVersion",
   "status",
   "writeCoordination",
+])
+const BOT_INSTALLATION_AUDIT_KEYS = Object.freeze([
+  "completeness",
+  "configuredGuildIds",
+  "discardedGuildFieldCount",
+  "drift",
+  "identity",
+  "installedGuildIds",
+  "installedInScopeGuildIds",
+  "privacy",
+  "schemaVersion",
+  "status",
+])
+const BOT_INSTALLATION_AUDIT_COMPLETENESS_KEYS = Object.freeze([
+  "complete",
+  "maximumGuilds",
+  "pageSize",
+  "pagesRead",
+])
+const BOT_INSTALLATION_AUDIT_DRIFT_KEYS = Object.freeze([
+  "detected",
+  "missingConfiguredGuildIds",
+  "unexpectedGuildIds",
+])
+const BOT_INSTALLATION_AUDIT_IDENTITY_KEYS = Object.freeze([
+  "applicationId",
+  "botId",
 ])
 
 // A subclass keeps modern discovery on the observed process so startup stderr remains available
@@ -181,6 +214,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   forumTagAuditPolicy: "forum-tag-audit-policy",
   forumTagChangePolicy: "forum-tag-change-policy",
   guildAccess: "guild-access",
+  guildInstallationDrift: "guild-installation-drift",
   guildDeparturePolicy: "guild-departure-policy",
   guildMembersIntent: "guild-members-intent",
   guildScope: "guild-scope",
@@ -288,8 +322,11 @@ export interface DoctorCheck {
 export interface IdentitySummary {
   applicationId: string
   botId: string
-  guildsAccessibleOnFirstPage: number
-  guildsInScopeOnFirstPage: number
+  configuredGuildCount: number
+  installedGuildCount: number
+  installedInScopeGuildCount: number
+  missingConfiguredGuildCount: number
+  unexpectedGuildCount: number
 }
 
 export interface DoctorReport {
@@ -306,8 +343,9 @@ export interface SetupReport {
   configBackupFile: string | null
   configFile: string | null
   credential: ConnectorCredentialReference
-  guildsAccessibleOnFirstPage: number
-  guildsInScopeOnFirstPage: number
+  configuredGuildCount: number
+  installedGuildCount: number
+  installedInScopeGuildCount: number
   launch: StdioLaunchDescriptor
   preset: SetupPresetDescriptor | null
   profile: ConnectorProfile | null
@@ -316,6 +354,7 @@ export interface SetupReport {
   status: "ok"
   toolsets: McpToolsetName[]
   toolSurface: McpToolSurface
+  unexpectedGuildCount: number
   warnings: string[]
 }
 
@@ -486,6 +525,12 @@ function doctorGuidance(
       reference: DOCTOR_REFERENCES.botSetup,
     }
   }
+  if (id === DOCTOR_CHECK_IDS.guildInstallationDrift) {
+    return {
+      action: "Remove the verified bot from every unintended guild or add an exact guild to local scope only when that installation is deliberate, then rerun doctor --online.",
+      reference: DOCTOR_REFERENCES.botSetup,
+    }
+  }
   if (id === DOCTOR_CHECK_IDS.observability) {
     return {
       action: "Disable export or correct the loopback collector configuration, then rerun doctor.",
@@ -521,11 +566,15 @@ function reportStatus(checks: readonly DoctorCheck[]): OperatorReportStatus {
 }
 
 function identitySummary(status: ConnectorStatus): IdentitySummary {
+  const audit = status.installationAudit
   return {
     applicationId: status.application.id,
     botId: status.bot.id,
-    guildsAccessibleOnFirstPage: status.guildPage.accessible,
-    guildsInScopeOnFirstPage: status.guildPage.inScope,
+    configuredGuildCount: audit.configuredGuildIds.length,
+    installedGuildCount: audit.installedGuildIds.length,
+    installedInScopeGuildCount: audit.installedInScopeGuildIds.length,
+    missingConfiguredGuildCount: audit.drift.missingConfiguredGuildIds.length,
+    unexpectedGuildCount: audit.drift.unexpectedGuildIds.length,
   }
 }
 
@@ -3721,17 +3770,34 @@ export async function diagnoseConnector(
           ? "Online verification was skipped because the selected bot credential is unavailable"
           : "Online verification requires valid connector configuration",
       ))
+      checks.push(check(
+        DOCTOR_CHECK_IDS.guildInstallationDrift,
+        "fail",
+        "Complete bot installation drift verification requires valid connector configuration and the selected bot credential",
+      ))
     } else {
       try {
         const service = options.service || new ConnectorService({ config: operationalConfig })
         const status = await service.getStatus()
         identity = identitySummary(status)
+        const installationAudit = status.installationAudit
+        const missingGuilds = installationAudit.drift.missingConfiguredGuildIds.length
+        const unexpectedGuilds = installationAudit.drift.unexpectedGuildIds.length
         checks.push(check(
           DOCTOR_CHECK_IDS.guildAccess,
-          status.guildPage.inScope > 0 ? "pass" : "fail",
-          status.guildPage.inScope > 0
-            ? `Verified application ${status.application.id}, bot ${status.bot.id}, and ${status.guildPage.inScope} in-scope guilds on the first page`
-            : `Verified application ${status.application.id} and bot ${status.bot.id}, but no accessible guilds are in local scope`,
+          missingGuilds === 0 && installationAudit.installedInScopeGuildIds.length > 0
+            ? "pass"
+            : "fail",
+          missingGuilds === 0 && installationAudit.installedInScopeGuildIds.length > 0
+            ? `Verified application ${status.application.id}, bot ${status.bot.id}, and all ${installationAudit.configuredGuildIds.length} configured guild installations through a complete inventory`
+            : `Verified application ${status.application.id} and bot ${status.bot.id}, but ${missingGuilds} configured guild installations are missing`,
+        ))
+        checks.push(check(
+          DOCTOR_CHECK_IDS.guildInstallationDrift,
+          missingGuilds > 0 ? "fail" : unexpectedGuilds > 0 ? "warn" : "pass",
+          missingGuilds > 0 || unexpectedGuilds > 0
+            ? `Complete ID-only inventory found ${missingGuilds} missing configured guilds and ${unexpectedGuilds} unexpected installations`
+            : `Complete ID-only inventory exactly matches all ${installationAudit.configuredGuildIds.length} configured guild installations`,
         ))
         const posture = status.applicationPosture
         const guildInstallSupported = posture.installation.guild.supported
@@ -3907,6 +3973,11 @@ export async function diagnoseConnector(
           DOCTOR_CHECK_IDS.guildAccess,
           "fail",
           redactedError(error, environment, operationalConfig.token),
+        ))
+        checks.push(check(
+          DOCTOR_CHECK_IDS.guildInstallationDrift,
+          "fail",
+          "Complete bot installation drift verification failed",
         ))
       }
     }
@@ -4177,16 +4248,13 @@ export async function prepareSetup(
   } catch (error) {
     throw redactedSetupVerificationError(error, environment, config.token)
   }
-  if (status.guildPage.inScope < 1) {
-    throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
-  }
-  if (
-    appliedPreset
-    && status.guildPage.inScope !== config.allowedGuildIds.size
-  ) {
+  if (status.installationAudit.drift.missingConfiguredGuildIds.length > 0) {
     throw new ConfigurationError(
-      `Discord bot can access ${status.guildPage.inScope} of ${config.allowedGuildIds.size} exact preset guilds on the first membership page`,
+      `Discord bot is missing ${status.installationAudit.drift.missingConfiguredGuildIds.length} of ${config.allowedGuildIds.size} exact configured guild installations`,
     )
+  }
+  if (status.installationAudit.installedInScopeGuildIds.length < 1) {
+    throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
   }
   if (appliedPreset) {
     portableConfig = createConnectorConfigDocument({
@@ -4268,16 +4336,22 @@ export async function prepareSetup(
     launch,
     preset: appliedPreset?.preset ?? null,
     profile,
-    guildsAccessibleOnFirstPage: status.guildPage.accessible,
-    guildsInScopeOnFirstPage: status.guildPage.inScope,
+    configuredGuildCount: status.installationAudit.configuredGuildIds.length,
+    installedGuildCount: status.installationAudit.installedGuildIds.length,
+    installedInScopeGuildCount:
+      status.installationAudit.installedInScopeGuildIds.length,
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: launch.serverName,
     status: "ok",
     toolsets: selectedMcpToolsets(config.mcpToolsets),
     toolSurface: config.mcpToolSurface,
+    unexpectedGuildCount: status.installationAudit.drift.unexpectedGuildIds.length,
     warnings: [
       ...policyWarnings(config),
       ...applicationPostureWarnings(status),
+      ...(status.installationAudit.drift.unexpectedGuildIds.length > 0
+        ? [`Verified bot has ${status.installationAudit.drift.unexpectedGuildIds.length} installations outside the exact configured guild scope`]
+        : []),
       ...(status.applicationPosture.privilegedIntents.messageContent === "enabled"
         ? []
         : [
@@ -4311,9 +4385,34 @@ function stringProperty(value: unknown, property: string): string | undefined {
   return typeof record?.[property] === "string" ? record[property] : undefined
 }
 
-function numberProperty(value: unknown, property: string): number | undefined {
+function canonicalSnowflakeArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    return undefined
+  }
+  const snowflakes = value as string[]
+  let previous = 0n
+  for (const snowflake of snowflakes) {
+    if (
+      !DISCORD_SNOWFLAKE_PATTERN.test(snowflake)
+      || BigInt(snowflake) < 1n
+      || BigInt(snowflake) > DISCORD_SNOWFLAKE_MAX
+      || BigInt(snowflake).toString() !== snowflake
+      || BigInt(snowflake) <= previous
+    ) return undefined
+    previous = BigInt(snowflake)
+  }
+  return snowflakes
+}
+
+function safeIntegerProperty(value: unknown, property: string): number | undefined {
   const record = objectValue(value)
-  return typeof record?.[property] === "number" ? record[property] : undefined
+  const propertyValue = record?.[property]
+  return Number.isSafeInteger(propertyValue) ? propertyValue as number : undefined
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index])
 }
 
 function matchesExactStringRecord(
@@ -4643,41 +4742,113 @@ async function inspectSmokeClient(
   }
   const application = objectValue(structured.application)
   const bot = objectValue(structured.bot)
+  const installationAudit = objectValue(structured.installationAudit)
+  const completeness = objectValue(installationAudit?.completeness)
+  const drift = objectValue(installationAudit?.drift)
+  const installationIdentity = objectValue(installationAudit?.identity)
   const applicationId = stringProperty(application, "id")
   const botId = stringProperty(bot, "id")
-  const guildsAccessible = numberProperty(structured.guildPage, "accessible")
-  const guildsInScope = numberProperty(structured.guildPage, "inScope")
+  const configuredGuildIds = canonicalSnowflakeArray(installationAudit?.configuredGuildIds)
+  const installedGuildIds = canonicalSnowflakeArray(installationAudit?.installedGuildIds)
+  const installedInScopeGuildIds = canonicalSnowflakeArray(
+    installationAudit?.installedInScopeGuildIds,
+  )
+  const missingConfiguredGuildIds = canonicalSnowflakeArray(
+    drift?.missingConfiguredGuildIds,
+  )
+  const unexpectedGuildIds = canonicalSnowflakeArray(drift?.unexpectedGuildIds)
+  const discardedGuildFieldCount = safeIntegerProperty(
+    installationAudit,
+    "discardedGuildFieldCount",
+  )
+  const maximumGuilds = safeIntegerProperty(completeness, "maximumGuilds")
+  const pageSize = safeIntegerProperty(completeness, "pageSize")
+  const pagesRead = safeIntegerProperty(completeness, "pagesRead")
   if (
     !application
     || !bot
+    || !installationAudit
+    || !completeness
+    || !drift
+    || !installationIdentity
     || !applicationId
     || !botId
-    || guildsAccessible === undefined
-    || guildsInScope === undefined
+    || !configuredGuildIds
+    || !installedGuildIds
+    || !installedInScopeGuildIds
+    || !missingConfiguredGuildIds
+    || !unexpectedGuildIds
+    || discardedGuildFieldCount === undefined
+    || maximumGuilds === undefined
+    || pageSize === undefined
+    || pagesRead === undefined
   ) {
     throw new Error("MCP get_connector_status returned an invalid identity report")
   }
+  const expectedConfiguredGuildIds = [...config.allowedGuildIds]
+    .sort((left, right) => {
+      const leftId = BigInt(left)
+      const rightId = BigInt(right)
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+    })
+  const installed = new Set(installedGuildIds)
+  const configured = new Set(expectedConfiguredGuildIds)
+  const expectedInstalledInScopeGuildIds = installedGuildIds
+    .filter((guildId) => configured.has(guildId))
+  const expectedMissingConfiguredGuildIds = expectedConfiguredGuildIds
+    .filter((guildId) => !installed.has(guildId))
+  const expectedUnexpectedGuildIds = installedGuildIds
+    .filter((guildId) => !configured.has(guildId))
   if (
     structured.schemaVersion !== CONNECTOR_STATUS_SCHEMA_VERSION
     || !hasExactKeys(structured, CONNECTOR_STATUS_KEYS)
     || !hasExactKeys(application, CONNECTOR_STATUS_APPLICATION_KEYS)
     || !hasExactKeys(bot, CONNECTOR_STATUS_BOT_KEYS)
+    || !hasExactKeys(installationAudit, BOT_INSTALLATION_AUDIT_KEYS)
+    || !hasExactKeys(completeness, BOT_INSTALLATION_AUDIT_COMPLETENESS_KEYS)
+    || !hasExactKeys(drift, BOT_INSTALLATION_AUDIT_DRIFT_KEYS)
+    || !hasExactKeys(installationIdentity, BOT_INSTALLATION_AUDIT_IDENTITY_KEYS)
+    || installationAudit.schemaVersion !== BOT_INSTALLATION_AUDIT_SCHEMA_VERSION
+    || installationAudit.status !== "complete"
+    || completeness.complete !== true
+    || maximumGuilds !== BOT_INSTALLATION_AUDIT_LIMITS.maximumGuilds
+    || pageSize !== BOT_INSTALLATION_AUDIT_LIMITS.pageSize
+    || pagesRead !== Math.floor(installedGuildIds.length / pageSize) + 1
+    || installedGuildIds.length > maximumGuilds
+    || discardedGuildFieldCount < 0
+    || drift.detected !== (
+      missingConfiguredGuildIds.length > 0 || unexpectedGuildIds.length > 0
+    )
+    || applicationId !== config.expectedApplicationId
+    || botId !== config.expectedBotId
+    || installationIdentity.applicationId !== applicationId
+    || installationIdentity.botId !== botId
+    || !sameStrings(configuredGuildIds, expectedConfiguredGuildIds)
+    || !sameStrings(installedInScopeGuildIds, expectedInstalledInScopeGuildIds)
+    || !sameStrings(missingConfiguredGuildIds, expectedMissingConfiguredGuildIds)
+    || !sameStrings(unexpectedGuildIds, expectedUnexpectedGuildIds)
+    || !matchesExactStringRecord(
+      installationAudit.privacy,
+      BOT_INSTALLATION_AUDIT_PRIVACY,
+    )
     || !matchesExactStringRecord(structured.privacy, CONNECTOR_STATUS_PRIVACY)
   ) {
     throw new Error("MCP get_connector_status returned an invalid privacy report")
   }
-  if (guildsInScope < 1) {
-    throw new Error("MCP get_connector_status found no accessible guilds inside local scope")
+  if (installedInScopeGuildIds.length < 1 || missingConfiguredGuildIds.length > 0) {
+    throw new Error("MCP get_connector_status found incomplete configured guild installations")
   }
   return {
     applicationId,
     botId,
+    configuredGuildCount: configuredGuildIds.length,
     destructiveTools: listed.tools
       .filter((tool) => tool.annotations?.destructiveHint === true)
       .map((tool) => tool.name)
       .sort(),
-    guildsAccessibleOnFirstPage: guildsAccessible,
-    guildsInScopeOnFirstPage: guildsInScope,
+    installedGuildCount: installedGuildIds.length,
+    installedInScopeGuildCount: installedInScopeGuildIds.length,
+    missingConfiguredGuildCount: missingConfiguredGuildIds.length,
     promptNames: promptNames.sort(),
     protocolVersion,
     readOnlyTools: listed.tools
@@ -4694,6 +4865,7 @@ async function inspectSmokeClient(
     toolsets: selectedMcpToolsets(config.mcpToolsets),
     toolSurface: config.mcpToolSurface,
     transport,
+    unexpectedGuildCount: unexpectedGuildIds.length,
   }
 }
 

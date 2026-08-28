@@ -2,6 +2,10 @@ import { loadConnectorConfigDocument } from "../../src/config.js"
 import { createConnectorConfigDocument } from "../../src/config-document.js"
 import { runDiscordMcpServer } from "../../src/mcp.js"
 import {
+  BOT_INSTALLATION_AUDIT_PRIVACY,
+  BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+} from "../../src/bot-installation-audit-service.js"
+import {
   CONNECTOR_STATUS_PRIVACY,
   CONNECTOR_STATUS_SCHEMA_VERSION,
   ConnectorService,
@@ -43,13 +47,36 @@ service.getStatus = async () => {
     },
     applicationPosture: {},
     bot: { id: BOT_ID },
-    guildPage: { accessible: 1, inScope: 1 },
+    installationAudit: {
+      completeness: {
+        complete: true,
+        maximumGuilds: 400,
+        pageSize: 200,
+        pagesRead: 1,
+      },
+      configuredGuildIds: [GUILD_ID],
+      discardedGuildFieldCount: 2,
+      drift: {
+        detected: false,
+        missingConfiguredGuildIds: [],
+        unexpectedGuildIds: [],
+      },
+      identity: {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+      },
+      installedGuildIds: [GUILD_ID],
+      installedInScopeGuildIds: [GUILD_ID],
+      privacy: BOT_INSTALLATION_AUDIT_PRIVACY,
+      schemaVersion: BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
+      status: "complete",
+    },
     policy: {},
     privacy: CONNECTOR_STATUS_PRIVACY,
     schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
     status: "ok",
     writeCoordination: {},
-  } as Awaited<ReturnType<ConnectorService["getStatus"]>>
+  } as unknown as Awaited<ReturnType<ConnectorService["getStatus"]>>
 }
 
 runDiscordMcpServer({

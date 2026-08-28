@@ -854,6 +854,10 @@ function serviceFixture(overrides: {
       calls.guilds += 1
       return [guild()]
     },
+    async listCurrentUserGuildMemberships() {
+      calls.guilds += 1
+      return { discardedFieldCount: 2, guildIds: [GUILD_ID] }
+    },
     async listGlobalApplicationCommands() {
       throw new Error("Unexpected global application-command listing")
     },
@@ -10660,7 +10664,12 @@ test("service verifies identity once and reports scope without message reads", a
   assert.deepEqual(posture.findingCounts, { blockers: 0, warnings: 0 })
   assert.equal(posture.installation.guild.supported, true)
   assert.deepEqual(status.bot, { id: BOT_ID })
-  assert.equal(status.guildPage.accessible, 1)
+  assert.equal(status.installationAudit.installedGuildIds.length, 1)
+  assert.deepEqual(status.installationAudit.drift, {
+    detected: false,
+    missingConfiguredGuildIds: [],
+    unexpectedGuildIds: [],
+  })
   assert.deepEqual(status.privacy, CONNECTOR_STATUS_PRIVACY)
   assert.equal(status.schemaVersion, CONNECTOR_STATUS_SCHEMA_VERSION)
   assert.equal("auditFile" in status, false)
@@ -10683,6 +10692,57 @@ test("service verifies identity once and reports scope without message reads", a
   assert.equal(calls.user, 1)
   assert.equal(calls.guilds, 2)
   assert.equal(calls.listMessages, 0)
+})
+
+test("service pins identity and exact configured scope through a complete installation audit", async () => {
+  const signal = AbortSignal.timeout(5_000)
+  const firstPage = Array.from(
+    { length: 200 },
+    (_, index) => (BigInt(GUILD_ID) + BigInt(index)).toString(),
+  )
+  const firstPageCursor = firstPage.at(-1)
+  assert.ok(firstPageCursor)
+  const unexpectedGuildId = (BigInt(GUILD_ID) + 300n).toString()
+  const missingGuildId = (BigInt(GUILD_ID) + 400n).toString()
+  const requests: Array<{
+    after?: string
+    limit?: number
+    signal?: AbortSignal
+  }> = []
+  const { calls, service } = serviceFixture({
+    client: {
+      async listCurrentUserGuildMemberships(options = {}) {
+        requests.push(options)
+        if (options.after === "0") {
+          return { discardedFieldCount: 600, guildIds: firstPage }
+        }
+        if (options.after === firstPageCursor) {
+          return { discardedFieldCount: 3, guildIds: [unexpectedGuildId] }
+        }
+        throw new Error("Unexpected installation-audit cursor")
+      },
+    },
+    configOverrides: {
+      readScope: { guildIds: [GUILD_ID, missingGuildId] },
+    },
+  })
+
+  const audit = await service.auditBotInstallations({ signal })
+
+  assert.deepEqual(requests, [
+    { after: "0", limit: 200, signal },
+    { after: firstPageCursor, limit: 200, signal },
+  ])
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(audit.completeness.complete, true)
+  assert.equal(audit.completeness.pagesRead, 2)
+  assert.deepEqual(audit.configuredGuildIds, [GUILD_ID, missingGuildId])
+  assert.deepEqual(audit.installedInScopeGuildIds, [GUILD_ID])
+  assert.deepEqual(audit.drift.missingConfiguredGuildIds, [missingGuildId])
+  assert.equal(audit.drift.unexpectedGuildIds.includes(unexpectedGuildId), true)
+  assert.equal(audit.drift.detected, true)
+  assert.equal(audit.discardedGuildFieldCount, 603)
 })
 
 test("service diagnoses Message Content intent from arbitrary-width application flags", async () => {

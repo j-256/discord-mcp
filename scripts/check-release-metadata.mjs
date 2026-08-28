@@ -594,6 +594,10 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("preset install server-observer"), "complete reference lacks preset-derived bot installation")
   invariant(reference.includes("guided product tour and searchable standalone explorer"), "complete reference lacks the guided catalog tour")
   invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks additive recipe inspection")
+  invariant(reference.includes("## Complete bot-installation drift audit"), "complete reference lacks bot-installation drift guidance")
+  invariant(reference.includes("`discord://connector/installations`"), "complete reference lacks the bot-installation resource")
+  invariant(reference.includes("`audit_bot_installations`"), "complete reference lacks the bot-installation tool and prompt")
+  invariant(security.includes("## Bot installation drift"), "security policy lacks bot-installation drift requirements")
   invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
   invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
   invariant(reference.includes("## Privacy-minimized guild incident actions and reviewed lockdown changes"), "complete reference lacks reviewed guild incident actions")
@@ -650,6 +654,7 @@ async function checkDocumentation(packageJson) {
     "## Head-to-head matrix",
     "## Why each lead is material",
     "## Soundboard playback head-to-head",
+    "## Bot-installation drift head-to-head",
     "## Audited releases and source limits",
     "## Registry matches outside the scored local comparison",
     "## Maintenance rule",
@@ -828,6 +833,7 @@ async function checkCommunityFiles() {
     "verified-outcome form",
     "private GitHub Security Advisory",
     "no response-time guarantee",
+    "guild-installation-drift",
   ]) {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }
@@ -842,6 +848,7 @@ async function checkCommunityFiles() {
     "does not provide a hosted service, shared bot, advertising, analytics",
     "does not print, persist, return, or include the token",
     "The connector does not independently retain message content",
+    "The bot-installation audit reads",
     "Your MCP host, model provider, terminal, operating system, Discord",
   ]) {
     invariant(privacy.includes(required), `privacy policy is missing ${required}`)

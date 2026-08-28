@@ -162,8 +162,9 @@ function setupReport(): SetupReport {
       provider: "environment",
       variable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     },
-    guildsAccessibleOnFirstPage: 1,
-    guildsInScopeOnFirstPage: 1,
+    configuredGuildCount: 1,
+    installedGuildCount: 1,
+    installedInScopeGuildCount: 1,
     launch: {
       args: ["serve", "--config", configFile],
       command: "discord-mcp",
@@ -194,6 +195,7 @@ function setupReport(): SetupReport {
     status: "ok",
     toolsets: ["connector", "messages"],
     toolSurface: "full",
+    unexpectedGuildCount: 0,
     warnings: [],
   }
 }
@@ -202,9 +204,11 @@ function smokeReport(): SmokeReport {
   return {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
+    configuredGuildCount: 1,
     destructiveTools: ["delete_messages"],
-    guildsAccessibleOnFirstPage: 1,
-    guildsInScopeOnFirstPage: 1,
+    installedGuildCount: 1,
+    installedInScopeGuildCount: 1,
+    missingConfiguredGuildCount: 0,
     promptNames: ["summarize_channel"],
     protocolVersion: "2026-07-28",
     readOnlyTools: ["get_connector_status"],
@@ -218,6 +222,7 @@ function smokeReport(): SmokeReport {
     toolsets: ["connector", "messages"],
     toolSurface: "full",
     transport: "stdio",
+    unexpectedGuildCount: 0,
   }
 }
 

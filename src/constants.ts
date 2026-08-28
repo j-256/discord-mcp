@@ -338,6 +338,7 @@ export const DISCORD_LIMITS = Object.freeze({
   forumChannelTopicCharacters: 4_096,
   categoryChannels: 50,
   currentUserGuilds: 200,
+  currentUserGuildResponseBytes: 8 * 1_024 * 1_024,
   deletionMessages: 100,
   guildMessageSearch: 25,
   guildApplicationCommandPermissions: 262,
