@@ -1059,6 +1059,7 @@ Guild jump links receive a bounded projection of the configured exact guild and 
 | `edit_own_message` | Discord write | Replace one exact non-webhook message owned by the verified bot |
 | `add_reaction` | Discord write | Idempotently add the bot's own single reaction to one exact message |
 | `remove_own_reaction` | Discord write | Idempotently remove the bot's own single normal reaction from one exact message |
+| `compile_component_template` | Local read | Compile one strict bundled announcement, incident-status, poll-results, release-notes, or welcome-card request into exact normalized static Components V2 plus mention review and reviewed-workflow handoff without Discord contact, persistence, or send authority |
 | `preview_component_layout` | Local read | Strictly normalize one bounded static Components V2 layout and report its outline, explicit defaults, recursive counts, aggregate Unicode length, notification projection, and warnings without contacting Discord or persisting content |
 | `plan_component_message` | Discord read | Verify one exact create or already-V2 bot-owned edit against identity, intent, scope, active-thread membership, complete permissions, reply and notification policy, live state, and one-shot evidence, then produce a keyed digest without persisting the layout |
 | `verify_component_message` | Discord read | Bind the exact caller-retained request to its token-keyed content-free terminal receipt, then fetch only the receipt-bound message and report verified, drifted, blocked, or absent state without scanning history or making a write |
@@ -1211,6 +1212,7 @@ MCP resource discovery lists only stable metadata. Listing resources or template
 | --- | --- | --- |
 | `ui://discord-mcp/plan-review` | Static | Render an optional display-only interactive review for canonical plan tools with no network, browser permission, persistence, approval, execution, or server-tool authority |
 | `discord://connector/safety` | Static | Explain trust boundaries and reviewed workflows without identity or Discord data |
+| `discord://connector/component-templates` | Static | Publish the versioned typed template catalog, exact limits, compile tool, reviewed lifecycle, and authority-free privacy contract without credentials or Discord access |
 | `discord://connector/tool-access` | Static | Classify every canonical tool's authorization lifecycle and exact reviewed companions without granting authority or claiming target readiness |
 | `discord://connector/policy` | Local | Report effective scope and write policy without credentials or Discord access |
 | `discord://connector/activity` | Local | Return a bounded content-free activity page without exposing the local file path |
@@ -1277,7 +1279,7 @@ Live templates are non-enumerable and require exact IDs:
 
 Every Discord-backed JSON resource carries an `untrusted-external-data` classification and an instruction to treat returned strings as data. The exact-message resource is deliberately compact: it includes message content, author identity, timestamps, jump URL, compact attachment metadata, and counts while omitting attachment and proxy URLs plus raw embeds, components, reactions, and mention payloads. Existing service checks still verify the bot identity, exact returned IDs, guild and channel scope, and fixed Discord API origin before the resource is returned. The binary attachment template is private, non-enumerable, and zero-lifetime; its response uses the exact verified media type selected by the attachment-read boundary rather than a JSON trust envelope.
 
-Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only the identity-free static safety guide and the deterministic data-free plan-review app are eligible for shared caching.
+Resource payloads and failures pass through the same recursive token-redaction boundary as tools. Live reads use private zero-lifetime cache hints. Only identity-free static contracts such as the safety guide, component-template catalog, tool-access manifest, and deterministic data-free plan-review app are eligible for shared caching.
 
 Every resource result is measured after redaction against `limits.mcpReadResponseMaxBytes`. Oversized resources fail whole with a fixed bounded protocol error, so clients never receive a syntactically valid but semantically incomplete resource fragment. The error omits the withheld value, URI-specific evidence, actual size, preview, and digest.
 
@@ -2981,9 +2983,39 @@ Static component messages have no immediate-call path. Set `capabilities.interac
 
 The input is a deliberately small layout DSL, not raw Discord JSON. It supports non-blank `text` displays, `separator` nodes with explicit normalized divider and spacing defaults, and top-level `container` nodes with optional RGB accent color and spoiler state. Containers must be non-empty and may contain only text and separators, so recursion stops after one level. Every layout must include a text display and is bounded to 40 total nodes, 4,000 aggregate Unicode characters, and 16 KiB of canonical UTF-8 state. Callers cannot provide numeric component IDs. The connector verifies that Discord assigned unique positive 32-bit IDs, then removes them before semantic comparison.
 
-Buttons, selects, interactive callbacks, custom IDs, sections, thumbnails, media galleries, files, attachments, remote-asset URL fields, raw numeric component types, arbitrary JSON, and content-bearing templates are intentionally absent. Text Display content may contain ordinary Discord markdown links, which the connector displays in the exact review but never fetches. This keeps outbound display composition separate from any future inbound interaction authority, local-file media policy, or remote-fetch boundary. The same static layout can still express rich hierarchy, visual separation, accent color, and spoiler treatment without granting hidden actions or fetching external assets.
+Buttons, selects, interactive callbacks, custom IDs, sections, thumbnails, media galleries, files, attachments, remote-asset URL fields, raw numeric component types, arbitrary JSON, remote templates, and arbitrary template variables are intentionally absent. Text Display content may contain ordinary Discord markdown links, which the connector displays in the exact review but never fetches. This keeps outbound display composition separate from any future inbound interaction authority, local-file media policy, or remote-fetch boundary. The same static layout can still express rich hierarchy, visual separation, accent color, and spoiler treatment without granting hidden actions or fetching external assets.
 
-1. Call `preview_component_layout` to validate and normalize the layout locally. Review its deterministic outline, explicit defaults, recursive counts, aggregate Unicode length, mentioned and suppressed user IDs, notification projection, and warnings.
+### Typed local templates
+
+`compile_component_template` provides a versioned local authoring layer over that same DSL. It accepts one strict discriminated shape, rejects unknown fields, validates Unicode and single-line labels, chooses semantic accent colors, derives presentation text, and immediately runs the ordinary component-layout and notification review. The compiler does not inspect connector configuration, use the bot token for Discord access, contact a service, write a file or activity record, grant Discord authority, or send a message; the ordinary MCP result boundary still applies secret redaction. The result returns ready-to-copy normalized `components`, its template name and version, the complete mention and safety review, fixed privacy and authority evidence, and exact plan, execute, and verify tool names. `discord://connector/component-templates` exposes the data-free catalog and limits to resource-aware clients.
+
+| Template | Required fields | Optional and derived behavior |
+| --- | --- | --- |
+| `announcement` | `headline`, `body`, `priority` | Priority is `information`, `important`, or `urgent`; it supplies accessible status text and the semantic accent |
+| `incident-status` | `title`, `status`, `summary` | Status is `investigating`, `identified`, `monitoring`, or `resolved`; `impact` and single-line `nextUpdate` are optional; status supplies accessible text and the semantic accent |
+| `poll-results` | `question`, two to ten uniquely labeled `{ label, votes }` options | Vote totals, singular or plural wording, and one-decimal percentages are derived deterministically; callers cannot provide a winner or precomputed chart |
+| `release-notes` | `releaseName`, `summary`, one to eight `changes` | Change order is preserved and rendered as a fixed list |
+| `welcome-card` | `headline`, `introduction`, one to eight `steps` | Step order is preserved and rendered as a fixed numbered path |
+
+All template narrative text remains untrusted transient content. Headlines, questions, release names, option labels, changes, steps, and next-update text are single-line; narrative bodies remain multiline. A visible user mention not repeated in `notifyUserIds` renders quietly, while a requested notification still requires that exact visible mention and the independently configured user allowlist during planning. The compiler preserves caller text and does not evaluate placeholders or fetch URLs.
+
+For example, compile a status card locally:
+
+```json
+{
+  "template": "incident-status",
+  "title": "API latency incident",
+  "status": "monitoring",
+  "summary": "Latency has returned to the normal range.",
+  "impact": "Some requests were delayed.",
+  "nextUpdate": "After the observation window",
+  "notifyUserIds": []
+}
+```
+
+Then follow one unchanged reviewed lifecycle:
+
+1. Call `compile_component_template` for one named template, or call `preview_component_layout` to validate and normalize a custom static layout locally. Review the deterministic outline, explicit defaults, recursive counts, aggregate Unicode length, mentioned and suppressed user IDs, notification projection, and warnings. When compiling, copy the returned exact `components` and `review.notificationUserIds` without reinterpreting them.
 2. Call `plan_component_message` with `action: "create"` or `action: "edit"`, the exact channel, normalized layout intent, explicit notification users, and a unique one-shot operation key. Create may include one exact reply and a separate reply-author notification choice; edit requires one exact message ID and forbids reply fields.
 3. Review the verified application, bot, guild, channel or thread, parent and private-thread membership where applicable, confirmed intent, complete role and overwrite evidence, required and effective permissions, current already-V2 edit state, target layout and preview, notifications, reply, irreversible flag warning, privacy projection, operation-key hash, and keyed digest.
 4. If an edit plan reports `already-current`, the live layout matches and its parsed user-mention state is empty. Call execution with the matching digest to receive a record-free no-op. No confirmation, claim, receipt, activity record, rate budget, or Discord mutation is needed.

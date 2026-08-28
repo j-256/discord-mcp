@@ -14,6 +14,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Start read-only and add narrowly reviewed capabilities | Designed fit | Presets establish bounded reads; additive recipes and explicit policy gates expose later workflows without granting Discord authority themselves |
 | Find a vaguely remembered conversation without building a local archive | Designed fit | One to five caller-supplied literal variants use Discord's live relevance index, fuse duplicate targets, and return freshly verified bounded current context without connector-owned persistence |
 | Consume one exact current guild-message attachment through MCP without creating a download file | Designed fit | The reader binds current channel, message, attachment, signed-delivery, byte-count, and media evidence, then returns native or embedded MCP content within the configured read budget |
+| Publish a common Components V2 announcement or status card without hand-authoring a layout | Designed fit | Typed bundled templates compile locally into the existing bounded static DSL and then use the same reviewed plan, signed execution, durable receipt, and exact verification lifecycle |
 | Synchronize one exact child channel to its live parent category | Designed fit | A separate reviewed workflow replaces the complete overwrite set only after structural impact, connector authority, future propagation, and stopped-concurrency review |
 | Receive a private slash-command request and send bounded follow-ups without exposing Discord's Interaction credential to MCP | Designed fit | Exact allowlists, ephemeral responses, default token disposal, and rotating one-shot process-local continuations preserve custody through a fixed response sequence |
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
@@ -78,6 +79,8 @@ MCPB compatibility is a host capability, not a universal MCP requirement. The pr
 Signed elicitation state detects a changed or orphaned confirmation round and binds the response to the reviewed request. It does not identify the human approver, certify the host's user interface, or replace the host's own write approval. A host without elicitation remains suitable for read-only and plan-only policy.
 
 Progressive discovery is an ergonomics mode, not an authority mechanism. It reveals only canonical schemas already permitted by configured toolsets. Choose `full` when a host does not implement reliable list-change refresh, even if that means presenting a larger initial catalog.
+
+The bundled component-template catalog is intentionally finite and local. It improves common static authoring without becoming a theme engine, remote template loader, arbitrary placeholder interpreter, interactive callback registry, media fetcher, or direct-send shortcut. Use the raw bounded static layout DSL when none of the named templates fits; use a separate reviewed workflow for any other Discord effect.
 
 ## Discord and operational constraints
 

@@ -6265,6 +6265,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://application/role-connection-metadata",
     "discord://application/skus",
     "discord://connector/activity",
+    "discord://connector/component-templates",
     "discord://connector/installations",
     "discord://connector/observability",
     "discord://connector/policy",

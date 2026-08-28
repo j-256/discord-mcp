@@ -269,6 +269,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },
+  compile_component_template: {
+    keywords: ["announcement", "card", "component", "incident", "layout", "local", "poll", "release", "template", "welcome", "v2"],
+    toolset: "interactions",
+    workflow: "component-message",
+  },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
     toolset: "deletion",

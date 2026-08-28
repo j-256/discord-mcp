@@ -86,6 +86,12 @@ import {
   type ComponentLayoutInput,
 } from "./component-layout.js"
 import {
+  COMPONENT_ANNOUNCEMENT_PRIORITIES,
+  COMPONENT_INCIDENT_STATUSES,
+  COMPONENT_TEMPLATE_LIMITS,
+  compileComponentTemplate,
+} from "./component-templates.js"
+import {
   normalizeComponentMessageRequest,
   type ComponentMessageRequest,
 } from "./component-message-service.js"
@@ -1614,6 +1620,128 @@ const componentNotificationUserIdsSchema = z.array(positiveSnowflakeSchema)
     message: "notifyUserIds must be unique",
   })
   .default([])
+function componentTemplateTextSchema(
+  name: string,
+  maxCharacters: number,
+  singleLine = false,
+) {
+  return z.string()
+    .refine((value) => value.trim().length > 0, {
+      message: `${name} must not be blank`,
+    })
+    .refine((value) => [...value].length <= maxCharacters, {
+      message: `${name} must not exceed ${maxCharacters} Unicode characters`,
+    })
+    .refine((value) => !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value), {
+      message: `${name} must not contain unsupported controls`,
+    })
+    .refine((value) => !singleLine || !/[\n\r\u2028\u2029]/u.test(value), {
+      message: `${name} must be single-line text`,
+    })
+    .refine((value) => {
+      try {
+        encodeURIComponent(value)
+        return true
+      } catch {
+        return false
+      }
+    }, { message: `${name} must contain valid Unicode` })
+}
+const componentTemplateHeadlineSchema = componentTemplateTextSchema(
+  "headline",
+  COMPONENT_TEMPLATE_LIMITS.headlineCharacters,
+  true,
+)
+const componentTemplateItemSchema = componentTemplateTextSchema(
+  "item",
+  COMPONENT_TEMPLATE_LIMITS.itemCharacters,
+  true,
+)
+const componentTemplateItemsSchema = z.array(componentTemplateItemSchema)
+  .min(1)
+  .max(COMPONENT_TEMPLATE_LIMITS.items)
+const componentTemplatePollOptionSchema = z.strictObject({
+  label: componentTemplateTextSchema(
+    "poll option label",
+    COMPONENT_TEMPLATE_LIMITS.pollOptionCharacters,
+    true,
+  ),
+  votes: z.number()
+    .int()
+    .min(0)
+    .max(COMPONENT_TEMPLATE_LIMITS.pollVotes),
+})
+const componentTemplatePollOptionsSchema = z.array(componentTemplatePollOptionSchema)
+  .min(2)
+  .max(COMPONENT_TEMPLATE_LIMITS.pollOptions)
+  .refine((options) => (
+    new Set(options.map(({ label }) => label)).size === options.length
+  ), { message: "poll option labels must be unique" })
+const componentTemplateInputSchema = z.discriminatedUnion("template", [
+  z.strictObject({
+    body: componentTemplateTextSchema(
+      "announcement body",
+      COMPONENT_TEMPLATE_LIMITS.announcementBodyCharacters,
+    ),
+    headline: componentTemplateHeadlineSchema,
+    notifyUserIds: componentNotificationUserIdsSchema,
+    priority: z.enum(COMPONENT_ANNOUNCEMENT_PRIORITIES),
+    template: z.literal("announcement"),
+  }),
+  z.strictObject({
+    impact: componentTemplateTextSchema(
+      "incident impact",
+      COMPONENT_TEMPLATE_LIMITS.incidentImpactCharacters,
+    ).optional(),
+    nextUpdate: componentTemplateTextSchema(
+      "incident next update",
+      COMPONENT_TEMPLATE_LIMITS.incidentNextUpdateCharacters,
+      true,
+    ).optional(),
+    notifyUserIds: componentNotificationUserIdsSchema,
+    status: z.enum(COMPONENT_INCIDENT_STATUSES),
+    summary: componentTemplateTextSchema(
+      "incident summary",
+      COMPONENT_TEMPLATE_LIMITS.incidentSummaryCharacters,
+    ),
+    template: z.literal("incident-status"),
+    title: componentTemplateHeadlineSchema,
+  }),
+  z.strictObject({
+    notifyUserIds: componentNotificationUserIdsSchema,
+    options: componentTemplatePollOptionsSchema,
+    question: componentTemplateTextSchema(
+      "poll question",
+      COMPONENT_TEMPLATE_LIMITS.pollQuestionCharacters,
+      true,
+    ),
+    template: z.literal("poll-results"),
+  }),
+  z.strictObject({
+    changes: componentTemplateItemsSchema,
+    notifyUserIds: componentNotificationUserIdsSchema,
+    releaseName: componentTemplateTextSchema(
+      "release name",
+      COMPONENT_TEMPLATE_LIMITS.releaseNameCharacters,
+      true,
+    ),
+    summary: componentTemplateTextSchema(
+      "release summary",
+      COMPONENT_TEMPLATE_LIMITS.summaryCharacters,
+    ),
+    template: z.literal("release-notes"),
+  }),
+  z.strictObject({
+    headline: componentTemplateHeadlineSchema,
+    introduction: componentTemplateTextSchema(
+      "welcome introduction",
+      COMPONENT_TEMPLATE_LIMITS.summaryCharacters,
+    ),
+    notifyUserIds: componentNotificationUserIdsSchema,
+    steps: componentTemplateItemsSchema,
+    template: z.literal("welcome-card"),
+  }),
+])
 const componentMessageOperationKeySchema = z.string()
   .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
   .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
@@ -19734,7 +19862,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Reuse one stable idempotency key for every retry of the same send, especially after an uncertain result.",
       "One-to-one private messages use an independent exact ordinary-user allowlist and never inherit guild or channel read scope. Reads require a caller-known exact DM channel and message when applicable, re-verify both participants, return transient plain text, normalized static Components V2, or bounded single-attachment metadata, and omit generated component IDs, profiles, avatars, attachment URLs, raw payloads, discovery, group DMs, persistence, and DM Gateway events. Send and reply additionally accept one owned local file only when the independent private-attachment gate and an attachment root are configured; no URL, base64, multiple-file, edit, or download path exists. For send, reply, same-format connector-message edit, or irreversible supported-message deletion, call plan_direct_message_change and review exact identities, transient complete body, file evidence when present, preview and reason, target presentation, forced empty mentions, fixed rate limits, privacy omissions, risks, one-shot key hash, and digest, then call execute_direct_message_change with identical inputs and the digest. Send planning never opens a channel. Execution requires signed approval, request-bound schema-v2 content-free evidence before contact, immutable channel and dispatch checkpoints, a non-retried mutation sequence, and exact presentation, body, attachment metadata, or absence readback. After a restart or uncertain result, call verify_direct_message_change with the exact retained request and never retry the spent key.",
       "Local file attachment messages use a separate exact channel and canonical directory scope: call plan_attachment_message, review the exact path, bytes, message fields, reply, notifications, permissions, one-shot operation key hash, warnings, and keyed digest, then call execute_attachment_message with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Call preview_component_layout locally, then plan_component_message, review the exact create or edit target, static text, separators, containers, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. After a completed operation or process restart, call verify_component_message with the exact caller-retained request to compare its content-free keyed receipt with fresh exact Discord state. Buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
+      "Static Components V2 messages use the interaction channel scope and require confirmed Message Content intent. Start with compile_component_template for one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card layout, or call preview_component_layout for a custom static layout. Compilation and preview are local, persist nothing, and grant no authority. Then call plan_component_message, review the exact create or edit target, static text, separators, containers, notifications, permissions, irreversible V2 flag, one-shot operation key hash, warnings, and keyed digest, then call execute_component_message with identical inputs and the digest. After a completed operation or process restart, call verify_component_message with the exact caller-retained request to compare its content-free keyed receipt with fresh exact Discord state. Arbitrary template sources and variables, buttons, selects, callbacks, raw Discord component JSON, remote media, and attachments are unsupported. Execution requires signed interactive approval, one non-retried mutation, and exact fresh readback; never retry after reservation or uncertainty.",
       "Static rich-embed messages use an independent exact channel scope and require confirmed Message Content intent. Call preview_embed_message locally, then plan_embed_message and review the complete plain content, embed presentation, create or edit target, reply, notifications, complete EMBED_LINKS and send permissions, one-shot key hash, warnings, and digest. Call execute_embed_message with identical inputs only after review; edits fully replace content and embeds on one exact unpinned bot-owned default message. After completion or restart, call verify_embed_message with the exact retained request. Plain-content HTTP URLs, embed URL and remote-asset fields, attachments, providers, arbitrary embed types, automatic retries, and retry after reservation or uncertainty are unsupported; ordinary markdown links inside embed text are allowed but never fetched by the connector.",
       "Message pins use the current paginated Discord pin endpoint for reads and a separate exact channel scope for changes: call plan_message_pin, review the exact application, bot, guild, channel, message state, permissions, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_message_pin with identical inputs and the digest. Pin and unpin are both treated as destructive reviewed changes; never retry with the same operation key after reservation or an uncertain outcome.",
       "Announcement crossposts use a separate exact direct-channel scope and require confirmed Message Content intent: call plan_announcement_crosspost, review the exact application, bot, guild, announcement channel, default non-poll non-forwarded message, authorship-sensitive permissions, unknown follower fanout, one-shot operation key hash, warnings, and keyed digest, then call execute_announcement_crosspost with identical inputs and the digest. Execution requires signed interactive approval, sends one non-retried request, accepts only the expected CROSSPOSTED flag transition, and verifies an exact fresh readback. Never retry after reservation or an uncertain outcome.",
@@ -29006,6 +29134,54 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         },
         requestState: signedState,
       })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("compile_component_template", server.registerTool(
+    "compile_component_template",
+    {
+      annotations: READ_ONLY_LOCAL_ANNOTATIONS,
+      description: "Compile one typed bundled announcement, incident-status, poll-results, release-notes, or welcome-card template into the bounded static Components V2 layout DSL. Returns exact normalized components, mention and notification review, and reviewed-workflow handoff guidance without contacting Discord, using the bot token for Discord access, granting authority, sending a message, or persisting content. Accepts no template source, arbitrary variable map, callback, remote media, attachment, or raw Discord JSON.",
+      inputSchema: componentTemplateInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Compile safe Discord component template",
+    },
+    safeToolHandler("compile_component_template", async (
+      input: z.infer<typeof componentTemplateInputSchema>,
+    ) => {
+      const { notifyUserIds, ...templateInput } = input
+      const compilation = compileComponentTemplate(templateInput, notifyUserIds)
+      const { layout, ...review } = compilation.review
+      const result = {
+        authority: {
+          discordContacted: false,
+          messageMutation: "impossible",
+          writeAuthorityGranted: false,
+        },
+        components: layout,
+        next: {
+          executeTool: "execute_component_message",
+          instruction: "Copy components and review.notificationUserIds unchanged into plan_component_message with the caller-selected action, exact target fields, and a fresh one-shot operation key",
+          planTool: "plan_component_message",
+          verifyTool: "verify_component_message",
+        },
+        privacy: {
+          compiledContent: "transient-untrusted",
+          persistence: "none",
+          templateSource: "bundled-local",
+        },
+        review,
+        schemaVersion: SCHEMA_VERSION,
+        status: "compiled",
+        template: {
+          name: compilation.template,
+          version: compilation.templateVersion,
+        },
+      }
+      return toolResult(
+        result,
+        `Compiled local ${compilation.template} template into ${review.counts.total} static component nodes`,
+      )
     }, secrets, observability),
   ))
 

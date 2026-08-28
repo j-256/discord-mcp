@@ -593,12 +593,12 @@ const CAPPYEO_GROUPS = Object.freeze([
   {
     disposition: "review-required",
     id: "components",
-    instruction: "Rebuild component layouts with the local preview, then review, execute, and verify the exact message operation.",
+    instruction: "Compile a typed bundled template when it fits or rebuild the bounded layout locally, then review, execute, and verify the exact message operation.",
     outcome: "Components v2 composition and delivery",
     recipes: ["channel-publisher"],
     sourcePrefixes: ["components_v2_"],
-    targetTools: ["preview_component_layout", "plan_component_message", "execute_component_message", "verify_component_message"],
-    trustChange: "A free-form component send becomes a schema-bounded preview and reviewed one-shot lifecycle.",
+    targetTools: ["compile_component_template", "preview_component_layout", "plan_component_message", "execute_component_message", "verify_component_message"],
+    trustChange: "A free-form or interpolated component send becomes typed local compilation or a schema-bounded preview followed by a reviewed one-shot lifecycle.",
   },
   {
     disposition: "review-required",
