@@ -32,6 +32,17 @@ import {
   type DiscordHostActivationHtmlExportReport,
 } from "./host-activation-html.js"
 import {
+  exportDiscordMigrationHtml,
+  type DiscordMigrationHtmlExportReport,
+} from "./migration-html.js"
+import {
+  createMigrationCatalog,
+  createMigrationPlan,
+  normalizeMigrationSourceId,
+  type MigrationCatalogReport,
+  type MigrationPlanReport,
+} from "./migration-planner.js"
+import {
   createHostActivationPlan,
   type HostActivationPlan,
 } from "./host-activation.js"
@@ -163,6 +174,7 @@ const CLI_COMMANDS = Object.freeze([
   "doctor",
   "help",
   "host",
+  "migrate",
   "preset",
   "profile",
   "recipe",
@@ -268,6 +280,18 @@ export type ParsedCliArguments =
     packageLaunch?: true
     profileName?: string
     serverName: string | undefined
+  }
+  | {
+    action: "list"
+    command: "migrate"
+    json: boolean
+  }
+  | {
+    action: "plan"
+    command: "migrate"
+    htmlFile?: string
+    json: boolean
+    sourceId: string
   }
   | {
     action: "install"
@@ -380,6 +404,10 @@ export interface CliDependencies {
     file: string,
     plan: HostActivationPlan,
   ): Promise<DiscordHostActivationHtmlExportReport>
+  exportMigrationHtml(
+    file: string,
+    plan: MigrationPlanReport,
+  ): Promise<DiscordMigrationHtmlExportReport>
   exportOnboardingHtml(
     file: string,
     plan: BotInstallPlan,
@@ -393,6 +421,8 @@ export interface CliDependencies {
   loadConfigDocument(file: string): ConnectorConfigDocument
   loadProfile(name: string, options: ProfileLocationOptions): Promise<ConnectorProfile>
   prepareSetup(options: SetupOptions): Promise<SetupReport>
+  migrationCatalog(): MigrationCatalogReport
+  migrationPlan(sourceId: string): Promise<MigrationPlanReport>
   reviewActivity(
     activityFile: string,
     limit: number,
@@ -450,6 +480,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   exportCatalogHtml: exportDiscordCatalogHtml,
   exportConfigWorkbenchHtml: exportDiscordConfigWorkbenchHtml,
   exportHostActivationHtml: exportDiscordHostActivationHtml,
+  exportMigrationHtml: exportDiscordMigrationHtml,
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
@@ -463,6 +494,8 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadConfig: loadConnectorConfig,
   loadConfigDocument: loadConnectorConfigDocumentFile,
   loadProfile,
+  migrationCatalog: createMigrationCatalog,
+  migrationPlan: createMigrationPlan,
   prepareSetup,
   planConfigChange,
   planRecipe: planConfigRecipe,
@@ -697,6 +730,58 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
     ...(packageLaunch ? { packageLaunch: true as const } : {}),
     ...(profileName ? { profileName } : {}),
     serverName,
+  }
+}
+
+function parseMigrationCommand(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "migrate" }> {
+  const action = args[0]
+  if (!action || !["list", "plan"].includes(action)) {
+    throw new ConfigurationError("migrate requires list or plan")
+  }
+  if (action === "list") {
+    const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
+    return {
+      action,
+      command: "migrate",
+      json: options.has("--json"),
+    }
+  }
+  const source = args[1]
+  if (!source || source.startsWith("--")) {
+    throw new ConfigurationError("migrate plan requires an exact source ID")
+  }
+  const sourceId = normalizeMigrationSourceId(source)
+  let htmlFile: string | undefined
+  let json = false
+  const seen = new Set<string>()
+  for (let index = 2; index < args.length; index += 1) {
+    const argument = args[index]
+    if (!argument || !["--html", "--json"].includes(argument)) {
+      throw new ConfigurationError(`Unknown option ${argument || ""}`)
+    }
+    if (seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError("Option --html requires a file path")
+    }
+    htmlFile = value
+    index += 1
+  }
+  return {
+    action: "plan",
+    command: "migrate",
+    ...(htmlFile ? { htmlFile } : {}),
+    json,
+    sourceId,
   }
 }
 
@@ -1401,6 +1486,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (command === "config") return parseConfigCommand(rest)
   if (command === "coordination") return parseCoordinationCommand(rest)
   if (command === "host") return parseHostOptions(rest)
+  if (command === "migrate") return parseMigrationCommand(rest)
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
@@ -1442,6 +1528,17 @@ function helpText(topic: CliCommand | undefined): string {
   }
   if (topic === "host") {
     return `Usage: discord-mcp host (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID] [--html FILE] [--json]\n\nGenerate one exact credential-free local stdio activation plan plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launch uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog. Optional HTML exclusively creates a mode-0600 interactive guide with every adapter, copy controls, host requirements, a read-only verification request, and visible limitations. The guide contains private Discord identifiers and may contain local paths, so do not share or commit it. This command reads no credential value, contacts no network or Discord endpoint, starts no process, discovers no host, and changes no policy or host configuration. Exit status is 0 on success and 2 on command failure.`
+  }
+  if (topic === "migrate") {
+    return [
+      "Usage: discord-mcp migrate <action> [options]",
+      "",
+      "Actions:",
+      "  list [--json]",
+      "  plan SOURCE [--html FILE] [--json]",
+      "",
+      "Generate a release-exact, complete outcome map from one scored Discord MCP source release into this connector's strict presets, recipes, tools, and reviewed lifecycles. SOURCE must be a versioned ID shown by migrate list. Planning reads no source checkout, configuration, host setting, credential, environment value, network, or Discord endpoint and changes nothing. It does not rewrite prompts, arguments, configuration, credentials, or host settings. Optional HTML exclusively creates a mode-0600 standalone interactive guide without replacing an existing file.",
+    ].join("\n")
   }
   if (topic === "coordination") {
     return [
@@ -1513,6 +1610,7 @@ function helpText(topic: CliCommand | undefined): string {
     "  serve    Run the stdio MCP server with a selected policy (default)",
     "  setup    Create or verify a policy and generate a portable launch descriptor",
     "  host     Project one verified policy into safe local MCP host adapters",
+    "  migrate  Plan a release-exact switch from another Discord MCP",
     "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  recipe   Review and add a bounded workflow to an existing policy",
@@ -1845,6 +1943,100 @@ function renderHostActivationHtmlExport(
     "Boundary: private mode-0600 standalone HTML with memory-only checklist state and no external navigation",
     "The guide contains private Discord identifiers and may contain local paths. It contains no credential value and must not be shared or committed.",
     "No credential value was read, Discord and the network were not contacted, no browser or process was started, no host was discovered, and no policy or host configuration was changed.",
+  ].join("\n")
+}
+
+function renderMigrationCatalog(report: MigrationCatalogReport): string {
+  return [
+    "Discord MCP release-exact migration sources",
+    `Catalog digest: ${report.catalogDigest}`,
+    "",
+    ...report.sources.flatMap((source, index) => [
+      ...(index > 0 ? [""] : []),
+      `${source.id} - ${source.product}`,
+      `  Audit fidelity: ${source.auditFidelity}`,
+      `  Registry identity: ${source.registryName}`,
+      `  Source inventory: ${source.sourceToolCount} tools (${source.sourceInventoryDigest})`,
+      `  Outcome groups: ${source.mappingCount}`,
+      `  Dispositions: supported=${source.dispositionToolCounts.supported}, review-required=${source.dispositionToolCounts["review-required"]}, intentionally-excluded=${source.dispositionToolCounts["intentionally-excluded"]}`,
+      `  Baseline preset: ${source.baselinePreset}`,
+      `  Manifest digest: ${source.manifestDigest}`,
+      `  Source evidence: ${source.evidenceUrl}`,
+      `  Registry release: ${source.registryUrl}`,
+      ...source.limitations.map((limitation) => `  Limit: ${limitation}`),
+    ]),
+    "",
+    "No source, configuration, host setting, credential, environment value, network, or Discord endpoint was read. Nothing was changed.",
+  ].join("\n")
+}
+
+function renderMigrationPlan(report: MigrationPlanReport): string {
+  const lines = [
+    `Discord MCP migration plan: ${report.source.id} -> ${report.target.package}@${report.target.version}`,
+    `Plan digest: ${report.planDigest}`,
+    `Source manifest digest: ${report.source.manifestDigest}`,
+    `Source inventory digest: ${report.source.sourceInventoryDigest}`,
+    `Migration catalog digest: ${report.catalogDigest}`,
+    `Target catalog digest: ${report.target.catalogContractDigest}`,
+    `Audit fidelity: ${report.source.auditFidelity}`,
+    `Source evidence: ${report.source.evidenceUrl}`,
+    `Registry release: ${report.source.registryUrl}`,
+    `Source tools accounted: ${report.summary.sourceToolCount}`,
+    `Outcome groups: ${report.summary.mappingCount}`,
+    `Dispositions: supported=${report.summary.dispositionToolCounts.supported}, review-required=${report.summary.dispositionToolCounts["review-required"]}, intentionally-excluded=${report.summary.dispositionToolCounts["intentionally-excluded"]}`,
+    `Least-privilege baseline: ${report.target.preset}`,
+    "",
+    "Complete outcome map:",
+  ]
+  for (const mapping of report.mappings) {
+    lines.push(
+      `${mapping.id}: ${mapping.outcome} [${mapping.disposition}]`,
+      `  Source tools: ${mapping.sourceTools.join(", ")}`,
+      `  Target tools: ${mapping.targetTools.join(", ") || "deliberately no connector equivalent"}`,
+      `  Recipes: ${mapping.recipes.join(", ") || "baseline or exact-scope workbench"}`,
+      `  Route: ${mapping.instruction}`,
+      `  Trust-model change: ${mapping.trustChange}`,
+    )
+  }
+  lines.push("", "Staged switching path:")
+  for (const [index, step] of report.steps.entries()) {
+    lines.push(`${index + 1}. ${step.title}`)
+    for (const command of step.commands) lines.push(`   ${command}`)
+    lines.push(`   Done when: ${step.completion}`)
+  }
+  lines.push(
+    "",
+    "Limits:",
+    ...report.limitations.map((limitation) => `- ${limitation}`),
+    "",
+    "Arguments translated: no",
+    "Configuration imported: no",
+    "Host settings changed: no",
+    "Credentials read: no",
+    "Source inspected: no",
+    "Network or Discord contacted: no",
+    "Policy, source, host, or activity state changed: no",
+  )
+  return lines.join("\n")
+}
+
+function renderMigrationHtmlExport(
+  report: DiscordMigrationHtmlExportReport,
+): string {
+  return [
+    "Discord MCP migration HTML: ok",
+    `File: ${report.file}`,
+    `Format: ${report.format}`,
+    `Source: ${report.sourceId}`,
+    `Plan digest: ${report.planDigest}`,
+    `HTML digest: ${report.htmlDigest}`,
+    `Bytes: ${report.bytes}`,
+    "Output file created: yes",
+    "Credentials embedded or read: no",
+    "Automatic network: disabled",
+    "Browser opened: no",
+    "Configuration changed: no",
+    "State persistence: disabled",
   ].join("\n")
 }
 
@@ -2691,6 +2883,32 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
                   ? [renderHostAdapter(findHostAdapter(adapterCatalog, parsed.adapterId))]
                   : []),
                 ...(guide ? [renderHostActivationHtmlExport(guide)] : []),
+              ].join("\n\n"),
+          {},
+        )
+        return CLI_EXIT_CODES.success
+      }
+      case "migrate": {
+        if (parsed.action === "list") {
+          const report = dependencies.migrationCatalog()
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderMigrationCatalog(report),
+            {},
+          )
+          return CLI_EXIT_CODES.success
+        }
+        const report = await dependencies.migrationPlan(parsed.sourceId)
+        const guide = parsed.htmlFile
+          ? await dependencies.exportMigrationHtml(parsed.htmlFile, report)
+          : undefined
+        safeWrite(
+          stdout,
+          parsed.json
+            ? jsonReport({ ...report, ...(guide ? { guide } : {}) })
+            : [
+                renderMigrationPlan(report),
+                ...(guide ? [renderMigrationHtmlExport(guide)] : []),
               ].join("\n\n"),
           {},
         )

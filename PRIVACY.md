@@ -8,6 +8,12 @@ The Discord bot token stays outside the non-secret configuration document. The c
 
 The connector sends the token only to Discord's fixed REST origin and, when explicitly enabled, vetted Discord Gateway or Interaction endpoints. Tests may inject a local transport or origin but production code cannot.
 
+## Migration evidence
+
+The offline migration planner uses shipped public manifests and the credential-free target catalog. It does not inspect another checkout, source configuration, active connector policy, MCP host settings, environment values, credential files, Discord content, local records, or browser state. It contacts no network or Discord endpoint, starts no process, exports no telemetry, and changes neither deployment.
+
+Migration reports contain public source release identities and evidence URLs, public source and target tool names, preset and recipe names, fixed placeholders, dispositions, counts, limitations, and deterministic digests. They contain no credential value, real Discord ID, local source path, username, role or channel name, message content, profile, or host-specific state. The optional mode-0600 HTML embeds the exact report but not its output path, makes no automatic request, and stores checklist and filter state only in memory. Source and Registry links navigate only when you activate them.
+
 ## Discord data
 
 Discord data is fetched only for an invoked operation within the exact configured scope and applicable Discord permissions. Results needed to answer the request are returned to the MCP host. The connector does not independently retain message content, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, topics, scaffold symbols, or avatars.
@@ -34,6 +40,6 @@ Metrics and traces are bounded and redacted. Export is off unless the configurat
 
 ## Control and deletion
 
-You choose the bot's Discord permissions, exact connector scope, enabled toolsets, write capabilities, local record paths, Gateway policy, and telemetry policy. Revoke the bot token in the Discord Developer Portal to stop its use. Remove the connector from the MCP host to stop local execution. Delete any configuration-selected local activity, receipt, profile, or telemetry files according to your own retention policy.
+You choose the bot's Discord permissions, exact connector scope, enabled toolsets, write capabilities, local record paths, Gateway policy, and telemetry policy. Revoke the bot token in the Discord Developer Portal to stop its use. Remove the connector from the MCP host to stop local execution. Delete any generated migration guide and configuration-selected local activity, receipt, profile, or telemetry files according to your own retention policy.
 
 Discord processes data under [Discord's privacy policy](https://discord.com/privacy). Questions or vulnerability reports for this connector can be filed through the repository's [support and security channels](https://github.com/j-256/discord-mcp/blob/v0.1.2/SUPPORT.md).

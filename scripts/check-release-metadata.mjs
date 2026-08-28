@@ -183,6 +183,7 @@ const EXPECTED_PACKAGE_FILES = [
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
+  "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "SUPPORT.md",
@@ -420,6 +421,7 @@ async function checkDocumentationPortal() {
   assertEqual(DOCUMENTATION_CONTENT_PATHS, [
     "README.md",
     "docs/getting-started.md",
+    "docs/migration.md",
     "docs/limitations.md",
     "PRIVACY.md",
     "docs/comparison.md",
@@ -550,13 +552,17 @@ async function checkDocumentation(packageJson) {
     join(REPOSITORY_ROOT, "docs/limitations.md"),
     "utf8",
   )
+  const migration = await readFile(
+    join(REPOSITORY_ROOT, "docs/migration.md"),
+    "utf8",
+  )
   const comparison = await readFile(join(REPOSITORY_ROOT, "docs/comparison.md"), "utf8")
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
   )
-  const documentation = `${readme}\n${gettingStarted}\n${limitations}\n${comparison}\n${reference}`
+  const documentation = `${readme}\n${gettingStarted}\n${migration}\n${limitations}\n${comparison}\n${reference}`
   const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
@@ -598,6 +604,7 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("`discord://connector/installations`"), "complete reference lacks the bot-installation resource")
   invariant(reference.includes("`audit_bot_installations`"), "complete reference lacks the bot-installation tool and prompt")
   invariant(security.includes("## Bot installation drift"), "security policy lacks bot-installation drift requirements")
+  invariant(security.includes("require one commit-pinned GitHub tree URL"), "security policy lacks pinned migration evidence")
   invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
   invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
   invariant(reference.includes("## Privacy-minimized guild incident actions and reviewed lockdown changes"), "complete reference lacks reviewed guild incident actions")
@@ -606,8 +613,8 @@ async function checkDocumentation(packageJson) {
   invariant(readme.includes("nonprivileged `GUILDS`-only layout-evidence connection"), "README lacks guild-builder Gateway evidence disclosure")
   invariant(reference.includes("privacy-minimized `GUILDS`-only layout connection"), "complete reference lacks guild-builder Gateway evidence disclosure")
   invariant(security.includes("Gateway evidence requirement"), "security policy lacks recipe Gateway disclosure")
-  invariant(readme.includes("there is no alternate environment-policy or migration mode"), "README lacks clean-break configuration policy")
-  invariant(reference.includes("There is no environment-policy or migration command"), "complete reference lacks clean-break configuration policy")
+  invariant(readme.includes("there is no alternate environment-policy or automatic import mode"), "README lacks clean-break configuration policy")
+  invariant(reference.includes("There is no environment-policy or automatic configuration-import command"), "complete reference lacks clean-break configuration policy")
   invariant(security.includes("no environment-policy compatibility shape is accepted"), "security policy lacks clean-break configuration policy")
   invariant(security.includes("An already-current application is a no-write, no-backup operation"), "security policy lacks guarded recipe application")
   invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
@@ -646,6 +653,7 @@ async function checkDocumentation(packageJson) {
     invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
   }
   invariant(readme.includes("[Get a verified read](docs/getting-started.md)"), "README lacks the getting-started route")
+  invariant(readme.includes("[Switch from another MCP](docs/migration.md)"), "README lacks the migration route")
   invariant(readme.includes("[Fit and boundaries](docs/limitations.md)"), "README lacks the product-boundaries route")
   invariant(readme.includes("[Field comparison](docs/comparison.md)"), "README lacks the field-comparison route")
   invariant(comparison.startsWith("# Discord MCP field comparison\n"), "field comparison heading is invalid")
@@ -655,6 +663,7 @@ async function checkDocumentation(packageJson) {
     "## Why each lead is material",
     "## Soundboard playback head-to-head",
     "## Bot-installation drift head-to-head",
+    "## Migration planning head-to-head",
     "## Audited releases and source limits",
     "## Registry matches outside the scored local comparison",
     "## Maintenance rule",
@@ -722,6 +731,23 @@ async function checkDocumentation(packageJson) {
     scoredComparisonTables > 1,
     "field comparison lacks focused head-to-head tables",
   )
+  invariant(migration.startsWith("# Migrate from another Discord MCP\n"), "migration guide heading is invalid")
+  for (const required of [
+    "## Supported source releases",
+    "discord-mcp migrate list",
+    "discord-mcp migrate plan cappyeo@0.25.0",
+    "## Read the dispositions correctly",
+    "## Follow the staged path",
+    "## Configuration remains a clean break",
+    "## Privacy and custody",
+    "## What the plan cannot prove",
+    "## Troubleshooting",
+    "supported`, `review-required`, or `intentionally-excluded",
+    "reads no source file",
+    "rewrite prompts or arguments",
+  ]) {
+    invariant(migration.includes(required), `migration guide is missing ${required}`)
+  }
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
   invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
@@ -834,6 +860,7 @@ async function checkCommunityFiles() {
     "private GitHub Security Advisory",
     "no response-time guarantee",
     "guild-installation-drift",
+    "discord-mcp migrate plan SOURCE --html PRIVATE_FILE",
   ]) {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }

@@ -32,6 +32,9 @@ const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
 const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
+const MIGRATION_CATALOG_FORMAT = "discord-mcp.migration-catalog.v1"
+const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
+const MIGRATION_HTML_FORMAT = "discord-mcp.migration-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-builder",
@@ -64,6 +67,26 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
 const EXPECTED_SETUP_PRESETS = ["server-observer", "channel-reader"]
 const EXPECTED_HOST_ADAPTERS = ["mcp-json", "cursor", "vscode", "gemini-extension"]
+const EXPECTED_MIGRATION_SOURCES = [
+  "cappyeo@0.25.0",
+  "hypark@0.1.1",
+  "jaimen-bell@0.1.1",
+  "oratorian@1.1.4",
+  "pasympa@2.1.1",
+  "targeted-reader@1.0.0",
+]
+const EXPECTED_MIGRATION_EXECUTION = Object.freeze({
+  activityRecordsCreated: false,
+  configurationRead: false,
+  credentialsRead: false,
+  discordContacted: false,
+  hostConfigurationRead: false,
+  networkContacted: false,
+  policyChanged: false,
+  processStarted: false,
+  sourceInspected: false,
+  sourceOrHostChanged: false,
+})
 const EXPECTED_RISK_CLASSES = [
   "administrative-write",
   "destructive-write",
@@ -85,9 +108,13 @@ const REQUIRED_FILES = [
   "dist/host-adapters.js",
   "dist/index.d.ts",
   "dist/index.js",
+  "dist/migration-html.js",
+  "dist/migration-manifests.js",
+  "dist/migration-planner.js",
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
+  "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -103,6 +130,7 @@ const STATIC_FILES = new Set([
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
+  "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
   "package.json",
@@ -828,6 +856,137 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     catalog.restOperationCount,
     "installed REST method counts",
   )
+  const migrationCatalogResult = await run(bin, ["migrate", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  const repeatedMigrationCatalogResult = await run(bin, ["migrate", "list", "--json"], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(
+    repeatedMigrationCatalogResult.stdout,
+    migrationCatalogResult.stdout,
+    "installed migration catalog is not deterministic",
+  )
+  const migrationCatalog = JSON.parse(migrationCatalogResult.stdout)
+  invariant(migrationCatalog.status === "ok", "installed migration catalog failed")
+  invariant(migrationCatalog.format === MIGRATION_CATALOG_FORMAT, "installed migration catalog format changed")
+  invariant(SHA256_DIGEST_PATTERN.test(migrationCatalog.catalogDigest), "installed migration catalog digest is invalid")
+  assert.deepEqual(migrationCatalog.execution, EXPECTED_MIGRATION_EXECUTION)
+  assert.deepEqual(
+    migrationCatalog.sources.map(({ id }) => id),
+    EXPECTED_MIGRATION_SOURCES,
+    "installed migration source inventory changed",
+  )
+  const migrationSources = new Map(migrationCatalog.sources.map((source) => [source.id, source]))
+  for (const source of migrationCatalog.sources) {
+    invariant(SHA256_DIGEST_PATTERN.test(source.manifestDigest), `installed migration source ${source.id} manifest digest is invalid`)
+    invariant(SHA256_DIGEST_PATTERN.test(source.sourceInventoryDigest), `installed migration source ${source.id} inventory digest is invalid`)
+    invariant(Number.isSafeInteger(source.sourceToolCount) && source.sourceToolCount > 0, `installed migration source ${source.id} tool count is invalid`)
+    invariant(
+      Object.values(source.dispositionToolCounts).reduce((total, count) => total + count, 0)
+        === source.sourceToolCount,
+      `installed migration source ${source.id} disposition accounting is incomplete`,
+    )
+  }
+  const migrationPlans = new Map()
+  for (const sourceId of EXPECTED_MIGRATION_SOURCES) {
+    const result = await run(bin, ["migrate", "plan", sourceId, "--json"], {
+      capture: true,
+      cwd: consumer,
+      env: catalogEnvironment,
+    })
+    const plan = JSON.parse(result.stdout)
+    const source = migrationSources.get(sourceId)
+    invariant(plan.status === "planned", `installed migration plan ${sourceId} failed`)
+    invariant(plan.format === MIGRATION_PLAN_FORMAT, `installed migration plan ${sourceId} format changed`)
+    invariant(plan.catalogDigest === migrationCatalog.catalogDigest, `installed migration plan ${sourceId} catalog binding changed`)
+    invariant(plan.source.manifestDigest === source.manifestDigest, `installed migration plan ${sourceId} source binding changed`)
+    invariant(plan.target.version === version, `installed migration plan ${sourceId} target version changed`)
+    invariant(SHA256_DIGEST_PATTERN.test(plan.target.catalogContractDigest), `installed migration plan ${sourceId} target digest is invalid`)
+    invariant(SHA256_DIGEST_PATTERN.test(plan.planDigest), `installed migration plan ${sourceId} digest is invalid`)
+    assert.deepEqual(plan.execution, EXPECTED_MIGRATION_EXECUTION)
+    assert.deepEqual({
+      argumentsTranslated: plan.argumentsTranslated,
+      configurationImported: plan.configurationImported,
+      hostSettingsChanged: plan.hostSettingsChanged,
+    }, {
+      argumentsTranslated: false,
+      configurationImported: false,
+      hostSettingsChanged: false,
+    })
+    const mappedSourceTools = plan.mappings.flatMap(({ sourceTools }) => sourceTools)
+    invariant(new Set(mappedSourceTools).size === mappedSourceTools.length, `installed migration plan ${sourceId} duplicates source tools`)
+    invariant(mappedSourceTools.length === source.sourceToolCount, `installed migration plan ${sourceId} omits source tools`)
+    for (const targetTool of plan.mappings.flatMap(({ targetTools }) => targetTools)) {
+      invariant(catalog.toolNames.includes(targetTool), `installed migration plan ${sourceId} names unknown target tool ${targetTool}`)
+    }
+    invariant(!result.stdout.includes(DUMMY_TOKEN), `installed migration plan ${sourceId} captured an ambient secret`)
+    migrationPlans.set(sourceId, { plan, stdout: result.stdout })
+  }
+  const repeatedMigrationPlan = await run(bin, [
+    "migrate",
+    "plan",
+    "targeted-reader@1.0.0",
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: catalogEnvironment,
+  })
+  assert.equal(
+    repeatedMigrationPlan.stdout,
+    migrationPlans.get("targeted-reader@1.0.0").stdout,
+    "installed migration plan is not deterministic",
+  )
+  const firstMigrationHtml = join(consumer, "migration-first.html")
+  const secondMigrationHtml = join(consumer, "migration-second.html")
+  const migrationHtml = async (file) => {
+    const result = await run(bin, [
+      "migrate",
+      "plan",
+      "targeted-reader@1.0.0",
+      "--html",
+      file,
+      "--json",
+    ], {
+      capture: true,
+      cwd: consumer,
+      env: catalogEnvironment,
+    })
+    return JSON.parse(result.stdout)
+  }
+  const firstMigrationGuide = await migrationHtml(firstMigrationHtml)
+  const secondMigrationGuide = await migrationHtml(secondMigrationHtml)
+  for (const report of [firstMigrationGuide, secondMigrationGuide]) {
+    invariant(report.guide?.status === "ok", "installed migration HTML export failed")
+    invariant(report.guide?.format === MIGRATION_HTML_FORMAT, "installed migration HTML format changed")
+    invariant(report.guide?.planDigest === report.planDigest, "installed migration HTML plan binding changed")
+    invariant(SHA256_DIGEST_PATTERN.test(report.guide?.htmlDigest), "installed migration HTML digest is invalid")
+    invariant(report.guide?.automaticNetwork === "disabled", "installed migration HTML permits automatic network access")
+    invariant(report.guide?.statePersistence === "disabled", "installed migration HTML persists browser state")
+    invariant(report.guide?.credentialValuesEmbedded === false, "installed migration HTML embeds credential values")
+  }
+  assert.equal(firstMigrationGuide.planDigest, secondMigrationGuide.planDigest, "installed migration HTML plans are not deterministic")
+  assert.equal(firstMigrationGuide.guide.htmlDigest, secondMigrationGuide.guide.htmlDigest, "installed migration HTML digest is not deterministic")
+  const firstMigrationHtmlBytes = await readFile(firstMigrationHtml)
+  const secondMigrationHtmlBytes = await readFile(secondMigrationHtml)
+  invariant(firstMigrationHtmlBytes.equals(secondMigrationHtmlBytes), "installed migration HTML bytes are not deterministic")
+  invariant(
+    ((await lstat(firstMigrationHtml)).mode & 0o077) === 0
+      && ((await lstat(secondMigrationHtml)).mode & 0o077) === 0,
+    "installed migration HTML is not private",
+  )
+  const migrationHtmlText = firstMigrationHtmlBytes.toString("utf8")
+  invariant(migrationHtmlText.includes(MIGRATION_HTML_FORMAT), "installed migration HTML omitted its format")
+  invariant(migrationHtmlText.includes(firstMigrationGuide.planDigest), "installed migration HTML omitted its plan digest")
+  invariant(migrationHtmlText.includes("connect-src 'none'"), "installed migration HTML permits network connections")
+  invariant(!migrationHtmlText.includes(DUMMY_TOKEN), "installed migration HTML captured an ambient secret")
+  invariant(!migrationHtmlText.includes(firstMigrationHtml), "installed migration HTML embedded its output path")
+  invariant(!/(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage)/.test(migrationHtmlText), "installed migration HTML contains forbidden browser authority")
   const firstCatalogHtml = join(consumer, "catalog-first.html")
   const secondCatalogHtml = join(consumer, "catalog-second.html")
   const catalogHtmlEnvironment = {

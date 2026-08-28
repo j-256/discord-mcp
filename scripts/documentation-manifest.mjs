@@ -15,6 +15,7 @@ export const DOCUMENTATION_MANIFEST_PATH = "generated/docs-manifest.json"
 export const DOCUMENTATION_CONTENT_PATHS = Object.freeze([
   "README.md",
   "docs/getting-started.md",
+  "docs/migration.md",
   "docs/limitations.md",
   "PRIVACY.md",
   "docs/comparison.md",

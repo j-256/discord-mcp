@@ -180,6 +180,7 @@ const SECURITY_GROUPS = Object.freeze([
     titles: [
       "Credentials",
       "Unified configuration",
+      "Migration planning",
       "MCP result boundaries",
       "Exact Discord references",
       "Application posture",
@@ -276,6 +277,11 @@ const FULL_DOCUMENTS = Object.freeze([
     description: "Create an owner-managed bot and complete one verified read through a compatible MCP host",
     route: "start/getting-started",
     source: "docs/getting-started.md",
+  },
+  {
+    description: "Map an audited Discord MCP release into least-privilege setup, policy, verification, and retirement steps",
+    route: "start/migration",
+    source: "docs/migration.md",
   },
   {
     description: "Custody, privacy, compatibility, operational constraints, and deliberately unsupported behavior",
@@ -628,6 +634,7 @@ Documentation: ${DOCUMENTATION_URL}/
 
 - [Choose your path](${DOCUMENTATION_URL}/start/choose/): Route to setup, fit, recovery, verification, or contribution
 - [First verified read](${DOCUMENTATION_URL}/start/getting-started/): Linear owner-managed bot setup with a read-only first outcome
+- [Switch from another Discord MCP](${DOCUMENTATION_URL}/start/migration/): Release-exact outcome mapping and a staged least-privilege cutover
 - [Fit and boundaries](${DOCUMENTATION_URL}/understand/boundaries/): Custody, privacy, compatibility, and operational constraints
 - [Privacy policy](${DOCUMENTATION_URL}/understand/privacy/): Credential, Discord-data, local-record, observability, and deletion boundaries
 - [Field comparison](${DOCUMENTATION_URL}/understand/comparison/): Dated head-to-head rubric with direct released-source evidence
@@ -788,6 +795,7 @@ async function main() {
   const fullSources = [
     "README.md",
     "docs/getting-started.md",
+    "docs/migration.md",
     "docs/limitations.md",
     "PRIVACY.md",
     "docs/comparison.md",
