@@ -145,6 +145,7 @@ const PRIVACY_OMISSIONS = Object.freeze([
 type ChannelOrderingTargetOutcome = "settled" | "uncertain"
 export type ChannelOrderPlacement = "above" | "below"
 export type ChannelOrderFamily = "category" | "text" | "unsupported" | "voice"
+export type ChannelOrderMode = "cross-parent-move" | "same-parent-order"
 export type ChannelOrderingHttpEvidenceMode = GuildChannelHttpEvidenceMode
 
 export interface ChannelOrderingRequest {
@@ -190,6 +191,21 @@ export interface ChannelOrderGroup {
   unsupportedType: number | null
 }
 
+export interface ChannelOrderMovePermissionEvidence {
+  administrator: boolean
+  effectivePermissionNames: DiscordPermissionName[]
+  effectivePermissions: string
+  manageChannels: boolean
+  viewChannel: boolean
+}
+
+export interface ChannelOrderParentCapacity {
+  childCountAfter: number | null
+  childCountBefore: number | null
+  childLimit: number | null
+  parentKind: "category" | "guild-root"
+}
+
 export interface ChannelOrderingPrivacyProjection {
   channelText: "transient-untrusted"
   hiddenMetadataReturned: false
@@ -224,8 +240,13 @@ export interface ChannelOrderAuditResult {
   status: "ok"
 }
 
-export interface ChannelOrderingAffectedChannel extends Omit<ChannelOrderEntry, "rank"> {
+export interface ChannelOrderingAffectedChannel extends Omit<
+  ChannelOrderEntry,
+  "parentChannelId" | "rank"
+> {
+  afterParentChannelId: string | null
   afterRank: number
+  beforeParentChannelId: string | null
   beforeRank: number
   submittedPosition: number
 }
@@ -233,6 +254,11 @@ export interface ChannelOrderingAffectedChannel extends Omit<ChannelOrderEntry, 
 export interface ChannelOrderingPositionWrite {
   beforeRawPosition: number
   channelId: string
+  parentChange: {
+    destinationParentChannelId: string | null
+    lockPermissions: false
+    sourceParentChannelId: string | null
+  } | null
   submittedPosition: number
 }
 
@@ -247,12 +273,17 @@ export interface ChannelOrderingPlan {
   current: {
     anchorRank: number
     channelRank: number
-    groupOrder: string[]
+    destinationGroupOrder: string[]
+    sourceGroupOrder: string[]
   }
+  destinationCapacity: ChannelOrderParentCapacity
+  destinationParentChannelId: string | null
+  destinationPermission: ChannelOrderPermissionEvidence
   desired: {
     anchorRank: number
     channelRank: number
-    groupOrder: string[]
+    destinationGroupOrder: string[]
+    sourceGroupOrder: string[]
   }
   digest: string
   family: Exclude<ChannelOrderFamily, "unsupported">
@@ -260,20 +291,26 @@ export interface ChannelOrderingPlan {
   httpEvidenceMode: ChannelOrderingHttpEvidenceMode
   impact: {
     affectedChannelCount: number
-    groupChannelCount: number
+    destinationGroupChannelCount: number
+    parentChangeCount: number
     rankChangeCount: number
     rawPositionWriteCount: number
+    sourceGroupChannelCount: number
   }
   layout: ChannelOrderAuditResult["layout"]
+  mode: ChannelOrderMode
   operationKeyHash: string
-  parentChannelId: string | null
-  permission: ChannelOrderPermissionEvidence
+  permissionOverwriteBehavior: "preserve"
   placement: ChannelOrderPlacement
   positionWrites: ChannelOrderingPositionWrite[]
   privacy: ChannelOrderingPrivacyProjection
   risks: string[]
   schemaVersion: number
+  sourceCapacity: ChannelOrderParentCapacity
+  sourceParentChannelId: string | null
+  sourcePermission: ChannelOrderPermissionEvidence
   status: "already-current" | "planned"
+  targetMovePermission: ChannelOrderMovePermissionEvidence | null
   warnings: string[]
   writeRequired: boolean
 }
@@ -350,15 +387,17 @@ interface ChannelOrderingState {
   httpChannels: HttpChannelEvidence[]
   httpEvidenceMode: ChannelOrderingHttpEvidenceMode
   layout: GatewayChannelLayoutSnapshot
+  rawRoles: DiscordRole[]
   roles: NormalizedDiscordRole[]
 }
 
 interface BuiltChannelOrderingPlan {
   baselineLayout: GatewayChannelLayoutSnapshot
-  desiredGroupOrder: string[]
+  expectedTopology: readonly GatewayChannelLayoutEntry[]
   expectedGroupOrders: ReadonlyMap<string, readonly string[]>
   plan: ChannelOrderingPlan
   request: NormalizedChannelOrderingRequest
+  targetHttpEvidence: HttpChannelEvidence
 }
 
 interface LayoutVerificationWatch {
@@ -789,6 +828,102 @@ function groupPermission(
   }
 }
 
+function targetMovePermission(
+  botId: string,
+  guildId: string,
+  target: HttpChannelEvidence,
+  member: DiscordGuildMember,
+  roles: readonly DiscordRole[],
+): ChannelOrderMovePermissionEvidence {
+  if (
+    target.metadataVisibility !== "visible"
+    || target.name === null
+    || target.permissionOverwrites === null
+  ) {
+    throw evidenceError("Discord cross-parent channel moves require visible exact target evidence")
+  }
+  let evaluated
+  try {
+    const channel: DiscordChannel = {
+      guild_id: guildId,
+      id: target.id,
+      name: target.name,
+      parent_id: target.parentChannelId,
+      permission_overwrites: target.permissionOverwrites,
+      position: target.position,
+      type: target.type,
+    }
+    evaluated = evaluateBotChannelPermissions({
+      botId,
+      channel,
+      guildId,
+      member,
+      permissionChannel: channel,
+      roles,
+    })
+  } catch (error) {
+    throw evidenceError("Discord target channel-move permission evidence is invalid", error)
+  }
+  if (evaluated.confidence !== "complete") {
+    throw evidenceError(
+      `Discord target channel-move permission evidence is incomplete: ${evaluated.warnings.join("; ")}`,
+    )
+  }
+  const manageChannels = evaluated.effectivePermissionNames.includes("MANAGE_CHANNELS")
+  const viewChannel = evaluated.effectivePermissionNames.includes("VIEW_CHANNEL")
+  if (!manageChannels || !viewChannel) {
+    throw evidenceError(
+      "Discord connector lacks complete VIEW_CHANNEL and MANAGE_CHANNELS authority on the moved channel",
+    )
+  }
+  return {
+    administrator: evaluated.administrator,
+    effectivePermissionNames: evaluated.effectivePermissionNames,
+    effectivePermissions: evaluated.effectivePermissions,
+    manageChannels,
+    viewChannel,
+  }
+}
+
+function parentCapacity(
+  layout: GatewayChannelLayoutSnapshot,
+  parentChannelId: string | null,
+  childCountDelta: -1 | 0 | 1,
+): ChannelOrderParentCapacity {
+  if (parentChannelId === null) {
+    return {
+      childCountAfter: null,
+      childCountBefore: null,
+      childLimit: null,
+      parentKind: "guild-root",
+    }
+  }
+  const parent = layout.channels.find((entry) => (
+    entry.channelId === parentChannelId
+  ))
+  if (
+    !parent
+    || parent.type !== DISCORD_CHANNEL_TYPES.category
+    || parent.parentChannelId !== null
+  ) throw evidenceError("Discord channel-ordering parent is not an exact root category")
+  const childCountBefore = layout.channels.filter((entry) => (
+    entry.parentChannelId === parentChannelId
+  )).length
+  const childCountAfter = childCountBefore + childCountDelta
+  if (childCountAfter < 0) {
+    throw evidenceError("Discord channel-ordering parent capacity evidence is inconsistent")
+  }
+  if (childCountAfter > DISCORD_LIMITS.categoryChannels) {
+    throw evidenceError("Discord channel-ordering destination category is at capacity")
+  }
+  return {
+    childCountAfter,
+    childCountBefore,
+    childLimit: DISCORD_LIMITS.categoryChannels,
+    parentKind: "category",
+  }
+}
+
 function buildGroups(options: {
   botId: string
   guildId: string
@@ -914,15 +1049,13 @@ function httpSnapshot(channels: readonly HttpChannelEvidence[]) {
 }
 
 function desiredOrder(
-  order: readonly ChannelOrderEntry[],
+  destinationOrder: readonly ChannelOrderEntry[],
+  target: ChannelOrderEntry,
   request: NormalizedChannelOrderingRequest,
 ): ChannelOrderEntry[] {
-  const remaining = order.filter((entry) => entry.id !== request.channelId)
+  const remaining = destinationOrder.filter((entry) => entry.id !== request.channelId)
   const anchorIndex = remaining.findIndex((entry) => entry.id === request.anchorChannelId)
-  const target = order.find((entry) => entry.id === request.channelId)
-  if (anchorIndex < 0 || !target) {
-    throw evidenceError("Discord channel-ordering target or anchor is missing")
-  }
+  if (anchorIndex < 0) throw evidenceError("Discord channel-ordering anchor is missing")
   const insertionIndex = request.placement === "above" ? anchorIndex : anchorIndex + 1
   return [
     ...remaining.slice(0, insertionIndex),
@@ -932,36 +1065,39 @@ function desiredOrder(
 }
 
 function affectedChannels(
-  current: readonly ChannelOrderEntry[],
-  desired: readonly ChannelOrderEntry[],
-  request: NormalizedChannelOrderingRequest,
+  currentGroups: readonly (readonly ChannelOrderEntry[])[],
+  desiredGroups: readonly (readonly ChannelOrderEntry[])[],
 ): ChannelOrderingAffectedChannel[] {
-  const targetRank = current.findIndex((entry) => entry.id === request.channelId)
-  const anchorRank = current.findIndex((entry) => entry.id === request.anchorChannelId)
-  if (targetRank < 0 || anchorRank < 0) {
-    throw evidenceError("Discord channel-ordering affected segment is incomplete")
+  const current = new Map<string, { entry: ChannelOrderEntry; rank: number }>()
+  const desired = new Map<string, { entry: ChannelOrderEntry; rank: number }>()
+  for (const group of currentGroups) {
+    group.forEach((entry, rank) => current.set(entry.id, { entry, rank }))
   }
-  const ids = current
-    .slice(Math.min(targetRank, anchorRank), Math.max(targetRank, anchorRank) + 1)
-    .map((entry) => entry.id)
-  const currentRanks = new Map(current.map((entry) => [entry.id, entry.rank]))
-  const desiredRanks = new Map(desired.map((entry, rank) => [entry.id, rank]))
-  const entries = new Map(current.map((entry) => [entry.id, entry]))
-  return ids.map((id) => {
-    const entry = entries.get(id)
-    const beforeRank = currentRanks.get(id)
-    const afterRank = desiredRanks.get(id)
-    if (!entry || beforeRank === undefined || afterRank === undefined) {
-      throw evidenceError("Discord channel-ordering affected segment is incomplete")
-    }
-    const { rank: _rank, ...projected } = entry
-    return {
+  for (const group of desiredGroups) {
+    group.forEach((entry, rank) => desired.set(entry.id, { entry, rank }))
+  }
+  if (current.size !== desired.size) {
+    throw evidenceError("Discord channel-ordering affected groups are incomplete")
+  }
+  return [...current].flatMap(([id, before]) => {
+    const after = desired.get(id)
+    if (!after) throw evidenceError("Discord channel-ordering affected groups are incomplete")
+    if (
+      before.rank === after.rank
+      && before.entry.parentChannelId === after.entry.parentChannelId
+    ) return []
+    const { parentChannelId: beforeParentChannelId, rank: _rank, ...projected } = before.entry
+    return [{
       ...projected,
-      afterRank,
-      beforeRank,
-      submittedPosition: afterRank,
-    }
-  }).sort((left, right) => left.beforeRank - right.beforeRank)
+      afterParentChannelId: after.entry.parentChannelId,
+      afterRank: after.rank,
+      beforeParentChannelId,
+      beforeRank: before.rank,
+      submittedPosition: after.rank,
+    }]
+  }).sort((left, right) => (
+    compareSnowflakes(left.id, right.id)
+  ))
 }
 
 function safeErrorCode(error: unknown): string {
@@ -987,16 +1123,17 @@ function activityEntry(options: {
     anchorChannelId: options.request.anchorChannelId,
     baselineRevision: options.plan.layout.revision,
     channelId: options.request.channelId,
+    destinationParentChannelId: options.plan.destinationParentChannelId,
     error: options.error ?? null,
     guildId: options.request.guildId,
     id: options.activityId,
     kind: "channel-ordering",
     observedRevision: options.observedRevision ?? null,
     operationKeyHash: options.request.operationKeyHash,
-    parentChannelId: options.plan.parentChannelId,
     placement: options.request.placement,
     planDigest: options.plan.digest,
     schemaVersion: SCHEMA_VERSION,
+    sourceParentChannelId: options.plan.sourceParentChannelId,
     status: options.status,
     timestamp: options.timestamp,
     verification: options.verification ?? null,
@@ -1088,12 +1225,12 @@ async function withGuildLock<T>(
 }
 
 function sameTopology(
-  expected: GatewayChannelLayoutSnapshot,
+  expected: readonly GatewayChannelLayoutEntry[],
   observed: GatewayChannelLayoutSnapshot,
 ): boolean {
-  if (expected.channels.length !== observed.channels.length) return false
+  if (expected.length !== observed.channels.length) return false
   const observedById = new Map(observed.channels.map((channel) => [channel.channelId, channel]))
-  return expected.channels.every((channel) => {
+  return expected.every((channel) => {
     const candidate = observedById.get(channel.channelId)
     return candidate
       && candidate.type === channel.type
@@ -1105,9 +1242,13 @@ function sameTopology(
 function matchingLayout(
   baseline: GatewayChannelLayoutSnapshot,
   observed: GatewayChannelLayoutSnapshot,
+  expectedTopology: readonly GatewayChannelLayoutEntry[],
   expectedGroupOrders: ReadonlyMap<string, readonly string[]>,
 ): boolean {
-  if (observed.revision <= baseline.revision || !sameTopology(baseline, observed)) {
+  if (
+    observed.revision <= baseline.revision
+    || !sameTopology(expectedTopology, observed)
+  ) {
     return false
   }
   const observedOrders = groupOrders(observed.channels)
@@ -1121,6 +1262,7 @@ function matchingLayout(
 function layoutVerificationWatch(options: {
   baseline: GatewayChannelLayoutSnapshot
   expectedGroupOrders: ReadonlyMap<string, readonly string[]>
+  expectedTopology: readonly GatewayChannelLayoutEntry[]
   guildId: string
   source: GatewayChannelLayoutSource
   timeoutMs: number
@@ -1141,7 +1283,12 @@ function layoutVerificationWatch(options: {
       latest = candidate
       if (
         armed
-        && matchingLayout(options.baseline, candidate, options.expectedGroupOrders)
+        && matchingLayout(
+          options.baseline,
+          candidate,
+          options.expectedTopology,
+          options.expectedGroupOrders,
+        )
       ) {
         matched = candidate
         notify?.()
@@ -1207,23 +1354,48 @@ function layoutVerificationWatch(options: {
 
 function observedEntries(
   snapshot: GatewayChannelLayoutSnapshot,
-  groupChannelIds: readonly string[],
   affectedChannelIds: ReadonlySet<string>,
 ): ObservedChannelOrderEntry[] {
-  const byId = new Map(snapshot.channels.map((channel) => [channel.channelId, channel]))
-  return groupChannelIds.flatMap((id, rank) => {
-    if (!affectedChannelIds.has(id)) return []
-    const channel = byId.get(id)
-    if (!channel) return []
+  const ranks = new Map<string, number>()
+  for (const ids of groupOrders(snapshot.channels).values()) {
+    ids.forEach((id, rank) => ranks.set(id, rank))
+  }
+  return snapshot.channels.flatMap((channel) => {
+    if (!affectedChannelIds.has(channel.channelId)) return []
+    const rank = ranks.get(channel.channelId)
+    if (rank === undefined) return []
     return [{
-      id,
+      id: channel.channelId,
       obfuscated: channel.obfuscated,
       parentChannelId: channel.parentChannelId,
       rank,
       rawPosition: channel.position,
       type: channel.type,
     }]
-  })
+  }).sort((left, right) => compareSnowflakes(left.id, right.id))
+}
+
+function verifyHttpReadback(
+  value: readonly DiscordChannel[],
+  observed: GatewayChannelLayoutSnapshot,
+  mode: ChannelOrderingHttpEvidenceMode,
+  targetBefore: HttpChannelEvidence,
+): void {
+  const projected = exactHttpChannels(value, observed, mode)
+  const targetAfter = projected.channels.find((entry) => entry.id === targetBefore.id)
+  if (!targetAfter) {
+    throw evidenceError("Discord channel-ordering readback omitted the exact target")
+  }
+  if (
+    targetAfter.metadataVisibility !== targetBefore.metadataVisibility
+    || targetAfter.type !== targetBefore.type
+    || stableString(targetAfter.permissionOverwrites)
+      !== stableString(targetBefore.permissionOverwrites)
+  ) {
+    throw evidenceError(
+      "Discord channel-ordering readback did not preserve exact target semantics and overwrites",
+    )
+  }
 }
 
 export class ChannelOrderingService {
@@ -1334,6 +1506,7 @@ export class ChannelOrderingService {
       httpChannels: http.channels,
       httpEvidenceMode: http.mode,
       layout: after,
+      rawRoles,
       roles,
     }
   }
@@ -1413,51 +1586,145 @@ export class ChannelOrderingService {
     if (targetGroup.family === "unsupported" || anchorGroup.family === "unsupported") {
       throw evidenceError("Discord channel-ordering target and anchor must use a supported channel family")
     }
-    if (
-      targetGroup.family !== anchorGroup.family
-      || targetGroup.parentChannelId !== anchorGroup.parentChannelId
-    ) throw evidenceError("Discord channel-ordering target and anchor must share one parent and family")
-    if (state.layout.channels.some((channel) => (
-      channel.parentChannelId === targetGroup.parentChannelId
-      && channelFamily(channel.type) === "unsupported"
-    ))) {
-      throw evidenceError("Discord channel-ordering parent contains an unsupported direct channel type")
+    if (targetGroup.family !== anchorGroup.family) {
+      throw evidenceError("Discord channel-ordering target and anchor must share one sortable family")
+    }
+    const crossParentMove = targetGroup.parentChannelId !== anchorGroup.parentChannelId
+    const mode: ChannelOrderMode = crossParentMove
+      ? "cross-parent-move"
+      : "same-parent-order"
+    for (const parentChannelId of new Set([
+      targetGroup.parentChannelId,
+      anchorGroup.parentChannelId,
+    ])) {
+      if (state.layout.channels.some((entry) => (
+        entry.parentChannelId === parentChannelId
+        && channelFamily(entry.type) === "unsupported"
+      ))) {
+        throw evidenceError(
+          "Discord channel-ordering source or destination contains an unsupported direct channel type",
+        )
+      }
     }
     if (
       targetGroup.permission.confidence !== "complete"
       || !targetGroup.permission.manageChannels
-    ) throw evidenceError("Discord connector lacks complete MANAGE_CHANNELS authority for this ordering group")
+    ) throw evidenceError("Discord connector lacks complete MANAGE_CHANNELS authority for the source group")
+    if (
+      anchorGroup.permission.confidence !== "complete"
+      || !anchorGroup.permission.manageChannels
+    ) throw evidenceError("Discord connector lacks complete MANAGE_CHANNELS authority for the destination group")
     const channel = targetGroup.channels.find((entry) => entry.id === request.channelId)
-    const anchor = targetGroup.channels.find((entry) => entry.id === request.anchorChannelId)
+    const anchor = anchorGroup.channels.find((entry) => entry.id === request.anchorChannelId)
     if (!channel || !anchor) {
       throw evidenceError("Discord channel-ordering target or anchor is missing")
     }
-    const desired = desiredOrder(targetGroup.channels, request)
-    const currentGroupOrder = targetGroup.channels.map((entry) => entry.id)
-    const desiredGroupOrder = desired.map((entry) => entry.id)
-    const writeRequired = stableString(currentGroupOrder) !== stableString(desiredGroupOrder)
-    const desiredRanks = new Map(desired.map((entry, rank) => [entry.id, rank]))
-    const affected = affectedChannels(targetGroup.channels, desired, request)
+    const targetHttpEvidence = state.httpChannels.find((entry) => (
+      entry.id === request.channelId
+    ))
+    if (!targetHttpEvidence) {
+      throw evidenceError("Discord channel-ordering target HTTP evidence is missing")
+    }
+    const targetPermission = crossParentMove
+      ? targetMovePermission(
+          botId,
+          request.guildId,
+          targetHttpEvidence,
+          state.botMember,
+          state.rawRoles,
+        )
+      : null
+    const sourceCapacity = parentCapacity(
+      state.layout,
+      targetGroup.parentChannelId,
+      crossParentMove ? -1 : 0,
+    )
+    const capacity = parentCapacity(
+      state.layout,
+      anchorGroup.parentChannelId,
+      crossParentMove ? 1 : 0,
+    )
+    const movedChannel: ChannelOrderEntry = crossParentMove
+      ? { ...channel, parentChannelId: anchorGroup.parentChannelId }
+      : channel
+    const sourceCurrent = targetGroup.channels
+    const destinationCurrent = crossParentMove
+      ? anchorGroup.channels
+      : targetGroup.channels
+    const sourceDesired = crossParentMove
+      ? sourceCurrent.filter((entry) => entry.id !== request.channelId)
+      : desiredOrder(destinationCurrent, movedChannel, request)
+    const destinationDesired = crossParentMove
+      ? desiredOrder(destinationCurrent, movedChannel, request)
+      : sourceDesired
+    const sourceCurrentOrder = sourceCurrent.map((entry) => entry.id)
+    const destinationCurrentOrder = destinationCurrent.map((entry) => entry.id)
+    const sourceDesiredOrder = sourceDesired.map((entry) => entry.id)
+    const destinationDesiredOrder = destinationDesired.map((entry) => entry.id)
+    const writeRequired = crossParentMove || (
+      stableString(sourceCurrentOrder) !== stableString(sourceDesiredOrder)
+    )
+    const currentGroups = crossParentMove
+      ? [sourceCurrent, destinationCurrent]
+      : [sourceCurrent]
+    const desiredGroups = crossParentMove
+      ? [sourceDesired, destinationDesired]
+      : [destinationDesired]
+    const affected = affectedChannels(currentGroups, desiredGroups)
+    const beforeById = new Map(
+      currentGroups.flatMap((group) => group).map((entry) => [entry.id, entry]),
+    )
     const positionWrites: ChannelOrderingPositionWrite[] = writeRequired
-      ? desired.map((entry, submittedPosition) => ({
-          beforeRawPosition: entry.rawPosition,
-          channelId: entry.id,
-          submittedPosition,
+      ? desiredGroups.flatMap((group) => group.map((entry, submittedPosition) => {
+          const before = beforeById.get(entry.id)
+          if (!before) {
+            throw evidenceError("Discord channel-ordering position evidence is incomplete")
+          }
+          return {
+            beforeRawPosition: before.rawPosition,
+            channelId: entry.id,
+            parentChange: crossParentMove && entry.id === request.channelId
+              ? {
+                  destinationParentChannelId: anchorGroup.parentChannelId,
+                  lockPermissions: false as const,
+                  sourceParentChannelId: targetGroup.parentChannelId,
+                }
+              : null,
+            submittedPosition,
+          }
         }))
       : []
-    const expectedGroupOrders = new Map(groupOrders(state.layout.channels))
-    const targetKey = groupKey(
+    const expectedTopology = state.layout.channels.map((entry) => (
+      crossParentMove && entry.channelId === request.channelId
+        ? { ...entry, parentChannelId: anchorGroup.parentChannelId }
+        : { ...entry }
+    ))
+    const expectedGroupOrders = new Map(groupOrders(expectedTopology))
+    const sourceKey = groupKey(
       targetGroup.parentChannelId,
       targetGroup.family,
       null,
     )
-    expectedGroupOrders.set(targetKey, desiredGroupOrder)
+    const destinationKey = groupKey(
+      anchorGroup.parentChannelId,
+      anchorGroup.family,
+      null,
+    )
+    if (sourceDesiredOrder.length > 0) {
+      expectedGroupOrders.set(sourceKey, sourceDesiredOrder)
+    } else {
+      expectedGroupOrders.delete(sourceKey)
+    }
+    expectedGroupOrders.set(destinationKey, destinationDesiredOrder)
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
       botMember: memberSnapshot(state.botMember),
-      desiredGroupOrder,
+      capacity,
+      destinationDesiredOrder,
+      destinationPermission: anchorGroup.permission,
       expectedGroupOrders: [...expectedGroupOrders],
+      expectedTopology,
       guild: {
         id: state.guild.id,
         name: state.guild.name,
@@ -1477,7 +1744,10 @@ export class ChannelOrderingService {
         placement: request.placement,
       },
       roles: rolesSnapshot(state.roles),
-      targetPermission: targetGroup.permission,
+      sourceCapacity,
+      sourceDesiredOrder,
+      sourcePermission: targetGroup.permission,
+      targetMovePermission: targetPermission,
     })
     const obfuscatedChannels = state.layout.channels.filter((entry) => entry.obfuscated).length
     const rankChangeCount = affected.filter((entry) => (
@@ -1489,7 +1759,12 @@ export class ChannelOrderingService {
         ? [`The complete layout contains ${obfuscatedChannels} obfuscated channel IDs whose metadata remains hidden`]
         : []),
       ...(targetGroup.permission.administrator
+        || anchorGroup.permission.administrator
+        || targetPermission?.administrator
         ? ["Discord connector has ADMINISTRATOR; replace it with narrowly scoped MANAGE_CHANNELS"]
+        : []),
+      ...(crossParentMove
+        ? ["The target's exact permission overwrites remain unsynchronized with the destination category"]
         : []),
       "Discord exposes no conditional channel-order update, so external same-guild administration can race the reviewed write",
       "The operation key is one-shot and cannot be retried after reservation, including after uncertainty",
@@ -1497,10 +1772,15 @@ export class ChannelOrderingService {
     ]
     const risks = [
       "Changing channel order changes navigation and can affect how members discover text, voice, Stage, forum, and media spaces",
-      "A real move normalizes the complete same-parent sortable group to sequential raw positions shown in the plan",
-      "The PATCH is sent once without automatic retry, rollback, parent movement, permission syncing, or flag changes",
-      "Success requires a newer complete matching Gateway layout; timeout, continuity loss, or contradiction is uncertain and quarantines the guild channel collection",
+      crossParentMove
+        ? "The move changes the target's category and normalizes both complete affected sortable groups to the sequential positions shown in the plan"
+        : "The reorder normalizes the complete same-parent sortable group to the sequential positions shown in the plan",
+      "The PATCH is sent once without automatic retry, rollback, permission syncing, flag changes, or metadata changes",
+      "Success requires a newer complete matching Gateway layout plus coherent HTTP readback preserving exact target overwrites; timeout, continuity loss, or contradiction is uncertain and quarantines the guild channel collection",
     ]
+    const destinationDesiredRanks = new Map(
+      destinationDesired.map((entry, rank) => [entry.id, rank]),
+    )
     const plan: ChannelOrderingPlan = {
       affectedChannels: affected,
       anchor,
@@ -1512,12 +1792,17 @@ export class ChannelOrderingService {
       current: {
         anchorRank: anchor.rank,
         channelRank: channel.rank,
-        groupOrder: currentGroupOrder,
+        destinationGroupOrder: destinationCurrentOrder,
+        sourceGroupOrder: sourceCurrentOrder,
       },
+      destinationCapacity: capacity,
+      destinationParentChannelId: anchorGroup.parentChannelId,
+      destinationPermission: anchorGroup.permission,
       desired: {
-        anchorRank: desiredRanks.get(anchor.id) as number,
-        channelRank: desiredRanks.get(channel.id) as number,
-        groupOrder: desiredGroupOrder,
+        anchorRank: destinationDesiredRanks.get(anchor.id) as number,
+        channelRank: destinationDesiredRanks.get(channel.id) as number,
+        destinationGroupOrder: destinationDesiredOrder,
+        sourceGroupOrder: sourceDesiredOrder,
       },
       digest,
       family: targetGroup.family,
@@ -1529,33 +1814,40 @@ export class ChannelOrderingService {
       httpEvidenceMode: state.httpEvidenceMode,
       impact: {
         affectedChannelCount: affected.length,
-        groupChannelCount: targetGroup.channels.length,
+        destinationGroupChannelCount: destinationCurrent.length,
+        parentChangeCount: crossParentMove ? 1 : 0,
         rankChangeCount,
         rawPositionWriteCount: positionWrites.length,
+        sourceGroupChannelCount: sourceCurrent.length,
       },
       layout: {
         obfuscatedChannels,
         revision: state.layout.revision,
         updatedAt: state.layout.updatedAt as string,
       },
+      mode,
       operationKeyHash: request.operationKeyHash,
-      parentChannelId: targetGroup.parentChannelId,
-      permission: targetGroup.permission,
+      permissionOverwriteBehavior: "preserve",
       placement: request.placement,
       positionWrites,
       privacy: privacyProjection(),
       risks,
       schemaVersion: SCHEMA_VERSION,
+      sourceCapacity,
+      sourceParentChannelId: targetGroup.parentChannelId,
+      sourcePermission: targetGroup.permission,
       status: writeRequired ? "planned" : "already-current",
+      targetMovePermission: targetPermission,
       warnings,
       writeRequired,
     }
     return {
       baselineLayout: state.layout,
-      desiredGroupOrder,
+      expectedTopology,
       expectedGroupOrders,
       plan,
       request,
+      targetHttpEvidence,
     }
   }
 
@@ -1627,7 +1919,13 @@ export class ChannelOrderingService {
       ) throw new ChannelOrderingPlanChangedError(expectedDigest, STATE_UNAVAILABLE)
       throw error
     }
-    const { baselineLayout, desiredGroupOrder, expectedGroupOrders, plan } = built
+    const {
+      baselineLayout,
+      expectedGroupOrders,
+      expectedTopology,
+      plan,
+      targetHttpEvidence,
+    } = built
     if (plan.digest !== expectedDigest) {
       throw new ChannelOrderingPlanChangedError(expectedDigest, plan.digest)
     }
@@ -1649,7 +1947,7 @@ export class ChannelOrderingService {
         observedAffectedChannels: plan.affectedChannels.map((entry) => ({
           id: entry.id,
           obfuscated: entry.obfuscated,
-          parentChannelId: entry.parentChannelId,
+          parentChannelId: entry.beforeParentChannelId,
           rank: entry.beforeRank,
           rawPosition: entry.rawPosition,
           type: entry.type,
@@ -1714,11 +2012,18 @@ export class ChannelOrderingService {
     try {
       const writes: ModifyGuildChannelPositionInput[] = plan.positionWrites.map((write) => ({
         id: write.channelId,
+        ...(write.parentChange
+          ? {
+              lockPermissions: false as const,
+              parentId: write.parentChange.destinationParentChannelId,
+            }
+          : {}),
         position: write.submittedPosition,
-      }))
+      } as ModifyGuildChannelPositionInput))
       watch = layoutVerificationWatch({
         baseline: baselineLayout,
         expectedGroupOrders,
+        expectedTopology,
         guildId: request.guildId,
         source: this.#layoutSource,
         timeoutMs: this.#verificationTimeoutMs,
@@ -1736,8 +2041,14 @@ export class ChannelOrderingService {
       observedLayoutRevision = observed.revision
       observedAffectedChannels = observedEntries(
         observed,
-        desiredGroupOrder,
         affectedIds,
+      )
+      const readback = await this.#client.getGuildChannels(request.guildId, options)
+      verifyHttpReadback(
+        readback,
+        observed,
+        plan.httpEvidenceMode,
+        targetHttpEvidence,
       )
     } catch (error) {
       const latest = watch?.latest() ?? null
@@ -1745,7 +2056,6 @@ export class ChannelOrderingService {
         observedLayoutRevision = latest.revision
         observedAffectedChannels = observedEntries(
           latest,
-          desiredGroupOrder,
           affectedIds,
         )
       }

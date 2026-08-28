@@ -4947,8 +4947,13 @@ export class ConnectorService {
       [
         writeResourceTarget("channel", request.channelId),
         writeResourceTarget("channel", request.anchorChannelId),
-        ...(coordinationPlan.parentChannelId
-          ? [writeResourceTarget("channel", coordinationPlan.parentChannelId)]
+        ...(coordinationPlan.sourceParentChannelId
+          ? [writeResourceTarget("channel", coordinationPlan.sourceParentChannelId)]
+          : []),
+        ...(coordinationPlan.destinationParentChannelId
+          && coordinationPlan.destinationParentChannelId
+            !== coordinationPlan.sourceParentChannelId
+          ? [writeResourceTarget("channel", coordinationPlan.destinationParentChannelId)]
           : []),
         writeGuildCollectionTarget("channels", request.guildId),
       ],

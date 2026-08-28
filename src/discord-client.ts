@@ -1277,10 +1277,17 @@ export interface CreateGuildChannelPermissionOverwriteInput {
   type: 0 | 1
 }
 
-export interface ModifyGuildChannelPositionInput {
-  id: string
-  position: number
-}
+export type ModifyGuildChannelPositionInput =
+  | {
+      id: string
+      position: number
+    }
+  | {
+      id: string
+      lockPermissions: false
+      parentId: string | null
+      position: number
+    }
 
 export interface CreateGuildRoleInput {
   hoist: boolean
@@ -7261,7 +7268,12 @@ function modifyGuildRolePositionsBody(
 
 function modifyGuildChannelPositionsBody(
   positions: readonly ModifyGuildChannelPositionInput[],
-): Array<{ id: string; position: number }> {
+): Array<{
+  id: string
+  lock_permissions?: false
+  parent_id?: string | null
+  position: number
+}> {
   if (
     !Array.isArray(positions)
     || positions.length < 1
@@ -7272,12 +7284,17 @@ function modifyGuildChannelPositionsBody(
     )
   }
   const ids = new Set<string>()
+  let parentChangeCount = 0
   return positions.map((position) => {
+    const keys = position && typeof position === "object" && !Array.isArray(position)
+      ? Object.keys(position).sort().join("\0")
+      : ""
+    const changesParent = keys === "id\0lockPermissions\0parentId\0position"
     if (
       !position
       || typeof position !== "object"
       || Array.isArray(position)
-      || Object.keys(position).sort().join("\0") !== "id\0position"
+      || (keys !== "id\0position" && !changesParent)
       || typeof position.id !== "string"
       || !DISCORD_SNOWFLAKE_PATTERN.test(position.id)
       || BigInt(position.id) < 1n
@@ -7289,9 +7306,38 @@ function modifyGuildChannelPositionsBody(
     ) {
       throw new RangeError("Discord channel-position input contains an invalid entry")
     }
+    if (changesParent) {
+      const move = position as Extract<
+        ModifyGuildChannelPositionInput,
+        { lockPermissions: false }
+      >
+      if (
+        move.lockPermissions !== false
+        || !(move.parentId === null || (
+          typeof move.parentId === "string"
+          && DISCORD_SNOWFLAKE_PATTERN.test(move.parentId)
+          && BigInt(move.parentId) >= 1n
+          && BigInt(move.parentId) <= DISCORD_SNOWFLAKE_MAX
+          && move.parentId !== move.id
+        ))
+        || parentChangeCount > 0
+      ) {
+        throw new RangeError("Discord channel-position input contains an invalid parent change")
+      }
+      parentChangeCount += 1
+    }
     ids.add(position.id)
     return {
       id: position.id,
+      ...(changesParent
+        ? {
+            lock_permissions: false as const,
+            parent_id: (position as Extract<
+              ModifyGuildChannelPositionInput,
+              { lockPermissions: false }
+            >).parentId,
+          }
+        : {}),
       position: position.position,
     }
   })

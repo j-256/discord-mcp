@@ -237,6 +237,7 @@ class MemoryOperationStore implements OperationStore {
 }
 
 class FixtureClient implements ChannelOrderingServiceClient {
+  afterModify: (() => void) | null = null
   channels: DiscordChannel[]
   guild: DiscordGuild
   member: DiscordGuildMember
@@ -314,7 +315,9 @@ class FixtureClient implements ChannelOrderingServiceClient {
       const current = this.channels.find((entry) => entry.id === requested.id)
       assert.ok(current)
       current.position = requested.position
+      if ("parentId" in requested) current.parent_id = requested.parentId
     }
+    this.afterModify?.()
     if (!this.publishMutation) return
     const next = layoutSnapshot(
       this.channels,
@@ -454,17 +457,34 @@ test("channel-order planning binds complete groups and normalizes the whole fami
   assert.deepEqual(plan.current, {
     anchorRank: 2,
     channelRank: 0,
-    groupOrder: [TARGET_CHANNEL_ID, MID_CHANNEL_ID, ANCHOR_CHANNEL_ID],
+    destinationGroupOrder: [TARGET_CHANNEL_ID, MID_CHANNEL_ID, ANCHOR_CHANNEL_ID],
+    sourceGroupOrder: [TARGET_CHANNEL_ID, MID_CHANNEL_ID, ANCHOR_CHANNEL_ID],
   })
   assert.deepEqual(plan.desired, {
     anchorRank: 2,
     channelRank: 1,
-    groupOrder: [MID_CHANNEL_ID, TARGET_CHANNEL_ID, ANCHOR_CHANNEL_ID],
+    destinationGroupOrder: [MID_CHANNEL_ID, TARGET_CHANNEL_ID, ANCHOR_CHANNEL_ID],
+    sourceGroupOrder: [MID_CHANNEL_ID, TARGET_CHANNEL_ID, ANCHOR_CHANNEL_ID],
   })
   assert.deepEqual(plan.positionWrites, [
-    { beforeRawPosition: 2, channelId: MID_CHANNEL_ID, submittedPosition: 0 },
-    { beforeRawPosition: 1, channelId: TARGET_CHANNEL_ID, submittedPosition: 1 },
-    { beforeRawPosition: 3, channelId: ANCHOR_CHANNEL_ID, submittedPosition: 2 },
+    {
+      beforeRawPosition: 2,
+      channelId: MID_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 0,
+    },
+    {
+      beforeRawPosition: 1,
+      channelId: TARGET_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 1,
+    },
+    {
+      beforeRawPosition: 3,
+      channelId: ANCHOR_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 2,
+    },
   ])
   assert.equal(plan.impact.rawPositionWriteCount, 3)
   assert.match(plan.digest, /^hmac-sha256:[a-f0-9]{64}$/)
@@ -475,6 +495,194 @@ test("channel-order planning binds complete groups and normalizes the whole fami
   assert.equal(noOp.status, "already-current")
   assert.equal(noOp.writeRequired, false)
   assert.deepEqual(noOp.positionWrites, [])
+})
+
+test("cross-parent planning binds exact destination, capacity, authority, and overwrite preservation", async () => {
+  const { service } = fixture()
+  const moveRequest = request({ anchorChannelId: TOP_CHANNEL_ID })
+
+  const plan = await service.plan(APPLICATION_ID, BOT_ID, moveRequest)
+
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.mode, "cross-parent-move")
+  assert.equal(plan.sourceParentChannelId, CATEGORY_ID)
+  assert.equal(plan.destinationParentChannelId, null)
+  assert.equal(plan.permissionOverwriteBehavior, "preserve")
+  assert.deepEqual(plan.destinationCapacity, {
+    childCountAfter: null,
+    childCountBefore: null,
+    childLimit: null,
+    parentKind: "guild-root",
+  })
+  assert.deepEqual(plan.sourceCapacity, {
+    childCountAfter: 3,
+    childCountBefore: 4,
+    childLimit: 50,
+    parentKind: "category",
+  })
+  assert.deepEqual(plan.current.sourceGroupOrder, [
+    TARGET_CHANNEL_ID,
+    MID_CHANNEL_ID,
+    ANCHOR_CHANNEL_ID,
+  ])
+  assert.deepEqual(plan.current.destinationGroupOrder, [TOP_CHANNEL_ID])
+  assert.deepEqual(plan.desired.sourceGroupOrder, [
+    MID_CHANNEL_ID,
+    ANCHOR_CHANNEL_ID,
+  ])
+  assert.deepEqual(plan.desired.destinationGroupOrder, [
+    TARGET_CHANNEL_ID,
+    TOP_CHANNEL_ID,
+  ])
+  assert.deepEqual(plan.targetMovePermission, {
+    administrator: false,
+    effectivePermissionNames: ["MANAGE_CHANNELS", "VIEW_CHANNEL"],
+    effectivePermissions: (
+      DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_CHANNELS
+    ).toString(),
+    manageChannels: true,
+    viewChannel: true,
+  })
+  assert.deepEqual(plan.positionWrites, [
+    {
+      beforeRawPosition: 2,
+      channelId: MID_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 0,
+    },
+    {
+      beforeRawPosition: 3,
+      channelId: ANCHOR_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 1,
+    },
+    {
+      beforeRawPosition: 1,
+      channelId: TARGET_CHANNEL_ID,
+      parentChange: {
+        destinationParentChannelId: null,
+        lockPermissions: false,
+        sourceParentChannelId: CATEGORY_ID,
+      },
+      submittedPosition: 0,
+    },
+    {
+      beforeRawPosition: 0,
+      channelId: TOP_CHANNEL_ID,
+      parentChange: null,
+      submittedPosition: 1,
+    },
+  ])
+  assert.equal(plan.impact.parentChangeCount, 1)
+  assert.equal(plan.impact.rawPositionWriteCount, 4)
+})
+
+test("cross-parent execution moves once, preserves overwrites, and verifies Gateway plus HTTP", async () => {
+  const target = fixture()
+  const moved = target.client.channels.find((entry) => entry.id === TARGET_CHANNEL_ID)
+  assert.ok(moved)
+  moved.permission_overwrites = [{
+    allow: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    deny: "0",
+    id: BOT_ROLE_ID,
+    type: 0,
+  }]
+  target.client.source.snapshot = layoutSnapshot(target.client.channels)
+  const moveRequest = request({ anchorChannelId: TOP_CHANNEL_ID })
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, moveRequest)
+
+  const result = await target.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    moveRequest,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.layoutMatched, true)
+  assert.deepEqual(target.client.patchCalls, [{
+    auditReason: "Reviewed channel layout change",
+    guildId: GUILD_ID,
+    positions: [
+      { id: MID_CHANNEL_ID, position: 0 },
+      { id: ANCHOR_CHANNEL_ID, position: 1 },
+      {
+        id: TARGET_CHANNEL_ID,
+        lockPermissions: false,
+        parentId: null,
+        position: 0,
+      },
+      { id: TOP_CHANNEL_ID, position: 1 },
+    ],
+  }])
+  const observed = target.client.channels.find((entry) => entry.id === TARGET_CHANNEL_ID)
+  assert.equal(observed?.parent_id, null)
+  assert.deepEqual(observed?.permission_overwrites, [{
+    allow: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    deny: "0",
+    id: BOT_ROLE_ID,
+    type: 0,
+  }])
+  const durable = target.activityStore.entries as Array<
+    ActivityEntry & Record<string, unknown>
+  >
+  assert.equal(durable[0]?.sourceParentChannelId, CATEGORY_ID)
+  assert.equal(durable[0]?.destinationParentChannelId, null)
+})
+
+test("cross-parent execution moves a root channel into a category and removes the empty source group", async () => {
+  const target = fixture()
+  const moveRequest = request({
+    anchorChannelId: ANCHOR_CHANNEL_ID,
+    channelId: TOP_CHANNEL_ID,
+  })
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, moveRequest)
+
+  assert.equal(plan.sourceParentChannelId, null)
+  assert.equal(plan.destinationParentChannelId, CATEGORY_ID)
+  assert.deepEqual(plan.sourceCapacity, {
+    childCountAfter: null,
+    childCountBefore: null,
+    childLimit: null,
+    parentKind: "guild-root",
+  })
+  assert.deepEqual(plan.destinationCapacity, {
+    childCountAfter: 5,
+    childCountBefore: 4,
+    childLimit: 50,
+    parentKind: "category",
+  })
+  assert.deepEqual(plan.desired.sourceGroupOrder, [])
+  assert.deepEqual(plan.desired.destinationGroupOrder, [
+    TARGET_CHANNEL_ID,
+    MID_CHANNEL_ID,
+    TOP_CHANNEL_ID,
+    ANCHOR_CHANNEL_ID,
+  ])
+
+  const result = await target.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    moveRequest,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed")
+  assert.equal(
+    target.client.channels.find((entry) => entry.id === TOP_CHANNEL_ID)?.parent_id,
+    CATEGORY_ID,
+  )
+  assert.deepEqual(target.client.patchCalls[0]?.positions, [
+    { id: TARGET_CHANNEL_ID, position: 0 },
+    { id: MID_CHANNEL_ID, position: 1 },
+    {
+      id: TOP_CHANNEL_ID,
+      lockPermissions: false,
+      parentId: CATEGORY_ID,
+      position: 2,
+    },
+    { id: ANCHOR_CHANNEL_ID, position: 3 },
+  ])
 })
 
 test("visibility-bounded HTTP evidence never reveals obfuscated metadata", async () => {
@@ -552,15 +760,8 @@ test("planning fails closed on scope, family, parent, unsupported siblings, evid
     fixture().service.plan(APPLICATION_ID, BOT_ID, request({
       anchorChannelId: VOICE_CHANNEL_ID,
     })),
-    /share one parent and family/,
+    /share one sortable family/,
   )
-  await assert.rejects(
-    fixture().service.plan(APPLICATION_ID, BOT_ID, request({
-      anchorChannelId: TOP_CHANNEL_ID,
-    })),
-    /share one parent and family/,
-  )
-
   const unsupported = new FixtureClient()
   const directory = channel(
     "740000000000000007",
@@ -589,6 +790,106 @@ test("planning fails closed on scope, family, parent, unsupported siblings, evid
   await assert.rejects(
     fixture({ client: unauthorized }).service.plan(APPLICATION_ID, BOT_ID, request()),
     /lacks complete MANAGE_CHANNELS authority/,
+  )
+})
+
+test("cross-parent planning fails closed on target visibility, target authority, destination authority, and capacity", async () => {
+  const obfuscated = new FixtureClient()
+  obfuscated.source.snapshot = {
+    ...obfuscated.source.snapshot,
+    channels: obfuscated.source.snapshot.channels.map((entry) => (
+      entry.channelId === TARGET_CHANNEL_ID
+        ? { ...entry, obfuscated: true }
+        : entry
+    )),
+  }
+  obfuscated.channels = obfuscated.channels.filter((entry) => (
+    entry.id !== TARGET_CHANNEL_ID
+  ))
+  await assert.rejects(
+    fixture({ client: obfuscated }).service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ anchorChannelId: TOP_CHANNEL_ID }),
+    ),
+    /require visible exact target evidence/,
+  )
+
+  const targetDenied = new FixtureClient()
+  const deniedTarget = targetDenied.channels.find((entry) => (
+    entry.id === TARGET_CHANNEL_ID
+  ))
+  assert.ok(deniedTarget)
+  deniedTarget.permission_overwrites = [{
+    allow: "0",
+    deny: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    id: BOT_ROLE_ID,
+    type: 0,
+  }]
+  targetDenied.source.snapshot = layoutSnapshot(targetDenied.channels)
+  await assert.rejects(
+    fixture({ client: targetDenied }).service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ anchorChannelId: TOP_CHANNEL_ID }),
+    ),
+    /lacks complete VIEW_CHANNEL and MANAGE_CHANNELS authority/,
+  )
+
+  const destinationDenied = new FixtureClient()
+  ;(destinationDenied.roles.find((entry) => entry.id === BOT_ROLE_ID) as DiscordRole)
+    .permissions = "0"
+  const sourceCategory = destinationDenied.channels.find((entry) => (
+    entry.id === CATEGORY_ID
+  ))
+  const scopedTarget = destinationDenied.channels.find((entry) => (
+    entry.id === TARGET_CHANNEL_ID
+  ))
+  assert.ok(sourceCategory)
+  assert.ok(scopedTarget)
+  sourceCategory.permission_overwrites = [{
+    allow: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    deny: "0",
+    id: BOT_ROLE_ID,
+    type: 0,
+  }]
+  scopedTarget.permission_overwrites = [{
+    allow: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    deny: "0",
+    id: BOT_ROLE_ID,
+    type: 0,
+  }]
+  destinationDenied.source.snapshot = layoutSnapshot(destinationDenied.channels)
+  await assert.rejects(
+    fixture({ client: destinationDenied }).service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({ anchorChannelId: TOP_CHANNEL_ID }),
+    ),
+    /lacks complete MANAGE_CHANNELS authority for the destination group/,
+  )
+
+  const full = new FixtureClient()
+  for (let index = 0; index < 46; index += 1) {
+    full.channels.push(channel(
+      (760_000_000_000_000_000n + BigInt(index)).toString(),
+      `Capacity ${index}`,
+      DISCORD_CHANNEL_TYPES.text,
+      4 + index,
+      CATEGORY_ID,
+    ))
+  }
+  full.source.snapshot = layoutSnapshot(full.channels)
+  await assert.rejects(
+    fixture({ client: full }).service.plan(
+      APPLICATION_ID,
+      BOT_ID,
+      request({
+        anchorChannelId: ANCHOR_CHANNEL_ID,
+        channelId: TOP_CHANNEL_ID,
+      }),
+    ),
+    /destination category is at capacity/,
   )
 })
 
@@ -623,8 +924,8 @@ test("visible parent-category MANAGE_CHANNELS authority permits obfuscated child
   assert.equal(plan.httpEvidenceMode, "visibility-bounded")
   assert.equal(plan.channel.obfuscated, true)
   assert.equal(plan.channel.name, null)
-  assert.equal(plan.permission.manageChannels, true)
-  assert.equal(plan.permission.source, "parent")
+  assert.equal(plan.sourcePermission.manageChannels, true)
+  assert.equal(plan.sourcePermission.source, "parent")
 })
 
 test("execution sends one complete position payload and verifies a newer whole-guild layout", async () => {
@@ -661,6 +962,46 @@ test("execution sends one complete position payload and verifies a newer whole-g
   ])
   assert.doesNotMatch(persisted, /Reviewed channel layout change|Private target|Private anchor/)
   assert.doesNotMatch(persisted, new RegExp(OPERATION_KEY))
+})
+
+test("accepted cross-parent overwrite drift is uncertain and quarantined", async () => {
+  const guildId = "735000000000000001"
+  const client = new FixtureClient(guildId)
+  const target = client.channels.find((entry) => entry.id === TARGET_CHANNEL_ID)
+  assert.ok(target)
+  target.permission_overwrites = [{
+    allow: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+    deny: "0",
+    id: BOT_ROLE_ID,
+    type: 0,
+  }]
+  client.source.snapshot = { ...layoutSnapshot(client.channels), guildId }
+  client.afterModify = () => {
+    const moved = client.channels.find((entry) => entry.id === TARGET_CHANNEL_ID)
+    assert.ok(moved)
+    moved.permission_overwrites = []
+  }
+  const targetFixture = fixture({ client })
+  const moveRequest = request({
+    anchorChannelId: TOP_CHANNEL_ID,
+    guildId,
+  })
+  const plan = await targetFixture.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    moveRequest,
+  )
+
+  await assert.rejects(
+    targetFixture.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      moveRequest,
+      plan.digest,
+    ),
+    (error) => executionResult(error).status === "uncertain",
+  )
+  assert.equal(client.patchCalls.length, 1)
 })
 
 test("already-current ordering spends no key and records no activity", async () => {

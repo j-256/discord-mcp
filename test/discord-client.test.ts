@@ -5112,7 +5112,12 @@ test("Discord client sends one exact channel-position PATCH and requires empty 2
   await client.modifyGuildChannelPositions(
     "100",
     [
-      { id: "300", position: 0 },
+      {
+        id: "300",
+        lockPermissions: false,
+        parentId: "400",
+        position: 0,
+      },
       { id: "301", position: 1 },
     ],
     "Reviewed channel order / case 42",
@@ -5120,7 +5125,12 @@ test("Discord client sends one exact channel-position PATCH and requires empty 2
 
   assert.deepEqual(requests, [{
     body: [
-      { id: "300", position: 0 },
+      {
+        id: "300",
+        lock_permissions: false,
+        parent_id: "400",
+        position: 0,
+      },
       { id: "301", position: 1 },
     ],
     method: "PATCH",
@@ -5170,6 +5180,40 @@ test("Discord client rejects unsafe channel-position contracts before fetching",
       "reviewed",
     ),
     /invalid entry/,
+  )
+  assert.throws(
+    () => client.modifyGuildChannelPositions(
+      "100",
+      [{
+        id: "300",
+        lockPermissions: true,
+        parentId: "400",
+        position: 0,
+      } as never],
+      "reviewed",
+    ),
+    /invalid parent change/,
+  )
+  assert.throws(
+    () => client.modifyGuildChannelPositions(
+      "100",
+      [
+        {
+          id: "300",
+          lockPermissions: false,
+          parentId: "400",
+          position: 0,
+        },
+        {
+          id: "301",
+          lockPermissions: false,
+          parentId: null,
+          position: 1,
+        },
+      ],
+      "reviewed",
+    ),
+    /invalid parent change/,
   )
   assert.equal(requests, 0)
 })

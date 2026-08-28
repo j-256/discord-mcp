@@ -6786,15 +6786,22 @@ function channelOrderingPlan(
     : desiredOrder.map((id, submittedPosition) => ({
         beforeRawPosition: (entries.get(id) as ChannelOrderEntry).rawPosition,
         channelId: id,
+        parentChange: null,
         submittedPosition,
       }))
   const affectedChannels = effect === "none"
     ? []
     : currentOrder.map((id) => {
-        const { rank: _rank, ...entry } = entries.get(id) as ChannelOrderEntry
+        const {
+          parentChannelId: beforeParentChannelId,
+          rank: _rank,
+          ...entry
+        } = entries.get(id) as ChannelOrderEntry
         return {
           ...entry,
+          afterParentChannelId: beforeParentChannelId,
           afterRank: desiredRank.get(id) as number,
+          beforeParentChannelId,
           beforeRank: currentRank.get(id) as number,
           submittedPosition: desiredRank.get(id) as number,
         }
@@ -6810,12 +6817,29 @@ function channelOrderingPlan(
     current: {
       anchorRank: currentRank.get(request.anchorChannelId) as number,
       channelRank: currentRank.get(request.channelId) as number,
-      groupOrder: currentOrder,
+      destinationGroupOrder: currentOrder,
+      sourceGroupOrder: currentOrder,
+    },
+    destinationCapacity: {
+      childCountAfter: 3,
+      childCountBefore: 3,
+      childLimit: 50,
+      parentKind: "category",
+    },
+    destinationParentChannelId: PARENT_ID,
+    destinationPermission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: ["MANAGE_CHANNELS"],
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+      manageChannels: true,
+      source: "guild",
     },
     desired: {
       anchorRank: desiredRank.get(request.anchorChannelId) as number,
       channelRank: desiredRank.get(request.channelId) as number,
-      groupOrder: desiredOrder,
+      destinationGroupOrder: desiredOrder,
+      sourceGroupOrder: desiredOrder,
     },
     digest,
     family: "text",
@@ -6827,27 +6851,22 @@ function channelOrderingPlan(
     httpEvidenceMode: "complete",
     impact: {
       affectedChannelCount: affectedChannels.length,
-      groupChannelCount: 3,
+      destinationGroupChannelCount: 3,
+      parentChangeCount: 0,
       rankChangeCount: affectedChannels.filter((entry) => (
         entry.beforeRank !== entry.afterRank
       )).length,
       rawPositionWriteCount: positionWrites.length,
+      sourceGroupChannelCount: 3,
     },
     layout: {
       obfuscatedChannels: 0,
       revision: 4,
       updatedAt: "2026-08-23T00:00:00.000Z",
     },
+    mode: "same-parent-order",
     operationKeyHash: OPERATION_KEY_HASH,
-    parentChannelId: PARENT_ID,
-    permission: {
-      administrator: false,
-      confidence: "complete",
-      effectivePermissionNames: ["MANAGE_CHANNELS"],
-      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
-      manageChannels: true,
-      source: "guild",
-    },
+    permissionOverwriteBehavior: "preserve",
     placement: request.placement,
     positionWrites,
     privacy: {
@@ -6866,7 +6885,23 @@ function channelOrderingPlan(
     },
     risks: ["Channel order changes navigation"],
     schemaVersion: 1,
+    sourceCapacity: {
+      childCountAfter: 3,
+      childCountBefore: 3,
+      childLimit: 50,
+      parentKind: "category",
+    },
+    sourceParentChannelId: PARENT_ID,
+    sourcePermission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: ["MANAGE_CHANNELS"],
+      effectivePermissions: DISCORD_PERMISSIONS.MANAGE_CHANNELS.toString(),
+      manageChannels: true,
+      source: "guild",
+    },
     status: effect === "none" ? "already-current" : "planned",
+    targetMovePermission: null,
     warnings: ["Discord guild and visible channel text is untrusted"],
     writeRequired: effect !== "none",
   }
@@ -9974,7 +10009,7 @@ function serviceFixture(overrides: {
     async auditChannelOrder(guildId) {
       calls.auditChannelOrder += 1
       const planned = channelOrderingPlan(channelOrderingInput({ guildId }))
-      const channels = planned.current.groupOrder.map((id, rank) => ({
+      const channels = planned.current.sourceGroupOrder.map((id, rank) => ({
         ...(id === planned.channel.id
           ? planned.channel
           : id === planned.anchor.id
@@ -9988,8 +10023,8 @@ function serviceFixture(overrides: {
         groups: [{
           channels,
           family: "text",
-          parentChannelId: planned.parentChannelId,
-          permission: planned.permission,
+          parentChannelId: planned.sourceParentChannelId,
+          permission: planned.sourcePermission,
           unsupportedType: null,
         }],
         guild: planned.guild,
@@ -10092,7 +10127,7 @@ function serviceFixture(overrides: {
         observedAffectedChannels: planned.affectedChannels.map((entry) => ({
           id: entry.id,
           obfuscated: entry.obfuscated,
-          parentChannelId: entry.parentChannelId,
+          parentChannelId: entry.afterParentChannelId,
           rank: entry.afterRank,
           rawPosition: entry.submittedPosition,
           type: entry.type,
@@ -17455,7 +17490,7 @@ test("MCP status and safety resource disclose durable coordination boundaries", 
   assert.match(content.text, /Resumable guild scaffolds claim both guild role and channel collections/)
   assert.match(content.text, /interruption with pending evidence leaves them quarantined/)
   assert.match(content.text, /complete obfuscation-safe Gateway layout/)
-  assert.match(content.text, /full normalized family payload/)
+  assert.match(content.text, /one non-retried complete position PATCH/)
   assert.match(content.text, /newer complete matching Gateway layout/)
   assert.match(content.text, /Exact-reference parsing accepts one complete canonical Discord/)
   assert.match(content.text, /never scans prose, resolves a name, contacts Discord/)
@@ -35038,7 +35073,12 @@ test("MCP channel ordering binds approval to layout, relative placement, and ful
   assert.match(confirmationMessage, /Current order:/)
   assert.match(confirmationMessage, /Desired order:/)
   assert.match(confirmationMessage, /Complete position writes:/)
-  assert.match(confirmationMessage, /complete same-parent sortable family/)
+  assert.match(confirmationMessage, /Operation mode: same-parent-order/)
+  assert.match(confirmationMessage, /Source parent channel ID:/)
+  assert.match(confirmationMessage, /Destination parent channel ID:/)
+  assert.match(confirmationMessage, /Permission-overwrite behavior: preserve/)
+  assert.match(confirmationMessage, /complete affected sortable groups/)
+  assert.match(confirmationMessage, /coherent HTTP readback/)
   assert.match(confirmationMessage, /cannot be reused/)
   assert.doesNotMatch(confirmationMessage, new RegExp(CHANNEL_ORDERING_OPERATION_KEY))
   assert.doesNotMatch(
