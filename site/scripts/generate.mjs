@@ -60,12 +60,13 @@ const REFERENCE_GROUPS = Object.freeze([
     ],
   },
   {
-    description: "Bounded community, search, member, ban, thread, and forum reads",
+    description: "Bounded community, search, attachment, member, ban, thread, and forum reads",
     label: "Read and discovery",
     slug: "read-and-discovery",
     titles: [
       "Privacy-safe community activity analysis",
       "Search",
+      "Native exact message-attachment reads",
       "Privacy-safe member directory",
       "Privacy-safe guild ban audit",
       "Threads and forums",
@@ -201,6 +202,7 @@ const SECURITY_GROUPS = Object.freeze([
     titles: [
       "Durable reviewed-write coordination",
       "Exact-recipient direct messages",
+      "Native attachment reads",
       "Attachment messages",
       "Static Components V2 messages",
       "Static rich-embed messages",

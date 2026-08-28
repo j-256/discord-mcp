@@ -2,6 +2,22 @@ export class ConfigurationError extends Error {
   override name = "ConfigurationError"
 }
 
+export class AttachmentReadEvidenceError extends Error {
+  override name = "AttachmentReadEvidenceError"
+}
+
+export class AttachmentReadDeliveryError extends Error {
+  override name = "AttachmentReadDeliveryError"
+}
+
+export class AttachmentReadTooLargeError extends Error {
+  override name = "AttachmentReadTooLargeError"
+}
+
+export class AttachmentReadWithheldError extends Error {
+  override name = "AttachmentReadWithheldError"
+}
+
 export type ConfigChangeErrorReason = "active" | "candidate" | "identity" | "review"
 
 export class ConfigChangeError extends ConfigurationError {

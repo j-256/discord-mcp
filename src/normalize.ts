@@ -29,9 +29,7 @@ function normalizeAttachment(attachment: DiscordAttachment) {
     filename: attachment.filename,
     height: attachment.height ?? null,
     id: attachment.id,
-    proxyUrl: attachment.proxy_url ?? null,
     size: attachment.size,
-    url: attachment.url,
     width: attachment.width ?? null,
   }
 }

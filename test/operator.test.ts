@@ -647,6 +647,7 @@ function toolService(
     getGuildMember: unexpected,
     getMemberVoiceState: unexpected,
     getMessage: unexpected,
+    getMessageAttachment: unexpected,
     getRole: unexpected,
     async getStatus() {
       return connectorStatus
@@ -6196,6 +6197,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/announcement-subscriptions",
     "discord://channels/{channelId}/forum-tags",
     "discord://channels/{channelId}/messages/{messageId}",
+    "discord://channels/{channelId}/messages/{messageId}/attachments/{attachmentId}",
     "discord://channels/{channelId}/messages/{messageId}/reactions",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
@@ -6473,7 +6475,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 6)
+  assert.equal(report.toolCount, 7)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
     "route_discord_goal",
@@ -6485,6 +6487,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "discover_discord_tools",
     "get_message",
     "list_activity",
+    "read_message_attachment",
     "read_messages",
     "search_messages",
   ])

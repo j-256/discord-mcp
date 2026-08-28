@@ -131,6 +131,13 @@ import type {
 } from "./attachment-message-service.js"
 import { AttachmentMessageService } from "./attachment-message-service.js"
 import {
+  assertMessageAttachmentReadInput,
+  MessageAttachmentReadService,
+  type MessageAttachmentReadOptions,
+  type MessageAttachmentReadResult,
+  type MessageAttachmentReadServiceOptions,
+} from "./message-attachment-read-service.js"
+import {
   reviewComponentLayout,
   type ComponentLayoutInput,
   type ComponentLayoutReview,
@@ -1147,6 +1154,10 @@ export interface ConnectorServiceOptions {
     AttachmentMessageServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  attachmentReadOptions?: Pick<
+    MessageAttachmentReadServiceOptions,
+    "fetchImplementation"
+  >
   componentMessageOptions?: Pick<
     ComponentMessageServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1538,6 +1549,7 @@ export class ConnectorService {
   readonly #announcementCrosspostService: AnnouncementCrosspostService
   readonly #announcementSubscriptionService: AnnouncementSubscriptionService
   readonly #attachmentMessageService: AttachmentMessageService
+  readonly #messageAttachmentReadService: MessageAttachmentReadService
   readonly #applicationEmojiService: ApplicationEmojiService
   readonly #applicationActivityInstanceService: ApplicationActivityInstanceService
   readonly #applicationEntitlementService: ApplicationEntitlementService
@@ -1863,6 +1875,11 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.attachmentMessageOptions,
+    })
+    this.#messageAttachmentReadService = new MessageAttachmentReadService({
+      client: this.#client,
+      policy: this.#policy,
+      ...options.attachmentReadOptions,
     })
     this.#componentMessageService = new ComponentMessageService({
       activityStore: this.#activityStore,
@@ -3038,6 +3055,29 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async getMessageAttachment(
+    channelId: string,
+    messageId: string,
+    attachmentId: string,
+    options: MessageAttachmentReadOptions,
+  ): Promise<MessageAttachmentReadResult> {
+    assertMessageAttachmentReadInput(
+      channelId,
+      messageId,
+      attachmentId,
+      options.maxBytes,
+    )
+    const identity = await this.#verifyIdentity(options)
+    return this.#messageAttachmentReadService.read(
+      identity.application.id,
+      identity.bot.id,
+      channelId,
+      messageId,
+      attachmentId,
+      options,
+    )
   }
 
   async searchMessages(

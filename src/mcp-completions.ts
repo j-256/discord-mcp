@@ -131,6 +131,7 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   ),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.channelWebhooks, "channelId", "webhookChannelIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.exactMessage, "channelId", "allowedChannelIds"),
+  resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.messageAttachment, "channelId", "allowedChannelIds"),
   resourceBinding(MCP_RESOURCE_TEMPLATE_URIS.messageReactions, "channelId", "allowedChannelIds"),
 
   promptBinding(MCP_PROMPT_NAMES.reviewApplicationCommands, "guildId", "allowedGuildIds"),

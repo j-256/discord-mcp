@@ -12,6 +12,8 @@ The connector sends the token only to Discord's fixed REST origin and, when expl
 
 Discord data is fetched only for an invoked operation within the exact configured scope and applicable Discord permissions. Results needed to answer the request are returned to the MCP host. The connector does not independently retain message content, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, topics, scaffold symbols, or avatars.
 
+An exact native attachment read refetches one current message, uses its Discord-supplied signed CDN URL internally without sending the bot credential, and returns the bounded bytes to the MCP host as native or embedded protocol content. It accepts no URL from the caller, creates no download file or cache, omits the signed and proxy URLs, scans raw bytes for active connector secrets before encoding, and overwrites its transient raw buffers afterward. The MCP host, model provider, and operating system still handle the encoded result under their own retention policies.
+
 Optional Gateway data is bounded, privacy-projected, and held in memory. Native Interaction payloads are discarded by default; an explicitly enabled continuation retains only the minimum rotating one-shot capability for its fixed lifetime and scope.
 
 Your MCP host, model provider, terminal, operating system, Discord, and any software that receives a result may have separate logging, retention, and privacy behavior. Review those systems before granting the bot access to sensitive servers or channels.

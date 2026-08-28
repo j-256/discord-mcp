@@ -714,6 +714,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["exact", "fetch", "message", "read"],
     toolset: "messages",
   },
+  read_message_attachment: {
+    keywords: ["attachment", "audio", "download", "exact", "file", "image", "media", "message", "native", "read"],
+    toolset: "messages",
+  },
   get_application_emoji: {
     keywords: ["application", "emoji", "exact", "get", "lookup"],
     toolset: "application-emojis",
