@@ -22,6 +22,8 @@ import {
   interactionNonce,
   type InteractionServiceClient,
 } from "../src/interaction-service.js"
+import { InteractionLimiter } from "../src/interaction-limiter.js"
+import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import { ScopePolicy } from "../src/policy.js"
 import type {
   DiscordChannel,
@@ -37,6 +39,15 @@ const REPLY_MESSAGE_ID = "400000000000000002"
 const MEMBER_ID = "500000000000000001"
 const NOTIFY_USER_ID = "500000000000000002"
 const IDEMPOTENCY_KEY = "request-1234567890"
+const NOW = "2026-08-14T00:00:00.000Z"
+const COMMAND_TIMESTAMP = "2026-08-13T23:59:30.000Z"
+const DISCORD_EPOCH_MS = 1_420_070_400_000n
+
+function snowflakeAt(timestamp: string): string {
+  return ((BigInt(Date.parse(timestamp)) - DISCORD_EPOCH_MS) << 22n).toString()
+}
+
+const COMMAND_MESSAGE_ID = snowflakeAt(COMMAND_TIMESTAMP)
 
 class MemoryActivityStore implements ActivityStore {
   readonly entries: ActivityEntry[] = []
@@ -72,6 +83,7 @@ function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
     guild_id: GUILD_ID,
     id: CHANNEL_ID,
     name: "interactions",
+    permission_overwrites: [],
     type: 0,
     ...overrides,
   }
@@ -92,6 +104,21 @@ function message(overrides: Partial<DiscordMessage> = {}): DiscordMessage {
     type: 0,
     ...overrides,
   }
+}
+
+function commandMessage(overrides: Partial<DiscordMessage> = {}): DiscordMessage {
+  return message({
+    author: {
+      bot: false,
+      id: MEMBER_ID,
+      username: "private-member-name",
+    },
+    content: `<@${BOT_ID}> please process this private command`,
+    id: COMMAND_MESSAGE_ID,
+    mentions: [{ bot: true, id: BOT_ID, username: "private-bot-name" }],
+    timestamp: COMMAND_TIMESTAMP,
+    ...overrides,
+  })
 }
 
 function policy(options: {
@@ -132,6 +159,7 @@ function createdMessage(input: CreateMessageInput): DiscordMessage {
 function fixture(options: {
   client?: Partial<InteractionServiceClient>
   interactionPolicy?: ScopePolicy
+  limiter?: InteractionLimiter
   store?: MemoryActivityStore
 } = {}) {
   const events = options.store?.events || []
@@ -141,6 +169,8 @@ function fixture(options: {
     edit: [] as EditMessageInput[],
     reaction: [] as string[],
     reactionRemove: [] as string[],
+    threadMember: [] as Array<[string, string]>,
+    typing: [] as string[],
   }
   let ownReaction: string | null = null
   const reactionMessage = (messageId: string) => {
@@ -183,6 +213,26 @@ function fixture(options: {
     async getChannel(channelId) {
       return channel({ id: channelId })
     },
+    async getGuildMember() {
+      return {
+        roles: [],
+        user: { bot: true, id: BOT_ID, username: "connector-bot" },
+      }
+    },
+    async getGuildRoles() {
+      return [{
+        id: GUILD_ID,
+        managed: false,
+        name: "everyone",
+        permissions: (
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+          | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+          | DISCORD_PERMISSIONS.SEND_MESSAGES
+          | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
+        ).toString(),
+        position: 0,
+      }]
+    },
     async getMessage(_channelId, messageId) {
       if (messageId === REPLY_MESSAGE_ID) {
         return message({
@@ -192,13 +242,27 @@ function fixture(options: {
       }
       return reactionMessage(messageId)
     },
+    async getThreadMember(threadId, userId) {
+      calls.threadMember.push([threadId, userId])
+      return {
+        flags: 0,
+        id: threadId,
+        join_timestamp: NOW,
+        user_id: userId,
+      }
+    },
+    async triggerTypingIndicator(channelId) {
+      calls.typing.push(channelId)
+      events.push("typing")
+    },
   }
   Object.assign(client, options.client)
   let activitySequence = 0
   const service = new InteractionService({
     activityStore: store,
     client,
-    clock: () => new Date("2026-08-14T00:00:00.000Z"),
+    clock: () => new Date(NOW),
+    ...(options.limiter ? { limiter: options.limiter } : {}),
     maxWritesPerMinute: 60,
     minWriteIntervalMs: 0,
     policy: options.interactionPolicy || policy(),
@@ -215,6 +279,341 @@ test("interaction nonce is stable, channel-bound, and Discord-sized", () => {
   assert.notEqual(first, interactionNonce(CHANNEL_ID, `${IDEMPOTENCY_KEY}-other`))
   assert.equal(first.length, 25)
   assert.match(first, /^[A-Za-z0-9_-]+$/)
+})
+
+test("command-processing signal proves a fresh bot-directed source and coalesces repeats", async () => {
+  const configured = fixture({
+    client: {
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+  })
+  const request = {
+    channelId: CHANNEL_ID,
+    sourceMessageId: COMMAND_MESSAGE_ID,
+  }
+
+  const [first, replay] = await Promise.all([
+    configured.service.signalCommandProcessing(BOT_ID, request),
+    configured.service.signalCommandProcessing(BOT_ID, request),
+  ])
+
+  assert.deepEqual(configured.calls.typing, [CHANNEL_ID])
+  assert.deepEqual(configured.events, [
+    "audit:pending",
+    "typing",
+    "audit:completed",
+  ])
+  assert.equal(first.localReplay, false)
+  assert.equal(replay.localReplay, true)
+  assert.equal(first.activityId, replay.activityId)
+  assert.equal(first.expiresAt, "2026-08-14T00:00:10.000Z")
+  assert.equal(first.sourceMessageId, COMMAND_MESSAGE_ID)
+  assert.deepEqual(
+    configured.store.entries.map(({ kind, status }) => ({ kind, status })),
+    [
+      { kind: "command-processing-signal", status: "pending" },
+      { kind: "command-processing-signal", status: "completed" },
+    ],
+  )
+  assert.equal(
+    configured.store.entries.every((entry) => (
+      "messageId" in entry && entry.messageId === COMMAND_MESSAGE_ID
+    )),
+    true,
+  )
+  assert.doesNotMatch(
+    JSON.stringify({ entries: configured.store.entries, first, replay }),
+    /private command|private-member-name|private-bot-name/,
+  )
+})
+
+test("command-processing signal does not delay a durable response cooldown lane", async () => {
+  const now = Date.parse(NOW)
+  const configured = fixture({
+    client: {
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+    limiter: new InteractionLimiter({
+      clock: () => now,
+      maxWritesPerMinute: 4,
+      minWriteIntervalMs: 60_000,
+    }),
+  })
+
+  await configured.service.signalCommandProcessing(BOT_ID, {
+    channelId: CHANNEL_ID,
+    sourceMessageId: COMMAND_MESSAGE_ID,
+  })
+  const response = await configured.service.sendMessage(BOT_ID, {
+    channelId: CHANNEL_ID,
+    content: "completed response",
+    idempotencyKey: IDEMPOTENCY_KEY,
+  })
+
+  assert.equal(response.status, "completed")
+  assert.deepEqual(configured.calls.typing, [CHANNEL_ID])
+  assert.equal(configured.calls.create.length, 1)
+})
+
+test("command-processing signal rejects stale, indirect, automated, and malformed sources", async () => {
+  const cases: Array<{
+    message: DiscordMessage
+    pattern: RegExp
+  }> = [
+    {
+      message: commandMessage({ content: "not directed to the bot" }),
+      pattern: /does not explicitly mention/,
+    },
+    {
+      message: commandMessage({ mentions: [] }),
+      pattern: /does not explicitly mention/,
+    },
+    {
+      message: commandMessage({
+        author: { bot: true, id: MEMBER_ID, username: "automated" },
+      }),
+      pattern: /not an ordinary user message/,
+    },
+    {
+      message: commandMessage({ webhook_id: "600000000000000001" }),
+      pattern: /not an ordinary user message/,
+    },
+    {
+      message: commandMessage({ type: 6 }),
+      pattern: /not an ordinary user message/,
+    },
+    {
+      message: commandMessage({ content: undefined as never }),
+      pattern: /not an ordinary user message/,
+    },
+    {
+      message: commandMessage({
+        id: snowflakeAt("2026-08-13T23:50:00.000Z"),
+        timestamp: "2026-08-13T23:50:00.000Z",
+      }),
+      pattern: /stale or has inconsistent creation evidence/,
+    },
+    {
+      message: commandMessage({ timestamp: "2026-08-13T23:59:20.000Z" }),
+      pattern: /stale or has inconsistent creation evidence/,
+    },
+  ]
+
+  for (const testCase of cases) {
+    const configured = fixture({
+      client: {
+        async getMessage() {
+          return testCase.message
+        },
+      },
+    })
+    await assert.rejects(
+      configured.service.signalCommandProcessing(BOT_ID, {
+        channelId: CHANNEL_ID,
+        sourceMessageId: testCase.message.id,
+      }),
+      testCase.pattern,
+    )
+    assert.equal(configured.calls.typing.length, 0)
+    assert.equal(configured.store.entries.length, 0)
+  }
+})
+
+test("command-processing signal requires exact scope, supported state, and complete permissions", async () => {
+  const request = {
+    channelId: CHANNEL_ID,
+    sourceMessageId: COMMAND_MESSAGE_ID,
+  }
+  const outOfScope = fixture({
+    client: { async getMessage() { return commandMessage() } },
+    interactionPolicy: policy({ interactionChannelIds: [OTHER_CHANNEL_ID] }),
+  })
+  await assert.rejects(
+    outOfScope.service.signalCommandProcessing(BOT_ID, request),
+    /outside the interaction scope/,
+  )
+
+  const unsupported = fixture({
+    client: {
+      async getChannel() {
+        return channel({ type: 15 })
+      },
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+  })
+  await assert.rejects(
+    unsupported.service.signalCommandProcessing(BOT_ID, request),
+    /requires a text, announcement, or active thread channel/,
+  )
+
+  const incomplete = fixture({
+    client: {
+      async getChannel() {
+        const value = channel()
+        delete value.permission_overwrites
+        return value
+      },
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+  })
+  await assert.rejects(
+    incomplete.service.signalCommandProcessing(BOT_ID, request),
+    /permission evidence is incomplete/,
+  )
+
+  const missing = fixture({
+    client: {
+      async getGuildRoles() {
+        return [{
+          id: GUILD_ID,
+          managed: false,
+          name: "everyone",
+          permissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+          ).toString(),
+          position: 0,
+        }]
+      },
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+  })
+  await assert.rejects(
+    missing.service.signalCommandProcessing(BOT_ID, request),
+    /lacks command-processing signal permissions: SEND_MESSAGES/,
+  )
+
+  assert.equal(outOfScope.calls.typing.length, 0)
+  assert.equal(unsupported.calls.typing.length, 0)
+  assert.equal(incomplete.calls.typing.length, 0)
+  assert.equal(missing.calls.typing.length, 0)
+})
+
+test("command-processing signal supports an exact active thread with parent permissions", async () => {
+  const configured = fixture({
+    client: {
+      async getChannel(channelId) {
+        if (channelId === CHANNEL_ID) {
+          return channel({
+            id: CHANNEL_ID,
+            parent_id: OTHER_CHANNEL_ID,
+            permission_overwrites: [],
+            thread_metadata: {
+              archived: false,
+              locked: false,
+            },
+            type: 12,
+          })
+        }
+        return channel({ id: OTHER_CHANNEL_ID, permission_overwrites: [], type: 0 })
+      },
+      async getMessage() {
+        return commandMessage()
+      },
+    },
+  })
+
+  const result = await configured.service.signalCommandProcessing(BOT_ID, {
+    channelId: CHANNEL_ID,
+    sourceMessageId: COMMAND_MESSAGE_ID,
+  })
+
+  assert.equal(result.status, "completed")
+  assert.deepEqual(configured.calls.typing, [CHANNEL_ID])
+  assert.deepEqual(configured.calls.threadMember, [[CHANNEL_ID, BOT_ID]])
+})
+
+test("command-processing signal rejects mismatched private-thread membership", async () => {
+  const configured = fixture({
+    client: {
+      async getChannel(channelId) {
+        if (channelId === CHANNEL_ID) {
+          return channel({
+            id: CHANNEL_ID,
+            parent_id: OTHER_CHANNEL_ID,
+            permission_overwrites: [],
+            thread_metadata: { archived: false, locked: false },
+            type: 12,
+          })
+        }
+        return channel({ id: OTHER_CHANNEL_ID, permission_overwrites: [], type: 0 })
+      },
+      async getMessage() {
+        return commandMessage()
+      },
+      async getThreadMember(threadId) {
+        return {
+          flags: 0,
+          id: threadId,
+          join_timestamp: NOW,
+          user_id: MEMBER_ID,
+        }
+      },
+    },
+  })
+
+  await assert.rejects(
+    configured.service.signalCommandProcessing(BOT_ID, {
+      channelId: CHANNEL_ID,
+      sourceMessageId: COMMAND_MESSAGE_ID,
+    }),
+    /mismatched command-processing private-thread membership evidence/,
+  )
+  assert.equal(configured.calls.typing.length, 0)
+  assert.equal(configured.store.entries.length, 0)
+})
+
+test("command-processing signal records known rejection without leaking details", async () => {
+  const configured = fixture({
+    client: {
+      async getMessage() {
+        return commandMessage()
+      },
+      async triggerTypingIndicator() {
+        throw new DiscordApiError({
+          code: 50013,
+          message: "Discord rejected private command details",
+          method: "POST",
+          retryAfterMs: 700,
+          route: `/channels/${CHANNEL_ID}/typing`,
+          status: 403,
+        })
+      },
+    },
+  })
+
+  await assert.rejects(
+    configured.service.signalCommandProcessing(BOT_ID, {
+      channelId: CHANNEL_ID,
+      sourceMessageId: COMMAND_MESSAGE_ID,
+    }),
+    (error: unknown) => (
+      error instanceof InteractionExecutionError
+      && (error.result as { status: string }).status === "failed"
+      && (error.result as { retryAfterMs: number }).retryAfterMs === 700
+    ),
+  )
+  assert.deepEqual(
+    configured.store.entries.map(({ kind, status }) => ({ kind, status })),
+    [
+      { kind: "command-processing-signal", status: "pending" },
+      { kind: "command-processing-signal", status: "failed" },
+    ],
+  )
+  assert.doesNotMatch(
+    JSON.stringify(configured.store.entries),
+    /private command|private command details|private-member-name|private-bot-name/,
+  )
 })
 
 test("send suppresses mentions, journals before writing, and returns no content", async () => {

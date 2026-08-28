@@ -2140,6 +2140,65 @@ test("Discord client crossposts one exact message without a body or automatic re
   assert.throws(() => client.crosspostMessage("200", "bad"), /message ID/)
 })
 
+test("Discord client triggers one exact typing indicator without a body or retry", async () => {
+  const requests: Array<{
+    body: RequestInit["body"]
+    method: string
+    url: string
+  }> = []
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (input, init) => {
+      requests.push({
+        body: init?.body,
+        method: init?.method || "GET",
+        url: String(input),
+      })
+      return new Response(null, { status: 204 })
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await client.triggerTypingIndicator("200")
+  assert.deepEqual(requests, [{
+    body: undefined,
+    method: "POST",
+    url: `${API_BASE_URL}/channels/200/typing`,
+  }])
+  assert.equal(sleeps, 0)
+  await assert.rejects(client.triggerTypingIndicator("bad"), /channel ID/)
+  assert.equal(requests.length, 1)
+
+  const rateLimited = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => jsonResponse({
+      message: "do not expose this",
+      retry_after: 0.001,
+    }, 429),
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    rateLimited.triggerTypingIndicator("200"),
+    (error: unknown) => {
+      assert(error instanceof DiscordApiError)
+      assert.equal(error.status, 429)
+      assert.equal(error.message.includes("do not expose this"), false)
+      assert.equal(error.cause, undefined)
+      return true
+    },
+  )
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client sends one exact message-forward contract without automatic retry", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = []
   let sleeps = 0

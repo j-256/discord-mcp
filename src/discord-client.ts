@@ -1678,6 +1678,7 @@ const CONTENT_SENSITIVE_REST_OPERATIONS: ReadonlySet<DiscordRestOperation> = new
   "list_guild_soundboard_sounds",
   "list_guild_stickers",
   "list_guild_templates",
+  "trigger_typing_indicator",
   "list_guild_scheduled_event_users",
   "leave_guild",
   "leave_thread",
@@ -12256,6 +12257,24 @@ export class DiscordClient {
 
   getChannel(channelId: string, options: RequestOptions = {}): Promise<DiscordChannel> {
     return this.#request("get_channel", `/channels/${channelId}`, options)
+  }
+
+  async triggerTypingIndicator(
+    channelId: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    assertPositiveSnowflake(channelId, "Discord typing-indicator channel ID")
+    await this.#request<void>(
+      "trigger_typing_indicator",
+      `/channels/${channelId}/typing`,
+      {
+        ...options,
+        automaticRateLimitRetry: false,
+        diagnosticRoute: "/channels/{channel.id}/typing",
+        expectedSuccessStatus: 204,
+        suppressFailureCause: true,
+      },
+    )
   }
 
   async getDirectMessageChannel(

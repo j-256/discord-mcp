@@ -124,6 +124,11 @@ const STAGE_INSTANCE_ID = "940000000000000001"
 const PRIVATE_APPLICATION_PROFILE_TEXT = "private-application-profile"
 const PRIVATE_BOT_PROFILE_TEXT = "private-bot-profile"
 const PRIVATE_ACTIVITY_FILE = "/private/connector/activity.jsonl"
+const COMMAND_PROCESSING_TIME = "2026-08-14T00:00:00.000Z"
+const DISCORD_EPOCH_MS = 1_420_070_400_000n
+const COMMAND_PROCESSING_MESSAGE_ID = (
+  (BigInt(Date.parse(COMMAND_PROCESSING_TIME)) - DISCORD_EPOCH_MS) << 22n
+).toString()
 
 const PASSTHROUGH_WRITE_COORDINATOR: WriteCoordinator = {
   run(_intent, operation) {
@@ -463,6 +468,9 @@ function serviceFixture(overrides: {
     },
     async followAnnouncementChannel() {
       throw new Error("Unexpected announcement subscription")
+    },
+    async triggerTypingIndicator() {
+      throw new Error("Unexpected command-processing signal")
     },
     async createGuildBan() {},
     async createGuildApplicationCommand() {
@@ -3738,6 +3746,68 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 1)
   assert.deepEqual(writeCoordinator.intents, [])
+})
+
+test("service verifies bot identity before signaling command processing", async () => {
+  let typingCalls = 0
+  const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return { roles: [], user: bot() }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
+      },
+      async getMessage() {
+        return message({
+          content: `<@${BOT_ID}> process this command`,
+          id: COMMAND_PROCESSING_MESSAGE_ID,
+          mentions: [bot()],
+          timestamp: COMMAND_PROCESSING_TIME,
+        })
+      },
+      async triggerTypingIndicator(channelId) {
+        assert.equal(channelId, CHANNEL_ID)
+        typingCalls += 1
+      },
+    },
+    configOverrides: {
+      capabilities: { interactions: true },
+      limits: { interactionMinWriteIntervalMs: 0 },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: { interactionChannelIds: [CHANNEL_ID] },
+    },
+    interactionOptions: {
+      clock: () => new Date(COMMAND_PROCESSING_TIME),
+    },
+  })
+
+  const result = await service.signalCommandProcessing({
+    channelId: CHANNEL_ID,
+    sourceMessageId: COMMAND_PROCESSING_MESSAGE_ID,
+  })
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.expiresAt, "2026-08-14T00:00:10.000Z")
+  assert.equal(typingCalls, 1)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.deepEqual(
+    calls.activityEntries.map(({ kind, status }) => ({ kind, status })),
+    [
+      { kind: "command-processing-signal", status: "pending" },
+      { kind: "command-processing-signal", status: "completed" },
+    ],
+  )
 })
 
 test("service verifies identity through credential-safe webhook administration", async () => {

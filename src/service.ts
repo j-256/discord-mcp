@@ -477,6 +477,8 @@ import type {
   RemoveOwnReactionRequest,
   RemoveOwnReactionResult,
   SendMessageRequest,
+  SignalCommandProcessingRequest,
+  SignalCommandProcessingResult,
 } from "./interaction-service.js"
 import { InteractionService } from "./interaction-service.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
@@ -934,6 +936,7 @@ export interface DiscordServiceClient {
   createThreadWithoutMessage: DiscordClient["createThreadWithoutMessage"]
   createWebhook: DiscordClient["createWebhook"]
   followAnnouncementChannel: DiscordClient["followAnnouncementChannel"]
+  triggerTypingIndicator: DiscordClient["triggerTypingIndicator"]
   deleteAllMessageReactions: DiscordClient["deleteAllMessageReactions"]
   deleteAllMessageReactionsForEmoji: DiscordClient["deleteAllMessageReactionsForEmoji"]
   deleteChannelPermissionOverwrite: DiscordClient["deleteChannelPermissionOverwrite"]
@@ -7110,6 +7113,18 @@ export class ConnectorService {
   ) {
     const identity = await this.#verifyIdentity(options)
     return this.#interactionService.sendMessage(identity.bot.id, request, options)
+  }
+
+  async signalCommandProcessing(
+    request: SignalCommandProcessingRequest,
+    options: RequestOptions = {},
+  ): Promise<SignalCommandProcessingResult> {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.signalCommandProcessing(
+      identity.bot.id,
+      request,
+      options,
+    )
   }
 
   async editOwnMessage(

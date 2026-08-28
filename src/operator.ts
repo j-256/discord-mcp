@@ -4578,18 +4578,19 @@ async function inspectSmokeClient(
     }
   }
   const interactionAnnotations = [
-    ["send_message", false],
-    ["add_reaction", false],
-    ["edit_own_message", true],
-    ["remove_own_reaction", true],
+    ["send_message", false, true],
+    ["signal_command_processing", false, false],
+    ["add_reaction", false, true],
+    ["edit_own_message", true, true],
+    ["remove_own_reaction", true, true],
   ] as const
-  for (const [name, destructiveHint] of interactionAnnotations) {
+  for (const [name, destructiveHint, idempotentHint] of interactionAnnotations) {
     if (!selectedToolNames.includes(name)) continue
     const tool = listed.tools.find((entry) => entry.name === name)
     if (
       !tool
       || tool.annotations?.destructiveHint !== destructiveHint
-      || tool.annotations.idempotentHint !== true
+      || tool.annotations.idempotentHint !== idempotentHint
       || tool.annotations.openWorldHint !== true
       || tool.annotations.readOnlyHint !== false
     ) {

@@ -271,4 +271,5 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`
 - Plan and review a recipe before applying it to the active policy
 - Read the [safety model](reference.md#safety-model) before enabling any write capability
+- Use `signal_command_processing` only after enabling exact message interactions and only for a fresh bot-directed command whose response is expected to take several seconds
 - Recheck [product boundaries and host compatibility](limitations.md) before moving from reads and plans to reviewed writes

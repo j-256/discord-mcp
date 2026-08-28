@@ -148,6 +148,14 @@ Keep principal permission diagnostics read-only and inside the same exact guild 
 
 Treat channel-role audits as standalone role baselines. Member-specific overwrites, member timeouts, and private-thread membership cannot be attributed to a role; report their limitations explicitly and do not inspect or return member profiles to fill the gap. Permission diagnostics may return live role names and decision evidence to the MCP caller, but must not persist names, member data, permission results, or raw Discord responses.
 
+## Command-processing signals
+
+Keep transient processing feedback inside the existing interaction capability and exact channel or thread allowlist. Require the verified connector bot as the only target and one caller-known exact source message. Never expose a generic typing dispatcher, arbitrary presence control, repeating loop, duration control, model-selected target, name lookup, or authority inherited from a parent, guild, read scope, native Interaction, or Gateway event.
+
+Before contact, freshly prove a supported active channel, an ordinary user-authored regular or reply source, both parsed and literal direct mention of the verified bot, consistent timestamp and snowflake creation evidence inside the fixed freshness window, exact thread parent, exact private-thread membership where applicable, complete role and overwrite evidence, and effective read plus send permission. Fail closed on a webhook, bot, system source, indirect mention, stale or future source, malformed evidence, unsupported or inactive target, incomplete permission inventory, missing scope, or identity drift.
+
+Use one bounded process-local ledger to coalesce the exact channel-and-source pair while fresh. Keep transient and durable per-channel cooldowns separate so the hint does not postpone the response, but charge both against the shared rolling interaction budget. Append pending content-free activity before exactly one non-retried bodyless request, accept only the documented 204, and return only exact identifiers, fixed status, replay state, and expiry. Never return or persist source content, mention data, profile fields, permission evidence, response data, or transport cause. Since Discord exposes no typing-state readback and local coalescing ends on restart, advertise the tool as non-idempotent and never treat it as work, completion, liveness, or delivery evidence.
+
 ## Guild audit logs
 
 Keep Discord guild audit history in the separate read-only `audit-logs` toolset and inside the existing exact guild allowlist. Do not add a broader guild scan, member enumeration, or Gateway cache. Every page must remain bounded, use an exact before-entry cursor, request only one lookahead entry, and validate unique IDs, descending order, cursor direction, and exact actor and action filters. Exact lookup must use the predecessor cursor and validate the returned entry ID so a neighboring audit entry can never stand in for a missing one.

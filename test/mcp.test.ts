@@ -9535,6 +9535,7 @@ function serviceFixture(overrides: {
     stageInstancePlan: 0,
     search: 0,
     send: 0,
+    signalProcessing: 0,
     threadCreationExecute: 0,
     threadCreationPlan: 0,
     threadGovernanceExecute: 0,
@@ -13922,6 +13923,20 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
       }
     },
+    async signalCommandProcessing(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.signalProcessing += 1
+      return {
+        activityId: "activity-processing-signal",
+        channelId: input.channelId,
+        expiresAt: "2026-08-28T00:00:10.000Z",
+        guildId: GUILD_ID,
+        localReplay: false,
+        schemaVersion: 1,
+        sourceMessageId: input.sourceMessageId,
+        status: "completed",
+      }
+    },
     async sendWebhookMessage(request) {
       if (overrides.webhookMessageError) throw overrides.webhookMessageError
       calls.webhookMessageSend += 1
@@ -14484,6 +14499,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_stage_instance",
       "list_channel_permission_overwrites",
       "send_message",
+      "signal_command_processing",
       "edit_own_message",
       "add_reaction",
       "remove_own_reaction",
@@ -15273,6 +15289,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       readOnlyHint: false,
     })
   }
+  assert.deepEqual(
+    listedTool(result.tools, "signal_command_processing").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+  )
   const edit = result.tools.find((tool) => tool.name === "edit_own_message")
   assert.deepEqual(edit?.annotations, {
     destructiveHint: true,
@@ -17645,6 +17670,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     stageInstancePlan: 0,
     search: 0,
     send: 0,
+    signalProcessing: 0,
     threadCreationExecute: 0,
     threadCreationPlan: 0,
     threadGovernanceExecute: 0,
@@ -19089,7 +19115,7 @@ test("MCP reaction reads separate aggregate access from identity audit", async (
   assert.equal(calls.reactionUsers, 1)
 })
 
-test("MCP interaction tools enforce bounded schemas and invoke idempotent services", async (context) => {
+test("MCP interaction tools enforce bounded schemas and invoke classified services", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
   const sent = await client.callTool({
@@ -19107,6 +19133,13 @@ test("MCP interaction tools enforce bounded schemas and invoke idempotent servic
       messageId: MESSAGE_ID,
     },
     name: "edit_own_message",
+  })
+  const signaled = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      sourceMessageId: MESSAGE_ID,
+    },
+    name: "signal_command_processing",
   })
   const reacted = await client.callTool({
     arguments: {
@@ -19132,13 +19165,23 @@ test("MCP interaction tools enforce bounded schemas and invoke idempotent servic
     },
     name: "send_message",
   })
+  const invalidSignal = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      sourceMessageId: "invalid",
+    },
+    name: "signal_command_processing",
+  })
 
   assert.equal(structuredContent(sent).status, "completed")
   assert.equal(structuredContent(edited).status, "completed")
+  assert.equal(structuredContent(signaled).status, "completed")
   assert.equal(structuredContent(reacted).status, "completed")
   assert.equal(structuredContent(removedReaction).status, "completed")
   assert.equal(invalid.isError, true)
+  assert.equal(invalidSignal.isError, true)
   assert.equal(calls.send, 1)
+  assert.equal(calls.signalProcessing, 1)
   assert.equal(calls.edit, 1)
   assert.equal(calls.addReaction, 1)
   assert.equal(calls.removeOwnReaction, 1)

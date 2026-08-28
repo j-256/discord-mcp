@@ -300,6 +300,7 @@ export interface DeletionActivity {
 }
 
 export type InteractionActivityKind =
+  | "command-processing-signal"
   | "message-edit"
   | "message-send"
   | "reaction-add"
@@ -2076,6 +2077,7 @@ function parseInteractionActivity(value: unknown): InteractionActivity | undefin
     || typeof record.id !== "string"
     || typeof record.timestamp !== "string"
     || ![
+      "command-processing-signal",
       "message-edit",
       "message-send",
       "reaction-add",

@@ -1999,6 +1999,11 @@ test("JSONL activity log accepts content-free interaction records without surfac
   const store = new JsonlActivityLog(file)
 
   await store.append(interaction("1", "pending"))
+  await store.append({
+    ...interaction("3", "completed"),
+    kind: "command-processing-signal",
+    nonce: null,
+  })
   await appendFile(
     file,
     `${JSON.stringify({ ...interaction("2", "completed"), content: "must-not-surface", emoji: "secret" })}\n`,
@@ -2006,7 +2011,8 @@ test("JSONL activity log accepts content-free interaction records without surfac
   )
   const result = await store.list()
 
-  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "1"])
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["2", "3", "1"])
+  assert.equal(result.entries[1]?.kind, "command-processing-signal")
   assert.doesNotMatch(JSON.stringify(result), /must-not-surface|secret/)
 })
 
