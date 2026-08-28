@@ -112,6 +112,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   get_guild_widget_settings: "discord-read",
   get_guild_settings: "discord-read",
   get_message: "discord-read",
+  read_message_attachment: "discord-read",
   get_observability_status: "local-read",
   get_poll: "discord-read",
   get_role: "discord-read",

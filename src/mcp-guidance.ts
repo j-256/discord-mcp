@@ -38,6 +38,7 @@ export type DiscordGuidanceService = Pick<
   | "getGuildProfile"
   | "getGuildSoundboardSound"
   | "getMessage"
+  | "getMessageAttachment"
   | "getRole"
   | "getStageInstance"
   | "getThreadMembership"

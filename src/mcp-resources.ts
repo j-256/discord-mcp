@@ -15,10 +15,16 @@ import {
   SCHEMA_VERSION,
 } from "./constants.js"
 import {
+  AttachmentReadTooLargeError,
   errorMessage,
   PolicyError,
   redactText,
 } from "./errors.js"
+import { encodeMessageAttachmentForMcp } from "./message-attachment-mcp.js"
+import {
+  maxMessageAttachmentBytesForMcp,
+  MESSAGE_ATTACHMENT_BINARY_MIME_TYPE,
+} from "./message-attachment-read-service.js"
 import {
   MCP_RESOURCE_NAMES,
   MCP_RESOURCE_TEMPLATE_NAMES,
@@ -62,6 +68,7 @@ function protocolError(
     return new ProtocolError(error.code, message)
   }
   const code = error instanceof PolicyError
+    || error instanceof AttachmentReadTooLargeError
     ? ProtocolErrorCode.InvalidParams
     : ProtocolErrorCode.InternalError
   return new ProtocolError(code, message)
@@ -1622,6 +1629,52 @@ export function registerDiscordResources(
         { signal: context.mcpReq.signal },
       )),
     ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.messageAttachment,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.messageAttachment,
+      resourceTemplateCompletionCallbacks(
+        MCP_RESOURCE_TEMPLATE_URIS.messageAttachment,
+        completionPolicy,
+      ),
+    ),
+    {
+      annotations: {
+        audience: ["assistant"],
+        priority: 0.7,
+      },
+      cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
+      description: "One exact current untrusted Discord message attachment as native binary resource content. The connector validates exact signed delivery evidence, enforces the MCP response budget, persists nothing, and omits the delivery URL.",
+      mimeType: MESSAGE_ATTACHMENT_BINARY_MIME_TYPE,
+      title: "Exact Discord message attachment",
+    },
+    async (uri, variables, context) => {
+      try {
+        const result = await service.getMessageAttachment(
+          templateSnowflake(variables, "channelId"),
+          templateSnowflake(variables, "messageId"),
+          templateSnowflake(variables, "attachmentId"),
+          {
+            maxBytes: maxMessageAttachmentBytesForMcp(
+              mcpReadResponseMaxBytes,
+            ),
+            signal: context.mcpReq.signal,
+          },
+        )
+        const encoded = encodeMessageAttachmentForMcp(result, secrets)
+        return boundedResource({
+          contents: [{
+            blob: encoded.data,
+            mimeType: encoded.metadata.attachment.deliveredMimeType,
+            uri: uri.href,
+          }],
+        })
+      } catch (error) {
+        throw protocolError(error, secrets)
+      }
+    },
   )
 
   server.registerResource(

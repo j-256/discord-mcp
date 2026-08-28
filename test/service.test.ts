@@ -103,6 +103,7 @@ const OTHER_CHANNEL_ID = "400000000000000002"
 const THREAD_ID = "400000000000000003"
 const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
+const ATTACHMENT_ID = "510000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
 const ANCHOR_ROLE_ID = "700000000000000002"
@@ -351,6 +352,7 @@ function serviceFixture(overrides: {
   applicationRoleConnectionMetadataOptions?:
     ConnectorServiceOptions["applicationRoleConnectionMetadataOptions"]
   attachmentMessageOptions?: ConnectorServiceOptions["attachmentMessageOptions"]
+  attachmentReadOptions?: ConnectorServiceOptions["attachmentReadOptions"]
   automodOptions?: ConnectorServiceOptions["automodOptions"]
   channelAdministrationOptions?: ConnectorServiceOptions["channelAdministrationOptions"]
   channelCloneOptions?: ConnectorServiceOptions["channelCloneOptions"]
@@ -1140,6 +1142,9 @@ function serviceFixture(overrides: {
         : {}),
       ...(overrides.attachmentMessageOptions
         ? { attachmentMessageOptions: overrides.attachmentMessageOptions }
+        : {}),
+      ...(overrides.attachmentReadOptions
+        ? { attachmentReadOptions: overrides.attachmentReadOptions }
         : {}),
       ...(overrides.applicationEmojiOptions
         ? { applicationEmojiOptions: overrides.applicationEmojiOptions }
@@ -10785,6 +10790,97 @@ test("service normalizes channel messages after enforcing guild scope", async ()
   assert.equal(
     result.messages[0]?.jumpUrl,
     `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}/${MESSAGE_ID}`,
+  )
+  assert.equal("url" in (result.messages[0]?.attachments[0] || {}), false)
+  assert.equal("proxyUrl" in (result.messages[0]?.attachments[0] || {}), false)
+})
+
+test("service pins identity through one exact transient attachment read", async () => {
+  const filename = "private.gif"
+  const bytes = new TextEncoder().encode("GIF89a-private")
+  const signedUrl = `https://cdn.discordapp.com/attachments/${CHANNEL_ID}/${ATTACHMENT_ID}/${filename}?ex=ffffffff&is=00000001&hm=${"a".repeat(64)}`
+  let channelReads = 0
+  let messageReads = 0
+  let fetchInput: unknown
+  let fetchOptions: RequestInit | undefined
+  const { calls, service } = serviceFixture({
+    attachmentReadOptions: {
+      fetchImplementation: async (input, options) => {
+        fetchInput = input
+        fetchOptions = options
+        return new Response(bytes, {
+          headers: {
+            "content-length": String(bytes.byteLength),
+            "content-type": "image/gif",
+          },
+        })
+      },
+    },
+    client: {
+      async getChannel(channelId, options) {
+        channelReads += 1
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(options?.signal instanceof AbortSignal, true)
+        return channel()
+      },
+      async getMessage(channelId, messageId, options) {
+        messageReads += 1
+        assert.equal(channelId, CHANNEL_ID)
+        assert.equal(messageId, MESSAGE_ID)
+        assert.equal(options?.signal instanceof AbortSignal, true)
+        return message({
+          attachments: [{
+            content_type: "image/gif",
+            filename,
+            height: 1,
+            id: ATTACHMENT_ID,
+            proxy_url: "https://media.discordapp.net/private",
+            size: bytes.byteLength,
+            url: signedUrl,
+            width: 1,
+          }],
+        })
+      },
+    },
+  })
+
+  await assert.rejects(
+    () => service.getMessageAttachment(
+      "bad",
+      MESSAGE_ID,
+      ATTACHMENT_ID,
+      { maxBytes: 1_024 },
+    ),
+    /channel ID/u,
+  )
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+  assert.equal(channelReads, 0)
+  assert.equal(messageReads, 0)
+
+  const signal = new AbortController().signal
+  const result = await service.getMessageAttachment(
+    CHANNEL_ID,
+    MESSAGE_ID,
+    ATTACHMENT_ID,
+    { maxBytes: 1_024, signal },
+  )
+
+  assert.equal(result.applicationId, APPLICATION_ID)
+  assert.equal(result.botId, BOT_ID)
+  assert.equal(result.guildId, GUILD_ID)
+  assert.equal(result.attachment.id, ATTACHMENT_ID)
+  assert.deepEqual(result.bytes, bytes)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(channelReads, 1)
+  assert.equal(messageReads, 1)
+  assert.equal(fetchInput, signedUrl)
+  assert.equal(fetchOptions?.signal, signal)
+  assert.equal(new Headers(fetchOptions?.headers).has("authorization"), false)
+  assert.doesNotMatch(
+    JSON.stringify({ ...result, bytes: [] }),
+    /cdn\.discordapp|hm=|proxy_url|proxyUrl/u,
   )
 })
 

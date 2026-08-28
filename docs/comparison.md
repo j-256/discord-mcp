@@ -197,7 +197,32 @@ The Registry matrix remains release-exact, but idea discovery also needs public 
 | [Soyouse](https://github.com/Soyouse/discord-mcp) | Multi-bot session isolation, an invalid-request monitor, raw REST pass-through, a web client, and a persistent history relay | Keep the multi-bot and shared-rate-safety lessons; reject raw endpoint authority and mandatory history persistence in favor of explicit bounded contracts |
 | [SaseQ](https://github.com/SaseQ/discord-mcp) | JDA implementation with stdio and HTTP modes, container installation, health checks, and a broad conventional tool surface | Retain transport and health-check ideas while preserving deterministic native package and MCPB installation that does not require Docker |
 | [goul4rt](https://github.com/goul4rt/mcp-discord) | Standalone or embedded discord.js operation, optional Gateway behavior, and broad monitoring and administration coverage | Do not add embeddability unless it preserves one policy source, fixed-origin REST, privacy projections, and reviewed writes |
-| [LawyerCord](https://github.com/SenorLawyer/LawyerCord) | A Discord-client bridge that returns downloaded attachments as native MCP image, audio, or resource-link blocks | Evaluate native attachment results only alongside an explicit custody and platform-policy design; do not inherit user-account automation or an implicit remote-download boundary |
+| [rayenking](https://github.com/rayenking/discord-mcp) | A broad bot-token surface with full message payloads and caller-URL attachment downloads to a shared temporary directory | Retain the explicit attachment-consumption outcome while rejecting caller-supplied delivery capabilities, unbounded buffering, caller-selected paths, and local-file persistence |
+| [LawyerCord](https://github.com/SenorLawyer/LawyerCord) | A Discord-client bridge that returns downloaded attachments as native MCP image, audio, or resource-link blocks | Adopt the useful native-result idea while adding bot identity and exact policy, signed-delivery proof, protocol-budgeted streaming, signature verification, generic embedded fallback, and disk-free transient custody |
+
+### Exact attachment-consumption head-to-head
+
+LawyerCord supplied the strongest native-content idea: its [MCP result adapter](https://github.com/SenorLawyer/LawyerCord/blob/main/tools/discord-mcp/server.mjs) emits image and audio blocks after an exact attachment download, while its [native delivery bridge](https://github.com/SenorLawyer/LawyerCord/blob/main/src/equicordplugins/discordMcp.desktop/native.ts) bounds a streamed fetch and writes it into a private downloads directory. rayenking's [attachment tool](https://github.com/rayenking/discord-mcp/blob/main/src/tools/attachments.ts) accepts a caller-supplied CDN URL and returns a temporary path. The focused rubric defines the operator outcome as safely bringing one exact current Discord attachment into MCP context, not as maintaining a connector-owned download archive.
+
+| Exact attachment-consumption outcome | Discord MCP | LawyerCord source head | rayenking source head |
+| --- | --- | --- | --- |
+| One exact channel, message, and attachment selection | **Lead** | Covered | Not demonstrated |
+| Exact local read scope plus freshly pinned application and bot identity | **Lead** | Partial | Not demonstrated |
+| Fresh exact-message lookup before every delivery | **Lead** | Covered | Not demonstrated |
+| No caller-supplied URL, filename, path, MIME type, or byte body | **Lead** | Covered | Partial |
+| Fixed signed CDN origin with exact path identities, decoded filename, query set, timestamps, and signature shape | **Lead** | Partial | Partial |
+| Credential-free, no-referrer, no-cache, non-redirected, non-retried delivery request | **Lead** | Partial | Partial |
+| Streaming bounded by current Discord size and the MCP response budget with exact byte-count completion | **Lead** | Partial | Not demonstrated |
+| Declared and delivered media agreement plus supported native byte-signature verification | **Lead** | Partial | Not demonstrated |
+| Safe `application/octet-stream` embedded fallback for unsupported or absent native media types | **Lead** | Partial | Not demonstrated |
+| Native MCP image or audio block plus equivalent stable private resource | **Lead** | Partial | Not demonstrated |
+| No connector-owned download file or local path disclosure | **Lead** | Different fit | Different fit |
+| Signed URL and raw payload omitted from results, errors, logs, traces, and durable state | **Lead** | Partial | Partial |
+| Raw-secret scan before encoding and byte wiping on success or failure | **Lead** | Not demonstrated | Not demonstrated |
+| Fixed actionable failure classes without URL, response, or transport-cause disclosure | **Lead** | Partial | Partial |
+| Standard MCP tool, resource, discovery, completion, and host-compatibility guidance | **Lead** | Partial | Partial |
+
+Discord MCP's [native exact message-attachment reader](reference.md#native-exact-message-attachment-reads) adds no capability flag, storage root, environment variable, write authority, Gateway dependency, or persistence path. It refetches current message evidence and internally consumes Discord's signed delivery capability without ever exposing or accepting that capability at MCP. The result uses the official MCP [image, audio, embedded blob, and resource-link content types](https://modelcontextprotocol.io/specification/2025-11-25/schema), while the delivery boundary follows Discord's [attachment object](https://docs.discord.com/developers/resources/message#attachment-object) and [signed attachment CDN URL contract](https://docs.discord.com/developers/reference#signed-attachment-cdn-urls). A host that does not support rich or binary MCP content remains an explicit compatibility limitation, and an operator who wants a persistent inbox should choose that different custody model rather than treating transient consumption as a download manager.
 
 ### Guild vanity audit head-to-head
 
