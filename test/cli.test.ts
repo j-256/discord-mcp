@@ -40,6 +40,10 @@ import {
 } from "../src/host-activation-html.js"
 import type { HostActivationPlan } from "../src/host-activation.js"
 import {
+  HOST_ADAPTER_CATALOG_FORMAT,
+  HOST_ADAPTER_IDS,
+} from "../src/host-adapters.js"
+import {
   applyConfigChange,
   planConfigChange,
 } from "../src/config-review.js"
@@ -433,6 +437,8 @@ function hostActivationHtmlReport(
 ): DiscordHostActivationHtmlExportReport {
   return {
     activationDigest: `sha256:${"a".repeat(64)}`,
+    adapterDigests: HOST_ADAPTER_IDS.map((_, index) => `sha256:${String(index).repeat(64)}`),
+    adapterIds: [...HOST_ADAPTER_IDS],
     automaticNetwork: "disabled",
     browserOpened: false,
     bytes: 87654,
@@ -878,10 +884,13 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "team-discord",
     "--command",
     "/usr/local/bin/discord-mcp",
+    "--adapter",
+    "vscode",
     "--html",
     "./host-activation.html",
     "--json",
   ]), {
+    adapterId: "vscode",
     command: "host",
     configFile: "/configuration/discord.json",
     htmlFile: "./host-activation.html",
@@ -1154,6 +1163,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(
     () => parseCliArguments(["host", "--profile", "support-bot", "--client", "legacy"]),
     /Unknown option --client/,
+  )
+  assert.throws(
+    () => parseCliArguments(["host", "--profile", "support-bot", "--adapter", "unknown"]),
+    /must be one of mcp-json, cursor, vscode, gemini-extension/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2111,6 +2124,14 @@ test("CLI generates an exact host activation plan without reading ambient creden
   assert.equal(report.privacy.discordContacted, false)
   assert.equal(report.privacy.hostConfigurationChanged, false)
   assert.equal(report.privacy.processStarted, false)
+  assert.equal(report.adapterCatalog.format, HOST_ADAPTER_CATALOG_FORMAT)
+  assert.equal(report.adapterCatalog.activationDigest, report.activationDigest)
+  assert.deepEqual(
+    report.adapterCatalog.adapters.map((adapter: { id: string }) => adapter.id),
+    HOST_ADAPTER_IDS,
+  )
+  assert.match(report.adapterCatalog.adapters[0].adapterDigest, /^sha256:[a-f0-9]{64}$/)
+  assert.match(report.adapterCatalog.adapters[2].content, /\$\{input:discord-mcp-credential-1\}/)
   assert.match(report.verification.prompt, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
@@ -2165,6 +2186,7 @@ test("CLI exports a pinned package host guide from a profile", async () => {
   ])
   assert.equal(report.guide.file, htmlFile)
   assert.equal(report.guide.activationDigest, report.activationDigest)
+  assert.equal(report.adapterCatalog.format, HOST_ADAPTER_CATALOG_FORMAT)
   assert.equal(exportedPlan?.activationDigest, report.activationDigest)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
@@ -2178,6 +2200,8 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
       CONFIG_FILE,
       "--command",
       "/usr/local/bin/discord-mcp",
+      "--adapter",
+      "vscode",
       "--html",
       "/output/activation.html",
     ],
@@ -2190,6 +2214,11 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
   assert.match(stdout.value(), /Discord MCP host activation: ok/)
   assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/discord-mcp"/)
   assert.match(stdout.value(), /Read-only host verification request:/)
+  assert.match(stdout.value(), /Verified host adapters:/)
+  assert.match(stdout.value(), /Discord MCP host adapter: Visual Studio Code \(vscode\)/)
+  assert.match(stdout.value(), /Secret strategy: secure-input/)
+  assert.match(stdout.value(), /\$\{input:discord-mcp-credential-1\}/)
+  assert.match(stdout.value(), /sandboxing disabled/)
   assert.match(stdout.value(), /Discord MCP host activation guide: ok/)
   assert.match(stdout.value(), /private mode-0600 standalone HTML/)
   assert.match(stdout.value(), /must not be shared or committed/)
@@ -3368,6 +3397,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
   assert.match(hostHelpOutput.value(), /host \(--config FILE \| --profile NAME\)/)
   assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
+  assert.match(hostHelpOutput.value(), /--adapter ID/)
+  assert.match(hostHelpOutput.value(), /mcp-json, cursor, vscode, gemini-extension/)
   assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
   assert.match(hostHelpOutput.value(), /reads no credential value/)
   assert.match(hostHelpOutput.value(), /discovers no host/)

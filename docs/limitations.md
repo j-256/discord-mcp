@@ -15,7 +15,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Synchronize one exact child channel to its live parent category | Designed fit | A separate reviewed workflow replaces the complete overwrite set only after structural impact, connector authority, future propagation, and stopped-concurrency review |
 | Receive a private slash-command request and send bounded follow-ups without exposing Discord's Interaction credential to MCP | Designed fit | Exact allowlists, ephemeral responses, default token disposal, and rotating one-shot process-local continuations preserve custody through a fixed response sequence |
 | Keep Discord content out of connector-owned storage and telemetry | Designed fit | Content is projected transiently and excluded from activity, operation, coordination, diagnostic, and telemetry records |
-| Use a local MCP host that can launch stdio and forward a secret reference | Designed fit | `host` emits a pinned model-neutral launch contract and optional private interactive field-mapping guide |
+| Use a local MCP host that can launch stdio and forward a secret reference | Designed fit | `host` emits a pinned model-neutral launch contract, four deterministic host adapters, and an optional private interactive activation guide |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
 | Use a Discord user account or selfbot | Not supported | The connector accepts a Discord bot token and verifies the pinned application and bot identities |
@@ -36,7 +36,16 @@ Discord permissions remain the outer authority boundary. Local policy can only n
 
 ## MCP host compatibility
 
-`host --npx --config FILE --html PRIVATE_FILE` validates one policy without reading its credential and produces the compatibility contract to translate into a host. Its optional mode-0600 interactive guide maps exact fields by meaning, supplies copy controls and a read-only verification request, and states its own limitations. The command intentionally does not contact Discord or the network, start a process, discover or edit a host, open a browser, or assume one product's schema. The private artifact contains Discord identifiers and may contain local paths, so it must not be shared or committed.
+`host --npx --config FILE --html PRIVATE_FILE` validates one policy without reading its credential and produces the canonical compatibility contract plus adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. Every adapter binds its exact JSON, destination guidance, secret strategy, requirements, limitations, and official schema source to the activation digest through its own digest. The optional mode-0600 interactive guide shows all four projections, supplies copy controls and a read-only verification request, and states its own limitations. The command intentionally does not contact Discord or the network, start a process, discover or edit a host, or open a browser. The private artifact contains Discord identifiers and may contain local paths or an encoded Cursor install URI, so it must not be shared or committed.
+
+| Generated adapter | Supported handoff | Important boundary |
+| --- | --- | --- |
+| `mcp-json` | Broad top-level `mcpServers` convention with exact command and ordered arguments | Secret interpolation is not portable across that convention, so environment credentials must already exist in the protected host process |
+| `cursor` | Global or project `mcp.json` plus the documented MCP install URI | The exact `${env:NAME}` reference resolves at launch; the policy-specific URI is private text and is never opened automatically |
+| `vscode` | Workspace or user-profile `mcp.json` with password-masked input variables | Interactive inputs are for local VS Code sessions and are not forwarded to Agent Host; sandboxing is omitted because VS Code auto-approves sandboxed MCP tools |
+| `gemini-extension` | Complete policy-specific local `gemini-extension.json` with sensitive settings | Gemini CLI's sensitive-setting path provides keychain custody; the generated local manifest is not a signed or published extension bundle |
+
+`--adapter ID` appends one exact adapter to human terminal output. `--json` always emits the complete adapter catalog so automation sees one stable shape. Neither mode writes or merges a destination file. File-backed credential policies omit host environment, input, and extension-setting secret fields because the protected file path is already part of the selected private policy.
 
 | Host capability | Requirement | Behavior when absent or incomplete |
 | --- | --- | --- |

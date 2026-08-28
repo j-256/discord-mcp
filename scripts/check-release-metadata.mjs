@@ -124,6 +124,24 @@ const EXPECTED_SITE_PRERELEASE_DEPENDENCIES = {
 }
 
 async function checkNeutrality() {
+  const clientCompatibilityPaths = new Set([
+    "README.md",
+    "SUPPORT.md",
+    "docs/comparison.md",
+    "docs/getting-started.md",
+    "docs/limitations.md",
+    "docs/reference.md",
+    "scripts/check-release-metadata.mjs",
+    "scripts/pack-and-verify.mjs",
+    "site/src/content/docs/index.mdx",
+    "site/src/content/docs/operate/index.mdx",
+    "site/src/content/docs/start/choose.mdx",
+    "site/test/neutrality.test.mjs",
+    "src/host-adapters.ts",
+    "test/cli.test.ts",
+    "test/host-activation-html.test.ts",
+    "test/host-adapters.test.ts",
+  ])
   const { stdout } = await run(
     "git",
     ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -144,7 +162,9 @@ async function checkNeutrality() {
       ? Buffer.from(await readlink(absolutePath))
       : await readFile(absolutePath)
     invariant(
-      !containsSpecificReference(bytes.toString("latin1")),
+      !containsSpecificReference(bytes.toString("latin1"), {
+        allowClientCompatibility: clientCompatibilityPaths.has(path),
+      }),
       `${path} has model- or harness-specific branding`,
     )
   }
@@ -597,7 +617,7 @@ async function checkDocumentation(packageJson) {
     "Shared bot, multi-tenant relay, public HTTP listener, or hosted control plane",
     "These are architectural boundaries, not a backlog promise",
     "strong contract evidence",
-    "private interactive field-mapping guide",
+    "private interactive activation guide",
   ]) {
     invariant(limitations.includes(required), `limitations guide is missing ${required}`)
   }
@@ -655,8 +675,14 @@ async function checkDocumentation(packageJson) {
     "field comparison contains an outcome Discord MCP does not lead",
   )
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
+  invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
+  invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
   invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
+  invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
+  invariant(limitations.includes("Generated adapter"), "product boundaries lack adapter-specific compatibility")
+  invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
+  invariant(comparison.includes("packaged one-click MCPB remains a distinct distribution advantage"), "field comparison hides the remaining packaged-client advantage")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
