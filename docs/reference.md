@@ -576,7 +576,7 @@ Activity and receipt records contain only application, beneficiary, SKU, and ent
 
 ## Install
 
-A compatible MCPB host can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 or newer, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
+A compatible MCPB host can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
 
 The bundle embeds its privacy policy, deterministic SPDX inventory, exact dependency notices, credential-free catalog evidence, and a single self-contained ESM server. Its verifier builds twice, checks exact ZIP structure and metadata, compares bytes, scans every entry for secrets and non-neutral branding, validates the embedded evidence, unpacks to a fresh directory, and completes a real MCP initialization and catalog handshake. Verify the downloaded file against its `SHA256SUMS` entry and GitHub Release attestation before import.
 
@@ -638,47 +638,49 @@ npm test
 npm run build
 ```
 
-The source build's CLI entrypoint is `dist/cli.js`. The package's `dist/index.js` is its import-only library entrypoint; executing it directly fails with a fixed credential-free correction to use `discord-mcp serve --config FILE` or `node dist/cli.js serve --config FILE` instead of closing silently during MCP initialization. The npm and source CLI entrypoints select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
+The source build's public CLI launcher is `dist/bin.js`; `dist/cli.js` is its internal executable module. The package's `dist/index.js` is its import-only library entrypoint; executing it directly fails with a fixed credential-free correction to use `discord-mcp serve --config FILE` or `node dist/bin.js serve --config FILE` instead of closing silently during MCP initialization. The npm and source CLI launchers select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
+
+The public launcher favors lower resident memory by starting verified Node 22 through 26 lines with V8's `--lite-mode` before connector code loads. That profile disables WebAssembly; the connector and its pinned dependencies require none, and Discord work is normally network-bound, so the principal tradeoff is lower execution throughput. Node 22 and 23 descriptors also pass `--no-expose-wasm` to suppress those lines' conflicting-default warning, while Node 24 through 26 reject the obsolete flag and receive only `--lite-mode`. Unknown future lines continue through the standard profile until the optimization is release-verified. MCPB uses the universal flag and therefore declares the exact `>=22 <27` range; its single static argument list means Node 22 and 23 emit one expected V8 compatibility warning before readiness, and bundle verification rejects any other stderr. The Node-22-pinned OCI image uses both flags. Smoke and generated direct-Node descriptors select the exact version-compatible profile themselves. On runtimes that expose POSIX process replacement, a bare or `npx` package launch replaces its tiny bootstrap in the same PID while preserving standard streams, Node arguments, CLI arguments, and the inherited environment; runtimes without that facility continue through the standard profile. Use `discord-mcp --standard-runtime COMMAND` when CPU throughput is more important than the memory profile. Custom `--command` launchers are never assumed to be Node and receive no injected runtime flags.
 
 ## Operator CLI
 
 The CLI provides a safe path from one non-secret configuration document to a verified MCP connection:
 
 ```sh
-node dist/cli.js catalog --check
-node dist/cli.js catalog --html ./discord-mcp-contract.html
-node dist/cli.js preset list
-node dist/cli.js preset show server-observer --json
-node dist/cli.js preset install server-observer --application-id APPLICATION_ID --guild-id GUILD_ID --html ./discord-mcp-onboarding.html
-node dist/cli.js setup --config ./discord-mcp.json --preset server-observer --guild-id GUILD_ID
-node dist/cli.js setup --config ./discord-reader.json --preset channel-reader --guild-id GUILD_ID --channel-id CHANNEL_ID
-node dist/cli.js setup --config ./discord-mcp.json
-node dist/cli.js config validate ./discord-mcp.json
-node dist/cli.js config show ./discord-mcp.json
-node dist/cli.js config explain capabilities.deletions
-node dist/cli.js config init ./mounted-secret.json --name mounted-secret --application-id APPLICATION_ID --bot-id BOT_ID --guild-id GUILD_ID --token-file /run/secrets/discord_bot_token
-node dist/cli.js config workbench ./discord-mcp.json --html ./discord-mcp-workbench.html
-node dist/cli.js config plan ./discord-mcp.json ./discord-mcp.candidate.json
-node dist/cli.js config apply ./discord-mcp.json ./discord-mcp.candidate.json --plan-digest PLAN_DIGEST --confirm ACTIVE_POLICY_NAME
-node dist/cli.js recipe list
-node dist/cli.js recipe show guild-starter --json
-node dist/cli.js recipe plan guild-starter ./discord-mcp.json --guild-id GUILD_ID
-node dist/cli.js recipe apply guild-starter ./discord-mcp.json --guild-id GUILD_ID --plan-digest PLAN_DIGEST --confirm guild-starter
-node dist/cli.js recipe show guild-builder --json
-node dist/cli.js recipe show direct-messenger --json
-node dist/cli.js recipe plan direct-messenger ./discord-mcp.json --user-id EXPECTED_RECIPIENT_USER_ID
-node dist/cli.js recipe apply direct-messenger ./discord-mcp.json --user-id EXPECTED_RECIPIENT_USER_ID --plan-digest PLAN_DIGEST --confirm direct-messenger
-node dist/cli.js setup --profile observer --preset server-observer --guild-id GUILD_ID
-node dist/cli.js setup --profile observer
-node dist/cli.js profile list
-node dist/cli.js activity --config ./discord-mcp.json --html ./discord-mcp-activity.html
-node dist/cli.js coordination list --config ./discord-mcp.json
-node dist/cli.js coordination resolve CLAIM_ID --confirm CLAIM_ID --config ./discord-mcp.json
-node dist/cli.js doctor --config ./discord-mcp.json
-node dist/cli.js doctor --config ./discord-mcp.json --online
-node dist/cli.js smoke --config ./discord-mcp.json
-node dist/cli.js host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
-node dist/cli.js host --npx --config ./discord-mcp.json --adapter mcp-json --inspect-host-file ./mcp.json
+node dist/bin.js catalog --check
+node dist/bin.js catalog --html ./discord-mcp-contract.html
+node dist/bin.js preset list
+node dist/bin.js preset show server-observer --json
+node dist/bin.js preset install server-observer --application-id APPLICATION_ID --guild-id GUILD_ID --html ./discord-mcp-onboarding.html
+node dist/bin.js setup --config ./discord-mcp.json --preset server-observer --guild-id GUILD_ID
+node dist/bin.js setup --config ./discord-reader.json --preset channel-reader --guild-id GUILD_ID --channel-id CHANNEL_ID
+node dist/bin.js setup --config ./discord-mcp.json
+node dist/bin.js config validate ./discord-mcp.json
+node dist/bin.js config show ./discord-mcp.json
+node dist/bin.js config explain capabilities.deletions
+node dist/bin.js config init ./mounted-secret.json --name mounted-secret --application-id APPLICATION_ID --bot-id BOT_ID --guild-id GUILD_ID --token-file /run/secrets/discord_bot_token
+node dist/bin.js config workbench ./discord-mcp.json --html ./discord-mcp-workbench.html
+node dist/bin.js config plan ./discord-mcp.json ./discord-mcp.candidate.json
+node dist/bin.js config apply ./discord-mcp.json ./discord-mcp.candidate.json --plan-digest PLAN_DIGEST --confirm ACTIVE_POLICY_NAME
+node dist/bin.js recipe list
+node dist/bin.js recipe show guild-starter --json
+node dist/bin.js recipe plan guild-starter ./discord-mcp.json --guild-id GUILD_ID
+node dist/bin.js recipe apply guild-starter ./discord-mcp.json --guild-id GUILD_ID --plan-digest PLAN_DIGEST --confirm guild-starter
+node dist/bin.js recipe show guild-builder --json
+node dist/bin.js recipe show direct-messenger --json
+node dist/bin.js recipe plan direct-messenger ./discord-mcp.json --user-id EXPECTED_RECIPIENT_USER_ID
+node dist/bin.js recipe apply direct-messenger ./discord-mcp.json --user-id EXPECTED_RECIPIENT_USER_ID --plan-digest PLAN_DIGEST --confirm direct-messenger
+node dist/bin.js setup --profile observer --preset server-observer --guild-id GUILD_ID
+node dist/bin.js setup --profile observer
+node dist/bin.js profile list
+node dist/bin.js activity --config ./discord-mcp.json --html ./discord-mcp-activity.html
+node dist/bin.js coordination list --config ./discord-mcp.json
+node dist/bin.js coordination resolve CLAIM_ID --confirm CLAIM_ID --config ./discord-mcp.json
+node dist/bin.js doctor --config ./discord-mcp.json
+node dist/bin.js doctor --config ./discord-mcp.json --online
+node dist/bin.js smoke --config ./discord-mcp.json
+node dist/bin.js host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+node dist/bin.js host --npx --config ./discord-mcp.json --adapter mcp-json --inspect-host-file ./mcp.json
 ```
 
 `catalog` starts a separate credential-free stdio server that reuses the production registrations while disabling all tool execution. It reads no ambient token or policy, constructs no Discord client, opens no Gateway or telemetry exporter, and creates no activity record. Static safety guidance and validated prompts remain inspectable; every listed, invalid, disabled, discovery, or unknown tool call returns the same fixed `CATALOG_ONLY` result. The production completion capability and every exact binding remain registered. Policy-bound completion returns no identifiers, while the static exact-tool access template completes only public canonical tool names. Add `--check` to verify the exact tool, prompt, resource, resource-template, and completion identities, every tool schema, risk annotation, and access lifecycle, the static safety guide, tool-access index, canonical tool-name completion, one exact per-tool contract, zero-value policy-completion boundary, and execution guard in process without contacting Discord. Add `--json` with `--check` for deterministic machine-readable evidence containing the sorted protocol inventories, access-stage and risk-class accounting, reviewed workflow companions, completion manifest, production toolsets, REST-method totals, a digest of the normalized MCP contract, and separate tool-access and safety-resource digests. Add `--html FILE` to render the same negotiated snapshot as a guided product tour and searchable standalone explorer with exact schemas, annotations, access contracts, prompts, resources, completion routes, instructions, safety guidance, and toolset, workflow, risk, and access-stage filters. The tour maps package inspection, read-only scope, goal routing, first live read, reviewed plan, approved execution, and ambiguity recovery to required exact prompt and tool declarations; rendering fails if a required declaration or access stage changes without an explicit tour update. It is a workflow map rather than a recorded or simulated Discord result and states which live identity, permission, target, and outcome evidence remains unproven. The HTML export embeds no credential, configured identifier, timestamp, machine path, external asset, or runtime network capability; it uses a restrictive content security policy, is written with private permissions, and refuses to replace an existing path. Its bytes are deterministic for one installed release, so exports from separate installations of the same archive can be compared directly. HTML export may be combined with `--check`, but not with JSON output. The contract digest includes negotiated server capabilities, the access manifest, the access index, one exact access resource, canonical tool-name completion, and the policy-completion manifest while excluding the package version, timestamp, machine paths, ambient configuration, and configured completion values so equivalent installed contracts can be compared directly across builds.
@@ -767,7 +769,7 @@ Add `--json` to `setup`, `host`, `migrate`, `doctor`, `smoke`, `activity`, confi
 
 CLI exit status is 0 for clean success, 1 for success with warnings or failure to start a long-running stdio server or catalog process, and 2 for invalid usage, a failed doctor check, or a failed bounded operator command. A warning-only doctor or setup report remains fully readable but returns 1 so automation cannot mistake a degraded boundary for a clean result.
 
-Run `node dist/cli.js help` for the complete command summary.
+Run `node dist/bin.js help` for the complete command summary.
 
 ## Configuration
 
@@ -3736,11 +3738,11 @@ OCI provenance and SBOM statements are records attached to the image index and p
 After building, verify the compiled CLI and selected policy without contacting Discord:
 
 ```sh
-node dist/cli.js catalog --check --json > catalog-evidence.json
-node dist/cli.js catalog --html ./discord-mcp-contract.html
-node dist/cli.js doctor --config ./discord-mcp.json
-node dist/cli.js help
-node dist/cli.js version
+node dist/bin.js catalog --check --json > catalog-evidence.json
+node dist/bin.js catalog --html ./discord-mcp-contract.html
+node dist/bin.js doctor --config ./discord-mcp.json
+node dist/bin.js help
+node dist/bin.js version
 ```
 
 Run the catalog evidence command twice and compare the complete JSON documents when reproducibility matters. Matching `contractDigest` values identify the same normalized instructions, tool schemas and annotations, prompt declarations, resource declarations, templates, static safety response, and fixed execution guard. The exact inventories and accounting fields make additions, removals, and classification changes reviewable without credentials or Discord access.
@@ -3748,8 +3750,8 @@ Run the catalog evidence command twice and compare the complete JSON documents w
 The online doctor and MCP smoke verify the token, expected application ID, bot identity, complete bounded ID-only installed-guild inventory, exact configured-scope drift, privileged-intent flags, content-free MCP catalogs, and read-only protocol path without returning guild names, icons, ownership, permissions, features, or raw guild payloads; requesting approximate member or presence counts; listing application emojis, guild members, guild bans, reaction users, scheduled-event subscribers, guild integrations, guild invites, guild vanity URLs, Guild Templates, guild onboarding, Welcome Screens, guild profiles, named guild settings, guild Community state, guild incident actions, authenticated widget settings, Discord channels, member voice states, soundboard sounds, AutoMod rules, or scheduled events; requesting a guild-prune estimate; calling anonymous widget routes; reading messages, ban reasons, or local files; changing application emojis or reactions; moderating reactions; creating or editing static component or rich-embed messages; sending attachments; deleting integrations; revoking invites; creating, synchronizing, editing, or deleting Guild Templates; replacing onboarding, a Welcome Screen, a guild profile, guild settings, guild Community routing, guild incident actions, or widget settings; changing soundboard sounds, AutoMod rules, scheduled events, permission overwrites, member nicknames, member roles, or member voice state; creating threads, channels, or roles; performing member moderation; or beginning a guild prune:
 
 ```sh
-node dist/cli.js doctor --config ./discord-mcp.json --online
-node dist/cli.js smoke --config ./discord-mcp.json
+node dist/bin.js doctor --config ./discord-mcp.json --online
+node dist/bin.js smoke --config ./discord-mcp.json
 ```
 
 Neither command queries or changes voice-channel status or application linked-role metadata. The offline doctor reports only the configured exact metadata-scope candidate count and derived projection policy. Smoke validates the catalog through the normal stdio runner, including any Gateway behavior selected by the policy.

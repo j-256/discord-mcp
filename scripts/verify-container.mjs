@@ -223,7 +223,12 @@ async function inspectImage(image, packageJson, revision) {
   invariant(report.Os === "linux", "container operating system must be Linux")
   invariant(config.User === "node", "container must declare the unprivileged node user")
   invariant(config.WorkingDir === "/app", "container working directory is invalid")
-  assert.deepEqual(config.Entrypoint, ["node", "dist/cli.js"])
+  assert.deepEqual(config.Entrypoint, [
+    "node",
+    "--no-expose-wasm",
+    "--lite-mode",
+    "dist/cli.js",
+  ])
   assert.deepEqual(config.Cmd, ["catalog"])
   assert.deepEqual(config.Env, EXPECTED_ENVIRONMENT)
   invariant(

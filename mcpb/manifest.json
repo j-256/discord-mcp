@@ -24,6 +24,7 @@
     "mcp_config": {
       "command": "node",
       "args": [
+        "--lite-mode",
         "${__dirname}/server/discord-mcp.mjs",
         "serve",
         "--config",
@@ -55,7 +56,7 @@
       "linux"
     ],
     "runtimes": {
-      "node": ">=22"
+      "node": ">=22 <27"
     }
   },
   "user_config": {

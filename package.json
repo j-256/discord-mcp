@@ -31,7 +31,7 @@
     }
   },
   "bin": {
-    "discord-mcp": "dist/cli.js"
+    "discord-mcp": "dist/bin.js"
   },
   "files": [
     "dist",
@@ -63,12 +63,12 @@
     "config:schema": "node --import tsx scripts/generate-config-schema.mjs",
     "config:schema:check": "node --import tsx scripts/generate-config-schema.mjs --check",
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
-    "mcp": "node dist/cli.js serve",
+    "mcp": "node dist/bin.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
     "mcpb:verify": "node scripts/build-mcpb.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     "prepack": "npm run config:schema:check && npm run metadata:check && npm run build",
-    "probe:live": "node dist/cli.js doctor --online --json",
+    "probe:live": "node dist/bin.js doctor --online --json",
     "sbom": "node scripts/generate-sbom.mjs",
     "security:check": "npm audit --audit-level=moderate && npm audit signatures",
     "test": "tsx --test test/*.test.ts",

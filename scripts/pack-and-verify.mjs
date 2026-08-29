@@ -109,6 +109,7 @@ const REQUIRED_FILES = [
   "README.md",
   "SECURITY.md",
   "discord-mcp.config.schema.json",
+  "dist/bin.js",
   "dist/cli.js",
   "dist/host-activation-html.js",
   "dist/host-activation.js",
@@ -603,7 +604,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive],
     { cwd: consumer, env: environment },
   )
-  const entrypoint = join(consumer, "node_modules", "@j-256", "discord-mcp", "dist", "cli.js")
+  const entrypoint = join(consumer, "node_modules", "@j-256", "discord-mcp", "dist", "bin.js")
   const libraryEntrypoint = join(
     consumer,
     "node_modules",
@@ -619,12 +620,21 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     env: environment,
   })
   assert.equal(versionResult.stdout.trim(), version)
+  assert.equal(versionResult.stderr, "")
+  const standardVersionResult = await run(bin, ["--standard-runtime", "version"], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  assert.equal(standardVersionResult.stdout.trim(), version)
+  assert.equal(standardVersionResult.stderr, "")
   const helpResult = await run(process.execPath, [entrypoint, "help"], {
     capture: true,
     cwd: consumer,
     env: environment,
   })
   assert.match(helpResult.stdout, /Run the stdio MCP server/)
+  assert.match(helpResult.stdout, /--standard-runtime/)
   const libraryResult = await run(process.execPath, [libraryEntrypoint], {
     allowedExitCodes: [1],
     capture: true,
@@ -637,7 +647,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     /package library entrypoint does not run an MCP server/u,
   )
   assert.match(libraryResult.stderr, /discord-mcp serve --config FILE/u)
-  assert.match(libraryResult.stderr, /node dist\/cli\.js serve --config FILE/u)
+  assert.match(libraryResult.stderr, /node dist\/bin\.js serve --config FILE/u)
   invariant(
     !libraryResult.stderr.includes(DUMMY_TOKEN),
     "installed library-entrypoint diagnostic exposed the credential",

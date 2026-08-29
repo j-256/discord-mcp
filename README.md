@@ -205,7 +205,7 @@ git clone https://github.com/j-256/discord-mcp.git
 cd discord-mcp
 npm run deps:locked
 npm run build
-node dist/cli.js catalog --check
+node dist/bin.js catalog --check
 ```
 
 The exact [installation](docs/reference.md#install), [operator CLI](docs/reference.md#operator-cli), and [configuration](docs/reference.md#configuration) references cover standalone configuration, managed profiles, OCI bind mounts, progressive discovery, toolsets, allowlists, optional Gateway modes, observability, and every independently gated feature.

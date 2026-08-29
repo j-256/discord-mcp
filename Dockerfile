@@ -34,5 +34,5 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json LICENSE ./
 
 USER node
-ENTRYPOINT ["node", "dist/cli.js"]
+ENTRYPOINT ["node", "--no-expose-wasm", "--lite-mode", "dist/cli.js"]
 CMD ["catalog"]

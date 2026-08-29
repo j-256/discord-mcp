@@ -108,6 +108,7 @@ import {
   DiscordApiError,
   ProfileError,
 } from "../src/errors.js"
+import { lowMemoryNodeArguments } from "../src/node-runtime.js"
 import {
   OPERATOR_REPORT_SCHEMA_VERSION,
   type DoctorReport,
@@ -128,6 +129,7 @@ const CHANNEL_ID = "400000000000000001"
 const USER_ID = "500000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const CONFIG_FILE = "/configuration/discord-mcp.json"
+const LOW_MEMORY_NODE_ARGUMENTS = lowMemoryNodeArguments(process.versions.node)
 
 function outputStream() {
   let output = ""
@@ -2277,6 +2279,7 @@ test("CLI generates an exact host activation plan without reading ambient creden
   assert.deepEqual(report.policy.source, { file: CONFIG_FILE, kind: "config" })
   assert.deepEqual(report.launch, {
     args: [
+      ...LOW_MEMORY_NODE_ARGUMENTS,
       "/srv/discord-mcp/dist/cli.js",
       "serve",
       "--config",
@@ -2560,7 +2563,7 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: TOKEN },
@@ -2645,7 +2648,7 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
 
   assert.equal(exitCode, 1)
   assert.deepEqual(received, {
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     credentialVariable: TOKEN_ALIAS,
     environment: source,
@@ -2712,7 +2715,7 @@ test("CLI forwards standalone configuration setup and renders recoverable replac
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: "/configuration/discord.json",
     credentialVariable: TOKEN_ALIAS,
@@ -2775,7 +2778,7 @@ test("CLI forwards and renders a file-backed setup credential", async () => {
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: "/configuration/discord.json",
     credentialFile,
@@ -2830,7 +2833,7 @@ test("CLI forwards exact preset setup intent and renders its read-only boundary"
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     credentialVariable: TOKEN_ALIAS,
     environment: source,
@@ -3126,6 +3129,7 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
       assert.equal(options.config, config)
       assert.deepEqual(options.launch, {
         args: [
+          ...LOW_MEMORY_NODE_ARGUMENTS,
           "/srv/discord-mcp/dist/cli.js",
           "serve",
           "--profile",
@@ -3196,6 +3200,7 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
       assert.equal(options.environment?.[CONFIG_FILE_ENVIRONMENT_VARIABLE], file)
       assert.deepEqual(options.launch, {
         args: [
+          ...LOW_MEMORY_NODE_ARGUMENTS,
           "/srv/discord-mcp/dist/cli.js",
           "serve",
           "--config",

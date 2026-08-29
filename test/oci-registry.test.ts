@@ -110,7 +110,12 @@ function validConfig(): object {
     config: {
       ArgsEscaped: true,
       Cmd: ["catalog"],
-      Entrypoint: ["node", "dist/cli.js"],
+      Entrypoint: [
+        "node",
+        "--no-expose-wasm",
+        "--lite-mode",
+        "dist/cli.js",
+      ],
       Env: [
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "NODE_VERSION=22.23.2",

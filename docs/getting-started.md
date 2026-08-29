@@ -152,7 +152,7 @@ After smoke passes, use the one-click MCPB path when the host supports it and th
 3. Enter the token for your own bot only in the host's sensitive `Discord bot token` prompt.
 4. Review the resulting local server entry, reload the host, and continue with the first-read request below.
 
-The same bundle supports macOS, Windows, and Linux with Node.js 22 or newer. Its launcher reads the selected strict config, maps the prompted token only to the exact environment variable declared there, removes the bundle-only input, and starts the normal server. It does not persist the token or expose policy flags in the host form. A file-backed credential policy is deliberately refused because the sensitive prompt cannot satisfy that file-custody contract; use the generated adapter path instead.
+The same bundle supports macOS, Windows, and Linux with Node.js 22 through 26. Its launcher reads the selected strict config, maps the prompted token only to the exact environment variable declared there, removes the bundle-only input, and starts the normal server. It does not persist the token or expose policy flags in the host form. A file-backed credential policy is deliberately refused because the sensitive prompt cannot satisfy that file-custody contract; use the generated adapter path instead.
 
 The release workflow builds the bundle twice, requires identical bytes, validates every ZIP path, mode, timestamp, and entry, checks its embedded deterministic SPDX inventory, third-party notices, privacy policy, and credential-free catalog evidence, then unpacks it and completes a real MCP handshake. Verify the downloaded bundle against `SHA256SUMS` and its GitHub artifact attestation before import.
 
@@ -287,13 +287,14 @@ npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adap
 ```
 
 - If a bare `discord-mcp` command is not found, use the pinned `npx --yes @j-256/discord-mcp@0.1.2` prefix or install the package globally before using the bare executable.
+- If the memory-optimized launcher is inappropriate for a CPU-heavy local workflow, place `--standard-runtime` before the command. This changes only Node's execution profile and never changes Discord policy or tool authority.
 - If policy creation rejects the directory, apply the exact platform-specific directory requirements above. A missing, symlinked, noncanonical, wrongly owned, or broadly writable location produces a condition-specific error.
 - If offline doctor reports the credential unavailable, make the exact referenced environment variable or file available to that process. The connector has no fallback token source.
 - If online doctor fails identity or guild access, verify the token belongs to the intended application, reinstall the exact generated grant in the intended guild, and inspect role or channel overrides. Do not broaden to `Administrator`.
 - If smoke fails, correct its reported layer before editing the host. Smoke exercises the same stdio server entrypoint without a model or host dependency.
-- If MCPB import fails before startup, confirm that the host supports MCPB manifest 0.3, Node.js 22 or newer, local file selection, and sensitive string inputs. Do not copy the token into the selected config.
+- If MCPB import fails before startup, confirm that the host supports MCPB manifest 0.3, Node.js 22 through 26, local file selection, and sensitive string inputs. Do not copy the token into the selected config.
 - If MCPB startup reports that an environment-backed credential is required, keep a file-backed policy unchanged and use the generated host adapter. Do not convert the secret file into static JSON merely to satisfy the bundle.
-- If a host says the connection closed during initialization, run exact host-file inspection first. Fix only its named projection, reload the host, and require status 0 before chasing runtime causes. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/cli.js serve --config FILE`.
+- If a host says the connection closed during initialization, run exact host-file inspection first. Fix only its named projection, reload the host, and require status 0 before chasing runtime causes. `dist/index.js` is the library entrypoint and does not run a server; a source checkout must use `node dist/bin.js serve --config FILE`.
 - If smoke passes but the host still fails, verify that the host forwards the referenced secret, uses stdio rather than a shell prompt or HTTP transport, allows the startup timeout, and was restarted after configuration changed.
 - If the server loads but an expected tool is absent, inspect `config show`, the selected toolsets, and `tools.surface`. Tool discovery can narrow the catalog but cannot grant a tool omitted by policy.
 

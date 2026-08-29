@@ -284,7 +284,7 @@ async function checkPackageAndLock() {
   invariant(packageJson.engines?.node === ">=22", "package Node.js floor must remain 22")
   invariant(packageJson.main === "./dist/index.js", "package main entrypoint is invalid")
   invariant(packageJson.types === "./dist/index.d.ts", "package types entrypoint is invalid")
-  invariant(packageJson.bin?.["discord-mcp"] === "dist/cli.js", "package CLI entrypoint is invalid")
+  invariant(packageJson.bin?.["discord-mcp"] === "dist/bin.js", "package CLI entrypoint is invalid")
   assertEqual(packageJson.exports, {
     ".": {
       import: "./dist/index.js",
@@ -321,12 +321,12 @@ async function checkPackageAndLock() {
     "config:schema": "node --import tsx scripts/generate-config-schema.mjs",
     "config:schema:check": "node --import tsx scripts/generate-config-schema.mjs --check",
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
-    mcp: "node dist/cli.js serve",
+    mcp: "node dist/bin.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
     "mcpb:verify": "node scripts/build-mcpb.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     prepack: "npm run config:schema:check && npm run metadata:check && npm run build",
-    "probe:live": "node dist/cli.js doctor --online --json",
+    "probe:live": "node dist/bin.js doctor --online --json",
     sbom: "node scripts/generate-sbom.mjs",
     "security:check": "npm audit --audit-level=moderate && npm audit signatures",
     test: "tsx --test test/*.test.ts",
@@ -777,13 +777,20 @@ async function checkDocumentation(packageJson) {
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
   invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
   invariant(gettingStarted.includes("--inspect-host-file"), "getting-started guide lacks exact host drift inspection")
+  invariant(gettingStarted.includes("`--standard-runtime`"), "getting-started guide lacks the standard-runtime recovery choice")
+  invariant(gettingStarted.includes("bundle supports macOS, Windows, and Linux with Node.js 22 through 26"), "getting-started guide lacks the exact MCPB runtime range")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
+  invariant(reference.includes("public CLI launcher is `dist/bin.js`"), "complete reference lacks the public package launcher")
+  invariant(reference.includes("V8's `--lite-mode`"), "complete reference lacks the low-memory runtime contract")
+  invariant(reference.includes("cross-platform manifest requires Node.js 22 through 26"), "complete reference lacks the exact MCPB runtime range")
+  invariant(reference.includes("bundle verification rejects any other stderr"), "complete reference lacks the MCPB warning boundary")
   invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
   invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
   invariant(reference.includes("### Host configuration drift inspection"), "complete reference lacks host drift inspection")
   invariant(security.includes("## Host configuration inspection"), "security policy lacks host inspection requirements")
   invariant(limitations.includes("Generated adapter"), "product boundaries lack adapter-specific compatibility")
   invariant(limitations.includes("`--inspect-host-file FILE`"), "product boundaries lack host inspection limits")
+  invariant(limitations.includes("Native-process memory parity"), "product boundaries lack the native-memory limitation")
   invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
   invariant(comparison.includes("Discord MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")
@@ -895,6 +902,8 @@ async function checkCommunityFiles() {
   }
   invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
   invariant(support.includes("discord-mcp host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
+  invariant(support.includes("node dist/bin.js serve --config FILE"), "support guide lacks the public source launcher")
+  invariant(support.includes("Node.js 22 through 26"), "support guide lacks the exact MCPB runtime range")
   invariant(privacy.startsWith("# Privacy policy\n"), "privacy policy heading is invalid")
   for (const required of [
     "## Credentials",
@@ -1088,7 +1097,7 @@ async function checkContainerSource(packageJson) {
     "COPY --from=build --chown=node:node /app/dist ./dist",
     "COPY --from=build --chown=node:node /app/node_modules ./node_modules",
     "USER node",
-    "ENTRYPOINT [\"node\", \"dist/cli.js\"]",
+    "ENTRYPOINT [\"node\", \"--no-expose-wasm\", \"--lite-mode\", \"dist/cli.js\"]",
     "CMD [\"catalog\"]",
   ]) {
     invariant(dockerfile.includes(required), `Dockerfile is missing ${required}`)
