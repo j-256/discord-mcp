@@ -5353,7 +5353,7 @@ test("MCP guild-blueprint authoring stays offline and preserves literal authorit
   assert.match(authored, /Candidate request JSON/)
   assert.match(authored, /Assumptions and omissions/)
   assert.match(authored, /Missing exact evidence/)
-  assert.match(authored, /Do not call capture_guild_blueprint, plan_guild_blueprint, execute_guild_blueprint, or verify_guild_blueprint/)
+  assert.match(authored, /Do not call preview_guild_blueprint, capture_guild_blueprint, plan_guild_blueprint, execute_guild_blueprint, or verify_guild_blueprint/)
   assert.match(authored, /separate review_guild_blueprint prompt/)
   assert.equal(totalCalls(calls), 0)
 

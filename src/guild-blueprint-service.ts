@@ -59,6 +59,12 @@ import {
   normalizeGuildCommunityChangeRequest,
 } from "./guild-community-service.js"
 import {
+  type GuildBlueprintManifestPreview,
+  type GuildBlueprintPlanManifestPreview,
+  projectGuildBlueprintManifestPreview,
+  projectGuildBlueprintPlanManifestPreview,
+} from "./guild-blueprint-preview.js"
+import {
   type GuildScaffoldPlan,
   type GuildScaffoldRequest,
   type GuildScaffoldResult,
@@ -691,6 +697,7 @@ export interface GuildBlueprintPlan {
     name: string
     ownerId: string
   }
+  manifestPreview: GuildBlueprintPlanManifestPreview
   operationKeyHash: string
   privacy: {
     activityAndReceipts: "content-free-domain-records"
@@ -2468,6 +2475,16 @@ export function guildBlueprintRequestDigest(request: GuildBlueprintRequest): str
   return normalizedRequestDigest(normalizeGuildBlueprintRequest(request))
 }
 
+export function previewGuildBlueprintManifest(
+  request: GuildBlueprintRequest,
+): GuildBlueprintManifestPreview {
+  const normalized = normalizeGuildBlueprintRequest(request)
+  return projectGuildBlueprintManifestPreview(
+    normalized,
+    normalizedRequestDigest(normalized),
+  )
+}
+
 function scaffoldRequest(request: NormalizedGuildBlueprintRequest): GuildScaffoldRequest {
   return {
     auditReason: request.auditReason,
@@ -3716,6 +3733,10 @@ export class GuildBlueprintService {
   ): Promise<BuiltGuildBlueprintPlan> {
     const request = normalizeGuildBlueprintRequest(requestInput)
     const requestDigest = normalizedRequestDigest(request)
+    const staticManifestPreview = projectGuildBlueprintManifestPreview(
+      request,
+      requestDigest,
+    )
     const structureRequest = scaffoldRequest(request)
     const structurePlan = await this.#domains.scaffold.plan(
       applicationId,
@@ -4605,6 +4626,11 @@ export class GuildBlueprintService {
       }
     }
 
+    const manifestPreview = projectGuildBlueprintPlanManifestPreview(
+      staticManifestPreview,
+      steps,
+      frontier,
+    )
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       bindings,
@@ -4629,7 +4655,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v7",
+      version: "guild-blueprint-plan.v8",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -4640,6 +4666,7 @@ export class GuildBlueprintService {
       digest,
       frontier,
       guild: { ...structurePlan.guild },
+      manifestPreview,
       operationKeyHash: request.operationKeyHash,
       privacy: {
         activityAndReceipts: "content-free-domain-records",
