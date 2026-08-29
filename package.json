@@ -65,7 +65,7 @@
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     "mcp": "node dist/cli.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
-    "mcpb:verify": "npm run build && node scripts/build-mcpb.mjs",
+    "mcpb:verify": "node scripts/build-mcpb.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     "prepack": "npm run config:schema:check && npm run metadata:check && npm run build",
     "probe:live": "node dist/cli.js doctor --online --json",
