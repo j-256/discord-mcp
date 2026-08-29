@@ -153,6 +153,15 @@ test("domain prompts retain toolset boundaries while goal routing spans configur
       .includes(MCP_PROMPT_NAMES.routeDiscordGoal),
     true,
   )
+  assert.deepEqual(
+    selectedMcpPromptNames(new Set(["polls"])).sort(),
+    [
+      MCP_PROMPT_NAMES.inspectDiscordPoll,
+      MCP_PROMPT_NAMES.reviewPollCreation,
+      MCP_PROMPT_NAMES.reviewPollEnd,
+      MCP_PROMPT_NAMES.routeDiscordGoal,
+    ].sort(),
+  )
   assert.equal(
     selectedMcpPromptNames(new Set())
       .includes(MCP_PROMPT_NAMES.routeDiscordGoal),

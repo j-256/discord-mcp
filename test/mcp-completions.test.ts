@@ -100,6 +100,39 @@ test("completion bindings are immutable, unique, domain-specific, and exact", ()
     }
   }
   assert.deepEqual(boundResourceTemplates, resourceTemplates)
+  assert.deepEqual(
+    MCP_POLICY_COMPLETION_BINDINGS
+      .filter((candidate) => (
+        candidate.kind === "prompt"
+        && (
+          candidate.reference === MCP_PROMPT_NAMES.inspectDiscordPoll
+          || candidate.reference === MCP_PROMPT_NAMES.reviewPollCreation
+          || candidate.reference === MCP_PROMPT_NAMES.reviewPollEnd
+        )
+      ))
+      .map(({ argument, policyFields, reference }) => ({
+        argument,
+        policyFields,
+        reference,
+      })),
+    [
+      {
+        argument: "channelId",
+        policyFields: ["pollChannelIds"],
+        reference: MCP_PROMPT_NAMES.inspectDiscordPoll,
+      },
+      {
+        argument: "channelId",
+        policyFields: ["pollChannelIds"],
+        reference: MCP_PROMPT_NAMES.reviewPollCreation,
+      },
+      {
+        argument: "channelId",
+        policyFields: ["pollChannelIds"],
+        reference: MCP_PROMPT_NAMES.reviewPollEnd,
+      },
+    ],
+  )
 })
 
 test("resource callbacks combine only their declared public policy arrays", async () => {

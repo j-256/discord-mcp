@@ -213,6 +213,9 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   promptBinding(MCP_PROMPT_NAMES.searchGuildMessages, "guildId", "allowedGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewMessageDeletion, "channelId", "deleteChannelIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewMessagePin, "channelId", "pinChannelIds"),
+  promptBinding(MCP_PROMPT_NAMES.inspectDiscordPoll, "channelId", "pollChannelIds"),
+  promptBinding(MCP_PROMPT_NAMES.reviewPollCreation, "channelId", "pollChannelIds"),
+  promptBinding(MCP_PROMPT_NAMES.reviewPollEnd, "channelId", "pollChannelIds"),
   promptBinding(
     MCP_PROMPT_NAMES.reviewAnnouncementCrosspost,
     "channelId",
