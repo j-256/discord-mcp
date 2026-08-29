@@ -294,7 +294,7 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 - Use `read_message_attachment` only after retaining the exact channel, message, and attachment IDs from a current permitted read
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`
 - Prefer `guild-starter` for a bundled public layout; use `guild-builder` only when its broader Community, onboarding, Welcome Screen, AutoMod, and requested `Manage Roles` authority is intended
-- Preview the complete retained guild-blueprint manifest locally before live planning, including bottom-up role-order adjacencies and exact-channel permission-overwrite targets, then distinguish freshly assessed entries from deferred intent and execute only the one named frontier
+- Preview the complete retained guild-blueprint manifest locally before live planning, including bottom-up role- and channel-order adjacencies and exact-channel permission-overwrite targets, then distinguish freshly assessed entries from deferred intent and execute only the one named frontier
 - Plan and review a recipe before applying it to the active policy
 - Read the [safety model](reference.md#safety-model) before enabling any write capability
 - Use `signal_command_processing` only after enabling exact message interactions and only for a fresh bot-directed command whose response is expected to take several seconds

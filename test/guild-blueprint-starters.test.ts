@@ -55,9 +55,25 @@ test("compiles every bundled starter into one strict planner request", () => {
     })
     assert.deepEqual(result.review.policyRequirements.capabilities, [
       "capabilities.guildScaffolds",
+      "capabilities.channelOrderingAudit",
+      "capabilities.channelOrderingChanges",
       "capabilities.guildSettingsAudit",
       "capabilities.guildSettingsChanges",
     ])
+    const orderedReferences = result.request.channelOrders?.flatMap(
+      ({ channels }) => channels,
+    ) ?? []
+    assert.ok((result.request.channelOrders?.length ?? 0) > 0)
+    assert.ok(result.request.channelOrders?.every(({ channels }) => (
+      channels.length >= 2
+      && channels.every((reference) => reference.kind === "scaffold")
+    )))
+    assert.equal(
+      new Set(orderedReferences.map((reference) => (
+        reference.kind === "scaffold" ? reference.key : reference.channelId
+      ))).size,
+      orderedReferences.length,
+    )
     assert.ok(result.request.scaffold.channels.some((channel) => (
       channel.key === result.review.systemChannelKey
       && channel.kind === "text"
@@ -148,6 +164,8 @@ test("adds only the optional sparse guild-name phase", () => {
   assert.deepEqual(result.request.profile, { name: "Reviewed Project Guild" })
   assert.deepEqual(result.review.policyRequirements.capabilities, [
     "capabilities.guildScaffolds",
+    "capabilities.channelOrderingAudit",
+    "capabilities.channelOrderingChanges",
     "capabilities.guildProfileAudit",
     "capabilities.guildProfileChanges",
     "capabilities.guildSettingsAudit",
@@ -155,6 +173,7 @@ test("adds only the optional sparse guild-name phase", () => {
   ])
   assert.deepEqual(result.review.policyRequirements.scopes, [
     "readScope.guildIds",
+    "scopes.channelOrderingGuildIds",
     "scopes.guildScaffoldGuildIds",
     "scopes.guildProfileGuildIds",
     "scopes.guildSettingsGuildIds",
@@ -169,7 +188,7 @@ test("adds only the optional sparse guild-name phase", () => {
   )))
 })
 
-test("exposes unresolved permission and ordering work without claiming it", () => {
+test("exposes unresolved permission work and explicit integrated ordering", () => {
   const result = compileGuildBlueprintStarter(input("community"))
 
   assert.deepEqual(result.review.informationChannelKeys, [
@@ -178,8 +197,19 @@ test("exposes unresolved permission and ordering work without claiming it", () =
   ])
   assert.deepEqual(
     result.review.postCompileHardening.map(({ tool }) => tool),
-    ["plan_channel_permission_overwrite", "plan_channel_order"],
+    ["plan_channel_permission_overwrite"],
   )
+  assert.deepEqual(
+    result.request.channelOrders?.map(({ channels }) => channels.map((reference) => (
+      reference.kind === "scaffold" ? reference.key : reference.channelId
+    ))),
+    [
+      ["com-01-start", "com-02-social", "com-03-feedback"],
+      ["com-start-01-rules", "com-start-02-news"],
+      ["com-social-01-general", "com-social-02-intro"],
+    ],
+  )
+  assert.equal(result.review.omittedCapabilities.includes("channel-ordering"), false)
   assert.ok(result.review.omittedCapabilities.includes("private-areas"))
   assert.ok(result.review.omittedCapabilities.includes("read-only-enforcement"))
   assert.ok(result.review.omittedCapabilities.includes("verification-level-change"))

@@ -196,11 +196,13 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "VIEW_CHANNEL",
     ],
     capabilities: [
+      "channelOrderingAudit",
+      "channelOrderingChanges",
       "guildScaffolds",
       "guildSettingsAudit",
       "guildSettingsChanges",
     ],
-    description: "Add the minimum connector policy for deterministic public-only guild blueprint starters: additive structure and conservative named settings through the ordinary reviewed blueprint lifecycle while preserving the live guild name.",
+    description: "Add the minimum connector policy for deterministic public-only guild blueprint starters: additive structure, symbolic category and child ordering, and conservative named settings through the ordinary reviewed blueprint lifecycle while preserving the live guild name.",
     gateway: {
       evidenceConnection: "guild-layout",
       eventFeedPolicy: "unchanged",
@@ -210,11 +212,13 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     privilegedIntents: [],
     risks: [
       "Blueprint execution can create public categories, text channels, and forum channels in each exact selected guild",
+      "Blueprint channel-order chains can reorder or explicitly reparent existing compatible channels in each exact selected guild when a separately authored manifest references them",
       "Starter settings change default notifications, explicit content filtering, and the system channel",
     ],
     scope: {
       kind: "guild",
       names: [
+        "channelOrderingGuildIds",
         "guildScaffoldGuildIds",
         "guildSettingsGuildIds",
       ],
@@ -226,9 +230,9 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Supplying guildName additionally requires separately reviewed guild-profile audit and change capabilities plus exact guild scope; this recipe deliberately omits that optional replacement authority",
       "Guild scaffolds are shared with custom blueprints; an existing Manage Roles grant can still satisfy a separately authored role-creation frontier, so retain the compiled request and least-privilege bot permissions",
       "Information channels remain ordinary public text channels until their proven exact IDs receive separately configured and reviewed permission overwrites",
-      "Final visual ordering remains a separately configured exact-ID workflow after created channel IDs are proven",
+      "The compiled starter orders categories and multi-channel parent groups without reparenting; separately authored channel-order chains share this exact-guild authority and can reparent only with explicit acknowledgement",
       "Guild-settings evidence activates a privacy-minimized GUILDS-only layout connection while the configured event-feed policy remains unchanged",
-      "Community, Welcome Screen, onboarding, AutoMod, publications, and existing-role or channel convergence remain disabled",
+      "Community, Welcome Screen, onboarding, AutoMod, publications, existing-role configuration, role ordering, channel metadata, and permission overwrites remain disabled",
     ],
   },
   {
@@ -241,6 +245,8 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     capabilities: [
       "automodAudit",
       "automodChanges",
+      "channelOrderingAudit",
+      "channelOrderingChanges",
       "guildCommunityAudit",
       "guildCommunityChanges",
       "guildProfileAudit",
@@ -253,7 +259,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "welcomeScreenAudit",
       "welcomeScreenChanges",
     ],
-    description: "Add exact-guild caller-retained blueprints for additive structure, guild profile, named settings, monotonic Community enablement and routing, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call. Role-order and permission-overwrite phases remain available only after their narrower standalone gates and exact scopes are added separately.",
+    description: "Add exact-guild caller-retained blueprints for additive structure, exact or receipt-bound channel-order chains, guild profile, named settings, monotonic Community enablement and routing, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call. Role-order and permission-overwrite phases remain available only after their narrower standalone gates and exact scopes are added separately.",
     gateway: {
       evidenceConnection: "guild-layout",
       eventFeedPolicy: "unchanged",
@@ -263,6 +269,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     privilegedIntents: [],
     risks: [
       "Blueprint execution can create roles, channels, or disabled AutoMod rules and replace guild profile, settings, Community routing, Welcome Screen, onboarding, or exact AutoMod policy state",
+      "Acknowledged channel-order chains can reorder or reparent compatible existing channels while preserving their exact permission overwrites without synchronizing them",
       "Community enablement adds a durable Discord guild feature and routes administrative, rules, and optional safety notices to selected exact channels",
       "Welcome Screen and onboarding are complete replacement surfaces, so omitted existing entries are reviewed removals",
       "AutoMod rules can block member interactions or messages, notify moderator channels, time out members, or change enforcement coverage",
@@ -271,6 +278,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       kind: "guild",
       names: [
         "automodGuildIds",
+        "channelOrderingGuildIds",
         "guildScaffoldGuildIds",
         "guildCommunityGuildIds",
         "guildProfileGuildIds",
@@ -286,6 +294,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "AutoMod timeout actions additionally require MODERATE_MEMBERS; the recipe does not grant that conditional permission to builders that do not use timeouts",
       "New AutoMod rules are created disabled, exact existing rules never use name-based adoption, and each disable, configure, or enable stage requires a separate fresh review",
       "AutoMod alert destinations remain unavailable until their exact Discord channel IDs are separately added to scopes.automodAlertChannelIds; the recipe never infers or broadens that content-bearing scope",
+      "Channel-order chains require globally unique exact or receipt-bound references; cross-parent movement additionally requires explicit per-chain acknowledgement",
       "Role-order convergence remains unavailable until roleOrderingAudit and roleOrderingChanges are enabled for the exact guild; this recipe never infers hierarchy authority from Manage Roles",
       "Permission-overwrite convergence remains unavailable until permissionOverwrites is enabled and every exact channel is added to permissionOverwriteChannelIds; the recipe cannot infer future scaffold channel IDs",
       "Guild-settings, Community, and onboarding evidence activate a privacy-minimized GUILDS-only Gateway layout connection while the configured event-feed policy remains unchanged",

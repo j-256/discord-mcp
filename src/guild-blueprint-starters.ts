@@ -15,7 +15,7 @@ export const GUILD_BLUEPRINT_STARTER_NAMES = [
 export type GuildBlueprintStarterName =
   typeof GUILD_BLUEPRINT_STARTER_NAMES[number]
 
-export const GUILD_BLUEPRINT_STARTER_VERSION = 1
+export const GUILD_BLUEPRINT_STARTER_VERSION = 2
 
 export const GUILD_BLUEPRINT_STARTER_PRINCIPLES = Object.freeze([
   "Keep the initial public layout compact and add channels only when activity justifies them",
@@ -23,15 +23,15 @@ export const GUILD_BLUEPRINT_STARTER_PRINCIPLES = Object.freeze([
   "Create no Administrator role and assign no role through a starter",
   "Use symbolic keys only for requested additive resources; fresh scaffold planning may accept one exact-state logical-name match but blocks ambiguity or drift",
   "Treat every compiled name and topic as editable presentation data, not authority",
+  "Express category and per-parent child order through symbolic top-to-bottom chains",
   "Plan and execute one fresh blueprint frontier at a time",
 ])
 
 export const GUILD_BLUEPRINT_STARTER_OMISSIONS = Object.freeze([
   "application-or-bot-identity-selection",
   "automod",
-  "channel-ordering",
   "community-enablement",
-  "existing-role-or-channel-convergence",
+  "exact-existing-role-or-channel-configuration",
   "member-or-role-assignment",
   "onboarding",
   "permission-overwrites",
@@ -371,12 +371,40 @@ function exactInput(value: GuildBlueprintStarterInput): Record<string, unknown> 
   return record
 }
 
+function starterChannelOrders(
+  definition: GuildBlueprintStarterDefinition,
+): NonNullable<GuildBlueprintRequest["channelOrders"]> {
+  const result: Array<NonNullable<GuildBlueprintRequest["channelOrders"]>[number]> = []
+  const categories = definition.channels.filter(({ kind }) => kind === "category")
+  if (categories.length >= 2) {
+    result.push({
+      channels: categories.map(({ key }) => ({ key, kind: "scaffold" })),
+    })
+  }
+  const childrenByParent = new Map<string | null, string[]>()
+  for (const channel of definition.channels) {
+    if (channel.kind === "category") continue
+    const parentKey = channel.parentKey ?? null
+    const children = childrenByParent.get(parentKey) ?? []
+    children.push(channel.key)
+    childrenByParent.set(parentKey, children)
+  }
+  for (const children of childrenByParent.values()) {
+    if (children.length < 2) continue
+    result.push({
+      channels: children.map((key) => ({ key, kind: "scaffold" })),
+    })
+  }
+  return result
+}
+
 function plannerRequest(
   input: GuildBlueprintStarterInput,
   definition: GuildBlueprintStarterDefinition,
 ): GuildBlueprintRequest {
   const candidate: GuildBlueprintRequest = {
     auditReason: input.auditReason,
+    channelOrders: starterChannelOrders(definition),
     guildId: input.guildId,
     operationKey: input.operationKey,
     ...(input.guildName === undefined
@@ -446,6 +474,8 @@ export function compileGuildBlueprintStarter(
       policyRequirements: {
         capabilities: [
           "capabilities.guildScaffolds",
+          "capabilities.channelOrderingAudit",
+          "capabilities.channelOrderingChanges",
           ...(input.guildName === undefined
             ? []
             : [
@@ -467,6 +497,7 @@ export function compileGuildBlueprintStarter(
         ],
         scopes: [
           "readScope.guildIds",
+          "scopes.channelOrderingGuildIds",
           "scopes.guildScaffoldGuildIds",
           ...(input.guildName === undefined
             ? []
@@ -481,11 +512,6 @@ export function compileGuildBlueprintStarter(
           symbolicChannelKeys: [...definition.informationChannelKeys],
           tool: "plan_channel_permission_overwrite",
         },
-        {
-          instruction: "Review exact channel placement separately if visual order matters; the starter does not claim an ordered live layout",
-          symbolicChannelKeys: definition.channels.map(({ key }) => key),
-          tool: "plan_channel_order",
-        },
       ],
       purpose: definition.purpose,
       resourceCount: definition.channels.length,
@@ -497,6 +523,7 @@ export function compileGuildBlueprintStarter(
         "The starter creates no role, grants no role permission, assigns no member, and never requests Administrator",
         "Fresh scaffold planning may accept one exact-state logical-name match as already current; ambiguous, mismatched, or drifting candidates block",
         "The starter sets default notifications to only mentions, applies explicit content filtering to all members, and points the system channel at its requested general channel",
+        "The starter converges category order and each multi-channel parent group through reviewed symbolic channel-order chains after structure completion",
         "The starter preserves the existing guild verification level rather than lowering an established membership barrier",
         ...(input.guildName === undefined
           ? []

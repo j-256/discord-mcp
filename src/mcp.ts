@@ -5764,6 +5764,51 @@ const guildBlueprintChannelReferenceSchema = z.discriminatedUnion("kind", [
     kind: z.literal("scaffold"),
   }),
 ])
+function guildBlueprintChannelReferenceIdentity(
+  reference: z.infer<typeof guildBlueprintChannelReferenceSchema>,
+): string {
+  return reference.kind === "exact"
+    ? `exact:${reference.channelId}`
+    : `scaffold:${reference.key}`
+}
+const guildBlueprintChannelOrderChainSchema = z.strictObject({
+  acknowledgeReparenting: z.literal(true)
+    .optional()
+    .describe("Required only when the chain may move a channel across parents"),
+  channels: z.array(guildBlueprintChannelReferenceSchema)
+    .min(2)
+    .max(CONNECTOR_LIMITS.guildBlueprintConvergenceTargets)
+    .describe("Unique channel references in desired top-to-bottom contiguous order"),
+})
+const guildBlueprintChannelOrdersSchema = z.array(
+  guildBlueprintChannelOrderChainSchema,
+)
+  .min(1)
+  .max(CONNECTOR_LIMITS.guildBlueprintConvergenceTargets)
+  .superRefine((chains, context) => {
+    const seen = new Set<string>()
+    let totalReferences = 0
+    for (const [chainIndex, chain] of chains.entries()) {
+      totalReferences += chain.channels.length
+      for (const [referenceIndex, reference] of chain.channels.entries()) {
+        const identity = guildBlueprintChannelReferenceIdentity(reference)
+        if (seen.has(identity)) {
+          context.addIssue({
+            code: "custom",
+            message: "guild blueprint channel-order references must be globally unique",
+            path: [chainIndex, "channels", referenceIndex],
+          })
+        }
+        seen.add(identity)
+      }
+    }
+    if (totalReferences > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets) {
+      context.addIssue({
+        code: "custom",
+        message: "guild blueprint channel-order references exceed the convergence bound",
+      })
+    }
+  })
 const guildBlueprintRoleReferenceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("exact"),
@@ -6186,6 +6231,7 @@ const guildBlueprintFields = {
   auditReason: auditReasonSchema,
   autoModerationRules: guildBlueprintAutoModerationRulesSchema.optional(),
   channelMetadata: guildBlueprintChannelMetadataListSchema.optional(),
+  channelOrders: guildBlueprintChannelOrdersSchema.optional(),
   channelPermissionOverwrites: guildBlueprintPermissionOverwritesSchema.optional(),
   community: guildBlueprintCommunitySchema.optional(),
   guildId: positiveSnowflakeSchema.describe("Exact guild blueprint target guild ID"),
@@ -6235,6 +6281,10 @@ function guildBlueprintRules(
       exemptRoles: readonly { key?: string; kind: string }[]
     }[] | undefined
     channelMetadata?: readonly unknown[] | undefined
+    channelOrders?: readonly {
+      acknowledgeReparenting?: true | undefined
+      channels: readonly { key?: string; kind: string }[]
+    }[] | undefined
     channelPermissionOverwrites?: readonly {
       target:
         | { kind: "member"; userId: string }
@@ -6261,7 +6311,11 @@ function guildBlueprintRules(
     roleConfigurations?: readonly unknown[] | undefined
     roleOrder?: readonly { key?: string; kind: string }[] | undefined
     scaffold: {
-      channels: readonly { key: string; kind: string }[]
+      channels: readonly {
+        key: string
+        kind: string
+        parentKey?: string | undefined
+      }[]
       roles: readonly { key: string }[]
     }
     settings?: {
@@ -6278,6 +6332,7 @@ function guildBlueprintRules(
   if (
     input.autoModerationRules === undefined
     && input.channelMetadata === undefined
+    && input.channelOrders === undefined
     && input.channelPermissionOverwrites === undefined
     && input.community === undefined
     && input.onboarding === undefined
@@ -6300,6 +6355,40 @@ function guildBlueprintRules(
         code: "custom",
         message: "guild blueprint role order must reference a requested role",
         path: ["roleOrder", index, "key"],
+      })
+    }
+  }
+  for (const [chainIndex, chain] of (input.channelOrders ?? []).entries()) {
+    const families = new Set<string>()
+    const parents = new Set<string | null>()
+    for (const [referenceIndex, reference] of chain.channels.entries()) {
+      if (reference.kind !== "scaffold") continue
+      const requested = input.scaffold.channels.find(
+        (channel) => channel.key === reference.key,
+      )
+      if (requested === undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "guild blueprint channel order must reference a requested channel",
+          path: ["channelOrders", chainIndex, "channels", referenceIndex, "key"],
+        })
+        continue
+      }
+      families.add(requested.kind === "category" ? "category" : "text")
+      parents.add(requested.parentKey ?? null)
+    }
+    if (families.size > 1) {
+      context.addIssue({
+        code: "custom",
+        message: "guild blueprint channel-order chain mixes incompatible scaffold families",
+        path: ["channelOrders", chainIndex, "channels"],
+      })
+    }
+    if (chain.acknowledgeReparenting !== true && parents.size > 1) {
+      context.addIssue({
+        code: "custom",
+        message: "guild blueprint channel-order chain requires explicit reparenting acknowledgement for differing scaffold parents",
+        path: ["channelOrders", chainIndex, "acknowledgeReparenting"],
       })
     }
   }
@@ -19122,6 +19211,16 @@ function guildBlueprintRequest(
             } as GuildBlueprintChannelMetadataInput
           }),
         }),
+    ...(input.channelOrders === undefined
+      ? {}
+      : {
+          channelOrders: input.channelOrders.map((chain) => ({
+            ...(chain.acknowledgeReparenting === true
+              ? { acknowledgeReparenting: true as const }
+              : {}),
+            channels: chain.channels,
+          })),
+        }),
     ...(input.channelPermissionOverwrites === undefined
       ? {}
       : {
@@ -19345,21 +19444,23 @@ function guildBlueprintConfirmationMessage(plan: GuildBlueprintPlan): string {
         ? roleOrderingConfirmationMessage(plan.frontier.plan)
         : plan.frontier.kind === "channel-metadata"
           ? channelMetadataConfirmationMessage(plan.frontier.plan)
-          : plan.frontier.kind === "channel-permission-overwrite"
-            ? channelPermissionOverwriteConfirmationMessage(plan.frontier.plan)
-            : plan.frontier.kind === "profile"
-              ? guildProfileConfirmationMessage(plan.frontier.plan)
-              : plan.frontier.kind === "settings"
-                ? guildSettingsConfirmationMessage(plan.frontier.plan)
-                : plan.frontier.kind === "community"
-                  ? guildCommunityConfirmationMessage(plan.frontier.plan)
-                  : plan.frontier.kind === "welcome-screen"
-                    ? welcomeScreenConfirmationMessage(plan.frontier.plan)
-                    : plan.frontier.kind === "onboarding"
-                      ? onboardingConfirmationMessage(plan.frontier.plan)
-                      : plan.frontier.kind === "auto-moderation"
-                        ? autoModerationConfirmationMessage(plan.frontier.plan)
-                        : componentMessageConfirmationMessage(plan.frontier.plan)
+          : plan.frontier.kind === "channel-ordering"
+            ? channelOrderingConfirmationMessage(plan.frontier.plan)
+            : plan.frontier.kind === "channel-permission-overwrite"
+              ? channelPermissionOverwriteConfirmationMessage(plan.frontier.plan)
+              : plan.frontier.kind === "profile"
+                ? guildProfileConfirmationMessage(plan.frontier.plan)
+                : plan.frontier.kind === "settings"
+                  ? guildSettingsConfirmationMessage(plan.frontier.plan)
+                  : plan.frontier.kind === "community"
+                    ? guildCommunityConfirmationMessage(plan.frontier.plan)
+                    : plan.frontier.kind === "welcome-screen"
+                      ? welcomeScreenConfirmationMessage(plan.frontier.plan)
+                      : plan.frontier.kind === "onboarding"
+                        ? onboardingConfirmationMessage(plan.frontier.plan)
+                        : plan.frontier.kind === "auto-moderation"
+                          ? autoModerationConfirmationMessage(plan.frontier.plan)
+                          : componentMessageConfirmationMessage(plan.frontier.plan)
   return [
     "Approve exactly one reviewed Discord guild blueprint frontier?",
     "The exact blueprint manifest remains caller-retained and is not persisted or copied into confirmation state.",
@@ -20300,7 +20401,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Thread creation uses a separate exact parent-channel scope: call plan_thread_creation for a message-anchored, standalone public, or standalone private thread, review the exact source preview when present, resolved settings, complete permission evidence, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_thread_creation with identical inputs and the digest. A source message that already owns a thread produces a no-op without approval or durable records. Writes are never automatically retried, and forum or media parents, lifecycle changes, membership changes, and starter messages are excluded.",
       "Thread governance uses separate exact guild, thread, and optional member allowlists and never enumerates members. For one rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, connector join, connector leave, add-member, or remove-member change, call plan_thread_change, review the exact guild, parent, thread and optional member, minimized current and desired state, complete inherited permissions, action-specific MANAGE_THREADS, self-membership, membership, send, or private-thread ownership authority, privacy projection, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_thread_change with identical inputs and the digest. Each execution performs one non-retried write and exact readback, never combines metadata fields or rolls back, and an uncertain outcome blocks later same-thread changes in the process.",
       "Forum-post creation uses a separate exact forum-channel scope: call plan_forum_post, review the exact title, starter content, tags, settings, notifications, audit reason, complete permission evidence, one-shot operation key hash, warnings, and keyed digest, then call execute_forum_post with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed additive structure, exact-ID role configuration, exact-ID channel metadata, profile, settings, monotonic Community, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. Exact role and channel targets are sorted by snowflake, receive target-stable derived operation identities, never adopt by name, and retain their standalone capability, exact-scope, permission, receipt, and readback gates. Exact role permissions replace only the known permission set, preserve unknown future bits, and forbid Administrator. preview_guild_blueprint validates and normalizes the full manifest locally, projects every ordered dependency and reference without returning the raw master key, and grants no authority; its possible stages are not claims about live state. capture_guild_blueprint reads two matching bounded live passes and returns no stored snapshot: a planner-ready caller-retained projection plus short-lived process-bound exact-target recovery attestations for captured roles and channels; it does not automatically add exact-target convergence phases. Each attestation binds verified identity, exact resource and target state, the complete capture digest, and applicable omission codes; it is not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention. Requested scaffold resources may become exact Community, onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Community enablement requires explicit acknowledgement and temporary guild ownership or complete Administrator authority, preserves every existing feature, and remains separate from routing-only Manage Guild authority. An enabled Welcome Screen or onboarding request is blocked before downstream planning when Community is disabled and no Community phase can establish it. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. A completed matching domain receipt can satisfy only fresh exact state; later drift blocks reuse and requires new reviewed intent. Blocked or drifting receipt evidence stops later phases without writing. Preview the complete intent locally, then call plan_guild_blueprint with the unchanged manifest and master operation key. The live plan overlays every manifest entry as freshly assessed or deferred and identifies only one executable frontier without predicting future Discord IDs or state. Review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
+      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed additive structure, exact-ID role configuration, bottom-up exact or receipt-bound role and channel ordering, exact-ID channel metadata and permission-overwrite convergence, profile, settings, monotonic Community, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. Canonical exact convergence targets receive target-stable derived operation identities, never adopt by name, and retain their standalone capability, exact-scope, permission, receipt, and readback gates. Role- and channel-order chains instead preserve globally unique semantic top-to-bottom references and converge one fresh bottom-up adjacency at a time. Channel moves preserve exact permission overwrites, never synchronize them, and require literal per-chain acknowledgement before any live cross-parent frontier. Exact role permissions replace only the known permission set, preserve unknown future bits, and forbid Administrator. preview_guild_blueprint validates and normalizes the full manifest locally, projects every ordered dependency and reference without returning the raw master key, and grants no authority; its possible stages are not claims about live state. capture_guild_blueprint reads two matching bounded live passes and returns no stored snapshot: a planner-ready caller-retained projection plus short-lived process-bound exact-target recovery attestations for captured roles and channels; it does not automatically add exact-target convergence phases. Each attestation binds verified identity, exact resource and target state, the complete capture digest, and applicable omission codes; it is not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention. Requested scaffold resources may become exact ordering, Community, onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Community enablement requires explicit acknowledgement and temporary guild ownership or complete Administrator authority, preserves every existing feature, and remains separate from routing-only Manage Guild authority. An enabled Welcome Screen or onboarding request is blocked before downstream planning when Community is disabled and no Community phase can establish it. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. A completed matching domain receipt can satisfy only fresh exact state; later drift blocks reuse and requires new reviewed intent. Blocked or drifting receipt evidence stops later phases without writing. Preview the complete intent locally, then call plan_guild_blueprint with the unchanged manifest and master operation key. The live plan overlays every manifest entry as freshly assessed or deferred and identifies only one executable frontier without predicting future Discord IDs or state. Review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
       "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Execution durably claims both guild role and channel collections; a normal verified pause releases the claims, while interruption or uncertain pending evidence requires review. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it. After completion, call verify_guild_scaffold with the same caller-retained request and operation key for fresh content-free completion evidence.",
       "Member nickname changes use a self-only safe default and a second gate for other members. Call plan_member_nickname_change with the current-bot target or one exact member ID plus a strict nickname or explicit null, review the exact transient current and desired names, CHANGE_NICKNAME or MANAGE_NICKNAMES evidence, protected-target boundary, hierarchy where applicable, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_member_nickname_change with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Names are never transformed or persisted, and no mutation is retried or rolled back.",
       "Member verification changes expose only Discord's named BYPASSES_VERIFICATION flag. Call plan_member_verification_change with one exact guild, member, desired boolean state, audit reason, and one-shot operation key; review the current and desired named state, documented permission alternative, protected and special-member boundaries, complete hierarchy, warnings, risks, key hash, and digest; then call execute_member_verification_change with identical input and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Raw flags are never accepted, exposed, or persisted, every unrelated flag is preserved and freshness-bound, and no mutation is retried or rolled back.",
@@ -20316,7 +20417,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Member moderation accepts exact guild and user IDs only. Choose a unique one-shot operation key, call plan_member_moderation, and review the pinned application and bot identities, target, action, parameters, audit reason, complete permission and hierarchy evidence, privacy boundary, risks, warnings, operation-key hash, readback boundary, and keyed digest. Then call execute_member_moderation with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, one-shot receipt reservation, pending content-free activity, one non-retried mutation, and exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Bulk guild bans require a separate exact guild scope and capability. Choose a unique one-shot operation key, call plan_bulk_guild_ban with two through the Discord endpoint maximum of unique exact user IDs, and review every pinned identity, transient target profile, membership and ban state, complete BAN_MEMBERS plus MANAGE_GUILD permission and hierarchy evidence, batch-wide message deletion window, audit reason, request estimates, privacy boundary, partial-success risk, warnings, operation-key hash, target-set digest, readback boundary, and keyed plan digest. Then call execute_bulk_guild_ban with identical inputs and the digest. Execution requires signed interactive approval, durable coordination across the complete exact target set, pending content-free activity, one non-retried batch request, and fresh exact ban readback for every target. Successful bans are never rolled back, failed subsets are never retried automatically, and any later action requires a new plan and key.",
       "Guild pruning requires separate non-exact audit and execution capabilities, an exact guild allowlist, an independent toolset, an operator policy ceiling, and exact allowlisting for every role used to widen the cohort. Call plan_guild_prune with literal acknowledgement that Discord never reveals candidate or removed member IDs, review the fresh estimated count, request and policy pre-dispatch ceilings, inactivity window, role semantics, connector permissions, protected-identity shields, risks, warnings, operation-key hash, and keyed digest, then call execute_guild_prune with identical inputs and the digest. Execution requires signed interactive approval, guild-wide member and exact-role coordination, pending content-free activity, and one non-retried request with count computation. Discord does not enforce either ceiling during mutation; response-count drift is explicit and an ambiguous outcome quarantines the member collection for operator review.",
-      "For a deterministic common public layout, read discord://connector/guild-blueprint-starters and call compile_guild_blueprint_starter with one exact guild ID, stable operation key, and community, creator, project, or support. Review and retain the returned strict request, make only intended presentation changes, pass that exact result through preview_guild_blueprint for complete local intent review, then pass it unchanged to plan_guild_blueprint. The compiler and preview are local, grant no authority, contact no Discord endpoint, accept no remote template or arbitrary variables, create no roles, and make no private or read-only access claim; use the exact-ID hardening planners named in the starter review where those policies are required.",
+      "For a deterministic common public layout, read discord://connector/guild-blueprint-starters and call compile_guild_blueprint_starter with one exact guild ID, stable operation key, and community, creator, project, or support. Review and retain the returned strict request, make only intended presentation changes, pass that exact result through preview_guild_blueprint for complete local intent review, then pass it unchanged to plan_guild_blueprint. The compiler and preview are local, grant no authority, contact no Discord endpoint, accept no remote template or arbitrary variables, create no roles, and make no private or read-only access claim. Each starter emits symbolic same-parent top-to-bottom category and child chains through the ordinary reviewed channel-ordering phase; use the exact-ID permission-hardening planners named in the starter review where access policy is required.",
       "Never bypass a disabled policy, protected target, changed plan, interaction guard, or interactive confirmation.",
     ]
   const server = new McpServer(
@@ -30126,7 +30227,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "compile_guild_blueprint_starter",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Compile one bundled community, creator, project, or support starter into a strict caller-retained plan_guild_blueprint request. The deterministic public-only layouts contain compact categories, text channels, forums, conservative named guild settings, and an optional sparse guild name. They create no role or private area, grant no permission, never request Administrator, and make no read-only claim; the result identifies exact permission-overwrite and ordering hardening that may be added to the retained manifest after exact IDs are proven. Compilation validates through the production blueprint contract without contacting Discord, reading a token, granting policy, reserving an operation key, planning or executing a write, importing a remote source, accepting arbitrary variables, or persisting content.",
+      description: "Compile one bundled community, creator, project, or support starter into a strict caller-retained plan_guild_blueprint request. The deterministic public-only layouts contain compact categories, text channels, forums, symbolic same-parent category and child ordering, conservative named guild settings, and an optional sparse guild name. They create no role or private area, grant no permission, never request Administrator, and make no read-only claim. Ordering converges only after exact scaffold IDs are proven and never acknowledges reparenting; the result identifies exact permission-overwrite hardening that may be added after exact IDs are known. Compilation validates through the production blueprint contract without contacting Discord, reading a token, granting policy, reserving an operation key, planning or executing a write, importing a remote source, accepting arbitrary variables, or persisting content.",
       inputSchema: guildBlueprintStarterInputSchema,
       outputSchema: toolOutputSchema,
       title: "Compile safe Discord guild blueprint starter",
@@ -30155,7 +30256,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
           resource: MCP_RESOURCE_URIS.guildBlueprintStarters,
           setupRecipe: "guild-starter",
           setupRecipeCoverage: input.guildName === undefined
-            ? "complete-for-structure-and-settings"
+            ? "complete-for-structure-ordering-and-settings"
             : "requires-separate-guild-profile-policy",
           verifyTool: "verify_guild_blueprint",
         },
@@ -30204,7 +30305,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "capture_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. A stable planner-ready result includes a short-lived process-bound signed recovery binding for every represented role and channel; each binds verified application, bot, guild, exact resource and captured target state, the complete capture digest, and applicable omission codes. Capture does not infer or add existing-role configuration, role-order, channel-metadata, or permission-overwrite convergence phases; author those with reviewed exact IDs or proven scaffold role references and their standalone policy. Blocked or changed captures return no binding. Returns stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, trusted Community routing, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, member directories or non-bot member profiles, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, attestation, policy content, operation, or activity record. Community evidence uses only the connector member required for complete permissions and omits all profile fields. A capture is a lossy authoring and same-guild recovery aid, not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention; review every omission and retain the returned artifact yourself.",
+      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. A stable planner-ready result includes a short-lived process-bound signed recovery binding for every represented role and channel; each binds verified application, bot, guild, exact resource and captured target state, the complete capture digest, and applicable omission codes. Capture does not infer or add existing-role configuration, role-order, channel-metadata, channel-order, or permission-overwrite convergence phases; author those with reviewed exact IDs or proven scaffold references and their standalone policy. Blocked or changed captures return no binding. Returns stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, trusted Community routing, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, member directories or non-bot member profiles, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, attestation, policy content, operation, or activity record. Community evidence uses only the connector member required for complete permissions and omits all profile fields. A capture is a lossy authoring and same-guild recovery aid, not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention; review every omission and retain the returned artifact yourself.",
       inputSchema: guildBlueprintCaptureInputSchema,
       outputSchema: toolOutputSchema,
       title: "Capture caller-retained Discord guild blueprint",
@@ -30232,7 +30333,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare the next process-bound frontier of one caller-retained declarative Discord guild blueprint. The result overlays every normalized manifest entry with freshly-assessed or deferred live status, while only the current complete-evidence frontier can be executable; it never simulates future Discord IDs or post-write state. Additive structure, exact-ID role configuration, bottom-up exact or receipt-bound role-order adjacency, exact-ID channel metadata, exact-channel one-target permission-overwrite convergence, profile, settings, monotonic Community enablement and routing, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publications delegate to their existing complete-evidence domains in a fixed order. Role-configuration, channel-metadata, and overwrite collections are canonicalized by snowflake and target identity; roleOrder preserves its semantic top-to-bottom chain. No live target is matched by name. Every hierarchy or overwrite frontier retains its standalone capability, exact scope, permission, receipt, coordination, non-retry, and readback gates. A completed matching nested receipt satisfies only fresh exact current state; drift blocks key reuse. A requested enabled Welcome Screen or onboarding phase is blocked early when Community is disabled and no acknowledged Community phase can establish it. Unbound AutoMod creation recovers identity only from a matching content-free request-bound receipt, never a name scan; exact existing rules use exact IDs, and policy changes advance through separate disable, configure, and enable reviews. Publication recovery uses content-free keyed receipts and one exact receipt-bound message read, never a history scan. Requested scaffold channel and role keys become exact domain references only where permitted. Returns one transient frontier or content-free Community, AutoMod, or publication blocker while persisting neither the manifest nor its content.",
+      description: "Prepare the next process-bound frontier of one caller-retained declarative Discord guild blueprint. The result overlays every normalized manifest entry with freshly-assessed or deferred live status, while only the current complete-evidence frontier can be executable; it never simulates future Discord IDs or post-write state. Additive structure, exact-ID role configuration, bottom-up exact or receipt-bound role-order adjacency, exact-ID channel metadata, bottom-up exact or receipt-bound channel-order adjacency, exact-channel one-target permission-overwrite convergence, profile, settings, monotonic Community enablement and routing, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publications delegate to their existing complete-evidence domains in a fixed order. Role-configuration, channel-metadata, and overwrite collections are canonicalized by snowflake and target identity; roleOrder and channelOrders preserve their semantic top-to-bottom chains. Channel-order references are globally unique before and after resolution. Each adjacency preserves exact permission overwrites and requires complete affected groups, capacity, movement authority, one non-retried write, and newer coherent Gateway plus HTTP readback. A live cross-parent adjacency returns a content-free blocker unless its chain contains literal acknowledgeReparenting=true; permission synchronization is never implied. No live target is matched by name. Every hierarchy, ordering, or overwrite frontier retains its standalone capability, exact scope, permission, receipt, coordination, non-retry, and readback gates. A completed matching nested receipt satisfies only fresh exact current state; drift blocks key reuse. A requested enabled Welcome Screen or onboarding phase is blocked early when Community is disabled and no acknowledged Community phase can establish it. Unbound AutoMod creation recovers identity only from a matching content-free request-bound receipt, never a name scan; exact existing rules use exact IDs, and policy changes advance through separate disable, configure, and enable reviews. Publication recovery uses content-free keyed receipts and one exact receipt-bound message read, never a history scan. Requested scaffold channel and role keys become exact domain references only where permitted. Returns one transient frontier or content-free channel-ordering, Community, AutoMod, or publication blocker while persisting neither the manifest nor its content.",
       inputSchema: guildBlueprintPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan Discord guild blueprint frontier",
@@ -30250,7 +30351,9 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
           ? `Discord guild blueprint ${result.digest} is blocked at AutoMod rule ${result.blocker.index + 1} in guild ${result.guild.id}`
           : result.blocker.kind === "publication"
             ? `Discord guild blueprint ${result.digest} is blocked at publication ${result.blocker.index + 1} in guild ${result.guild.id}`
-            : `Discord guild blueprint ${result.digest} requires an acknowledged Community phase before ${result.blocker.requiredBy.join(" and ")} in guild ${result.guild.id}`
+            : result.blocker.kind === "channel-ordering"
+              ? `Discord guild blueprint ${result.digest} requires explicit reparenting acknowledgement at channel-order adjacency ${result.blocker.index + 1} in guild ${result.guild.id}`
+              : `Discord guild blueprint ${result.digest} requires an acknowledged Community phase before ${result.blocker.requiredBy.join(" and ")} in guild ${result.guild.id}`
         : result.frontier === null
           ? `Discord guild blueprint ${result.digest} is already current in guild ${result.guild.id}`
           : `Discord guild blueprint ${result.digest} has reviewed ${result.frontier.kind} frontier in guild ${result.guild.id}`
@@ -30262,7 +30365,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_guild_blueprint",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
-      description: "Execute exactly one fresh reviewed frontier of a caller-retained Discord guild blueprint after signed interactive approval when a write is required. Signed state contains only request and aggregate plan digests. The coordinator derives phase-, exact-target-, role-adjacency-, overwrite-target-, AutoMod-rule-stage-, or publication-key-separated operation keys and delegates to the existing scaffold, role-configuration, role-ordering, channel-metadata, channel-permission-overwrite, profile, settings, Community, Welcome Screen, onboarding, AutoMod, or component-message executor, preserving every domain reservation, pending audit, limiter, non-retry, readback, conflict, and uncertainty-quarantine invariant. A content-free Community, AutoMod, or publication blocker returns without elicitation or a write. Plan again before any later phase.",
+      description: "Execute exactly one fresh reviewed frontier of a caller-retained Discord guild blueprint after signed interactive approval when a write is required. Signed state contains only request and aggregate plan digests. The coordinator derives phase-, exact-target-, role-adjacency-, channel-adjacency-, overwrite-target-, AutoMod-rule-stage-, or publication-key-separated operation keys and delegates to the existing scaffold, role-configuration, role-ordering, channel-metadata, channel-ordering, channel-permission-overwrite, profile, settings, Community, Welcome Screen, onboarding, AutoMod, or component-message executor, preserving every domain reservation, pending audit, limiter, non-retry, readback, conflict, and uncertainty-quarantine invariant. A content-free channel-ordering, Community, AutoMod, or publication blocker returns without elicitation or a write. Plan again before any later phase.",
       inputSchema: guildBlueprintExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord guild blueprint frontier",
@@ -30384,7 +30487,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "verify_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Verify one exact caller-retained Discord guild blueprint against fresh live domain plans, content-free durable receipts, exact receipt-bound AutoMod rules, and exact receipt-bound publication reads. Returns identities, hashes, phase states, exact resource, AutoMod rule, and publication message IDs without blueprint, AutoMod, or publication keys, fixed blocker codes, and a fresh aggregate digest. It does not write, reserve an operation, scan message history, persist the manifest, or return AutoMod policy, component content, notification IDs, guild names, channel names, role names, topics, descriptions, permissions, or audit reasons.",
+      description: "Verify one exact caller-retained Discord guild blueprint against fresh live domain plans, content-free durable receipts, exact receipt-bound AutoMod rules, and exact receipt-bound publication reads. Returns identities, hashes, phase states, exact hierarchy and channel-order target and anchor IDs, exact resources, AutoMod rule IDs, and publication message IDs without blueprint, AutoMod, or publication keys, fixed blocker codes, and a fresh aggregate digest. It does not write, reserve an operation, scan message history, persist the manifest, or return AutoMod policy, component content, notification IDs, guild names, channel names, role names, topics, descriptions, permissions, or audit reasons.",
       inputSchema: guildBlueprintPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Verify Discord guild blueprint completion",
