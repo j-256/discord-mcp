@@ -483,6 +483,7 @@ import {
 } from "./integration-service.js"
 import type {
   AddReactionRequest,
+  AddReactionsRequest,
   EditOwnMessageRequest,
   InteractionServiceOptions,
   RemoveOwnReactionRequest,
@@ -7221,6 +7222,14 @@ export class ConnectorService {
   ) {
     await this.#verifyIdentity(options)
     return this.#interactionService.addReaction(request, options)
+  }
+
+  async addReactions(
+    request: AddReactionsRequest,
+    options: RequestOptions = {},
+  ) {
+    await this.#verifyIdentity(options)
+    return this.#interactionService.addReactions(request, options)
   }
 
   async removeOwnReaction(

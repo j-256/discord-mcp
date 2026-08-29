@@ -356,6 +356,7 @@ function guidanceService(options: {
   }
   const service: DiscordToolService = {
     addReaction: unexpected,
+    addReactions: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     playSoundboardSound: unexpected,
@@ -4020,7 +4021,8 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.match(safety.text, /Same-member uncertain outcomes remain quarantined/)
   assert.match(safety.text, /Message pin listing uses Discord's current timestamp-paginated endpoint/)
   assert.match(safety.text, /complete message-read and PIN_MESSAGES permission evidence/)
-  assert.match(safety.text, /Reaction aggregate reads use ordinary readable-channel scope/)
+  assert.match(safety.text, /Reaction reads use readable-channel scope/)
+  assert.match(safety.text, /A set validates two to ten unique emoji/)
   assert.match(safety.text, /reason is local-only/)
   assert.match(safety.text, /same-message uncertain outcomes remain quarantined/)
   assert.match(safety.text, /Bulk guild-ban planning and execution require their own exact guild scope/)

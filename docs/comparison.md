@@ -520,7 +520,7 @@ Discord MCP's [privacy-bounded vanity audit](reference.md#privacy-bounded-vanity
 
 ### Native poll decision-lifecycle head-to-head
 
-Timergy 0.1.4 contributes a notably clear product idea: its MCP instructions lead an operator through create, share, collect, inspect, and finalize stages instead of exposing five unrelated tools. The exact [Registry release](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.DockerDiscordControl%2Ftimergy/versions/0.1.4) resolves to the [`@timergy/mcp` 0.1.4 package](https://www.npmjs.com/package/@timergy/mcp/v/0.1.4), whose included TypeScript source was audited. Discord MCP adopts that guided lifecycle for native Discord polls while retaining its local credential, exact-scope, review, privacy, and recovery model. The focused rubric is one poll whose participants already belong in Discord; Timergy remains the stronger different-fit choice when the actual need is a scheduling website for participants outside Discord with structured yes, maybe, and no availability.
+Timergy 0.1.4 contributes a notably clear product idea: its MCP instructions lead an operator through create, share, collect, inspect, and finalize stages instead of exposing five unrelated tools. The exact [Registry release](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.DockerDiscordControl%2Ftimergy/versions/0.1.4) resolves to the [`@timergy/mcp` 0.1.4 package](https://registry.npmjs.org/@timergy%2Fmcp/0.1.4), whose included TypeScript source was audited. Discord MCP adopts that guided lifecycle for native Discord polls while retaining its local credential, exact-scope, review, privacy, and recovery model. The focused rubric is one poll whose participants already belong in Discord; Timergy remains the stronger different-fit choice when the actual need is a scheduling website for participants outside Discord with structured yes, maybe, and no availability.
 
 | Native Discord poll outcome | Discord MCP | Timergy 0.1.4 |
 | --- | --- | --- |
@@ -537,6 +537,25 @@ Timergy 0.1.4 contributes a notably clear product idea: its MCP instructions lea
 | Release identity and verification | **Lead**: cross-surface version checks, reproducible archives, SBOMs, provenance, package execution, and protocol evidence | Partial: the 0.1.4 package includes auditable source, but its runtime server metadata still reports version 0.1.1 and the release does not publish comparable verification evidence |
 
 Discord MCP does not copy Timergy's bot-side voting, configurable service origin, passphrase channel, named voter-token map, or third-party retention model. Its three prompts add no endpoint, permission, capability flag, background task, state store, or execution shortcut. They improve the useful lifecycle idea by keeping every write on the existing reviewed native Discord path and keeping aggregate inspection identity-free by default.
+
+### Additive reaction-set head-to-head
+
+Danushkumar's linked public source contributes a useful convenience: one handler fetches an exact message and adds several caller-supplied reactions in order. The Registry's hosted 1.2.0 entry cannot be tied to a source revision, so this focused comparison uses the public [reaction handler](https://github.com/Danushkumar-V/mcp-discord/blob/main/src/tools/reactions.ts) and [input schema](https://github.com/Danushkumar-V/mcp-discord/blob/main/src/schemas.ts) rechecked on 2026-08-29 as source-head idea evidence, not release-matching scored evidence.
+
+| Additive own-reaction outcome | Discord MCP | Danushkumar source head |
+| --- | --- | --- |
+| One discoverable multi-reaction call | **Lead**: `add_reactions` is a first-class exact MCP tool with ordinary and progressive discovery, static readiness, and complete annotations | Covered: `add_multiple_reactions` exposes one direct handler |
+| Input bounds and complete validation | **Lead**: strict exact IDs plus two to ten emoji, existing Unicode or `name:snowflake` grammar, and full validation before target access or writes | Partial: channel and message IDs are strings and `emojis` is an array of strings without demonstrated minimum, maximum, emoji grammar, or uniqueness |
+| Logical uniqueness | **Lead**: duplicate Unicode values and custom emoji aliases sharing one snowflake fail before mutation | Not demonstrated |
+| Target authority | **Lead**: freshly pinned application and bot plus exact policy-authorized interaction channel or thread | Not demonstrated in the handler |
+| Idempotence and request replay | **Lead**: bot-owned reactions are prechecked, satisfied items become journaled no-ops, and the identical ordered set safely converges after interruption | Not demonstrated: every listed item calls `message.react` |
+| Pacing | **Lead**: every real write uses the bounded local interaction limiter while Discord's dynamic response behavior remains authoritative | Partial: the loop sleeps a fixed 300 ms after every reaction |
+| Mutation boundary | **Lead**: each item has a pending content-free record, one idempotent PUT operation with exact 204 handling, and a fresh exact-message postcondition that re-proves the complete processed prefix | Partial: each item awaits discord.js `message.react`, but no independent pending record or exact readback is demonstrated |
+| Partial failure and recovery | **Lead**: stop at the first item failure or prefix drift, report only the failed index or drift boundary plus verified counts, never compensate, and document identical-request recovery | Partial: an exception stops the loop, but no content-free progress or convergence contract is returned |
+| Privacy and persistence | **Lead**: results, errors, activity, telemetry, and durable state omit emoji values, message content, authors, and profiles | Not demonstrated for the handler |
+| Poll distinction | **Lead**: reaction sets are documented for acknowledgements, status markers, and small emoji menus, while native poll tools retain vote-specific state and privacy semantics | Not demonstrated |
+
+Discord MCP keeps the useful one-call outcome but does not copy the unbounded string array, unconditional writes, fixed sleep, or success-only summary. The feature adds no capability flag, scope, credential, endpoint, Gateway dependency, activity kind, or persistence path; it composes the existing exact-scope interaction primitive into a bounded recovery contract.
 
 ## Audited releases and source limits
 
@@ -556,7 +575,7 @@ The tagged audits use the exact public source tags named above. For untagged rel
 
 | Registry entry | Classification | Why it is not scored |
 | --- | --- | --- |
-| [Danushkumar 1.2.0](https://registry.modelcontextprotocol.io/v0.1/servers/ai.smithery%2FDanushkumar-V-mcp-discord/versions/1.2.0) | Different fit | The registry exposes a hosted authenticated remote. Its linked repository does not identify source matching the registered release, so local custody and exact released behavior cannot be compared reliably. |
+| [Danushkumar 1.2.0](https://registry.modelcontextprotocol.io/v0.1/servers/ai.smithery%2FDanushkumar-V-mcp-discord/versions/1.2.0) | Different fit | The registry exposes a hosted authenticated remote. Its linked repository does not identify source matching the registered release, so local custody and exact released behavior cannot be scored reliably; the public source head's multiple-reaction idea is compared separately above. |
 | [Sachicali suite 1.2.0](https://registry.modelcontextprotocol.io/v0.1/servers/ai.smithery%2Fsachicali-discordmcp-suite/versions/1.2.0) | Not auditable | The registry exposes a hosted authenticated remote and no public source repository. |
 | [mcp-dir 0.1.0](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.mcp-dir%2Fdiscord-mcp/versions/0.1.0) | Not auditable | The registry exposes a hosted remote. The public repository contains documentation and manifests but not the server implementation. |
 | [Timergy 0.1.4](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.DockerDiscordControl%2Ftimergy/versions/0.1.4) | Different fit | This is a scheduling-poll service used from chat interfaces, not a Discord guild-access server. Its strong guided lifecycle is adopted and compared separately through native Discord polls. |

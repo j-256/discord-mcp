@@ -186,6 +186,29 @@ test("tool discovery normalizes safe variants while rejecting weak multi-term ma
   assert.deepEqual(weak.matches, [])
 })
 
+test("tool discovery distinguishes one reaction from an additive reaction set", () => {
+  const catalog = createDiscordToolDiscoveryCatalog([
+    trackedTool({
+      description: "Add one own Discord reaction",
+      name: "add_reaction",
+      title: "Add one reaction",
+    }),
+    trackedTool({
+      description: "Add an ordered unique set of own Discord reactions",
+      name: "add_reactions",
+      title: "Add multiple reactions",
+    }),
+  ], "full")
+
+  const result = discoverDiscordTools({
+    detail: "compact",
+    limit: 1,
+    query: "add multiple emoji reactions as a status menu",
+  }, catalog)
+
+  assert.equal(result.matches[0]?.name, "add_reactions")
+})
+
 test("tool discovery promotes reviewed planners without crossing exact risk filters", () => {
   const catalog = createDiscordToolDiscoveryCatalog([
     trackedTool({
@@ -506,6 +529,10 @@ test("tool readiness distinguishes static setup, credentials, and live proof", (
       case: "reaction-not-already-present",
       permissions: ["ADD_REACTIONS"],
     }],
+  )
+  assert.deepEqual(
+    byName.get("add_reactions")?.requirements,
+    byName.get("add_reaction")?.requirements,
   )
   assert.deepEqual(
     byName.get("list_archived_threads")?.requirements.discord,

@@ -465,6 +465,8 @@ export const REACTION_TYPES = Object.freeze({
 })
 
 export const REACTION_LIMITS = Object.freeze({
+  addSetEmojis: 10,
+  addSetEmojisMinimum: 2,
   aggregatesPerMessage: 100,
   burstColorsPerReaction: 16,
   userPage: 100,

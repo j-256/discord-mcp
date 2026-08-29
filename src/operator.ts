@@ -4708,6 +4708,7 @@ async function inspectSmokeClient(
     ["send_message", false, true],
     ["signal_command_processing", false, false],
     ["add_reaction", false, true],
+    ["add_reactions", false, true],
     ["edit_own_message", true, true],
     ["remove_own_reaction", true, true],
   ] as const

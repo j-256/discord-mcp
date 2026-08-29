@@ -9785,6 +9785,7 @@ function serviceFixture(overrides: {
   const calls = {
     active: 0,
     addReaction: 0,
+    addReactions: 0,
     applicationCommandAudit: 0,
     auditChannelOrder: 0,
     auditRoleOrder: 0,
@@ -12425,6 +12426,23 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
       }
     },
+    async addReactions(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.addReactions += 1
+      return {
+        activityIds: input.emojis.map((_, index) => `activity-reaction-${index + 1}`),
+        addedCount: input.emojis.length,
+        channelId: input.channelId,
+        existingCount: 0,
+        guildId: GUILD_ID,
+        messageId: input.messageId,
+        processedCount: input.emojis.length,
+        requestedCount: input.emojis.length,
+        schemaVersion: 1,
+        status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
     async removeOwnReaction(input) {
       if (overrides.interactionError) throw overrides.interactionError
       calls.removeOwnReaction += 1
@@ -15059,6 +15077,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "signal_command_processing",
       "edit_own_message",
       "add_reaction",
+      "add_reactions",
       "remove_own_reaction",
       "plan_reaction_moderation",
       "execute_reaction_moderation",
@@ -15869,10 +15888,11 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   })
   const send = result.tools.find((tool) => tool.name === "send_message")
   const reaction = result.tools.find((tool) => tool.name === "add_reaction")
+  const reactions = result.tools.find((tool) => tool.name === "add_reactions")
   const soundboardPlayback = result.tools.find((tool) => (
     tool.name === "play_soundboard_sound"
   ))
-  for (const tool of [send, reaction, soundboardPlayback]) {
+  for (const tool of [send, reaction, reactions, soundboardPlayback]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: false,
       idempotentHint: true,
@@ -18248,6 +18268,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     guildVoiceRegions: 0,
     voiceRegions: 0,
     addReaction: 0,
+    addReactions: 0,
     applicationCommandAudit: 0,
     auditChannelOrder: 0,
     auditRoleOrder: 0,
@@ -19928,6 +19949,14 @@ test("MCP interaction tools enforce bounded schemas and invoke classified servic
     },
     name: "add_reaction",
   })
+  const reactedSet = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emojis: ["🔥", "✅"],
+      messageId: MESSAGE_ID,
+    },
+    name: "add_reactions",
+  })
   const removedReaction = await client.callTool({
     arguments: {
       channelId: CHANNEL_ID,
@@ -19951,18 +19980,30 @@ test("MCP interaction tools enforce bounded schemas and invoke classified servic
     },
     name: "signal_command_processing",
   })
+  const invalidReactionSet = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emojis: ["🔥"],
+      messageId: MESSAGE_ID,
+    },
+    name: "add_reactions",
+  })
 
   assert.equal(structuredContent(sent).status, "completed")
   assert.equal(structuredContent(edited).status, "completed")
   assert.equal(structuredContent(signaled).status, "completed")
   assert.equal(structuredContent(reacted).status, "completed")
+  assert.equal(structuredContent(reactedSet).status, "completed")
+  assert.equal(structuredContent(reactedSet).requestedCount, 2)
   assert.equal(structuredContent(removedReaction).status, "completed")
   assert.equal(invalid.isError, true)
   assert.equal(invalidSignal.isError, true)
+  assert.equal(invalidReactionSet.isError, true)
   assert.equal(calls.send, 1)
   assert.equal(calls.signalProcessing, 1)
   assert.equal(calls.edit, 1)
   assert.equal(calls.addReaction, 1)
+  assert.equal(calls.addReactions, 1)
   assert.equal(calls.removeOwnReaction, 1)
 })
 
@@ -20059,6 +20100,89 @@ test("MCP interaction errors distinguish uncertain external outcomes", async (co
 
   assert.equal(result.isError, true)
   assert.equal(structuredContent(result).status, "outcome-uncertain")
+})
+
+test("MCP reaction-set failures expose content-free resumable progress", async (context) => {
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      interactionError: new InteractionExecutionError(
+        "Discord reaction set stopped at item 2 after 1 verified item; retry the same ordered set to converge safely",
+        {
+          activityIds: ["activity-reaction-1"],
+          addedCount: 1,
+          channelId: CHANNEL_ID,
+          existingCount: 0,
+          failedActivityId: "activity-reaction-2",
+          failedIndex: 1,
+          guildId: GUILD_ID,
+          messageId: MESSAGE_ID,
+          processedCount: 1,
+          requestedCount: 3,
+          schemaVersion: 1,
+          status: "failed",
+        },
+      ),
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emojis: ["🔥", "✅", "🎉"],
+      messageId: MESSAGE_ID,
+    },
+    name: "add_reactions",
+  })
+  const structured = structuredContent(result)
+  const error = structured.error as Record<string, unknown>
+  const progress = error.result as Record<string, unknown>
+
+  assert.equal(result.isError, true)
+  assert.equal(structured.status, "interaction-failed")
+  assert.equal(progress.failedIndex, 1)
+  assert.equal(progress.processedCount, 1)
+  assert.equal(progress.requestedCount, 3)
+  assert.doesNotMatch(JSON.stringify(result), /🔥|✅|🎉/)
+})
+
+test("MCP reaction-set progress preserves a local retry delay", async (context) => {
+  const { client } = await connectedFixture(context, {
+    serviceOverrides: {
+      interactionError: new InteractionExecutionError(
+        "Discord reaction set stopped after one verified item",
+        {
+          activityIds: ["activity-reaction-1"],
+          addedCount: 1,
+          channelId: CHANNEL_ID,
+          existingCount: 0,
+          failedActivityId: null,
+          failedIndex: 1,
+          guildId: GUILD_ID,
+          messageId: MESSAGE_ID,
+          processedCount: 1,
+          requestedCount: 2,
+          schemaVersion: 1,
+          status: "rate-limited",
+        },
+        { cause: new InteractionRateLimitError(900) },
+      ),
+    },
+  })
+
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      emojis: ["🔥", "✅"],
+      messageId: MESSAGE_ID,
+    },
+    name: "add_reactions",
+  })
+  const structured = structuredContent(result)
+
+  assert.equal(result.isError, true)
+  assert.equal(structured.status, "rate-limited")
+  assert.equal((structured.error as Record<string, unknown>).retryAfterMs, 900)
+  assert.doesNotMatch(JSON.stringify(result), /🔥|✅/)
 })
 
 test("MCP private-message tools expose exact reads, plans, and receipt verification", async (context) => {

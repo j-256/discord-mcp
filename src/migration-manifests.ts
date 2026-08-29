@@ -677,7 +677,7 @@ const CAPPYEO_GROUPS = Object.freeze([
     outcome: "Message, reaction, thread, pin, crosspost, and poll operations",
     recipes: ["channel-publisher"],
     sourcePrefixes: ["messages_", "polls_", "reactions_"],
-    targetTools: [...TARGET_MESSAGE_LIFECYCLE, "add_reaction", "remove_own_reaction", "list_message_reactions", "list_reaction_users", "plan_reaction_moderation", "execute_reaction_moderation", "get_poll", "list_poll_answer_voters", "plan_poll_end", "execute_poll_end"],
+    targetTools: [...TARGET_MESSAGE_LIFECYCLE, "add_reaction", "add_reactions", "remove_own_reaction", "list_message_reactions", "list_reaction_users", "plan_reaction_moderation", "execute_reaction_moderation", "get_poll", "list_poll_answer_voters", "plan_poll_end", "execute_poll_end"],
     trustChange: "Message writes add explicit mention policy, anti-spam controls, replay safety, and content-free receipts.",
   },
   {
@@ -760,7 +760,7 @@ const PASYMPA_GROUPS = Object.freeze([
     outcome: "Messages, embeds, reactions, pins, forwarding, crossposts, and threads",
     recipes: ["channel-publisher"],
     sourceNames: ["discord_add_reaction", "discord_bulk_delete_messages", "discord_create_thread", "discord_crosspost_message", "discord_delete_message", "discord_edit_embed", "discord_edit_message", "discord_fetch_pinned_messages", "discord_forward_message", "discord_get_reactions", "discord_pin_message", "discord_read_messages", "discord_remove_reactions", "discord_reply_message", "discord_search_messages", "discord_send_embed", "discord_send_message", "discord_send_multiple_embeds"],
-    targetTools: [...TARGET_MESSAGE_LIFECYCLE, "add_reaction", "list_message_reactions", "list_reaction_users", "plan_reaction_moderation", "execute_reaction_moderation"],
+    targetTools: [...TARGET_MESSAGE_LIFECYCLE, "add_reaction", "add_reactions", "list_message_reactions", "list_reaction_users", "plan_reaction_moderation", "execute_reaction_moderation"],
     trustChange: "Writes add exact channel policy, explicit mention handling, anti-spam controls, review where needed, and content-free receipts.",
   },
   {
@@ -929,7 +929,7 @@ const ORATORIAN_GROUPS = Object.freeze([
     outcome: "Messages, reactions, and pins",
     recipes: ["channel-publisher"],
     sourceNames: ["discord_add_reaction", "discord_delete_message", "discord_edit_message", "discord_pin_message", "discord_remove_reaction", "discord_send_message", "discord_unpin_message"],
-    targetTools: ["send_message", "edit_own_message", "add_reaction", "remove_own_reaction", "plan_reaction_moderation", "execute_reaction_moderation", "plan_message_deletion", "delete_messages", "plan_message_pin", "execute_message_pin"],
+    targetTools: ["send_message", "edit_own_message", "add_reaction", "add_reactions", "remove_own_reaction", "plan_reaction_moderation", "execute_reaction_moderation", "plan_message_deletion", "delete_messages", "plan_message_pin", "execute_message_pin"],
     trustChange: "Message writes become exact-channel, mention-safe, replay-safe, and reviewed when high-impact.",
   },
   {

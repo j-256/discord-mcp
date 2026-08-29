@@ -6,6 +6,7 @@ import type {
   ActivityList,
   ActivityStore,
 } from "../src/activity-log.js"
+import { REACTION_LIMITS } from "../src/constants.js"
 import type {
   CreateMessageInput,
   EditMessageInput,
@@ -121,6 +122,19 @@ function commandMessage(overrides: Partial<DiscordMessage> = {}): DiscordMessage
   })
 }
 
+function ownReactionAggregate(reaction: string) {
+  const custom = reaction.includes(":")
+  const [name, id] = custom ? reaction.split(":") : [reaction, null]
+  return {
+    burst_colors: [],
+    count: 1,
+    count_details: { burst: 0, normal: 1 },
+    emoji: { animated: false, id, name },
+    me: true,
+    me_burst: false,
+  }
+}
+
 function policy(options: {
   interactionChannelIds?: readonly string[]
   mentionUserIds?: readonly string[]
@@ -167,33 +181,24 @@ function fixture(options: {
   const calls = {
     create: [] as CreateMessageInput[],
     edit: [] as EditMessageInput[],
+    messageReads: [] as string[],
     reaction: [] as string[],
     reactionRemove: [] as string[],
     threadMember: [] as Array<[string, string]>,
     typing: [] as string[],
   }
-  let ownReaction: string | null = null
+  const ownReactions = new Set<string>()
   const reactionMessage = (messageId: string) => {
-    if (ownReaction === null) return message({ id: messageId, reactions: [] })
-    const custom = ownReaction.includes(":")
-    const [name, id] = custom ? ownReaction.split(":") : [ownReaction, null]
     return message({
       id: messageId,
-      reactions: [{
-        burst_colors: [],
-        count: 1,
-        count_details: { burst: 0, normal: 1 },
-        emoji: { animated: false, id, name },
-        me: true,
-        me_burst: false,
-      }],
+      reactions: [...ownReactions].map(ownReactionAggregate),
     })
   }
   const client: InteractionServiceClient = {
     async addOwnReaction(_channelId, _messageId, emoji) {
       calls.reaction.push(emoji)
       events.push("reaction")
-      ownReaction = emoji
+      ownReactions.add(emoji)
     },
     async createMessage(_channelId, input) {
       calls.create.push(structuredClone(input))
@@ -208,7 +213,7 @@ function fixture(options: {
     async deleteOwnReaction(_channelId, _messageId, emoji) {
       calls.reactionRemove.push(emoji)
       events.push("reaction-remove")
-      ownReaction = null
+      ownReactions.delete(emoji)
     },
     async getChannel(channelId) {
       return channel({ id: channelId })
@@ -234,6 +239,7 @@ function fixture(options: {
       }]
     },
     async getMessage(_channelId, messageId) {
+      calls.messageReads.push(messageId)
       if (messageId === REPLY_MESSAGE_ID) {
         return message({
           author: { bot: false, id: MEMBER_ID, username: "member" },
@@ -964,6 +970,209 @@ test("reaction validates one emoji, verifies the target, and journals no emoji c
     }),
     /one Unicode emoji or name:snowflake/,
   )
+})
+
+test("reaction sets validate every logical emoji before reading or writing", async () => {
+  for (const emojis of [
+    ["🔥"],
+    Array.from({ length: REACTION_LIMITS.addSetEmojis + 1 }, () => "🔥"),
+    ["🔥", "not-an-emoji"],
+    ["🔥", "🔥"],
+    ["first:600000000000000001", "renamed:600000000000000001"],
+  ]) {
+    const configured = fixture()
+    await assert.rejects(
+      () => configured.service.addReactions({
+        channelId: CHANNEL_ID,
+        emojis,
+        messageId: MESSAGE_ID,
+      }),
+      RangeError,
+    )
+    assert.deepEqual(configured.calls.messageReads, [])
+    assert.deepEqual(configured.calls.reaction, [])
+    assert.deepEqual(configured.store.entries, [])
+  }
+})
+
+test("reaction sets preserve order, reuse verified snapshots, and converge to no-ops", async () => {
+  const configured = fixture()
+  const request = {
+    channelId: CHANNEL_ID,
+    emojis: ["🔥", "✅", "custom:600000000000000001"],
+    messageId: MESSAGE_ID,
+  }
+
+  const first = await configured.service.addReactions(request)
+
+  assert.equal(first.status, "completed")
+  assert.equal(first.addedCount, 3)
+  assert.equal(first.existingCount, 0)
+  assert.equal(first.processedCount, 3)
+  assert.equal(first.requestedCount, 3)
+  assert.deepEqual(first.activityIds, ["activity-1", "activity-2", "activity-3"])
+  assert.deepEqual(configured.calls.reaction, request.emojis)
+  assert.deepEqual(configured.calls.messageReads, [
+    MESSAGE_ID,
+    MESSAGE_ID,
+    MESSAGE_ID,
+    MESSAGE_ID,
+  ])
+  assert.doesNotMatch(
+    JSON.stringify({ entries: configured.store.entries, result: first }),
+    /🔥|✅|custom/,
+  )
+
+  const replay = await configured.service.addReactions(request)
+
+  assert.equal(replay.status, "noop")
+  assert.equal(replay.addedCount, 0)
+  assert.equal(replay.existingCount, 3)
+  assert.equal(replay.processedCount, 3)
+  assert.deepEqual(configured.calls.reaction, request.emojis)
+  assert.equal(configured.calls.messageReads.length, 5)
+  assert.deepEqual(
+    configured.store.entries.slice(-3).map(({ kind, status }) => ({ kind, status })),
+    [
+      { kind: "reaction-add", status: "noop" },
+      { kind: "reaction-add", status: "noop" },
+      { kind: "reaction-add", status: "noop" },
+    ],
+  )
+})
+
+test("reaction sets detect concurrent drift across the processed prefix", async () => {
+  let reads = 0
+  const configured = fixture({
+    client: {
+      async getMessage() {
+        reads += 1
+        if (reads === 1) return message({ reactions: [] })
+        if (reads === 2) {
+          return message({ reactions: [ownReactionAggregate("🔥")] })
+        }
+        return message({ reactions: [ownReactionAggregate("✅")] })
+      },
+    },
+  })
+
+  await assert.rejects(
+    () => configured.service.addReactions({
+      channelId: CHANNEL_ID,
+      emojis: ["🔥", "✅", "🎉"],
+      messageId: MESSAGE_ID,
+    }),
+    (error: unknown) => {
+      if (!(error instanceof InteractionExecutionError)) return false
+      const result = error.result as Record<string, unknown>
+      assert.equal(result.status, "uncertain")
+      assert.equal(result.failedIndex, null)
+      assert.equal(result.driftDetectedAfterIndex, 1)
+      assert.equal(result.processedCount, 2)
+      assert.deepEqual(result.activityIds, ["activity-1", "activity-2"])
+      assert.doesNotMatch(JSON.stringify(result), /🔥|✅|🎉/)
+      return true
+    },
+  )
+  assert.deepEqual(configured.calls.reaction, ["🔥", "✅"])
+  assert.deepEqual(configured.store.entries.map(({ status }) => status), [
+    "pending",
+    "completed",
+    "pending",
+    "completed",
+  ])
+})
+
+test("reaction sets stop at the first failure and expose content-free retry progress", async () => {
+  const configured = fixture()
+  const originalAdd = configured.client.addOwnReaction.bind(configured.client)
+  let attempts = 0
+  configured.client.addOwnReaction = async (...arguments_) => {
+    attempts += 1
+    if (attempts === 2) {
+      throw new DiscordApiError({
+        code: 50013,
+        message: "Discord rejected private reaction details",
+        method: "PUT",
+        route: `/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}/reactions/private/@me`,
+        status: 403,
+      })
+    }
+    return originalAdd(...arguments_)
+  }
+  const request = {
+    channelId: CHANNEL_ID,
+    emojis: ["🔥", "✅", "🎉"],
+    messageId: MESSAGE_ID,
+  }
+
+  await assert.rejects(
+    () => configured.service.addReactions(request),
+    (error: unknown) => {
+      if (!(error instanceof InteractionExecutionError)) return false
+      const result = error.result as Record<string, unknown>
+      assert.equal(result.status, "failed")
+      assert.equal(result.failedIndex, 1)
+      assert.equal(result.processedCount, 1)
+      assert.equal(result.addedCount, 1)
+      assert.equal(result.existingCount, 0)
+      assert.deepEqual(result.activityIds, ["activity-1"])
+      assert.equal(result.failedActivityId, "activity-2")
+      assert.doesNotMatch(JSON.stringify(result), /🔥|✅|🎉|private/)
+      return true
+    },
+  )
+  assert.deepEqual(configured.calls.reaction, ["🔥"])
+  assert.deepEqual(
+    configured.store.entries.map(({ kind, status }) => ({ kind, status })),
+    [
+      { kind: "reaction-add", status: "pending" },
+      { kind: "reaction-add", status: "completed" },
+      { kind: "reaction-add", status: "pending" },
+      { kind: "reaction-add", status: "failed" },
+    ],
+  )
+
+  configured.client.addOwnReaction = originalAdd
+  const recovered = await configured.service.addReactions(request)
+
+  assert.equal(recovered.status, "completed")
+  assert.equal(recovered.existingCount, 1)
+  assert.equal(recovered.addedCount, 2)
+  assert.deepEqual(configured.calls.reaction, ["🔥", "✅", "🎉"])
+})
+
+test("reaction sets preserve local retry timing after a verified prefix", async () => {
+  const now = Date.parse(NOW)
+  const configured = fixture({
+    limiter: new InteractionLimiter({
+      clock: () => now,
+      maxWritesPerMinute: 1,
+      minWriteIntervalMs: 0,
+    }),
+  })
+
+  await assert.rejects(
+    () => configured.service.addReactions({
+      channelId: CHANNEL_ID,
+      emojis: ["🔥", "✅"],
+      messageId: MESSAGE_ID,
+    }),
+    (error: unknown) => {
+      if (!(error instanceof InteractionExecutionError)) return false
+      const result = error.result as Record<string, unknown>
+      assert.equal(result.status, "rate-limited")
+      assert.equal(result.failedIndex, 1)
+      assert.equal(result.processedCount, 1)
+      assert.equal(result.failedActivityId, null)
+      return true
+    },
+  )
+  assert.deepEqual(configured.calls.reaction, ["🔥"])
+  assert.deepEqual(configured.store.entries.map(({ status }) => status), [
+    "pending",
+    "completed",
+  ])
 })
 
 test("own reaction changes are idempotent and verify authoritative state", async () => {

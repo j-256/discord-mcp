@@ -921,7 +921,7 @@ function exactRequirement(
   if (CHANNEL_READ_OVERRIDES.has(name)) {
     return channel([], ["VIEW_CHANNEL"])
   }
-  if (name === "add_reaction") {
+  if (name === "add_reaction" || name === "add_reactions") {
     return channel([
       "$.capabilities.interactions",
       "$.scopes.interactionChannelIds",

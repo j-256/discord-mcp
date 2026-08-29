@@ -14,6 +14,7 @@ import {
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
   IDEMPOTENCY_KEY_PATTERN,
+  REACTION_LIMITS,
   SCHEMA_VERSION,
 } from "./constants.js"
 import type { DiscordClient } from "./discord-client.js"
@@ -100,6 +101,12 @@ export interface AddReactionRequest {
   messageId: string
 }
 
+export interface AddReactionsRequest {
+  channelId: string
+  emojis: readonly string[]
+  messageId: string
+}
+
 export type RemoveOwnReactionRequest = AddReactionRequest
 
 export interface SignalCommandProcessingRequest {
@@ -134,6 +141,20 @@ export interface AddReactionResult {
   channelId: string
   guildId: string
   messageId: string
+  schemaVersion: number
+  status: "completed" | "noop"
+  url: string
+}
+
+export interface AddReactionsResult {
+  activityIds: string[]
+  addedCount: number
+  channelId: string
+  existingCount: number
+  guildId: string
+  messageId: string
+  processedCount: number
+  requestedCount: number
   schemaVersion: number
   status: "completed" | "noop"
   url: string
@@ -193,6 +214,11 @@ interface ProcessingSignalState {
   guildId: string
 }
 
+interface OwnReactionChange {
+  message: DiscordMessage
+  result: AddReactionResult
+}
+
 function ownsNormalReaction(
   message: DiscordMessage,
   emoji: NormalizedReactionEmoji,
@@ -203,6 +229,70 @@ function ownsNormalReaction(
       : entry.emoji.kind === "unicode" && entry.emoji.name === emoji.name
   ))
   return aggregate?.me ?? false
+}
+
+function ownsNormalReactionPrefix(
+  message: DiscordMessage,
+  emojis: readonly NormalizedReactionEmoji[],
+  endExclusive: number,
+): boolean {
+  for (let index = 0; index < endExclusive; index += 1) {
+    const emoji = emojis[index]
+    if (!emoji || !ownsNormalReaction(message, emoji)) return false
+  }
+  return true
+}
+
+function normalizedReactionSet(
+  value: readonly string[],
+): NormalizedReactionEmoji[] {
+  if (
+    !Array.isArray(value)
+    || value.length < REACTION_LIMITS.addSetEmojisMinimum
+    || value.length > REACTION_LIMITS.addSetEmojis
+  ) {
+    throw new RangeError(
+      `Discord reaction set must contain ${REACTION_LIMITS.addSetEmojisMinimum}-${REACTION_LIMITS.addSetEmojis} emoji`,
+    )
+  }
+  const normalized = value.map((emoji) => normalizeReactionEmoji(emoji))
+  const keys = new Set<string>()
+  for (const emoji of normalized) {
+    if (keys.has(emoji.key)) {
+      throw new RangeError("Discord reaction set must contain unique logical emoji")
+    }
+    keys.add(emoji.key)
+  }
+  return normalized
+}
+
+function reactionSetFailureStatus(error: unknown): string {
+  if (
+    error instanceof InteractionExecutionError
+    && error.result
+    && typeof error.result === "object"
+    && "status" in error.result
+  ) return String(error.result.status)
+  if (error instanceof InteractionRateLimitError) return "rate-limited"
+  return "failed"
+}
+
+function reactionSetFailedActivityId(error: unknown): string | null {
+  if (
+    error instanceof InteractionExecutionError
+    && error.result
+    && typeof error.result === "object"
+    && "activityId" in error.result
+    && typeof error.result.activityId === "string"
+  ) return error.result.activityId
+  return null
+}
+
+function reactionSetCause(error: unknown): unknown {
+  if (error instanceof InteractionExecutionError && error.cause !== undefined) {
+    return error.cause
+  }
+  return error
 }
 
 function activityError(error: unknown): string {
@@ -877,6 +967,98 @@ export class InteractionService {
     return this.#setOwnReaction(request, true, options)
   }
 
+  async addReactions(
+    request: AddReactionsRequest,
+    options: RequestOptions = {},
+  ): Promise<AddReactionsResult> {
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      throw new RangeError("Discord reaction-set request must be an object")
+    }
+    const emojis = normalizedReactionSet(request.emojis)
+    const { guildId } = await this.#channel(request.channelId, options)
+    let message = await this.#message(
+      request.channelId,
+      guildId,
+      request.messageId,
+      options,
+    )
+    const activityIds: string[] = []
+    let addedCount = 0
+    let existingCount = 0
+    for (const [index, emoji] of emojis.entries()) {
+      let change: OwnReactionChange
+      try {
+        change = await this.#setOwnReactionFromSnapshot(
+          request,
+          true,
+          emoji,
+          guildId,
+          message,
+          options,
+        )
+      } catch (error) {
+        const verifiedItems = `${index} verified ${index === 1 ? "item" : "items"}`
+        throw new InteractionExecutionError(
+          `Discord reaction set stopped at item ${index + 1} after ${verifiedItems}; retry the same ordered set to converge safely`,
+          {
+            activityIds,
+            addedCount,
+            channelId: request.channelId,
+            existingCount,
+            failedActivityId: reactionSetFailedActivityId(error),
+            failedIndex: index,
+            guildId,
+            messageId: request.messageId,
+            processedCount: index,
+            requestedCount: emojis.length,
+            schemaVersion: SCHEMA_VERSION,
+            status: reactionSetFailureStatus(error),
+          },
+          { cause: reactionSetCause(error) },
+        )
+      }
+      message = change.message
+      activityIds.push(change.result.activityId)
+      if (change.result.status === "noop") existingCount += 1
+      else addedCount += 1
+      if (!ownsNormalReactionPrefix(message, emojis, index + 1)) {
+        const processedCount = index + 1
+        const processedItems = `${processedCount} processed ${processedCount === 1 ? "item" : "items"}`
+        throw new InteractionExecutionError(
+          `Discord reaction set lost a previously verified item after ${processedItems}; retry the same ordered set to converge safely`,
+          {
+            activityIds,
+            addedCount,
+            channelId: request.channelId,
+            driftDetectedAfterIndex: index,
+            existingCount,
+            failedActivityId: null,
+            failedIndex: null,
+            guildId,
+            messageId: request.messageId,
+            processedCount,
+            requestedCount: emojis.length,
+            schemaVersion: SCHEMA_VERSION,
+            status: "uncertain",
+          },
+        )
+      }
+    }
+    return {
+      activityIds,
+      addedCount,
+      channelId: request.channelId,
+      existingCount,
+      guildId,
+      messageId: request.messageId,
+      processedCount: emojis.length,
+      requestedCount: emojis.length,
+      schemaVersion: SCHEMA_VERSION,
+      status: addedCount === 0 ? "noop" : "completed",
+      url: discordMessageUrl(guildId, request.channelId, request.messageId),
+    }
+  }
+
   async removeOwnReaction(
     request: RemoveOwnReactionRequest,
     options: RequestOptions = {},
@@ -897,6 +1079,24 @@ export class InteractionService {
       request.messageId,
       options,
     )
+    return (await this.#setOwnReactionFromSnapshot(
+      request,
+      desired,
+      emoji,
+      guildId,
+      existing,
+      options,
+    )).result
+  }
+
+  async #setOwnReactionFromSnapshot(
+    request: Pick<AddReactionRequest, "channelId" | "messageId">,
+    desired: boolean,
+    emoji: NormalizedReactionEmoji,
+    guildId: string,
+    existing: DiscordMessage,
+    options: RequestOptions,
+  ): Promise<OwnReactionChange> {
     const activityId = this.#randomId()
     const kind = desired ? "reaction-add" : "reaction-remove-own"
     if (ownsNormalReaction(existing, emoji) === desired) {
@@ -909,16 +1109,19 @@ export class InteractionService {
         status: "noop",
       }))
       return {
-        activityId,
-        channelId: request.channelId,
-        guildId,
-        messageId: request.messageId,
-        schemaVersion: SCHEMA_VERSION,
-        status: "noop",
-        url: discordMessageUrl(guildId, request.channelId, request.messageId),
+        message: existing,
+        result: {
+          activityId,
+          channelId: request.channelId,
+          guildId,
+          messageId: request.messageId,
+          schemaVersion: SCHEMA_VERSION,
+          status: "noop",
+          url: discordMessageUrl(guildId, request.channelId, request.messageId),
+        },
       }
     }
-    await this.#write({
+    const observed = await this.#write({
       activityId,
       channelId: request.channelId,
       guildId,
@@ -940,27 +1143,31 @@ export class InteractionService {
             options,
           )
         }
-        const observed = await this.#message(
+        const value = await this.#message(
           request.channelId,
           guildId,
           request.messageId,
           options,
         )
-        if (ownsNormalReaction(observed, emoji) !== desired) {
+        if (ownsNormalReaction(value, emoji) !== desired) {
           throw new InteractionIdentityError(
             "Discord reaction state does not match the requested own-reaction change",
           )
         }
+        return value
       },
     })
     return {
-      activityId,
-      channelId: request.channelId,
-      guildId,
-      messageId: request.messageId,
-      schemaVersion: SCHEMA_VERSION,
-      status: "completed",
-      url: discordMessageUrl(guildId, request.channelId, request.messageId),
+      message: observed,
+      result: {
+        activityId,
+        channelId: request.channelId,
+        guildId,
+        messageId: request.messageId,
+        schemaVersion: SCHEMA_VERSION,
+        status: "completed",
+        url: discordMessageUrl(guildId, request.channelId, request.messageId),
+      },
     }
   }
 }
