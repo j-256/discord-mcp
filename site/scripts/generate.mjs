@@ -182,6 +182,7 @@ const SECURITY_GROUPS = Object.freeze([
       "Credentials",
       "Unified configuration",
       "Host configuration inspection",
+      "Reviewed host configuration installation",
       "Migration planning",
       "MCP result boundaries",
       "Exact Discord references",

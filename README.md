@@ -127,7 +127,7 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 After `smoke` succeeds, compatible MCPB hosts can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
 
-For a file-backed token or another host, `host` emits one credential-free contract and deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. After merging one, `--inspect-host-file` reports exact drift without returning observed values or editing the file. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
+For a file-backed token or another host, `host` emits deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; `--inspect-host-file` reports exact drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
 
 Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, effective read-response budget, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
 
@@ -276,7 +276,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, complete bounded ID-only installed-guild inventory, and exact configured-scope drift | Read-only |
 | `discord-mcp smoke --config FILE` | Spawned stdio negotiation, discovery, annotations, and connector identity through the selected policy | Read-only |
-| `discord-mcp host --npx --config FILE [--adapter ID] [--html PRIVATE_FILE] [--json]` | Exact credential-free policy-to-stdio mapping, digest-bound common MCP JSON, Cursor, VS Code, and Gemini CLI adapters, and optional private interactive activation guide without host mutation | None |
+| `discord-mcp host`; `host plan`; `host apply` | Credential-free adapters, reviewed freshness-bound static JSON installation with a recoverable backup and rollback, and value-free drift inspection | None |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |

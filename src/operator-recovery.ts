@@ -55,6 +55,7 @@ export interface CliFailureContext {
 const OPERATOR_REFERENCES = Object.freeze({
   botSetup: "docs/reference.md#discord-bot-setup",
   configuration: "docs/reference.md#configuration",
+  hostInstallation: "docs/reference.md#reviewed-host-configuration-installation",
   operatorCli: "docs/reference.md#operator-cli",
   verification: "docs/reference.md#verification",
 })
@@ -177,6 +178,14 @@ export function classifyCliFailure(
     )
   }
   if (error instanceof ConfigurationError) {
+    if (context.helpTopic === "host") {
+      return guidance(
+        CLI_FAILURE_CATEGORIES.configuration,
+        "Validate the selected policy. If a host file was involved, inspect it and any sibling recovery artifacts; rerun host plan and apply only a fresh reviewed digest after state is known.",
+        OPERATOR_REFERENCES.hostInstallation,
+        OPERATOR_RETRY.afterInspection,
+      )
+    }
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
       "Run discord-mcp doctor with the intended --config or --profile, resolve every failing check, and retry only with that credential, identity, scope, and policy.",

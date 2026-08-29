@@ -74,6 +74,22 @@ test("operator recovery distinguishes configuration, profile, and usage correcti
   assert.equal(safeCliFailureMessage(new Error("argument secret"), usage), "Invalid command usage")
 })
 
+test("operator recovery routes host configuration failures through fresh inspection", () => {
+  const result = classifyCliFailure(
+    new ConfigurationError("Host configuration changed after review"),
+    { helpTopic: "host", usage: false },
+  )
+
+  assert.equal(result.category, "configuration")
+  assert.equal(result.recovery.retry, "after-inspection")
+  assert.match(result.recovery.action, /inspect it and any sibling recovery artifacts/u)
+  assert.match(result.recovery.action, /fresh reviewed digest/u)
+  assert.equal(
+    result.recovery.reference,
+    "docs/reference.md#reviewed-host-configuration-installation",
+  )
+})
+
 test("operator recovery directs config changes through fresh candidate review", () => {
   const active = classifyCliFailure(
     new ConfigChangeError("active failed", "active"),

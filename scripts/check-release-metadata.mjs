@@ -143,10 +143,12 @@ async function checkNeutrality() {
     "site/test/neutrality.test.mjs",
     "src/host-adapters.ts",
     "src/host-inspection.ts",
+    "src/host-installation.ts",
     "test/cli.test.ts",
     "test/host-activation-html.test.ts",
     "test/host-adapters.test.ts",
     "test/host-inspection.test.ts",
+    "test/host-installation.test.ts",
   ])
   const { stdout } = await run(
     "git",
@@ -777,6 +779,8 @@ async function checkDocumentation(packageJson) {
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
   invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
   invariant(gettingStarted.includes("--inspect-host-file"), "getting-started guide lacks exact host drift inspection")
+  invariant(gettingStarted.includes("host plan"), "getting-started guide lacks reviewed host planning")
+  invariant(gettingStarted.includes("host apply"), "getting-started guide lacks reviewed host application")
   invariant(gettingStarted.includes("`--standard-runtime`"), "getting-started guide lacks the standard-runtime recovery choice")
   invariant(gettingStarted.includes("bundle supports macOS, Windows, and Linux with Node.js 22 through 26"), "getting-started guide lacks the exact MCPB runtime range")
   invariant(reference.includes("[Product boundaries and host compatibility](limitations.md)"), "complete reference lacks the product-boundaries route")
@@ -784,17 +788,24 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("V8's `--lite-mode`"), "complete reference lacks the low-memory runtime contract")
   invariant(reference.includes("cross-platform manifest requires Node.js 22 through 26"), "complete reference lacks the exact MCPB runtime range")
   invariant(reference.includes("bundle verification rejects any other stderr"), "complete reference lacks the MCPB warning boundary")
-  invariant(reference.includes("`host` requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
+  invariant(reference.includes("The `host` generation form requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
   invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
+  invariant(reference.includes("### Reviewed host configuration installation"), "complete reference lacks reviewed host installation")
+  invariant(reference.includes("`discord-mcp.host-change-plan.v1`"), "complete reference lacks the host change-plan contract")
+  invariant(reference.includes("`discord-mcp.host-change-apply.v1`"), "complete reference lacks the host change-apply contract")
   invariant(reference.includes("### Host configuration drift inspection"), "complete reference lacks host drift inspection")
   invariant(security.includes("## Host configuration inspection"), "security policy lacks host inspection requirements")
+  invariant(security.includes("## Reviewed host configuration installation"), "security policy lacks host installation requirements")
   invariant(limitations.includes("Generated adapter"), "product boundaries lack adapter-specific compatibility")
   invariant(limitations.includes("`--inspect-host-file FILE`"), "product boundaries lack host inspection limits")
+  invariant(limitations.includes("`host plan --adapter ID --host-file FILE`"), "product boundaries lack host installation planning")
   invariant(limitations.includes("Native-process memory parity"), "product boundaries lack the native-memory limitation")
   invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
+  invariant(readme.includes("`host plan` and `host apply`"), "README lacks reviewed host installation")
   invariant(comparison.includes("Discord MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")
   invariant(comparison.includes("executes the unpacked server handshake"), "field comparison lacks bundle execution evidence")
+  invariant(comparison.includes("Reviewed static host-configuration installation, drift inspection, and recovery"), "field comparison lacks reviewed host installation")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")

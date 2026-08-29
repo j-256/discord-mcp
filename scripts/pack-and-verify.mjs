@@ -32,6 +32,8 @@ const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
 const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
+const HOST_CHANGE_APPLY_FORMAT = "discord-mcp.host-change-apply.v1"
+const HOST_CHANGE_PLAN_FORMAT = "discord-mcp.host-change-plan.v1"
 const HOST_INSPECTION_FORMAT = "discord-mcp.host-inspection.v1"
 const MIGRATION_CATALOG_FORMAT = "discord-mcp.migration-catalog.v1"
 const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
@@ -1357,6 +1359,109 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   invariant(!staleHostInspectionResult.stdout.includes(hostConfigurationFile), "installed stale host inspection returned its selected path")
   invariant(!staleHostInspectionResult.stdout.includes(DUMMY_TOKEN), "installed stale host inspection returned observed host content")
   invariant((await readFile(hostConfigurationFile)).equals(staleHostBytes), "installed host inspection changed its selected file")
+  const hostChangePlanResult = await run(bin, [
+    "host",
+    "plan",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--host-file",
+    hostConfigurationFile,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const hostChangePlan = JSON.parse(hostChangePlanResult.stdout)
+  invariant(hostChangePlan.format === HOST_CHANGE_PLAN_FORMAT, "installed host change-plan format changed")
+  invariant(hostChangePlan.status === "ready", "installed host change plan is not ready")
+  invariant(hostChangePlan.change?.operation === "update", "installed host change plan missed owned drift")
+  invariant(hostChangePlan.change?.strategy === "merge-owned-records", "installed host change plan selected the wrong merge strategy")
+  invariant(hostChangePlan.change?.serverEntry === "replace", "installed host change plan missed the stale server entry")
+  invariant(hostChangePlan.privacy?.privateHostBytesHashed === false, "installed host change plan hashed private host bytes")
+  invariant(hostChangePlan.privacy?.hostPathReturned === false, "installed host change plan returned its selected path")
+  invariant(SHA256_DIGEST_PATTERN.test(hostChangePlan.planDigest), "installed host change-plan digest is invalid")
+  invariant(!hostChangePlanResult.stdout.includes(hostConfigurationFile), "installed host change plan returned its selected path")
+  invariant(!hostChangePlanResult.stdout.includes(DUMMY_TOKEN), "installed host change plan returned observed host content")
+  const hostChangeApplyResult = await run(bin, [
+    "host",
+    "apply",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--host-file",
+    hostConfigurationFile,
+    "--plan-digest",
+    hostChangePlan.planDigest,
+    "--confirm",
+    hostChangePlan.confirmation.requiredValue,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const hostChangeApply = JSON.parse(hostChangeApplyResult.stdout)
+  invariant(hostChangeApply.format === HOST_CHANGE_APPLY_FORMAT, "installed host change-apply format changed")
+  invariant(hostChangeApply.status === "applied", "installed host change apply did not report application")
+  invariant(hostChangeApply.planDigest === hostChangePlan.planDigest, "installed host change apply lost its reviewed digest")
+  invariant(hostChangeApply.backup?.created === true, "installed host change apply omitted its backup")
+  invariant(typeof hostChangeApply.backup?.file === "string", "installed host change apply omitted its backup path")
+  invariant(hostChangeApply.inspection?.status === "match", "installed host change apply did not verify its projection")
+  invariant(hostChangeApply.privacy?.credentialValuesReturned === false, "installed host change apply returned credential material")
+  invariant(hostChangeApply.privacy?.hostPathReturned === true, "installed host change apply did not disclose its recovery path")
+  invariant(!hostChangeApplyResult.stdout.includes(DUMMY_TOKEN), "installed host change apply returned observed host content")
+  invariant((await readFile(hostChangeApply.backup.file)).equals(staleHostBytes), "installed host change backup does not match the reviewed original")
+  invariant(((await lstat(hostChangeApply.backup.file)).mode & 0o077) === 0, "installed host change backup is not private")
+  invariant((await readFile(hostConfigurationFile, "utf8")) === expectedHostConfiguration.content, "installed host change apply did not publish the exact adapter")
+  const exactHostPlanResult = await run(bin, [
+    "host",
+    "plan",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--host-file",
+    hostConfigurationFile,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const exactHostPlan = JSON.parse(exactHostPlanResult.stdout)
+  invariant(exactHostPlan.change?.operation === "unchanged", "installed exact host change plan is not a no-op")
+  const exactHostBytes = await readFile(hostConfigurationFile)
+  const exactHostApplyResult = await run(bin, [
+    "host",
+    "apply",
+    "--npx",
+    "--config",
+    configFile,
+    "--adapter",
+    "mcp-json",
+    "--host-file",
+    hostConfigurationFile,
+    "--plan-digest",
+    exactHostPlan.planDigest,
+    "--confirm",
+    exactHostPlan.confirmation.requiredValue,
+    "--json",
+  ], {
+    capture: true,
+    cwd: consumer,
+    env: environment,
+  })
+  const exactHostApply = JSON.parse(exactHostApplyResult.stdout)
+  invariant(exactHostApply.status === "unchanged", "installed exact host apply performed a write")
+  invariant(exactHostApply.backup?.created === false, "installed exact host apply created a backup")
+  invariant((await readFile(hostConfigurationFile)).equals(exactHostBytes), "installed exact host apply changed the destination")
   const firstWorkbenchFile = join(consumer, "workbench-first.html")
   const secondWorkbenchFile = join(consumer, "workbench-second.html")
   const firstWorkbenchResult = await run(bin, [

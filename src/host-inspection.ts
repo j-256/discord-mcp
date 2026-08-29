@@ -1,18 +1,5 @@
 import { createHash } from "node:crypto"
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
-  realpathSync,
-} from "node:fs"
-import type { BigIntStats } from "node:fs"
-import { resolve } from "node:path"
-import { TextDecoder } from "node:util"
 
-import { parseStrictConfigJson } from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
   createHostAdapterCatalog,
@@ -21,12 +8,18 @@ import {
   type HostAdapterId,
 } from "./host-adapters.js"
 import type { HostActivationPlan } from "./host-activation.js"
+import {
+  HOST_JSON_MAX_BYTES,
+  HOST_JSON_MIN_BYTES,
+  readHostJsonSnapshot,
+  type HostFileReview,
+} from "./host-file.js"
 import { stableString } from "./normalize.js"
 
 export const HOST_INSPECTION_FORMAT = "discord-mcp.host-inspection.v1"
 export const HOST_INSPECTION_SCHEMA_VERSION = 1
-export const HOST_INSPECTION_MIN_BYTES = 2
-export const HOST_INSPECTION_MAX_BYTES = 1_048_576
+export const HOST_INSPECTION_MIN_BYTES = HOST_JSON_MIN_BYTES
+export const HOST_INSPECTION_MAX_BYTES = HOST_JSON_MAX_BYTES
 
 export const HOST_INSPECTION_DIFFERENCES = Object.freeze([
   "host-root-invalid",
@@ -66,15 +59,7 @@ export interface HostInspectionReport {
     readonly serverEntry: "drifted" | "exact" | "invalid" | "missing"
     readonly unrelatedState: "ignored" | "not-applicable"
   }
-  readonly fileReview: {
-    readonly access: "owner-private" | "platform-unverified"
-    readonly bounded: true
-    readonly canonical: true
-    readonly owner: "platform-unverified" | "trusted"
-    readonly regularFile: true
-    readonly singleLink: true
-    readonly stableRead: true
-  }
+  readonly fileReview: HostFileReview
   readonly format: typeof HOST_INSPECTION_FORMAT
   readonly inspectionDigest: string
   readonly limitations: readonly string[]
@@ -95,11 +80,6 @@ export interface HostInspectionReport {
   readonly status: "drift" | "match"
 }
 
-interface FileReadResult {
-  readonly bytes: Buffer
-  readonly fileReview: HostInspectionReport["fileReview"]
-}
-
 interface ComparisonResult {
   readonly differences: readonly HostInspectionDifference[]
   readonly expectedSensitiveInputCount: number
@@ -109,15 +89,16 @@ interface ComparisonResult {
 }
 
 const HOST_INSPECTION_DIGEST_DOMAIN = "discord-mcp-host-inspection-v1\0"
-const HOST_INSPECTION_EXPOSED_MODE_MASK = 0o077n
 const SHARED_ADAPTER_IDS = new Set<HostAdapterId>(["cursor", "mcp-json", "vscode"])
 const STANDARD_SERVER_KEYS = new Set(["args", "command", "env", "type"])
-const STRICT_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
 const HOST_INSPECTION_LIMITATIONS = Object.freeze([
   "A match proves one stable static file projection, not that the host loaded it or retained it unchanged.",
+  "JSON is byte-, depth-, and node-bounded; non-finite, unsafe-integer, and negative-zero values fail closed.",
   "Inspection does not prove secret availability, host approval behavior, elicitation support, process startup, MCP negotiation, or Discord access.",
+  "The parent must be canonical, process-owned, and not writable by group or world where portable metadata exists; other platforms cannot verify that boundary.",
   "On platforms without portable owner and mode metadata, file ownership and access are reported as platform-unverified rather than claimed private.",
   "Unrelated host entries and inputs are deliberately ignored and are not returned, counted, hashed, or assessed.",
+  "Activation, adapter, and inspection digests can confirm already-suspected private launcher references and are not anonymity mechanisms.",
 ])
 
 function deepFreeze<Value>(value: Value): Value {
@@ -143,146 +124,6 @@ function digest(value: unknown): string {
     .update(HOST_INSPECTION_DIGEST_DOMAIN)
     .update(stableString(value))
     .digest("hex")}`
-}
-
-function isNodeError(error: unknown, code: string): boolean {
-  return error instanceof Error
-    && "code" in error
-    && (error as NodeJS.ErrnoException).code === code
-}
-
-function sameFile(left: BigIntStats, right: BigIntStats): boolean {
-  return left.dev === right.dev
-    && left.ino === right.ino
-    && left.mode === right.mode
-    && left.nlink === right.nlink
-    && left.uid === right.uid
-    && left.gid === right.gid
-    && left.size === right.size
-    && left.ctimeNs === right.ctimeNs
-    && left.mtimeNs === right.mtimeNs
-}
-
-function assertSafeHostFile(metadata: BigIntStats): void {
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new ConfigurationError("Host configuration must be one regular file")
-  }
-  if (metadata.nlink !== 1n) {
-    throw new ConfigurationError("Host configuration must have exactly one hard link")
-  }
-  if (
-    metadata.size < BigInt(HOST_INSPECTION_MIN_BYTES)
-    || metadata.size > BigInt(HOST_INSPECTION_MAX_BYTES)
-  ) {
-    throw new ConfigurationError("Host configuration exceeds the bounded JSON file size")
-  }
-  if (process.platform !== "win32") {
-    const userId = typeof process.getuid === "function" ? BigInt(process.getuid()) : undefined
-    if (userId === undefined || ![0n, userId].includes(metadata.uid)) {
-      throw new ConfigurationError("Host configuration owner is not trusted")
-    }
-    if ((metadata.mode & HOST_INSPECTION_EXPOSED_MODE_MASK) !== 0n) {
-      throw new ConfigurationError("Host configuration must not grant group or world access")
-    }
-  }
-}
-
-function readExactBytes(fileDescriptor: number, expectedBytes: number): Buffer {
-  const buffer = Buffer.alloc(expectedBytes + 1)
-  let offset = 0
-  while (offset < buffer.byteLength) {
-    const bytesRead = readSync(
-      fileDescriptor,
-      buffer,
-      offset,
-      buffer.byteLength - offset,
-      offset,
-    )
-    if (bytesRead === 0) break
-    offset += bytesRead
-  }
-  if (offset !== expectedBytes) {
-    buffer.fill(0)
-    throw new ConfigurationError("Host configuration changed while it was read")
-  }
-  return buffer.subarray(0, expectedBytes)
-}
-
-function readHostConfiguration(file: string): FileReadResult {
-  if (typeof file !== "string" || !file.trim() || file.includes("\0")) {
-    throw new ConfigurationError("Host inspection requires a valid explicit file path")
-  }
-  const path = resolve(file)
-  let bytes: Buffer | undefined
-  let fileDescriptor: number | undefined
-  try {
-    const canonical = realpathSync.native(path)
-    const beforePath = lstatSync(path, { bigint: true })
-    if (canonical !== path || beforePath.isSymbolicLink()) {
-      throw new ConfigurationError("Host configuration path must not contain symbolic links")
-    }
-    assertSafeHostFile(beforePath)
-    const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0
-    fileDescriptor = openSync(path, fsConstants.O_RDONLY | noFollow)
-    const beforeRead = fstatSync(fileDescriptor, { bigint: true })
-    assertSafeHostFile(beforeRead)
-    if (beforePath.dev !== beforeRead.dev || beforePath.ino !== beforeRead.ino) {
-      throw new ConfigurationError("Host configuration changed while it was opened")
-    }
-    bytes = readExactBytes(fileDescriptor, Number(beforeRead.size))
-    const afterRead = fstatSync(fileDescriptor, { bigint: true })
-    const afterPath = lstatSync(path, { bigint: true })
-    if (
-      realpathSync.native(path) !== path
-      || !sameFile(beforeRead, afterRead)
-      || !sameFile(afterRead, afterPath)
-    ) {
-      throw new ConfigurationError("Host configuration changed while it was read")
-    }
-    return {
-      bytes,
-      fileReview: Object.freeze({
-        access: process.platform === "win32" ? "platform-unverified" : "owner-private",
-        bounded: true,
-        canonical: true,
-        owner: process.platform === "win32" ? "platform-unverified" : "trusted",
-        regularFile: true,
-        singleLink: true,
-        stableRead: true,
-      }),
-    }
-  } catch (error) {
-    bytes?.fill(0)
-    if (error instanceof ConfigurationError) throw error
-    if (isNodeError(error, "ENOENT")) {
-      throw new ConfigurationError("Host configuration file was not found")
-    }
-    if (isNodeError(error, "ELOOP")) {
-      throw new ConfigurationError("Host configuration path must not contain symbolic links")
-    }
-    throw new ConfigurationError("Unable to inspect host configuration file")
-  } finally {
-    if (fileDescriptor !== undefined) {
-      try {
-        closeSync(fileDescriptor)
-      } catch {
-        bytes?.fill(0)
-        throw new ConfigurationError("Unable to finalize host configuration inspection")
-      }
-    }
-  }
-}
-
-function parseHostConfiguration(bytes: Buffer): unknown {
-  if (bytes.includes(0) || bytes.byteLength > HOST_INSPECTION_MAX_BYTES) {
-    throw new ConfigurationError("Host configuration is not valid bounded JSON")
-  }
-  try {
-    const text = STRICT_UTF8_DECODER.decode(bytes)
-    return parseStrictConfigJson(text.endsWith("\n") ? text : `${text}\n`)
-  } catch {
-    throw new ConfigurationError("Host configuration is not valid strict JSON")
-  }
 }
 
 function expectedServer(adapter: HostAdapter): {
@@ -411,10 +252,13 @@ export function inspectHostAdapterFile(
   file: string,
 ): HostInspectionReport {
   const adapter = findHostAdapter(createHostAdapterCatalog(plan), adapterId)
-  const source = readHostConfiguration(file)
+  const source = readHostJsonSnapshot(file)
+  if (source.state !== "present") {
+    throw new ConfigurationError("Host configuration file was not found")
+  }
   let comparison: ComparisonResult
   try {
-    comparison = compareConfiguration(parseHostConfiguration(source.bytes), adapter)
+    comparison = compareConfiguration(source.document, adapter)
   } finally {
     source.bytes.fill(0)
   }
