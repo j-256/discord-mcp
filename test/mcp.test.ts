@@ -8585,6 +8585,24 @@ function guildBlueprintPlan(
       name: "Guild",
       ownerId: USER_ID,
     },
+    manifestPreview: {
+      coverage: "complete-intent-sequence-current-frontier-only",
+      entries: [],
+      executableEntryId: null,
+      frontierEntryId: null,
+      livePrerequisites: [],
+      summary: {
+        assessed: 0,
+        blocked: 0,
+        deferred: 0,
+        executable: 0,
+        ready: 0,
+        satisfied: 0,
+        prerequisites: 0,
+        total: 0,
+      },
+      warnings: [],
+    },
     operationKeyHash: OPERATION_KEY_HASH,
     privacy: {
       activityAndReceipts: "content-free-domain-records",
@@ -14912,6 +14930,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "plan_attachment_message",
       "execute_attachment_message",
       "compile_guild_blueprint_starter",
+      "preview_guild_blueprint",
       "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
@@ -16672,12 +16691,14 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
     "compile_guild_blueprint_starter",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
+    "preview_guild_blueprint",
     "verify_guild_blueprint",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
       "compile_guild_blueprint_starter",
+      "preview_guild_blueprint",
       "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
@@ -33195,6 +33216,10 @@ test("MCP guild blueprint starters compile strict authority-free planner inputs"
   assert.deepEqual(result.starter, { name: "support", version: 1 })
   assert.equal((result.next as Record<string, unknown>).setupRecipe, "guild-starter")
   assert.equal(
+    (result.next as Record<string, unknown>).previewTool,
+    "preview_guild_blueprint",
+  )
+  assert.equal(
     (result.next as Record<string, unknown>).setupRecipeCoverage,
     "requires-separate-guild-profile-policy",
   )
@@ -33253,6 +33278,46 @@ test("MCP guild blueprint starters compile strict authority-free planner inputs"
   assert.equal(unknownStarter.isError, true)
   assert.equal(invalidKey.isError, true)
   assert.equal(JSON.stringify(result).includes(TOKEN), false)
+})
+
+test("MCP guild blueprint preview is complete, local, and authority-free", async (context) => {
+  const { calls, client, guildBlueprintCaptureCalls } = await connectedFixture(context)
+  const input = guildBlueprintToolInput()
+  const previewed = await client.callTool({
+    arguments: input,
+    name: "preview_guild_blueprint",
+  })
+  const preview = structuredContent(previewed)
+
+  assert.equal(previewed.isError, undefined)
+  assert.equal(preview.status, "previewed")
+  assert.deepEqual(preview.authority, {
+    discordContacted: false,
+    executablePlanCreated: false,
+    liveStateAssessed: false,
+    requestDigestAuthority: "comparison-only-not-an-approval",
+    writeAuthorityGranted: false,
+  })
+  assert.deepEqual(
+    (preview.sequence as Array<Record<string, unknown>>).map(({ id }) => id),
+    ["structure", "settings"],
+  )
+  assert.equal(
+    "operationKey" in (preview.normalizedManifest as Record<string, unknown>),
+    false,
+  )
+  assert.equal(JSON.stringify(preview).includes(GUILD_BLUEPRINT_OPERATION_KEY), false)
+  assert.match(JSON.stringify(preview), /comparison identifier only/u)
+  assert.equal(calls.guildBlueprintPlan, 0)
+  assert.equal(guildBlueprintCaptureCalls.capture, 0)
+
+  const invalid = await client.callTool({
+    arguments: { ...input, remoteTemplateUrl: "https://example.invalid" },
+    name: "preview_guild_blueprint",
+  })
+  assert.equal(invalid.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 0)
+  assert.equal(guildBlueprintCaptureCalls.capture, 0)
 })
 
 test("MCP guild blueprint capture returns one strict planner-compatible draft", async (context) => {

@@ -350,6 +350,11 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },
+  preview_guild_blueprint: {
+    keywords: ["blueprint", "dependency", "dry run", "guild", "intent", "local", "manifest", "normalize", "preview", "reference", "review", "sequence"],
+    toolset: "guild-blueprints",
+    workflow: "guild-blueprint",
+  },
   delete_messages: {
     keywords: ["bulk", "delete", "exact ids", "remove"],
     toolset: "deletion",

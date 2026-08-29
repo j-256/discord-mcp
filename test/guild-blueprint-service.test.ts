@@ -33,10 +33,13 @@ import {
   guildBlueprintRequestDigest,
   guildBlueprintStepOperationKey,
   normalizeGuildBlueprintRequest,
+  previewGuildBlueprintManifest,
   type GuildBlueprintDomainServices,
   type GuildBlueprintExecutors,
+  type GuildBlueprintPlanStep,
   type GuildBlueprintRequest,
 } from "../src/guild-blueprint-service.js"
+import { projectGuildBlueprintPlanManifestPreview } from "../src/guild-blueprint-preview.js"
 import type {
   GuildProfileChangePlan,
   GuildProfileChangeRequest,
@@ -1486,6 +1489,128 @@ test("guild blueprint publications normalize one strict bounded manifest contrac
   )
 })
 
+test("guild blueprint preview exposes the complete normalized intent without authority", () => {
+  const manifest = request({
+    autoModerationRules: autoModerationRules(),
+    channelMetadata: [{ channelId: CHANNEL_ID, topic: null }],
+    community: community(),
+    onboarding: onboarding(),
+    publications: publications(),
+    roleConfigurations: [{ hoist: true, roleId: ROLE_ID }],
+    welcomeScreen: welcomeScreen(),
+  })
+  const preview = previewGuildBlueprintManifest(manifest)
+
+  assert.equal(preview.status, "previewed")
+  assert.deepEqual(preview.authority, {
+    discordContacted: false,
+    executablePlanCreated: false,
+    liveStateAssessed: false,
+    requestDigestAuthority: "comparison-only-not-an-approval",
+    writeAuthorityGranted: false,
+  })
+  assert.equal("operationKey" in preview.normalizedManifest, false)
+  assert.equal(preview.normalizedManifest.operationKeyHash, operationKeyHash(OPERATION_KEY))
+  assert.equal(preview.operationKeyHash, operationKeyHash(OPERATION_KEY))
+  assert.equal(preview.requestDigest, guildBlueprintRequestDigest(manifest))
+  assert.deepEqual(
+    preview.sequence.map((entry) => entry.id),
+    [
+      "structure",
+      "role-configuration:0",
+      "channel-metadata:0",
+      "profile",
+      "settings",
+      "community",
+      "welcome-screen",
+      "onboarding",
+      "auto-moderation:0",
+      "publication:0",
+    ],
+  )
+  assert.deepEqual(
+    preview.sequence.map((entry) => entry.dependsOn),
+    [
+      [],
+      ["structure"],
+      ["role-configuration:0"],
+      ["channel-metadata:0"],
+      ["profile"],
+      ["settings"],
+      ["community"],
+      ["welcome-screen"],
+      ["onboarding"],
+      ["auto-moderation:0"],
+    ],
+  )
+  const references = preview.sequence.flatMap((entry) => entry.references)
+  assert.equal(references.some((reference) => (
+    reference.kind === "exact"
+    && reference.resource === "channel"
+    && reference.id === PUBLICATION_CHANNEL_ID
+  )), true)
+  assert.equal(references.some((reference) => (
+    reference.kind === "exact"
+    && reference.resource === "user"
+    && reference.id === NOTIFICATION_USER_ID
+  )), true)
+  assert.equal(references.some((reference) => (
+    reference.kind === "scaffold"
+    && reference.resource === "role"
+    && reference.key === "private-role"
+    && reference.relationship === "uses"
+  )), true)
+  assert.deepEqual(
+    preview.sequence.find((entry) => entry.id === "auto-moderation:0")
+      ?.potentialWriteStages,
+    ["disable-if-required", "configure", "enable"],
+  )
+  assert.match(preview.warnings.join("\n"), /does not contact Discord/u)
+  assert.match(preview.warnings.join("\n"), /not an executable plan digest/u)
+  assert.deepEqual(preview, previewGuildBlueprintManifest(manifest))
+})
+
+test("guild blueprint preview rejects inconsistent live planner projections", () => {
+  const preview = previewGuildBlueprintManifest(request())
+  const projectedStep = (
+    kind: "community" | "profile" | "settings" | "structure",
+    state: GuildBlueprintPlanStep["state"],
+    writeRequired: boolean,
+  ): GuildBlueprintPlanStep => ({
+    kind,
+    nestedPlanDigest: null,
+    operationKeyHash: operationKeyHash(OPERATION_KEY),
+    state,
+    writeRequired,
+  })
+
+  assert.throws(
+    () => projectGuildBlueprintPlanManifestPreview(
+      preview,
+      [
+        projectedStep("structure", "ready", true),
+        projectedStep("profile", "waiting", false),
+        projectedStep("settings", "waiting", false),
+      ],
+      null,
+    ),
+    /frontier is inconsistent/u,
+  )
+  assert.throws(
+    () => projectGuildBlueprintPlanManifestPreview(
+      preview,
+      [
+        projectedStep("structure", "satisfied", false),
+        projectedStep("profile", "satisfied", false),
+        projectedStep("settings", "satisfied", false),
+        projectedStep("community", "satisfied", false),
+      ],
+      null,
+    ),
+    /unsupported live prerequisite/u,
+  )
+})
+
 test("guild blueprint publications recover in order and expose one exact frontier", async () => {
   const state = fixture({
     componentVerification(value, index) {
@@ -1937,6 +2062,25 @@ test("guild blueprint exposes only the structure frontier before later planning"
     ],
   )
   assert.deepEqual(plan.bindings, [])
+  assert.equal(plan.manifestPreview.coverage, "complete-intent-sequence-current-frontier-only")
+  assert.equal(plan.manifestPreview.frontierEntryId, "structure")
+  assert.equal(plan.manifestPreview.executableEntryId, "structure")
+  assert.equal(plan.manifestPreview.summary.assessed, 1)
+  assert.equal(plan.manifestPreview.summary.deferred, 4)
+  assert.deepEqual(
+    plan.manifestPreview.entries.map((entry) => [
+      entry.id,
+      entry.assessment.state,
+      entry.assessment.executable,
+    ]),
+    [
+      ["structure", "ready", true],
+      ["profile", "waiting", false],
+      ["settings", "waiting", false],
+      ["welcome-screen", "waiting", false],
+      ["onboarding", "waiting", false],
+    ],
+  )
 })
 
 test("guild blueprint sequences and executes exact convergence one target at a time", async () => {
@@ -2216,6 +2360,20 @@ test("guild blueprint blocks Community-dependent enablement before downstream pl
       ["onboarding", "waiting"],
     ],
   )
+  assert.deepEqual(plan.manifestPreview.livePrerequisites, [{
+    assessment: {
+      deferred: false,
+      executable: false,
+      freshlyAssessed: true,
+      nestedPlanDigest: null,
+      state: "blocked",
+      writeRequired: false,
+    },
+    id: "community",
+    kind: "community",
+  }])
+  assert.equal(plan.manifestPreview.summary.prerequisites, 1)
+  assert.equal(plan.manifestPreview.executableEntryId, null)
 
   const executionCalls: string[] = []
   const result = await state.service.execute(

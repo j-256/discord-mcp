@@ -721,6 +721,7 @@ const LOCAL_TOOL_NAMES: ReadonlySet<McpToolName> = new Set([
   MCP_DISCOVERY_TOOL_NAME,
   "compile_component_template",
   "compile_guild_blueprint_starter",
+  "preview_guild_blueprint",
   "get_gateway_events",
   "get_gateway_status",
   "get_observability_status",

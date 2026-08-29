@@ -86,6 +86,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "discover_discord_tools",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
+    "preview_guild_blueprint",
     "verify_guild_blueprint",
   ])
   assert.deepEqual(guildStarter.capabilities, [
@@ -130,6 +131,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "discover_discord_tools",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
+    "preview_guild_blueprint",
     "verify_guild_blueprint",
   ])
   assert.equal(guildBuilder.capabilities.includes("automodAudit"), true)
