@@ -426,6 +426,7 @@ import type {
   GuildBlueprintCaptureServiceOptions,
 } from "./guild-blueprint-capture-service.js"
 import { GuildBlueprintCaptureService } from "./guild-blueprint-capture-service.js"
+import { createGuildRecoveryAttestationKey } from "./guild-recovery-attestation.js"
 import type {
   GuildBlueprintPlan,
   GuildBlueprintRequest,
@@ -1257,6 +1258,7 @@ export interface ConnectorServiceOptions {
     GuildBlueprintCaptureServiceOptions,
     "clock"
   >
+  guildRecoveryAttestationKey?: Uint8Array
   guildExpressionOptions?: Pick<
     GuildExpressionServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1662,6 +1664,9 @@ export class ConnectorService {
     const operationStore = options.operationStore || new FileOperationStore(
       operationReceiptDirectory(options.config.auditFile),
     )
+    const guildRecoveryAttestationKey = new Uint8Array(
+      options.guildRecoveryAttestationKey ?? createGuildRecoveryAttestationKey(),
+    )
     this.#writeCoordinator = options.writeCoordinator || new FileWriteCoordinator(
       writeCoordinationDirectory(options.config.auditFile),
       operationStore,
@@ -1845,6 +1850,7 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.channelDeletionOptions,
+      recoveryAttestationKey: guildRecoveryAttestationKey,
     })
     this.#channelMetadataService = new ChannelMetadataService({
       activityStore: this.#activityStore,
@@ -2216,6 +2222,7 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.roleDeletionOptions,
+      recoveryAttestationKey: guildRecoveryAttestationKey,
     })
     this.#roleOrderingService = new RoleOrderingService({
       activityStore: this.#activityStore,
@@ -2250,6 +2257,7 @@ export class ConnectorService {
       community: this.#guildCommunityService,
       policy: this.#policy,
       ...options.guildBlueprintCaptureOptions,
+      recoveryAttestationKey: guildRecoveryAttestationKey,
     })
   }
 

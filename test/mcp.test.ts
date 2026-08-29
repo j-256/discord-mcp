@@ -154,6 +154,10 @@ import type {
   RoleDeletionRequest,
 } from "../src/role-deletion-service.js"
 import type {
+  GuildDeletionRecoveryEvidence,
+  GuildDeletionRecoveryRequest,
+} from "../src/guild-recovery-attestation.js"
+import type {
   ChannelMetadataChangePlan,
   ChannelMetadataChangeRequest,
   ChannelMetadataReadResult,
@@ -823,6 +827,8 @@ const CHANNEL_ORDERING_ANCHOR_ID = "200000000000000004"
 const CHANNEL_ORDERING_MID_ID = "200000000000000005"
 const CHANNEL_ORDERING_OPERATION_KEY = "channel-ordering-attempt-0001"
 const CHANNEL_DELETION_OPERATION_KEY = "channel-deletion-attempt-0001"
+const RECOVERY_ATTESTATION = `guild-recovery.v1.${"A".repeat(64)}.${"b".repeat(64)}`
+const DIFFERENT_RECOVERY_ATTESTATION = `guild-recovery.v1.${"C".repeat(64)}.${"d".repeat(64)}`
 const CHANNEL_CLONE_OPERATION_KEY = "channel-clone-attempt-0001"
 const CHANNEL_CLONE_CREATED_ID = "200000000000000006"
 const ATTACHMENT_OPERATION_KEY = "attachment-send-attempt-0001"
@@ -7295,8 +7301,49 @@ function channelDeletionInput(
     channelId: CHANNEL_ID,
     guildId: GUILD_ID,
     operationKey: CHANNEL_DELETION_OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
     ...overrides,
   } as ChannelDeletionRequest & Record<string, unknown>
+}
+
+function deletionRecoveryEvidence(
+  request: GuildDeletionRecoveryRequest,
+  blueprintKey: string,
+  omissionCode: string,
+): GuildDeletionRecoveryEvidence {
+  const limitations = {
+    atomicSnapshot: false as const,
+    automaticRollback: false as const,
+    completeBackup: false as const,
+    connectorPersistence: false as const,
+    crossGuildPortable: false as const,
+    losslessRestore: false as const,
+    messageRecovery: false as const,
+    originalIdRestoration: false as const,
+  }
+  return request.mode === "none"
+    ? {
+        capture: null,
+        limitations,
+        mode: "none",
+        verified: false,
+      }
+    : {
+        capture: {
+          blueprintKey,
+          captureDigest: `sha256:${"c".repeat(64)}`,
+          capturedAt: "2026-08-23T00:00:00.000Z",
+          expiresAt: "2026-08-23T00:30:00.000Z",
+          omissionCodes: [omissionCode],
+          targetStateDigest: `sha256:${"e".repeat(64)}`,
+        },
+        limitations,
+        mode: "verified-blueprint-capture",
+        verified: true,
+      }
 }
 
 function channelDeletionPlan(
@@ -7345,6 +7392,11 @@ function channelDeletionPlan(
       updatedAt: "2026-08-23T00:00:00.000Z",
     },
     operationKeyHash: OPERATION_KEY_HASH,
+    recovery: deletionRecoveryEvidence(
+      request.recovery,
+      `channel-${request.channelId}`,
+      "CHANNEL_ORDER_OMITTED",
+    ),
     permission: {
       administrator: false,
       confidence: "complete",
@@ -7437,6 +7489,10 @@ function roleDeletionInput(
     auditReason: AUDIT_REASON,
     guildId: GUILD_ID,
     operationKey: ROLE_DELETION_OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
     roleId: ROLE_ID,
     ...overrides,
   } as RoleDeletionRequest & Record<string, unknown>
@@ -7484,6 +7540,11 @@ function roleDeletionPlan(
     },
     memberCount,
     operationKeyHash: OPERATION_KEY_HASH,
+    recovery: deletionRecoveryEvidence(
+      request.recovery,
+      `role-${request.roleId}`,
+      "ROLE_ORDER_OMITTED",
+    ),
     permission: {
       administrator: false,
       botEffectivePermissionNames: ["MANAGE_GUILD", "MANAGE_ROLES"],
@@ -8748,10 +8809,12 @@ function guildBlueprintCaptureResult(
       memberProfiles: "connector-bot-identity-only",
       messageContent: "not-read",
       rawPayloads: "omitted",
+      recoveryAttestations: "transient-process-bound",
       returnedText: "transient-caller-retained",
       serverPersistence: "none",
       webhooks: "not-read",
     },
+    recoveryBindings: [],
     schemaVersion: 1,
     status: "ready",
   }
@@ -33113,6 +33176,7 @@ test("MCP guild blueprint capture returns one strict planner-compatible draft", 
     memberProfiles: "connector-bot-identity-only",
     messageContent: "not-read",
     rawPayloads: "omitted",
+    recoveryAttestations: "transient-process-bound",
     returnedText: "transient-caller-retained",
     serverPersistence: "none",
     webhooks: "not-read",
@@ -37698,6 +37762,7 @@ test("MCP channel ordering exposes uncertainty and content-free conflicts", asyn
 
 test("MCP channel deletion requires explicit irreversible intent and returns content-free plans", async (context) => {
   const { calls, client } = await connectedFixture(context)
+  const { recovery: _recovery, ...missingRecovery } = channelDeletionInput()
   const planned = await client.callTool({
     arguments: channelDeletionInput(),
     name: "plan_channel_deletion",
@@ -37711,6 +37776,29 @@ test("MCP channel deletion requires explicit irreversible intent and returns con
   })
   const extraField = await client.callTool({
     arguments: { ...channelDeletionInput(), channelName: "unsafe-target" },
+    name: "plan_channel_deletion",
+  })
+  const missingRecoveryResult = await client.callTool({
+    arguments: missingRecovery,
+    name: "plan_channel_deletion",
+  })
+  const unacknowledgedRecovery = await client.callTool({
+    arguments: channelDeletionInput({
+      recovery: {
+        acknowledgeNoRecoveryArtifact: false,
+        mode: "none",
+      } as never,
+    }),
+    name: "plan_channel_deletion",
+  })
+  const malformedRecovery = await client.callTool({
+    arguments: channelDeletionInput({
+      recovery: {
+        acknowledgeCallerRetentionAndLimitations: true,
+        attestation: "not-an-attestation",
+        mode: "verified-blueprint-capture",
+      },
+    }),
     name: "plan_channel_deletion",
   })
 
@@ -37727,8 +37815,45 @@ test("MCP channel deletion requires explicit irreversible intent and returns con
   )
   assert.equal(unacknowledged.isError, true)
   assert.equal(extraField.isError, true)
+  assert.equal(missingRecoveryResult.isError, true)
+  assert.equal(unacknowledgedRecovery.isError, true)
+  assert.equal(malformedRecovery.isError, true)
   assert.equal(calls.channelDeletionPlan, 1)
   assert.doesNotMatch(JSON.stringify(planned), new RegExp(CHANNEL_DELETION_OPERATION_KEY))
+})
+
+test("MCP channel deletion keeps recovery attestations out of plans and signed approval output", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const recovery = {
+    acknowledgeCallerRetentionAndLimitations: true as const,
+    attestation: RECOVERY_ATTESTATION,
+    mode: "verified-blueprint-capture" as const,
+  }
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      ...channelDeletionInput({ recovery }),
+      planDigest: DIGEST,
+    },
+    name: "execute_channel_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.channelDeletionPlan, 1)
+  assert.equal(calls.channelDeletionExecute, 1)
+  assert.match(confirmationMessage, /verified-blueprint-capture/u)
+  assert.match(confirmationMessage, /CHANNEL_ORDER_OMITTED/u)
+  assert.match(confirmationMessage, /automaticRollback.*false/u)
+  assert.equal(confirmationMessage.includes(RECOVERY_ATTESTATION), false)
+  assert.equal(JSON.stringify(result).includes(RECOVERY_ATTESTATION), false)
+  assert.equal(JSON.stringify(serverMessages).includes(RECOVERY_ATTESTATION), false)
 })
 
 test("MCP channel deletion binds signed approval to complete irreversible evidence", async (context) => {
@@ -37861,6 +37986,58 @@ test("MCP channel-deletion approval state binds the exact destructive target", a
   assert.equal(fixture.calls.channelDeletionExecute, 0)
 })
 
+test("MCP channel-deletion approval state binds the recovery attestation hash", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    ...channelDeletionInput({
+      recovery: {
+        acknowledgeCallerRetentionAndLimitations: true,
+        attestation: RECOVERY_ATTESTATION,
+        mode: "verified-blueprint-capture",
+      },
+    }),
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_channel_deletion",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  assert.equal(JSON.stringify(initial).includes(RECOVERY_ATTESTATION), false)
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        recovery: {
+          acknowledgeCallerRetentionAndLimitations: true,
+          attestation: DIFFERENT_RECOVERY_ATTESTATION,
+          mode: "verified-blueprint-capture",
+        },
+      },
+      inputResponses: {
+        confirm_channel_deletion: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_channel_deletion",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.channelDeletionExecute, 0)
+})
+
 test("MCP channel deletion exposes uncertainty and content-free conflicts", async (context) => {
   const approve = async () => ({
     action: "accept" as const,
@@ -37915,6 +38092,7 @@ test("MCP channel deletion exposes uncertainty and content-free conflicts", asyn
 
 test("MCP role deletion exposes readiness and requires exact irreversible intent", async (context) => {
   const { calls, client } = await connectedFixture(context)
+  const { recovery: _recovery, ...missingRecovery } = roleDeletionInput()
   const readiness = await client.callTool({
     arguments: { guildId: GUILD_ID, roleId: ROLE_ID },
     name: "audit_role_deletion",
@@ -37934,6 +38112,29 @@ test("MCP role deletion exposes readiness and requires exact irreversible intent
     arguments: { ...roleDeletionInput(), roleName: "unsafe-target" },
     name: "plan_role_deletion",
   })
+  const missingRecoveryResult = await client.callTool({
+    arguments: missingRecovery,
+    name: "plan_role_deletion",
+  })
+  const unacknowledgedRecovery = await client.callTool({
+    arguments: roleDeletionInput({
+      recovery: {
+        acknowledgeNoRecoveryArtifact: false,
+        mode: "none",
+      } as never,
+    }),
+    name: "plan_role_deletion",
+  })
+  const malformedRecovery = await client.callTool({
+    arguments: roleDeletionInput({
+      recovery: {
+        acknowledgeCallerRetentionAndLimitations: true,
+        attestation: "not-an-attestation",
+        mode: "verified-blueprint-capture",
+      },
+    }),
+    name: "plan_role_deletion",
+  })
 
   assert.equal(structuredContent(readiness).status, "ready")
   assert.equal(structuredContent(planned).status, "planned")
@@ -37944,9 +38145,46 @@ test("MCP role deletion exposes readiness and requires exact irreversible intent
   )
   assert.equal(unacknowledged.isError, true)
   assert.equal(extraField.isError, true)
+  assert.equal(missingRecoveryResult.isError, true)
+  assert.equal(unacknowledgedRecovery.isError, true)
+  assert.equal(malformedRecovery.isError, true)
   assert.equal(calls.roleDeletionAudit, 1)
   assert.equal(calls.roleDeletionPlan, 1)
   assert.doesNotMatch(JSON.stringify(planned), new RegExp(ROLE_DELETION_OPERATION_KEY))
+})
+
+test("MCP role deletion keeps recovery attestations out of plans and signed approval output", async (context) => {
+  let confirmationMessage = ""
+  const serverMessages: unknown[] = []
+  const recovery = {
+    acknowledgeCallerRetentionAndLimitations: true as const,
+    attestation: RECOVERY_ATTESTATION,
+    mode: "verified-blueprint-capture" as const,
+  }
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serverMessages,
+  })
+  const result = await client.callTool({
+    arguments: {
+      ...roleDeletionInput({ recovery }),
+      planDigest: DIGEST,
+    },
+    name: "execute_role_deletion",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.roleDeletionPlan, 1)
+  assert.equal(calls.roleDeletionExecute, 1)
+  assert.match(confirmationMessage, /verified-blueprint-capture/u)
+  assert.match(confirmationMessage, /ROLE_ORDER_OMITTED/u)
+  assert.match(confirmationMessage, /automaticRollback.*false/u)
+  assert.equal(confirmationMessage.includes(RECOVERY_ATTESTATION), false)
+  assert.equal(JSON.stringify(result).includes(RECOVERY_ATTESTATION), false)
+  assert.equal(JSON.stringify(serverMessages).includes(RECOVERY_ATTESTATION), false)
 })
 
 test("MCP role deletion binds signed approval to complete irreversible evidence", async (context) => {
@@ -38057,6 +38295,58 @@ test("MCP role-deletion approval state binds the exact destructive target", asyn
       arguments: {
         ...request,
         roleId: "350000000000000009",
+      },
+      inputResponses: {
+        confirm_role_deletion: {
+          action: "accept",
+          content: { approve: true },
+        },
+      },
+      name: "execute_role_deletion",
+      requestState: initial.requestState,
+    },
+  }, specTypeSchemas.CallToolResult)
+
+  assert.equal(structuredContent(result).status, "confirmation-invalid")
+  assert.equal(result.isError, true)
+  assert.equal(fixture.calls.roleDeletionExecute, 0)
+})
+
+test("MCP role-deletion approval state binds the recovery attestation hash", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    ...roleDeletionInput({
+      recovery: {
+        acknowledgeCallerRetentionAndLimitations: true,
+        attestation: RECOVERY_ATTESTATION,
+        mode: "verified-blueprint-capture",
+      },
+    }),
+    planDigest: DIGEST,
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "execute_role_deletion",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  assert.equal(JSON.stringify(initial).includes(RECOVERY_ATTESTATION), false)
+  const result = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: {
+        ...request,
+        recovery: {
+          acknowledgeCallerRetentionAndLimitations: true,
+          attestation: DIFFERENT_RECOVERY_ATTESTATION,
+          mode: "verified-blueprint-capture",
+        },
       },
       inputResponses: {
         confirm_role_deletion: {

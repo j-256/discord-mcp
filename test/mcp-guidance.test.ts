@@ -3565,7 +3565,17 @@ test("MCP installation guidance audits one complete ID-only inventory", async (c
 test("MCP guidance completes exact configured IDs without service calls", async (context) => {
   const { calls, client } = await connectedFixture(context)
 
-  const [guild, channel, blueprint, recall, invalid, unbound] = await Promise.all([
+  const [
+    guild,
+    channel,
+    blueprint,
+    recoveryGuild,
+    recoveryChannel,
+    recoveryRole,
+    recall,
+    invalid,
+    unbound,
+  ] = await Promise.all([
     client.complete({
       argument: { name: "guildId", value: "100" },
       ref: {
@@ -3584,6 +3594,27 @@ test("MCP guidance completes exact configured IDs without service calls", async 
       argument: { name: "guildId", value: "100" },
       ref: {
         name: MCP_PROMPT_NAMES.authorGuildBlueprint,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "guildId", value: "100" },
+      ref: {
+        name: MCP_PROMPT_NAMES.prepareGuildRecovery,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "channelId", value: "200" },
+      ref: {
+        name: MCP_PROMPT_NAMES.prepareGuildRecovery,
+        type: "ref/prompt",
+      },
+    }),
+    client.complete({
+      argument: { name: "roleId", value: "350" },
+      ref: {
+        name: MCP_PROMPT_NAMES.prepareGuildRecovery,
         type: "ref/prompt",
       },
     }),
@@ -3621,6 +3652,9 @@ test("MCP guidance completes exact configured IDs without service calls", async 
     values: [CHANNEL_ID],
   })
   assert.deepEqual(blueprint.completion, guild.completion)
+  assert.deepEqual(recoveryGuild.completion, guild.completion)
+  assert.deepEqual(recoveryChannel.completion.values, [])
+  assert.deepEqual(recoveryRole.completion.values, [])
   assert.deepEqual(recall.completion, guild.completion)
   assert.deepEqual(invalid.completion.values, [])
   assert.notEqual(invalid.completion.hasMore, true)
@@ -5312,6 +5346,50 @@ test("MCP guild-blueprint authoring stays offline and preserves literal authorit
         name: MCP_PROMPT_NAMES.authorGuildBlueprint,
       }),
       /Invalid arguments for prompt/,
+    )
+  }
+  assert.equal(totalCalls(calls), 0)
+})
+
+test("MCP guild recovery preparation is capture-only and exact-target bound", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const arguments_ = {
+    auditReason: "Prepare reviewed channel retirement recovery",
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+  }
+  const prepared = promptText(await client.getPrompt({
+    arguments: arguments_,
+    name: MCP_PROMPT_NAMES.prepareGuildRecovery,
+  }))
+
+  assert.deepEqual(JSON.parse(prepared.split("\n")[1] || ""), arguments_)
+  assert.match(prepared, /Call only capture_guild_blueprint exactly once/u)
+  assert.match(prepared, /channelId and roleId select returned evidence only/u)
+  assert.match(prepared, /stable two-pass result/u)
+  assert.match(prepared, /exact matching resource type and ID/u)
+  assert.match(prepared, /valid only in this running connector process/u)
+  assert.match(prepared, /not an atomic or complete backup/u)
+  assert.match(prepared, /Never synthesize or recommend the explicit no-recovery-artifact opt-out/u)
+  assert.match(prepared, /Do not call plan_guild_blueprint/u)
+  assert.match(prepared, /plan_channel_deletion, plan_role_deletion/u)
+  assert.match(prepared, /Persist no blueprint, attestation, Discord data, or input value/u)
+  assert.equal(totalCalls(calls), 0)
+
+  for (const invalidArguments of [{
+    ...arguments_,
+    roleId: ROLE_ID,
+  }, {
+    ...arguments_,
+    channelId: "0",
+  }]) {
+    await assert.rejects(
+      () => client.getPrompt({
+        arguments: invalidArguments,
+        name: MCP_PROMPT_NAMES.prepareGuildRecovery,
+      }),
+      /Invalid arguments for prompt/u,
     )
   }
   assert.equal(totalCalls(calls), 0)
@@ -8106,6 +8184,10 @@ test("MCP channel-deletion guidance exposes exact readiness and a plan-only stri
     channelId: CHANNEL_ID,
     guildId: GUILD_ID,
     operationKey: OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
   }
   const reviewed = await client.getPrompt({
     arguments: { requestJson: JSON.stringify(request) },
@@ -8114,21 +8196,33 @@ test("MCP channel-deletion guidance exposes exact readiness and a plan-only stri
   const text = promptText(reviewed)
   assert.deepEqual(JSON.parse(text.split("\n")[1] || ""), request)
   assert.match(text, /Call only plan_channel_deletion/)
+  assert.match(text, /credential-free recovery mode/u)
+  assert.match(text, /never repeat it in narrative output/u)
+  assert.match(text, /invalid, expired, mismatched, or stale recovery attestation/u)
   assert.match(text, /Do not call execute_channel_deletion/)
   assert.equal(totalCalls(calls), 1)
 
-  await assert.rejects(
-    () => client.getPrompt({
-      arguments: {
-        requestJson: JSON.stringify({
-          ...request,
-          acknowledgeIrreversibleContentLoss: false,
-        }),
-      },
-      name: MCP_PROMPT_NAMES.reviewChannelDeletion,
-    }),
-    /valid strict plan_channel_deletion input object/,
-  )
+  for (const invalidRequest of [{
+    ...request,
+    acknowledgeIrreversibleContentLoss: false,
+  }, {
+    ...request,
+    recovery: undefined,
+  }, {
+    ...request,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: false,
+      mode: "none",
+    },
+  }]) {
+    await assert.rejects(
+      () => client.getPrompt({
+        arguments: { requestJson: JSON.stringify(invalidRequest) },
+        name: MCP_PROMPT_NAMES.reviewChannelDeletion,
+      }),
+      /valid strict plan_channel_deletion input object/,
+    )
+  }
 })
 
 test("MCP role-deletion guidance exposes exact readiness and a plan-only strict prompt", async (context) => {
@@ -8153,6 +8247,10 @@ test("MCP role-deletion guidance exposes exact readiness and a plan-only strict 
     auditReason: "Retire an unused test role",
     guildId: GUILD_ID,
     operationKey: OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
     roleId: ROLE_ID,
   }
   const reviewed = await client.getPrompt({
@@ -8162,21 +8260,33 @@ test("MCP role-deletion guidance exposes exact readiness and a plan-only strict 
   const text = promptText(reviewed)
   assert.deepEqual(JSON.parse(text.split("\n")[1] || ""), request)
   assert.match(text, /Call only plan_role_deletion/)
+  assert.match(text, /credential-free recovery mode/u)
+  assert.match(text, /never repeat it in narrative output/u)
+  assert.match(text, /invalid, expired, mismatched, or stale recovery attestation/u)
   assert.match(text, /Do not call execute_role_deletion/)
   assert.match(text, /historical role mentions/)
   assert.match(text, /other applications/)
   assert.equal(totalCalls(calls), 1)
 
-  await assert.rejects(
-    () => client.getPrompt({
-      arguments: {
-        requestJson: JSON.stringify({
-          ...request,
-          acknowledgeIrreversibleRoleLoss: false,
-        }),
-      },
-      name: MCP_PROMPT_NAMES.reviewRoleDeletion,
-    }),
-    /valid strict plan_role_deletion input object/,
-  )
+  for (const invalidRequest of [{
+    ...request,
+    acknowledgeIrreversibleRoleLoss: false,
+  }, {
+    ...request,
+    recovery: undefined,
+  }, {
+    ...request,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: false,
+      mode: "none",
+    },
+  }]) {
+    await assert.rejects(
+      () => client.getPrompt({
+        arguments: { requestJson: JSON.stringify(invalidRequest) },
+        name: MCP_PROMPT_NAMES.reviewRoleDeletion,
+      }),
+      /valid strict plan_role_deletion input object/,
+    )
+  }
 })

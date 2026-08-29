@@ -42,6 +42,20 @@ import {
   GuildChannelEvidenceError,
   type GuildChannelHttpEvidenceMode,
 } from "./guild-channel-evidence.js"
+import {
+  guildBlueprintChannelRecoveryStateDigest,
+} from "./guild-blueprint-capture-service.js"
+import {
+  createGuildRecoveryAttestationKey,
+  guildDeletionRecoveryWarnings,
+  guildDeletionRecoveryRequestDigestView,
+  noGuildRecoveryArtifactEvidence,
+  normalizeGuildDeletionRecoveryRequest,
+  verifyGuildRecoveryAttestation,
+  type GuildDeletionRecoveryEvidence,
+  type GuildDeletionRecoveryRequest,
+  type NormalizedGuildDeletionRecoveryRequest,
+} from "./guild-recovery-attestation.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -200,10 +214,13 @@ export interface ChannelDeletionRequest {
   channelId: string
   guildId: string
   operationKey: string
+  recovery: GuildDeletionRecoveryRequest
 }
 
-export interface NormalizedChannelDeletionRequest extends ChannelDeletionRequest {
+export interface NormalizedChannelDeletionRequest
+  extends Omit<ChannelDeletionRequest, "recovery"> {
   operationKeyHash: string
+  recovery: NormalizedGuildDeletionRecoveryRequest
 }
 
 export interface ChannelDeletionTarget {
@@ -298,6 +315,7 @@ export interface ChannelDeletionPlan extends Omit<
   createdAt: string
   digest: string
   operationKeyHash: string
+  recovery: GuildDeletionRecoveryEvidence
   status: "blocked" | "planned"
   writeRequired: boolean
 }
@@ -352,6 +370,7 @@ export interface ChannelDeletionServiceOptions {
     "assertChannelDeletionAllowed" | "assertChannelDeletionAuditable"
   >
   randomId?: () => string
+  recoveryAttestationKey?: Uint8Array
   verificationTimeoutMs?: number
 }
 
@@ -488,6 +507,7 @@ export function normalizeChannelDeletionRequest(
       "channelId",
       "guildId",
       "operationKey",
+      "recovery",
     ])
     || request.acknowledgeIrreversibleContentLoss !== true
     || typeof request.auditReason !== "string"
@@ -499,6 +519,7 @@ export function normalizeChannelDeletionRequest(
   return {
     ...request,
     operationKeyHash: operationKeyHash(request.operationKey),
+    recovery: normalizeGuildDeletionRecoveryRequest(request.recovery),
   }
 }
 
@@ -1228,6 +1249,7 @@ export class ChannelDeletionService {
   readonly #planKey: Uint8Array
   readonly #policy: ChannelDeletionServiceOptions["policy"]
   readonly #randomId: () => string
+  readonly #recoveryAttestationKey: Uint8Array
   readonly #verificationTimeoutMs: number
 
   constructor(options: ChannelDeletionServiceOptions) {
@@ -1246,6 +1268,9 @@ export class ChannelDeletionService {
     this.#planKey = options.planKey ?? createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId ?? randomUUID
+    this.#recoveryAttestationKey = new Uint8Array(
+      options.recoveryAttestationKey ?? createGuildRecoveryAttestationKey(),
+    )
     this.#verificationTimeoutMs = verificationTimeoutMs
   }
 
@@ -1583,6 +1608,7 @@ export class ChannelDeletionService {
         ? ["Voice and Stage occupant enumeration is unavailable; verify that the target is empty in Discord because deletion may disconnect active participants"]
         : []),
       "Discord exposes no conditional channel deletion, so external same-guild administration can race the reviewed write",
+      "Deletion planning requires either a fresh exact target-bound caller-retained blueprint attestation or explicit acknowledgement that no recovery artifact is retained",
     ]
     const risks = [
       "Guild channel deletion is irreversible and can permanently destroy an unbounded message history",
@@ -1671,11 +1697,30 @@ export class ChannelDeletionService {
     }
     const state = await this.#state(botId, request.guildId, request.channelId, options)
     const readiness = this.#readiness(applicationId, botId, state)
+    const recovery = request.recovery.mode === "none"
+      ? noGuildRecoveryArtifactEvidence()
+      : verifyGuildRecoveryAttestation(
+          this.#recoveryAttestationKey,
+          request.recovery.attestation,
+          {
+            applicationId,
+            botId,
+            guildId: request.guildId,
+            resourceId: request.channelId,
+            resourceType: "channel",
+            targetStateDigest: guildBlueprintChannelRecoveryStateDigest(
+              state.targetChannel,
+            ),
+          },
+          this.#clock(),
+        )
     const digest = reviewedPlanDigest(this.#planKey, {
       acknowledgeIrreversibleContentLoss: request.acknowledgeIrreversibleContentLoss,
       auditReason: request.auditReason,
       evidenceDigest: readiness.evidenceDigest,
       operationKeyHash: request.operationKeyHash,
+      recovery: guildDeletionRecoveryRequestDigestView(request.recovery),
+      recoveryEvidence: recovery,
     })
     const {
       evidenceDigest: _evidenceDigest,
@@ -1690,7 +1735,9 @@ export class ChannelDeletionService {
       createdAt: this.#clock().toISOString(),
       digest,
       operationKeyHash: request.operationKeyHash,
+      recovery,
       status: readiness.ready ? "planned" : "blocked",
+      warnings: [...shared.warnings, ...guildDeletionRecoveryWarnings(recovery)],
       writeRequired: readiness.ready,
     }
     return {

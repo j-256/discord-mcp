@@ -138,6 +138,7 @@ test("domain prompts retain toolset boundaries while goal routing spans configur
     selectedMcpPromptNames(new Set(["guild-blueprints"])).sort(),
     [
       MCP_PROMPT_NAMES.authorGuildBlueprint,
+      MCP_PROMPT_NAMES.prepareGuildRecovery,
       MCP_PROMPT_NAMES.reviewGuildBlueprint,
       MCP_PROMPT_NAMES.routeDiscordGoal,
     ].sort(),

@@ -13,6 +13,12 @@ import {
   normalizeChannelDeletionRequest,
 } from "../src/channel-deletion-service.js"
 import {
+  guildBlueprintChannelRecoveryStateDigest,
+} from "../src/guild-blueprint-capture-service.js"
+import {
+  createGuildRecoveryAttestation,
+} from "../src/guild-recovery-attestation.js"
+import {
   DISCORD_CHANNEL_TYPES,
   SCHEMA_VERSION,
 } from "../src/constants.js"
@@ -60,6 +66,7 @@ const CHILD_CHANNEL_ID = "840000000000000004"
 const BOT_ROLE_ID = "850000000000000001"
 const OPERATION_KEY = "channel-deletion-operation-001"
 const PLAN_KEY = new Uint8Array(32).fill(23)
+const RECOVERY_KEY = new Uint8Array(32).fill(31)
 
 function role(
   id: string,
@@ -409,6 +416,10 @@ function request(
     channelId: TARGET_CHANNEL_ID,
     guildId: GUILD_ID,
     operationKey: OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
     ...overrides,
   }
 }
@@ -430,6 +441,7 @@ function fixture(options: {
     planKey: PLAN_KEY,
     policy: options.policy ?? policy(client.guild.id),
     randomId: () => "activity-channel-deletion-001",
+    recoveryAttestationKey: RECOVERY_KEY,
     verificationTimeoutMs: options.verificationTimeoutMs ?? 20,
   })
   return { activityStore, client, operationStore, service }
@@ -484,6 +496,126 @@ test("channel-deletion readiness and plan bind complete content-free evidence", 
   assert.match(plan.digest, /^hmac-sha256:[a-f0-9]{64}$/)
   assert.equal(JSON.stringify(plan).includes(OPERATION_KEY), false)
   assert.equal(JSON.stringify(plan).includes("permission_overwrites"), false)
+})
+
+test("channel-deletion verifies fresh exact-target blueprint recovery evidence", async () => {
+  const target = fixture()
+  const channel = target.client.channels.find((entry) => (
+    entry.id === TARGET_CHANNEL_ID
+  ))
+  assert.ok(channel)
+  const binding = createGuildRecoveryAttestation(RECOVERY_KEY, {
+    applicationId: APPLICATION_ID,
+    blueprintKey: `channel-${TARGET_CHANNEL_ID}`,
+    botId: BOT_ID,
+    captureDigest: `sha256:${"c".repeat(64)}`,
+    capturedAt: "2026-08-23T11:50:00.000Z",
+    guildId: GUILD_ID,
+    omissionCodes: ["CHANNEL_ORDER_OMITTED"],
+    resourceId: TARGET_CHANNEL_ID,
+    resourceType: "channel",
+    targetStateDigest: guildBlueprintChannelRecoveryStateDigest(channel),
+  })
+  const capturedRequest = request({
+    recovery: {
+      acknowledgeCallerRetentionAndLimitations: true,
+      attestation: binding.attestation,
+      mode: "verified-blueprint-capture",
+    },
+  })
+  const capturedPlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+  )
+  const noArtifactPlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.deepEqual(capturedPlan.recovery, {
+    capture: {
+      blueprintKey: `channel-${TARGET_CHANNEL_ID}`,
+      captureDigest: binding.captureDigest,
+      capturedAt: binding.capturedAt,
+      expiresAt: binding.expiresAt,
+      omissionCodes: ["CHANNEL_ORDER_OMITTED"],
+      targetStateDigest: binding.targetStateDigest,
+    },
+    limitations: {
+      atomicSnapshot: false,
+      automaticRollback: false,
+      completeBackup: false,
+      connectorPersistence: false,
+      crossGuildPortable: false,
+      losslessRestore: false,
+      messageRecovery: false,
+      originalIdRestoration: false,
+    },
+    mode: "verified-blueprint-capture",
+    verified: true,
+  })
+  assert.notEqual(capturedPlan.digest, noArtifactPlan.digest)
+  assert.doesNotMatch(JSON.stringify(capturedPlan), new RegExp(binding.attestation))
+  assert.ok(capturedPlan.warnings.some((warning) => (
+    warning.includes("CHANNEL_ORDER_OMITTED")
+  )))
+  assert.ok(noArtifactPlan.warnings.some((warning) => (
+    warning.includes("No recovery artifact is attested")
+  )))
+
+  channel.name = "Changed after capture"
+  await assert.rejects(
+    () => target.service.plan(APPLICATION_ID, BOT_ID, capturedRequest),
+    /invalid, expired, mismatched, or stale/u,
+  )
+})
+
+test("channel-deletion never persists a recovery attestation", async () => {
+  const target = fixture()
+  const selectedChannel = target.client.channels.find((entry) => (
+    entry.id === TARGET_CHANNEL_ID
+  ))
+  assert.ok(selectedChannel)
+  const binding = createGuildRecoveryAttestation(RECOVERY_KEY, {
+    applicationId: APPLICATION_ID,
+    blueprintKey: `channel-${TARGET_CHANNEL_ID}`,
+    botId: BOT_ID,
+    captureDigest: `sha256:${"f".repeat(64)}`,
+    capturedAt: "2026-08-23T11:50:00.000Z",
+    guildId: GUILD_ID,
+    omissionCodes: [],
+    resourceId: TARGET_CHANNEL_ID,
+    resourceType: "channel",
+    targetStateDigest: guildBlueprintChannelRecoveryStateDigest(selectedChannel),
+  })
+  const capturedRequest = request({
+    recovery: {
+      acknowledgeCallerRetentionAndLimitations: true,
+      attestation: binding.attestation,
+      mode: "verified-blueprint-capture",
+    },
+  })
+  const plan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+  )
+  const result = await target.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+    plan.digest,
+  )
+  const durableAndReturnedState = JSON.stringify({
+    activity: target.activityStore.entries,
+    receipts: [...target.operationStore.receipts.values()],
+    result,
+  })
+
+  assert.equal(result.status, "completed")
+  assert.equal(durableAndReturnedState.includes(binding.attestation), false)
 })
 
 test("channel-deletion discloses unavailable voice occupancy evidence", async () => {

@@ -11,6 +11,7 @@ import {
   GuildBlueprintCaptureService,
   normalizeGuildBlueprintCaptureRequest,
 } from "../src/guild-blueprint-capture-service.js"
+import { verifyGuildRecoveryAttestation } from "../src/guild-recovery-attestation.js"
 import { normalizeGuildBlueprintRequest } from "../src/guild-blueprint-service.js"
 import type { GuildCommunityAuditResult } from "../src/guild-community-service.js"
 import { ScopePolicy } from "../src/policy.js"
@@ -48,6 +49,7 @@ const AUTOMOD_RULE_ID = "800000000000000001"
 const TOKEN_VARIABLE = "DISCORD_CAPTURE_TEST_TOKEN"
 const OPERATION_KEY = "guild-blueprint-capture-operation-0001"
 const AUDIT_REASON = "Restore the reviewed caller-retained guild blueprint"
+const RECOVERY_KEY = new Uint8Array(32).fill(41)
 
 interface CapturePass {
   autoModerationRules: DiscordAutoModerationRuleSummary[]
@@ -370,6 +372,7 @@ function fixture(
       },
     },
     policy: selectedPolicy,
+    recoveryAttestationKey: RECOVERY_KEY,
   })
   return { calls, service }
 }
@@ -414,6 +417,7 @@ test("guild blueprint capture returns one strict planner-ready caller-retained i
   assert.equal(result.captureWindow.stable, true)
   assert.equal(result.privacy.messageContent, "not-read")
   assert.equal(result.privacy.memberProfiles, "connector-bot-identity-only")
+  assert.equal(result.privacy.recoveryAttestations, "transient-process-bound")
   assert.equal(result.privacy.serverPersistence, "none")
   assert.ok(result.blueprint)
   assert.doesNotThrow(() => normalizeGuildBlueprintRequest(result.blueprint!))
@@ -429,6 +433,46 @@ test("guild blueprint capture returns one strict planner-ready caller-retained i
     key: `role-${ROLE_ID}`,
     kind: "scaffold",
   }])
+  assert.deepEqual(result.recoveryBindings.map((binding) => ({
+    blueprintKey: binding.blueprintKey,
+    captureDigest: binding.captureDigest,
+    capturedAt: binding.capturedAt,
+    expiresAt: binding.expiresAt,
+    omissionCodes: binding.omissionCodes,
+    resourceId: binding.resourceId,
+    resourceType: binding.resourceType,
+  })), [{
+    blueprintKey: `channel-${CHANNEL_ID}`,
+    captureDigest: result.captureDigest,
+    capturedAt: "2026-08-24T00:00:01.000Z",
+    expiresAt: "2026-08-24T00:30:01.000Z",
+    omissionCodes: [],
+    resourceId: CHANNEL_ID,
+    resourceType: "channel",
+  }, {
+    blueprintKey: `role-${ROLE_ID}`,
+    captureDigest: result.captureDigest,
+    capturedAt: "2026-08-24T00:00:01.000Z",
+    expiresAt: "2026-08-24T00:30:01.000Z",
+    omissionCodes: [],
+    resourceId: ROLE_ID,
+    resourceType: "role",
+  }])
+  for (const binding of result.recoveryBindings) {
+    assert.doesNotThrow(() => verifyGuildRecoveryAttestation(
+      RECOVERY_KEY,
+      binding.attestation,
+      {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        guildId: GUILD_ID,
+        resourceId: binding.resourceId,
+        resourceType: binding.resourceType,
+        targetStateDigest: binding.targetStateDigest,
+      },
+      new Date("2026-08-24T00:05:00.000Z"),
+    ))
+  }
   assert.equal(JSON.stringify(result).includes("test-token"), false)
 })
 
@@ -447,6 +491,7 @@ test("guild blueprint capture returns no torn blueprint when the second pass cha
   assert.equal(result.captureDigest, null)
   assert.equal(result.coverage, null)
   assert.deepEqual(result.omissions, [])
+  assert.deepEqual(result.recoveryBindings, [])
   assert.deepEqual(result.blockers.map((entry) => entry.code), ["CAPTURE_CHANGED"])
   assert.doesNotMatch(JSON.stringify(result), /Changed during capture/u)
 })
@@ -668,6 +713,7 @@ test("guild blueprint capture blocks unknown or unresolved AutoMod evidence", as
 
   assert.equal(result.status, "blocked")
   assert.equal(result.blueprint, null)
+  assert.deepEqual(result.recoveryBindings, [])
   const codes = new Set(result.blockers.map(({ code }) => code))
   assert.equal(codes.has("AUTOMOD_UNKNOWN_EVIDENCE"), true)
   assert.equal(codes.has("CHANNEL_REFERENCE_UNRESOLVED"), true)

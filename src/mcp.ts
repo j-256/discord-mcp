@@ -161,6 +161,11 @@ import {
   type GuildBlueprintCaptureRequest,
 } from "./guild-blueprint-capture-service.js"
 import {
+  GUILD_RECOVERY_ATTESTATION_MAX_CHARACTERS,
+  GUILD_RECOVERY_ATTESTATION_PATTERN,
+  guildDeletionRecoveryRequestDigestView,
+} from "./guild-recovery-attestation.js"
+import {
   guildBlueprintRequestDigest,
   normalizeGuildBlueprintRequest,
   type GuildBlueprintAutoModerationActionInput,
@@ -5607,6 +5612,22 @@ const channelOrderingExecuteInputSchema = z.strictObject({
   ...channelOrderingFields,
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 }).superRefine(channelOrderingRules)
+const guildDeletionRecoveryInputSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    acknowledgeCallerRetentionAndLimitations: z.literal(true)
+      .describe("Literal true acknowledgement that the caller retained the returned blueprint and reviewed every capture limitation and omission"),
+    attestation: z.string()
+      .max(GUILD_RECOVERY_ATTESTATION_MAX_CHARACTERS)
+      .regex(GUILD_RECOVERY_ATTESTATION_PATTERN)
+      .describe("Short-lived exact-target attestation returned by capture_guild_blueprint; never reuse it for another target"),
+    mode: z.literal("verified-blueprint-capture"),
+  }),
+  z.strictObject({
+    acknowledgeNoRecoveryArtifact: z.literal(true)
+      .describe("Literal true acknowledgement that no caller-retained recovery artifact is being used"),
+    mode: z.literal("none"),
+  }),
+]).describe("Exact recovery-artifact choice; use a fresh target binding from capture_guild_blueprint or explicitly proceed without one")
 const channelDeletionFields = {
   acknowledgeIrreversibleContentLoss: z.literal(true)
     .describe("Literal true acknowledgement that deleting the exact channel permanently loses its channel content"),
@@ -5618,6 +5639,7 @@ const channelDeletionFields = {
     .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
     .regex(IDEMPOTENCY_KEY_PATTERN)
     .describe("Unique one-shot operation key; keep unchanged through review and never reuse after reservation"),
+  recovery: guildDeletionRecoveryInputSchema,
 }
 const channelDeletionPlanInputSchema = z.strictObject(channelDeletionFields)
 const channelDeletionExecuteInputSchema = z.strictObject({
@@ -5638,6 +5660,7 @@ const roleDeletionFields = {
     .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
     .regex(IDEMPOTENCY_KEY_PATTERN)
     .describe("Unique one-shot operation key; keep unchanged through review and never reuse after reservation"),
+  recovery: guildDeletionRecoveryInputSchema,
   roleId: positiveSnowflakeSchema,
 }
 const roleDeletionPlanInputSchema = z.strictObject(roleDeletionFields)
@@ -8900,6 +8923,17 @@ const channelOrderingRequestStateSchema = z.strictObject({
   placement: z.enum(["above", "below"]),
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
 })
+const guildDeletionRecoveryRequestStateSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    acknowledgeCallerRetentionAndLimitations: z.literal(true),
+    attestationHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    mode: z.literal("verified-blueprint-capture"),
+  }),
+  z.strictObject({
+    acknowledgeNoRecoveryArtifact: z.literal(true),
+    mode: z.literal("none"),
+  }),
+])
 const channelDeletionRequestStateSchema = z.strictObject({
   acknowledgeIrreversibleContentLoss: z.literal(true),
   auditReason: auditReasonSchema,
@@ -8907,6 +8941,7 @@ const channelDeletionRequestStateSchema = z.strictObject({
   guildId: positiveSnowflakeSchema,
   operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN),
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  recovery: guildDeletionRecoveryRequestStateSchema,
 })
 const roleDeletionRequestStateSchema = z.strictObject({
   acknowledgeIrreversibleRoleLoss: z.literal(true),
@@ -8914,6 +8949,7 @@ const roleDeletionRequestStateSchema = z.strictObject({
   guildId: positiveSnowflakeSchema,
   operationKeyHash: z.string().regex(OPERATION_KEY_HASH_PATTERN),
   planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  recovery: guildDeletionRecoveryRequestStateSchema,
   roleId: positiveSnowflakeSchema,
 })
 const memberRoleRequestStateSchema = z.strictObject({
@@ -18471,6 +18507,7 @@ function channelDeletionRequest(
     channelId: input.channelId,
     guildId: input.guildId,
     operationKey: input.operationKey,
+    recovery: input.recovery,
   }
 }
 
@@ -18490,6 +18527,7 @@ function channelDeletionConfirmationMessage(
     `Blockers: ${reviewLiteral(plan.blockers)}`,
     `Connector authority: ${reviewLiteral(plan.permission)}`,
     `Privacy boundary: ${reviewLiteral(plan.privacy)}`,
+    `Recovery preparation: ${reviewLiteral(plan.recovery)}`,
     `Discord audit-log reason: ${reviewLiteral(plan.auditReason)}`,
     `One-shot operation key hash: ${plan.operationKeyHash}`,
     `Plan digest: ${plan.digest}`,
@@ -18501,7 +18539,7 @@ function channelDeletionConfirmationMessage(
     "This workflow permanently deletes the exact direct guild channel and its channel content with one non-retried request, then requires a newer coherent Gateway layout proving absence.",
     "The operation key cannot be reused after reservation, including after an uncertain outcome. An uncertain result quarantines the guild channel collection.",
     "This workflow never deletes threads, DMs, non-empty categories, active Stage instances, special guild channels, or channels with discovered references, invites, threads, webhooks, or scheduled events.",
-    "Set approve to true only after checking every exact ID, target property, irreversible acknowledgement, dependency count and digest, authority fact, reason, risk, warning, hash, and digest.",
+    "Set approve to true only after checking every exact ID, target property, irreversible acknowledgement, recovery mode and limitation, dependency count and digest, authority fact, reason, risk, warning, hash, and digest.",
   ].join("\n")
 }
 
@@ -18513,6 +18551,7 @@ function channelDeletionRequestStatePayload(request: ChannelDeletionRequest) {
     channelId: normalized.channelId,
     guildId: normalized.guildId,
     operationKeyHash: normalized.operationKeyHash,
+    recovery: guildDeletionRecoveryRequestDigestView(normalized.recovery),
   }
 }
 
@@ -18555,6 +18594,7 @@ function roleDeletionRequest(
     auditReason: input.auditReason,
     guildId: input.guildId,
     operationKey: input.operationKey,
+    recovery: input.recovery,
     roleId: input.roleId,
   }
 }
@@ -18575,6 +18615,7 @@ function roleDeletionConfirmationMessage(
     `Blockers: ${reviewLiteral(plan.blockers)}`,
     `Connector authority: ${reviewLiteral(plan.permission)}`,
     `Privacy boundary: ${reviewLiteral(plan.privacy)}`,
+    `Recovery preparation: ${reviewLiteral(plan.recovery)}`,
     `Discord audit-log reason: ${reviewLiteral(plan.auditReason)}`,
     `One-shot operation key hash: ${plan.operationKeyHash}`,
     `Plan digest: ${plan.digest}`,
@@ -18586,7 +18627,7 @@ function roleDeletionConfirmationMessage(
     "This workflow permanently deletes the exact standard role with one non-retried request, then requires fresh evidence proving absence and preserving every reviewed survivor.",
     "Historical mentions, Guild Template references, and command permissions owned by other applications cannot be completely discovered through Discord's API.",
     "The operation key cannot be reused after reservation, including after an uncertain outcome. An uncertain result quarantines same-process role deletion for this guild.",
-    "Set approve to true only after checking every exact ID, role property, irreversible acknowledgement, dependency count and digest, authority fact, platform blind spot, reason, risk, warning, hash, and digest.",
+    "Set approve to true only after checking every exact ID, role property, irreversible acknowledgement, recovery mode and limitation, dependency count and digest, authority fact, platform blind spot, reason, risk, warning, hash, and digest.",
   ].join("\n")
 }
 
@@ -18597,6 +18638,7 @@ function roleDeletionRequestStatePayload(request: RoleDeletionRequest) {
     auditReason: normalized.auditReason,
     guildId: normalized.guildId,
     operationKeyHash: normalized.operationKeyHash,
+    recovery: guildDeletionRecoveryRequestDigestView(normalized.recovery),
     roleId: normalized.roleId,
   }
 }
@@ -19968,7 +20010,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Thread creation uses a separate exact parent-channel scope: call plan_thread_creation for a message-anchored, standalone public, or standalone private thread, review the exact source preview when present, resolved settings, complete permission evidence, audit reason, one-shot operation key hash, warnings, and keyed digest, then call execute_thread_creation with identical inputs and the digest. A source message that already owns a thread produces a no-op without approval or durable records. Writes are never automatically retried, and forum or media parents, lifecycle changes, membership changes, and starter messages are excluded.",
       "Thread governance uses separate exact guild, thread, and optional member allowlists and never enumerates members. For one rename, archive, unarchive, lock, unlock, auto-archive, slowmode, invitation-policy, connector join, connector leave, add-member, or remove-member change, call plan_thread_change, review the exact guild, parent, thread and optional member, minimized current and desired state, complete inherited permissions, action-specific MANAGE_THREADS, self-membership, membership, send, or private-thread ownership authority, privacy projection, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_thread_change with identical inputs and the digest. Each execution performs one non-retried write and exact readback, never combines metadata fields or rolls back, and an uncertain outcome blocks later same-thread changes in the process.",
       "Forum-post creation uses a separate exact forum-channel scope: call plan_forum_post, review the exact title, starter content, tags, settings, notifications, audit reason, complete permission evidence, one-shot operation key hash, warnings, and keyed digest, then call execute_forum_post with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
-      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed structure, profile, settings, monotonic Community, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. Requested scaffold resources may become exact Community, onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Community enablement requires explicit acknowledgement and temporary guild ownership or complete Administrator authority, preserves every existing feature, and remains separate from routing-only Manage Guild authority. An enabled Welcome Screen or onboarding request is blocked before downstream planning when Community is disabled and no Community phase can establish it. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. Blocked or drifting receipt evidence stops later phases without writing. Call plan_guild_blueprint with the unchanged manifest and master operation key, review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
+      "Guild blueprints coordinate one caller-retained declarative manifest across a fixed structure, profile, settings, monotonic Community, Welcome Screen, onboarding, staged AutoMod, and ordered static Components V2 publication sequence. capture_guild_blueprint reads two matching bounded live passes and returns no stored snapshot: a planner-ready caller-retained projection plus short-lived process-bound exact-target recovery attestations for captured roles and channels. Each attestation binds verified identity, exact resource and target state, the complete capture digest, and applicable omission codes; it is not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention. Requested scaffold resources may become exact Community, onboarding, AutoMod, Welcome Screen, system-channel, or publication references only after complete exact scaffold evidence. Community enablement requires explicit acknowledgement and temporary guild ownership or complete Administrator authority, preserves every existing feature, and remains separate from routing-only Manage Guild authority. An enabled Welcome Screen or onboarding request is blocked before downstream planning when Community is disabled and no Community phase can establish it. Every AutoMod rule and publication has a stable key and separate derived operation identity. Unbound AutoMod rules never adopt by name: only a matching content-free request-bound creation receipt can recover their exact rule ID. New rules are created disabled, and enabled policy changes advance through separately reviewed disable, configure, and enable stages. Publication recovery likewise verifies a content-free receipt and one exact receipt-bound message without scanning history. Blocked or drifting receipt evidence stops later phases without writing. Call plan_guild_blueprint with the unchanged manifest and master operation key, review the aggregate digest plus the complete nested domain frontier, then call execute_guild_blueprint with identical input and the digest. Signed confirmation state contains only keyed request and plan digests, each call can execute only one fresh frontier, and the coordinator delegates every reservation, pending audit, non-retried write, readback, conflict, and uncertainty decision to the hardened domain workflow. Plan again after each frontier, and call verify_guild_blueprint with the same caller-retained manifest only after every phase is current.",
       "Guild scaffolds use a dedicated exact guild scope: call plan_guild_scaffold, review the verified application, bot, guild, exact additive role and channel graph, resolved parents, permissions, capacities, durable operation binding, ready frontier, step limit, warnings, and keyed digest, then call execute_guild_scaffold with identical inputs and the digest. Execution durably claims both guild role and channel collections; a normal verified pause releases the claims, while interruption or uncertain pending evidence requires review. Reuse the same operation key only for an intentional paused resume; an uncertain or drifting step permanently blocks it. After completion, call verify_guild_scaffold with the same caller-retained request and operation key for fresh content-free completion evidence.",
       "Member nickname changes use a self-only safe default and a second gate for other members. Call plan_member_nickname_change with the current-bot target or one exact member ID plus a strict nickname or explicit null, review the exact transient current and desired names, CHANGE_NICKNAME or MANAGE_NICKNAMES evidence, protected-target boundary, hierarchy where applicable, audit reason, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_member_nickname_change with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Names are never transformed or persisted, and no mutation is retried or rolled back.",
       "Member verification changes expose only Discord's named BYPASSES_VERIFICATION flag. Call plan_member_verification_change with one exact guild, member, desired boolean state, audit reason, and one-shot operation key; review the current and desired named state, documented permission alternative, protected and special-member boundaries, complete hierarchy, warnings, risks, key hash, and digest; then call execute_member_verification_change with identical input and the digest. Execution requires signed interactive approval, durable exact-member coordination, pending content-free records, one non-retried PATCH, and exact readback. Raw flags are never accepted, exposed, or persisted, every unrelated flag is preserved and freshness-bound, and no mutation is retried or rolled back.",
@@ -19978,8 +20020,8 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Role creation is additive-only and exact-guild scoped: call plan_role_creation, review the exact named permissions, bot permission subset and hierarchy, complete role inventory, capacity, collisions, one-shot operation key hash, and keyed digest, then call execute_role_creation with identical inputs and the digest. Never retry with the same operation key after reservation or an uncertain outcome.",
       "Role configuration uses a separate exact standard-role scope: call plan_role_configuration, review the exact application, bot, guild, role, affected-member count, complete current and desired states, tagged role-icon intent and owned local-file review when present, requested and effective named permission deltas, modern colors, logical-name collisions, hierarchy, grantability, risks, warnings, one-shot operation key hash, verification mode, and keyed digest, then call execute_role_configuration with identical inputs and the digest. Omitted properties and unrelated permission bits are preserved. Role icons accept only clear, one NFC Unicode emoji grapheme, or exact owned 64 by 64 PNG or JPEG bytes under configured expression roots. @everyone, managed roles, ADMINISTRATOR grants, deletion, reordering, assignment, creation, retries after reservation, and rollback are not supported.",
       "Channel placement uses a separate exact guild scope: call audit_channel_order for the complete canonical obfuscation-safe layout, or call plan_channel_order with one exact target channel, anchor channel, and above-or-below placement in the same sortable family. A different-parent anchor selects the exact destination category or guild root. Review source and destination parents, current and desired groups, capacity, complete or visibility-bounded HTTP evidence, source-group, destination-group, and target move authority, explicit overwrite preservation, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_channel_order with identical inputs and the digest. Execution requires signed interactive approval and durable guild-channel coordination, subscribes before one non-retried complete position PATCH, and requires a newer complete matching Gateway layout plus coherent HTTP readback. Family changes, permission synchronization, flag or metadata changes, arbitrary numeric positions, retries, and rollback are unsupported. An uncertain outcome quarantines the guild channel collection.",
-      "Channel deletion uses separate exact guild and channel scopes: inspect the deletion-readiness resource or call plan_channel_deletion with a literal irreversible content-loss acknowledgement, audit reason, and one-shot operation key. Review the exact supported direct channel, complete coherent obfuscation-safe layout, target permissions, all dependency blocker counts and evidence digest, privacy omissions, risks, warnings, key hash, and keyed plan digest, then call execute_channel_deletion with identical inputs and the digest. Execution requires signed interactive approval and durable guild-channel coordination, subscribes before one non-retried DELETE, validates Discord's response, and requires a newer coherent Gateway layout proving the target absent without changing any baseline survivor's type, parent, or visibility. Threads, DMs, directory and announcement channels, non-empty categories, active Stage instances, special guild channels, discovered references, retries, rollback, and already-absent success are unsupported. Message content is never fetched. An uncertain outcome quarantines the guild channel collection.",
-      "Role deletion uses a separate exact role scope: call audit_role_deletion or inspect the deletion-readiness resource, then call plan_role_deletion with a literal irreversible role-loss acknowledgement, audit reason, and one-shot operation key. Review the exact standard unmanaged target, aggregate zero-holder evidence, bot hierarchy, MANAGE_ROLES and MANAGE_GUILD authority, complete unobfuscated Gateway channel-overwrite inventory, invite grants, emoji restrictions, onboarding options, AutoMod exemptions, integration ownership, this-application command permissions, platform blind spots, risks, warnings, key hash, and keyed digest before execute_role_deletion. Execution requires signed interactive approval and durable coordination across every reviewed guild collection, records pending content-free evidence, sends one non-retried DELETE, and requires fresh target-absence plus survivor-preservation evidence. Historical mentions, Guild Template role references, and other applications' command permissions are not completely discoverable. No references are cleaned up, no mutation is retried, and no rollback is attempted.",
+      "Channel deletion uses separate exact guild and channel scopes: inspect the deletion-readiness resource or call plan_channel_deletion with a literal irreversible content-loss acknowledgement, audit reason, one-shot operation key, and an exact recovery choice. The preferred choice supplies the fresh matching target attestation from a caller-retained blueprint capture and acknowledges its lossy limitations; the explicit alternative acknowledges that no recovery artifact is retained. Planning rejects forged, expired, identity-mismatched, target-mismatched, or stale attestations and returns only credential-free recovery evidence. Review that evidence plus the exact supported direct channel, complete coherent obfuscation-safe layout, target permissions, all dependency blocker counts and evidence digest, privacy omissions, risks, warnings, key hash, and keyed plan digest, then call execute_channel_deletion with identical inputs and the digest. Execution requires signed interactive approval and durable guild-channel coordination, subscribes before one non-retried DELETE, validates Discord's response, and requires a newer coherent Gateway layout proving the target absent without changing any baseline survivor's type, parent, or visibility. Threads, DMs, directory and announcement channels, non-empty categories, active Stage instances, special guild channels, discovered references, retries, rollback, and already-absent success are unsupported. Message content is never fetched. An uncertain outcome quarantines the guild channel collection.",
+      "Role deletion uses a separate exact role scope: call audit_role_deletion or inspect the deletion-readiness resource, then call plan_role_deletion with a literal irreversible role-loss acknowledgement, audit reason, one-shot operation key, and an exact recovery choice. The preferred choice supplies the fresh matching target attestation from a caller-retained blueprint capture and acknowledges its lossy limitations; the explicit alternative acknowledges that no recovery artifact is retained. Planning rejects forged, expired, identity-mismatched, target-mismatched, or stale attestations and returns only credential-free recovery evidence. Review that evidence plus the exact standard unmanaged target, aggregate zero-holder evidence, bot hierarchy, MANAGE_ROLES and MANAGE_GUILD authority, complete unobfuscated Gateway channel-overwrite inventory, invite grants, emoji restrictions, onboarding options, AutoMod exemptions, integration ownership, this-application command permissions, platform blind spots, risks, warnings, key hash, and keyed digest before execute_role_deletion. Execution requires signed interactive approval and durable coordination across every reviewed guild collection, records pending content-free evidence, sends one non-retried DELETE, and requires fresh target-absence plus survivor-preservation evidence. Historical mentions, Guild Template role references, and other applications' command permissions are not completely discoverable. No references are cleaned up, no mutation is retried, and no rollback is attempted.",
       "Role ordering uses a separate exact guild scope: call audit_role_order for the complete canonical hierarchy, or call plan_role_order with one exact target role, anchor role, and above-or-below placement. Review current and desired ranks, the complete affected segment, aggregate holder assignments, hierarchy-sensitive permissions, connector hierarchy and MANAGE_ROLES evidence, risks, warnings, one-shot operation key hash, and keyed digest, then call execute_role_order with identical inputs and the digest. Execution requires signed interactive approval and durable guild-role coordination, sends one non-retried target-position PATCH, and verifies the complete response and fresh hierarchy. @everyone, managed roles, connector-held roles, unsafe affected segments, unknown future fields, arbitrary numeric positions, metadata changes, permission changes, membership changes, retries, and rollback are unsupported. An uncertain outcome quarantines the guild role collection.",
       "Member moderation accepts exact guild and user IDs only. Choose a unique one-shot operation key, call plan_member_moderation, and review the pinned application and bot identities, target, action, parameters, audit reason, complete permission and hierarchy evidence, privacy boundary, risks, warnings, operation-key hash, readback boundary, and keyed digest. Then call execute_member_moderation with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, one-shot receipt reservation, pending content-free activity, one non-retried mutation, and exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Bulk guild bans require a separate exact guild scope and capability. Choose a unique one-shot operation key, call plan_bulk_guild_ban with two through the Discord endpoint maximum of unique exact user IDs, and review every pinned identity, transient target profile, membership and ban state, complete BAN_MEMBERS plus MANAGE_GUILD permission and hierarchy evidence, batch-wide message deletion window, audit reason, request estimates, privacy boundary, partial-success risk, warnings, operation-key hash, target-set digest, readback boundary, and keyed plan digest. Then call execute_bulk_guild_ban with identical inputs and the digest. Execution requires signed interactive approval, durable coordination across the complete exact target set, pending content-free activity, one non-retried batch request, and fresh exact ban readback for every target. Successful bans are never rolled back, failed subsets are never retried automatically, and any later action requires a new plan and key.",
@@ -29793,7 +29835,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "capture_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. Returns a strict planner-ready blueprint or an explicit blocker, with stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, trusted Community routing, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, member directories or non-bot member profiles, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, policy content, operation, or activity record. Community evidence uses only the connector member required for complete permissions and omits all profile fields. A capture is an authoring and same-guild recovery aid, not a complete backup; review every omission before calling plan_guild_blueprint.",
+      description: "Capture two matching live passes of the Discord guild state representable inside the configured policy and visibility boundaries by the caller-retained guild-blueprint contract. A stable planner-ready result includes a short-lived process-bound signed recovery binding for every represented role and channel; each binds verified application, bot, guild, exact resource and captured target state, the complete capture digest, and applicable omission codes. Blocked or changed captures return no binding. Returns stable codes for unsupported roles, channels, ordering, permission overwrites, forum settings, trusted Community routing, complete exact-ID AutoMod policy, exact-bound references, unknown evidence, and capacity limits. Reads no messages, member directories or non-bot member profiles, webhooks, invites, attachments, embeds, components, AutoMod execution events, or audit logs, and persists no snapshot, attestation, policy content, operation, or activity record. Community evidence uses only the connector member required for complete permissions and omits all profile fields. A capture is a lossy authoring and same-guild recovery aid, not an atomic or complete backup, lossless restore, message recovery, original-ID restoration, cross-guild migration, automatic rollback, or proof of caller retention; review every omission and retain the returned artifact yourself.",
       inputSchema: guildBlueprintCaptureInputSchema,
       outputSchema: toolOutputSchema,
       title: "Capture caller-retained Discord guild blueprint",
@@ -29811,8 +29853,8 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         : result.status === "blocked"
           ? `blocked: Discord guild ${result.guildId} capture has ${result.blockers.length} blocker(s); resolve them and capture again`
           : result.status === "review-required"
-            ? `review-required: Discord guild ${result.guildId} capture ${result.captureDigest} has ${result.omissions.length} omission(s); explicitly accept or edit the partial desired state before planning`
-            : `ready: Discord guild ${result.guildId} capture ${result.captureDigest} is representable; retain the returned blueprint and call plan_guild_blueprint`
+            ? `review-required: Discord guild ${result.guildId} capture ${result.captureDigest} has ${result.omissions.length} omission(s) and ${result.recoveryBindings.length} short-lived recovery binding(s); retain the artifact and explicitly accept or edit the partial desired state before planning`
+            : `ready: Discord guild ${result.guildId} capture ${result.captureDigest} is representable with ${result.recoveryBindings.length} short-lived recovery binding(s); retain the returned artifact yourself and call plan_guild_blueprint for additive authoring`
       return toolResult(result, summary)
     }, secrets, observability),
   ))
@@ -31824,7 +31866,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_channel_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan to permanently delete one exact direct Discord guild channel. Requires an explicit irreversible content-loss acknowledgement and binds pinned identity, a coherent complete obfuscation-safe Gateway layout, exact target and overwrite evidence, complete role and permission evidence, every applicable guild reference, widget, onboarding, Welcome Screen, AutoMod, event, invite, thread, webhook, category-child, and Stage-instance blocker inventory, audit reason, and one-shot key hash without fetching message content or persisting Discord data.",
+      description: "Prepare a process-bound keyed plan to permanently delete one exact direct Discord guild channel. Requires an explicit irreversible content-loss acknowledgement plus one exact recovery choice: either a fresh matching target attestation from a caller-retained lossy blueprint capture with acknowledged limitations, or literal acknowledgement that no recovery artifact is retained. Rejects forged, expired, identity-mismatched, target-mismatched, or stale attestations and returns only credential-free recovery evidence. Binds pinned identity, a coherent complete obfuscation-safe Gateway layout, exact target and overwrite evidence, complete role and permission evidence, every applicable guild reference, widget, onboarding, Welcome Screen, AutoMod, event, invite, thread, webhook, category-child, and Stage-instance blocker inventory, audit reason, recovery choice, and one-shot key hash without fetching message content or persisting Discord data.",
       inputSchema: channelDeletionPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan reviewed Discord channel deletion",
@@ -31848,7 +31890,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_channel_deletion",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
-      description: "Permanently delete one exact reviewed direct Discord guild channel only after a fresh matching keyed plan and signed interactive approval. Durably coordinates the guild channel collection, target, and optional parent, reserves a one-shot key, records pending content-free evidence, subscribes before one non-retried DELETE, validates the returned channel, and requires a newer coherent Gateway layout proving exact absence while preserving every baseline survivor's type, parent, and visibility. Never treats an already-absent target as success, fetches message content, retries, or rolls back.",
+      description: "Permanently delete one exact reviewed direct Discord guild channel only after a fresh matching keyed plan, the identical recovery choice, and signed interactive approval of the credential-free recovery evidence and limitations. Signed request state binds only the attestation hash, never the raw attestation. Durably coordinates the guild channel collection, target, and optional parent, reserves a one-shot key, records pending content-free evidence, subscribes before one non-retried DELETE, validates the returned channel, and requires a newer coherent Gateway layout proving exact absence while preserving every baseline survivor's type, parent, and visibility. Never persists an attestation, treats an already-absent target as success, fetches message content, retries, or rolls back.",
       inputSchema: channelDeletionExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord channel deletion",
@@ -31866,7 +31908,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
               ? "Discord channel-deletion confirmation was canceled"
               : "Discord channel-deletion confirmation was declined"
           },
-          invalidStateReason: "Signed confirmation state does not match the exact guild, target channel, irreversible content-loss acknowledgement, audit reason, one-shot operation key, or plan digest",
+          invalidStateReason: "Signed confirmation state does not match the exact guild, target channel, irreversible content-loss acknowledgement, recovery choice, audit reason, one-shot operation key, or plan digest",
           key: CHANNEL_DELETION_CONFIRMATION_KEY,
           message: channelDeletionConfirmationMessage,
           missingStateReason: "Discord confirmation responses require signed request state",
@@ -31895,7 +31937,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
             expectedDigest: input.planDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
-            reason: "The fresh Discord target, guild topology, dependency, or connector-authority snapshot does not match the requested channel-deletion digest",
+            reason: "The fresh Discord target, guild topology, dependency, recovery, or connector-authority snapshot does not match the requested channel-deletion digest",
             schemaVersion: SCHEMA_VERSION,
             status: "plan-changed",
           }
@@ -31952,7 +31994,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_role_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan to permanently delete one exact standard unmanaged Discord role. Requires an explicit irreversible role-loss acknowledgement and binds pinned identity, complete aggregate holder and hierarchy evidence, a coherent unobfuscated Gateway channel layout, every discoverable role dependency, audit reason, and one-shot key hash. Historical mentions, Guild Template role references, and other applications' command permissions are identified as API blind spots.",
+      description: "Prepare a process-bound keyed plan to permanently delete one exact standard unmanaged Discord role. Requires an explicit irreversible role-loss acknowledgement plus one exact recovery choice: either a fresh matching target attestation from a caller-retained lossy blueprint capture with acknowledged limitations, or literal acknowledgement that no recovery artifact is retained. Rejects forged, expired, identity-mismatched, target-mismatched, or stale attestations and returns only credential-free recovery evidence. Binds pinned identity, complete aggregate holder and hierarchy evidence, a coherent unobfuscated Gateway channel layout, every discoverable role dependency, audit reason, recovery choice, and one-shot key hash. Historical mentions, Guild Template role references, and other applications' command permissions are identified as API blind spots.",
       inputSchema: roleDeletionPlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan reviewed Discord role deletion",
@@ -31976,7 +32018,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_role_deletion",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
-      description: "Permanently delete one exact reviewed standard Discord role only after a fresh matching keyed plan and signed interactive approval. Durably coordinates the target and every reviewed guild collection, reserves a one-shot key, records pending content-free evidence, sends one non-retried DELETE, and requires fresh target-absence and survivor-preservation evidence. Never treats an absent target as success, cleans up references, retries, or rolls back.",
+      description: "Permanently delete one exact reviewed standard Discord role only after a fresh matching keyed plan, the identical recovery choice, and signed interactive approval of the credential-free recovery evidence and limitations. Signed request state binds only the attestation hash, never the raw attestation. Durably coordinates the target and every reviewed guild collection, reserves a one-shot key, records pending content-free evidence, sends one non-retried DELETE, and requires fresh target-absence and survivor-preservation evidence. Never persists an attestation, treats an absent target as success, cleans up references, retries, or rolls back.",
       inputSchema: roleDeletionExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord role deletion",
@@ -31994,7 +32036,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
               ? "Discord role-deletion confirmation was canceled"
               : "Discord role-deletion confirmation was declined"
           },
-          invalidStateReason: "Signed confirmation state does not match the exact guild, target role, irreversible role-loss acknowledgement, audit reason, one-shot operation key, or plan digest",
+          invalidStateReason: "Signed confirmation state does not match the exact guild, target role, irreversible role-loss acknowledgement, recovery choice, audit reason, one-shot operation key, or plan digest",
           key: ROLE_DELETION_CONFIRMATION_KEY,
           message: roleDeletionConfirmationMessage,
           missingStateReason: "Discord confirmation responses require signed request state",
@@ -32022,7 +32064,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
             expectedDigest: input.planDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
-            reason: "The fresh Discord target role, holders, hierarchy, channel layout, dependency, or connector-authority snapshot does not match the requested role-deletion digest",
+            reason: "The fresh Discord target role, holders, hierarchy, channel layout, dependency, recovery, or connector-authority snapshot does not match the requested role-deletion digest",
             roleId: request.roleId,
             schemaVersion: SCHEMA_VERSION,
             status: "plan-changed",

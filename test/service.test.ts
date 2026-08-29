@@ -2926,6 +2926,10 @@ test("service coordinates every receipt-backed single-step workflow by shared ta
     auditReason: "reviewed",
     guildId: GUILD_ID,
     operationKey,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true as const,
+      mode: "none" as const,
+    },
     roleId: CREATED_ROLE_ID,
   }
   const roleDeletionPlan = await service.planRoleDeletion(roleDeletionRequest)

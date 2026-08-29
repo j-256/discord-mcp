@@ -42,6 +42,8 @@ import type {
 } from "../src/operation-store.js"
 import { DISCORD_PERMISSIONS } from "../src/permissions.js"
 import { ScopePolicy } from "../src/policy.js"
+import { guildBlueprintRoleRecoveryStateDigest } from "../src/guild-blueprint-capture-service.js"
+import { createGuildRecoveryAttestation } from "../src/guild-recovery-attestation.js"
 import {
   normalizeRoleDeletionRequest,
   type RoleDeletionRequest,
@@ -71,6 +73,7 @@ const ONBOARDING_OPTION_ID = "970000000000000003"
 const AUTOMOD_RULE_ID = "970000000000000004"
 const OPERATION_KEY = "role-deletion-operation-001"
 const PLAN_KEY = new Uint8Array(32).fill(29)
+const RECOVERY_KEY = new Uint8Array(32).fill(37)
 
 function role(
   id: string,
@@ -492,6 +495,10 @@ function request(overrides: Partial<RoleDeletionRequest> = {}): RoleDeletionRequ
     auditReason: "Reviewed role retirement",
     guildId: GUILD_ID,
     operationKey: OPERATION_KEY,
+    recovery: {
+      acknowledgeNoRecoveryArtifact: true,
+      mode: "none",
+    },
     roleId: TARGET_ROLE_ID,
     ...overrides,
   }
@@ -513,6 +520,7 @@ function fixture(options: {
     planKey: PLAN_KEY,
     policy: options.policy ?? policy(client.guild.id),
     randomId: () => "activity-role-deletion-001",
+    recoveryAttestationKey: RECOVERY_KEY,
   })
   return { activityStore, client, operationStore, service }
 }
@@ -569,6 +577,138 @@ test("role-deletion readiness and plan bind complete transient evidence", async 
   assert.equal(plan.acknowledgeIrreversibleRoleLoss, true)
   assert.match(plan.digest, /^hmac-sha256:[a-f0-9]{64}$/)
   assert.equal(JSON.stringify(plan).includes(OPERATION_KEY), false)
+})
+
+test("role-deletion verifies fresh exact-target blueprint recovery evidence", async () => {
+  const target = fixture()
+  const selectedRole = target.client.roles.find((entry) => (
+    entry.id === TARGET_ROLE_ID
+  ))
+  assert.ok(selectedRole)
+  const readiness = await target.service.audit(
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    TARGET_ROLE_ID,
+  )
+  assert.equal(readiness.status, "ready")
+  if (readiness.status !== "ready") assert.fail("Expected ready role evidence")
+  const binding = createGuildRecoveryAttestation(RECOVERY_KEY, {
+    applicationId: APPLICATION_ID,
+    blueprintKey: `role-${TARGET_ROLE_ID}`,
+    botId: BOT_ID,
+    captureDigest: `sha256:${"d".repeat(64)}`,
+    capturedAt: "2026-08-23T11:50:00.000Z",
+    guildId: GUILD_ID,
+    omissionCodes: ["ROLE_ORDER_OMITTED"],
+    resourceId: TARGET_ROLE_ID,
+    resourceType: "role",
+    targetStateDigest: guildBlueprintRoleRecoveryStateDigest(readiness.target),
+  })
+  const capturedRequest = request({
+    recovery: {
+      acknowledgeCallerRetentionAndLimitations: true,
+      attestation: binding.attestation,
+      mode: "verified-blueprint-capture",
+    },
+  })
+  const capturedPlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+  )
+  const noArtifactPlan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+
+  assert.deepEqual(capturedPlan.recovery, {
+    capture: {
+      blueprintKey: `role-${TARGET_ROLE_ID}`,
+      captureDigest: binding.captureDigest,
+      capturedAt: binding.capturedAt,
+      expiresAt: binding.expiresAt,
+      omissionCodes: ["ROLE_ORDER_OMITTED"],
+      targetStateDigest: binding.targetStateDigest,
+    },
+    limitations: {
+      atomicSnapshot: false,
+      automaticRollback: false,
+      completeBackup: false,
+      connectorPersistence: false,
+      crossGuildPortable: false,
+      losslessRestore: false,
+      messageRecovery: false,
+      originalIdRestoration: false,
+    },
+    mode: "verified-blueprint-capture",
+    verified: true,
+  })
+  assert.notEqual(capturedPlan.digest, noArtifactPlan.digest)
+  assert.doesNotMatch(JSON.stringify(capturedPlan), new RegExp(binding.attestation))
+  assert.ok(capturedPlan.warnings.some((warning) => (
+    warning.includes("ROLE_ORDER_OMITTED")
+  )))
+  assert.ok(noArtifactPlan.warnings.some((warning) => (
+    warning.includes("No recovery artifact is attested")
+  )))
+
+  selectedRole.name = "Changed after capture"
+  await assert.rejects(
+    () => target.service.plan(APPLICATION_ID, BOT_ID, capturedRequest),
+    /invalid, expired, mismatched, or stale/u,
+  )
+})
+
+test("role-deletion never persists a recovery attestation", async () => {
+  const target = fixture()
+  const readiness = await target.service.audit(
+    APPLICATION_ID,
+    BOT_ID,
+    GUILD_ID,
+    TARGET_ROLE_ID,
+  )
+  assert.equal(readiness.status, "ready")
+  if (readiness.status !== "ready") assert.fail("Expected ready role evidence")
+  const binding = createGuildRecoveryAttestation(RECOVERY_KEY, {
+    applicationId: APPLICATION_ID,
+    blueprintKey: `role-${TARGET_ROLE_ID}`,
+    botId: BOT_ID,
+    captureDigest: `sha256:${"a".repeat(64)}`,
+    capturedAt: "2026-08-23T11:50:00.000Z",
+    guildId: GUILD_ID,
+    omissionCodes: [],
+    resourceId: TARGET_ROLE_ID,
+    resourceType: "role",
+    targetStateDigest: guildBlueprintRoleRecoveryStateDigest(readiness.target),
+  })
+  const capturedRequest = request({
+    recovery: {
+      acknowledgeCallerRetentionAndLimitations: true,
+      attestation: binding.attestation,
+      mode: "verified-blueprint-capture",
+    },
+  })
+  const plan = await target.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+  )
+  const result = await target.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    capturedRequest,
+    plan.digest,
+  )
+  const durableAndReturnedState = JSON.stringify({
+    activity: target.activityStore.entries,
+    receipts: [...target.operationStore.receipts.values()],
+    result,
+  })
+
+  assert.equal(result.status, "completed")
+  assert.equal(durableAndReturnedState.includes(binding.attestation), false)
 })
 
 test("role-deletion reports every discoverable dependency as a blocker", async () => {

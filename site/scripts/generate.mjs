@@ -222,6 +222,7 @@ const SECURITY_GROUPS = Object.freeze([
       "Channel metadata",
       "Parent-category permission synchronization",
       "Channel ordering",
+      "Channel deletion",
       "Channel creation",
       "Guild scaffolds",
       "Guild blueprints",
