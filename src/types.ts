@@ -336,7 +336,9 @@ export interface DiscordReactionCountDetails {
 }
 
 export interface DiscordReaction {
+  burst_count?: number
   burst_colors: string[]
+  burst_me?: boolean
   count: number
   count_details: DiscordReactionCountDetails
   emoji: DiscordPartialEmoji

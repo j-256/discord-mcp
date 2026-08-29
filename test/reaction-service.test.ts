@@ -498,6 +498,15 @@ test("reaction aggregate parsing canonicalizes state and rejects unknown evidenc
   assert.equal(parsed[1]?.burstCount, 1)
   assert.equal(parsed[1]?.meBurst, true)
 
+  const compatible = reaction(UNICODE_EMOJI, {
+    burst: 1,
+    meBurst: true,
+    normal: 2,
+  })
+  compatible.burst_count = 1
+  compatible.burst_me = true
+  assert.deepEqual(parseReactionAggregates([compatible]), [parsed[1]])
+
   const mismatched = reaction(UNICODE_EMOJI)
   mismatched.count = 99
   assert.throws(() => parseReactionAggregates([mismatched]), ReactionEvidenceError)
@@ -510,6 +519,29 @@ test("reaction aggregate parsing canonicalizes state and rejects unknown evidenc
       ...reaction(UNICODE_EMOJI),
       future_field: true,
     } as DiscordReaction]),
+    /invalid message reaction counts/,
+  )
+  assert.throws(
+    () => parseReactionAggregates([{
+      ...reaction(UNICODE_EMOJI),
+      burst_count: 0,
+    }]),
+    /invalid message reaction counts/,
+  )
+  assert.throws(
+    () => parseReactionAggregates([{
+      ...reaction(UNICODE_EMOJI, { burst: 1 }),
+      burst_count: 0,
+      burst_me: false,
+    }]),
+    /invalid message reaction counts/,
+  )
+  assert.throws(
+    () => parseReactionAggregates([{
+      ...reaction(UNICODE_EMOJI),
+      burst_count: 0,
+      burst_me: "false",
+    } as unknown as DiscordReaction]),
     /invalid message reaction counts/,
   )
   assert.throws(
