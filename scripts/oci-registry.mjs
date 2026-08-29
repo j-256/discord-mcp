@@ -311,7 +311,12 @@ export function validateOciConfig(configDocument, expected) {
   invariant(config.ArgsEscaped === true, "OCI image argument encoding changed")
   invariant(config?.User === "node", "OCI image must declare the unprivileged node user")
   invariant(config?.WorkingDir === "/app", "OCI image working directory changed")
-  assert.deepEqual(config?.Entrypoint, ["node", "dist/cli.js"])
+  assert.deepEqual(config?.Entrypoint, [
+    "node",
+    "--no-expose-wasm",
+    "--lite-mode",
+    "dist/cli.js",
+  ])
   assert.deepEqual(config?.Cmd, ["catalog"])
   invariant(Array.isArray(config.Env), "OCI image environment is invalid")
   invariant(

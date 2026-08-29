@@ -122,6 +122,10 @@ import {
 import { isMainModule } from "./entrypoint.js"
 import { runDiscordMcpServer } from "./mcp.js"
 import {
+  lowMemoryNodeArguments,
+  STANDARD_RUNTIME_ARGUMENT,
+} from "./node-runtime.js"
+import {
   FileOperationStore,
   operationReceiptDirectory,
 } from "./operation-store.js"
@@ -1619,6 +1623,9 @@ function helpText(topic: CliCommand | undefined): string {
   if (topic === "version") return "Usage: discord-mcp version\n\nPrint the package version."
   return [
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
+    `       ${CONNECTOR_NAME} ${STANDARD_RUNTIME_ARGUMENT} <command> [options]`,
+    "",
+    "The public launcher uses a memory-optimized Node profile by default. Add --standard-runtime to favor execution speed instead.",
     "",
     "Commands:",
     "  activity  Review content-free write outcomes and durable claims",
@@ -2553,7 +2560,11 @@ function currentEntrypointLaunch(options: CliOptions): {
   const entrypointPath = options.entrypointPath || process.argv[1]
   return entrypointPath
     ? {
-        args: [entrypointPath, "serve"],
+        args: [
+          ...lowMemoryNodeArguments(options.nodeVersion || process.versions.node),
+          entrypointPath,
+          "serve",
+        ],
         command: options.executablePath || process.execPath,
       }
     : {

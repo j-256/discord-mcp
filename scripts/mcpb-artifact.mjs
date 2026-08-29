@@ -39,6 +39,9 @@ const MCPB_MANIFEST_SCHEMA_URL = "https://raw.githubusercontent.com/modelcontext
 const MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE = "MCPB_DISCORD_BOT_SECRET"
 const MCPB_VERIFY_TOKEN_VARIABLE = "DISCORD_MCPB_VERIFY_TOKEN"
 const MCPB_VERIFY_TOKEN = "mcpb-artifact-verification-token"
+const MCPB_READY_MESSAGE = "[mcp] Discord connector stdio server ready\n"
+const MCPB_LITE_MODE_WARNING_MAX_NODE_MAJOR = 23
+const LEGACY_LITE_MODE_WARNING = "Warning: disabling flag --expose_wasm due to conflicting flags\n"
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
 const ZIP_END_SIGNATURE = 0x06054b50
 const ZIP_LOCAL_FILE_SIGNATURE = 0x04034b50
@@ -123,6 +126,7 @@ export async function validateMcpbManifest(document, packageJson) {
     entry_point: "server/discord-mcp.mjs",
     mcp_config: {
       args: [
+        "--lite-mode",
         "${__dirname}/server/discord-mcp.mjs",
         "serve",
         "--config",
@@ -137,7 +141,7 @@ export async function validateMcpbManifest(document, packageJson) {
   })
   assert.deepEqual(document.compatibility, {
     platforms: ["darwin", "win32", "linux"],
-    runtimes: { node: ">=22" },
+    runtimes: { node: ">=22 <27" },
   })
   assert.deepEqual(document.user_config, {
     bot_token: {
@@ -345,7 +349,7 @@ async function generateCatalogEvidence(path, packageJson, suppliedPath) {
   } else {
     const result = await run(
       process.execPath,
-      ["dist/cli.js", "catalog", "--check", "--json"],
+      ["dist/bin.js", "catalog", "--check", "--json"],
       { capture: true, env: {} },
     )
     await writeFile(path, result.stdout, { flag: "wx" })
@@ -474,12 +478,23 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
     if (/^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/.test(name)) delete environment[name]
   }
   environment[MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE] = MCPB_VERIFY_TOKEN
-  const serverPath = join(extraction, "server", "discord-mcp.mjs")
+  const manifest = JSON.parse(unpacked["manifest.json"].toString("utf8"))
+  const manifestArguments = manifest.server.mcp_config.args.map((argument) => argument
+    .replaceAll("${__dirname}", extraction)
+    .replaceAll("${user_config.config_file}", configFile))
+  invariant(
+    manifestArguments.every((argument) => !argument.includes("${")),
+    "Unpacked MCPB launch arguments retain an unresolved placeholder",
+  )
   const transport = new StdioClientTransport({
-    args: [serverPath, "serve", "--config", configFile],
+    args: manifestArguments,
     command: process.execPath,
     env: environment,
+    stderr: "pipe",
   })
+  const stderr = []
+  invariant(transport.stderr, "Unpacked MCPB stderr capture is unavailable")
+  transport.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)))
   const client = new Client(
     { name: "discord-mcp-mcpb-verifier", version: "1.0.0" },
     { capabilities: {} },
@@ -502,6 +517,17 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
   } finally {
     await client.close().catch(() => undefined)
   }
+  const nodeMajor = Number.parseInt(process.versions.node.split(".", 1)[0] || "", 10)
+  const expectedStderr = `${
+    nodeMajor <= MCPB_LITE_MODE_WARNING_MAX_NODE_MAJOR
+      ? LEGACY_LITE_MODE_WARNING
+      : ""
+  }${MCPB_READY_MESSAGE}`
+  assert.equal(
+    Buffer.concat(stderr).toString("utf8"),
+    expectedStderr,
+    "Unpacked MCPB emitted unexpected stderr",
+  )
 }
 
 export async function buildAndVerifyMcpb(options = {}) {

@@ -60,7 +60,7 @@ test("library entrypoint direct execution fails with exact CLI guidance", async 
   assert.equal(stdout, "")
   assert.equal(
     stderr,
-    "[discord-mcp] The package library entrypoint does not run an MCP server. Use `discord-mcp serve --config FILE` or `node dist/cli.js serve --config FILE`.\n",
+    "[discord-mcp] The package library entrypoint does not run an MCP server. Use `discord-mcp serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
   )
   assert.doesNotMatch(stderr, new RegExp(privateToken))
 })
