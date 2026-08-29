@@ -650,8 +650,9 @@ async function checkDocumentation(packageJson) {
   invariant(!/DISCORD_BOT_TOKEN\s*=\s*["']YOUR_DISCORD_BOT_TOKEN["']/.test(documentation), "documentation must not teach token literals in command history")
   for (const required of [
     "--npx",
-    "get_connector_status",
     "list_channels",
+    "Setup is the first-run readiness gate",
+    "Show me the channels in Discord server YOUR_GUILD_ID using Discord MCP.",
     "## Recovery ladder",
     "dist/index.js",
     "environment.forward",
