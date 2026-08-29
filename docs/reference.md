@@ -646,6 +646,8 @@ The public launcher favors lower resident memory by starting verified Node 22 th
 
 The CLI provides a safe path from one non-secret configuration document to a verified MCP connection:
 
+Every command and nested action accepts `-h` and `--help`, writes help to stdout, returns status 0, reads no environment or credential, and invokes no operator dependency. Use `discord-mcp FAMILY --help` for the complete family catalog, `discord-mcp FAMILY ACTION --help` for one exact action, or `discord-mcp help FAMILY ACTION` for the same contextual result. Unknown actions and extra arguments remain usage errors even when a help flag is present, so a typo cannot silently select broader documentation.
+
 ```sh
 node dist/bin.js catalog --check
 node dist/bin.js catalog --html ./discord-mcp-contract.html

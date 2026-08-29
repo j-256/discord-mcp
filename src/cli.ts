@@ -205,7 +205,48 @@ const CLI_EXIT_CODES = Object.freeze({
   warning: 1,
 } as const)
 
+const CLI_HELP_FLAGS: ReadonlySet<string> = new Set(["--help", "-h"])
+
+const CLI_COMMAND_ACTIONS = Object.freeze({
+  config: Object.freeze([
+    "init",
+    "validate",
+    "show",
+    "explain",
+    "workbench",
+    "plan",
+    "apply",
+  ] as const),
+  coordination: Object.freeze(["list", "resolve"] as const),
+  host: Object.freeze(["generate", "plan", "apply"] as const),
+  migrate: Object.freeze(["list", "plan"] as const),
+  preset: Object.freeze(["list", "show", "install"] as const),
+  profile: Object.freeze(["list", "show", "remove", "restore"] as const),
+  recipe: Object.freeze(["list", "show", "plan", "apply"] as const),
+})
+
 type CliCommand = typeof CLI_COMMANDS[number]
+type CliActionCommand = keyof typeof CLI_COMMAND_ACTIONS
+type CliCommandAction = typeof CLI_COMMAND_ACTIONS[CliActionCommand][number]
+type CliActionForCommand<C extends CliCommand> = C extends CliActionCommand
+  ? typeof CLI_COMMAND_ACTIONS[C][number]
+  : never
+
+function isCliActionCommand(command: CliCommand): command is CliActionCommand {
+  return Object.hasOwn(CLI_COMMAND_ACTIONS, command)
+}
+
+function isCliCommandAction<C extends CliCommand>(
+  command: C,
+  action: string,
+): action is CliActionForCommand<C> {
+  return isCliActionCommand(command)
+    && (CLI_COMMAND_ACTIONS[command] as readonly string[]).includes(action)
+}
+
+function isCliHelpFlag(value: string | undefined): boolean {
+  return value !== undefined && CLI_HELP_FLAGS.has(value)
+}
 
 export type ParsedCliArguments =
   | {
@@ -284,7 +325,11 @@ export type ParsedCliArguments =
     profileName?: string
   }
   | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
-  | { command: "help"; topic: CliCommand | undefined }
+  | {
+    action?: CliCommandAction
+    command: "help"
+    topic: CliCommand | undefined
+  }
   | {
     action: "generate"
     adapterId?: HostAdapterId
@@ -721,7 +766,7 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
 
 function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "host" }> {
   const explicitAction = args[0]
-  const action = explicitAction === "generate" || explicitAction === "plan" || explicitAction === "apply"
+  const action = explicitAction && isCliCommandAction("host", explicitAction)
     ? explicitAction
     : "generate"
   const options = action === explicitAction ? args.slice(1) : args
@@ -876,7 +921,7 @@ function parseMigrationCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "migrate" }> {
   const action = args[0]
-  if (!action || !["list", "plan"].includes(action)) {
+  if (!action || !isCliCommandAction("migrate", action)) {
     throw new ConfigurationError("migrate requires list or plan")
   }
   if (action === "list") {
@@ -928,7 +973,7 @@ function parseConfigCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "config" }> {
   const action = args[0]
-  if (!action || !["apply", "explain", "init", "plan", "show", "validate", "workbench"].includes(action)) {
+  if (!action || !isCliCommandAction("config", action)) {
     throw new ConfigurationError(
       "config requires apply, explain, init, plan, show, validate, or workbench",
     )
@@ -1142,7 +1187,7 @@ function parsePresetCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "preset" }> {
   const action = args[0]
-  if (!action || !["install", "list", "show"].includes(action)) {
+  if (!action || !isCliCommandAction("preset", action)) {
     throw new ConfigurationError("preset requires install, list, or show")
   }
   if (action === "list") {
@@ -1211,7 +1256,7 @@ function parseRecipeCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "recipe" }> {
   const action = args[0]
-  if (!action || !["apply", "list", "plan", "show"].includes(action)) {
+  if (!action || !isCliCommandAction("recipe", action)) {
     throw new ConfigurationError("recipe requires apply, list, plan, or show")
   }
   if (action === "list") {
@@ -1354,7 +1399,7 @@ function parseProfileCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "profile" }> {
   const action = args[0]
-  if (!action || !["list", "show", "remove", "restore"].includes(action)) {
+  if (!action || !isCliCommandAction("profile", action)) {
     throw new ConfigurationError("profile requires list, show, remove, or restore")
   }
   if (action === "list") {
@@ -1472,7 +1517,7 @@ function parseCoordinationCommand(
   args: readonly string[],
 ): Extract<ParsedCliArguments, { command: "coordination" }> {
   const action = args[0]
-  if (!action || !["list", "resolve"].includes(action)) {
+  if (!action || !isCliCommandAction("coordination", action)) {
     throw new ConfigurationError("coordination requires list or resolve")
   }
   if (action === "list") {
@@ -1544,7 +1589,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (args.length === 0) return { command: "serve" }
   const command = args[0]
   const rest = args.slice(1)
-  if (command === "--help" || command === "-h") {
+  if (isCliHelpFlag(command)) {
     if (rest.length > 0) throw new ConfigurationError(`${command} does not accept arguments`)
     return { command: "help", topic: undefined }
   }
@@ -1556,15 +1601,45 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
     throw new ConfigurationError(`Unknown command ${command || ""}`)
   }
   if (command === "help") {
-    const topic = rest[0]
-    if (rest.length > 1 || (topic && !isCommand(topic))) {
-      throw new ConfigurationError("help accepts at most one command name")
+    if (rest.length === 1 && isCliHelpFlag(rest[0])) {
+      return { command: "help", topic: undefined }
     }
-    return { command: "help", topic: topic as CliCommand | undefined }
+    const topic = rest[0]
+    const action = rest[1]
+    if (
+      rest.length > 2
+      || (topic !== undefined && !isCommand(topic))
+      || (action !== undefined && (
+        topic === undefined
+        || !isCommand(topic)
+        || !isCliCommandAction(topic, action)
+      ))
+    ) {
+      throw new ConfigurationError(
+        "help accepts at most one command and one optional known action",
+      )
+    }
+    return {
+      ...(action ? { action: action as CliCommandAction } : {}),
+      command: "help",
+      topic: topic as CliCommand | undefined,
+    }
   }
-  if (rest.includes("--help") || rest.includes("-h")) {
-    if (rest.length > 1) throw new ConfigurationError("--help must be used alone")
-    return { command: "help", topic: command }
+  if (rest.some((argument) => isCliHelpFlag(argument))) {
+    if (rest.length === 1 && isCliHelpFlag(rest[0])) {
+      return { command: "help", topic: command }
+    }
+    if (
+      rest.length === 2
+      && rest[0] !== undefined
+      && isCliCommandAction(command, rest[0])
+      && isCliHelpFlag(rest[1])
+    ) {
+      return { action: rest[0], command: "help", topic: command }
+    }
+    throw new ConfigurationError(
+      "--help or -h must be used alone or after one known action",
+    )
   }
   if (command === "version") {
     if (rest.length > 0) throw new ConfigurationError(`${command} does not accept options`)
@@ -1639,7 +1714,162 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   }
 }
 
-function helpText(topic: CliCommand | undefined): string {
+interface CliActionHelpEntry {
+  readonly description: string
+  readonly synopsis: string
+}
+
+type CliActionHelpCatalog = {
+  readonly [C in CliActionCommand]: Readonly<
+    Record<CliActionForCommand<C>, CliActionHelpEntry>
+  >
+}
+
+const CLI_ACTION_HELP: CliActionHelpCatalog = Object.freeze({
+  config: Object.freeze({
+    init: {
+      description: "Create one strict schema-v2 non-secret policy at FILE. The parent must already be a canonical process-owned private directory. The command stores only a credential variable name or absolute protected-file reference, resolves no secret, contacts no network or Discord endpoint, and refuses replacement unless --force is explicit.",
+      synopsis: "init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force] [--json]",
+    },
+    validate: {
+      description: "Validate one strict non-secret policy, including its complete cross-field authority and safety rules, without resolving credentials, contacting Discord, or changing the file. Exit status is 0 for a valid document and 2 for a usage or validation failure.",
+      synopsis: "validate FILE [--json]",
+    },
+    show: {
+      description: "Render one validated policy as a secret-free operator report without resolving a credential, contacting Discord, or changing the file. Add --json for the equivalent structured report.",
+      synopsis: "show FILE [--json]",
+    },
+    explain: {
+      description: "Explain the complete configuration contract or one exact dotted schema path without reading a policy, resolving a credential, contacting Discord, or changing state. Add --json for the equivalent structured report.",
+      synopsis: "explain [PATH] [--json]",
+    },
+    workbench: {
+      description: "Read one validated active policy and exclusively create a private standalone candidate editor at OUTPUT_FILE. The editor has no credential, network, Discord, active-file write, or approval authority and never replaces an existing output file.",
+      synopsis: "workbench ACTIVE_FILE --html OUTPUT_FILE [--json]",
+    },
+    plan: {
+      description: "Compare one active policy with one candidate, validate both complete documents, and return the exact changes plus a path-bound fresh digest without resolving credentials, contacting Discord, or changing either file.",
+      synopsis: "plan ACTIVE_FILE CANDIDATE_FILE [--json]",
+    },
+    apply: {
+      description: "Recompute one policy-change plan, require its exact digest and active-policy name, preserve a recoverable backup, publish atomically, and verify the result. The pinned application and bot identities cannot change, and no credential or Discord endpoint is used.",
+      synopsis: "apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTIVE_NAME [--json]",
+    },
+  }),
+  coordination: Object.freeze({
+    list: {
+      description: "Inspect one selected policy's content-free durable reviewed-write claims without resolving credentials, contacting Discord, or changing activity or coordination state. Add --json for the equivalent structured report.",
+      synopsis: "list [--config FILE | --profile NAME] [--json]",
+    },
+    resolve: {
+      description: "Resolve one exact durable claim only after stopping its owner and independently inspecting Discord. Exact claim-ID confirmation is required; this local recovery action does not undo Discord state, prove the external outcome, or authorize a retry.",
+      synopsis: "resolve CLAIM_ID --confirm CLAIM_ID [--config FILE | --profile NAME] [--json]",
+    },
+  }),
+  host: Object.freeze({
+    generate: {
+      description: "Generate one credential-free local stdio activation plus verified client adapters from an explicit policy. Optional HTML exclusively creates a private guide. Generation resolves no credential, contacts no network or Discord endpoint, discovers no host, and changes no host file.",
+      synopsis: "generate (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
+    },
+    plan: {
+      description: "Read one explicitly selected private static host JSON file and return a metadata-fresh path- and value-free change plan for one adapter. Planning resolves no credential, contacts no network, starts no process, and changes no file.",
+      synopsis: "plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]",
+    },
+    apply: {
+      description: "Recompute one host-file plan, require its exact digest and server-name confirmation, preserve unrelated records and a recoverable backup, publish atomically, and reread the owned projection. A successful file update does not prove that the host loaded or started it.",
+      synopsis: "apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]",
+    },
+  }),
+  migrate: Object.freeze({
+    list: {
+      description: "List every immutable release-scored migration source and its evidence contract without reading configuration, credentials, environment values, source checkouts, host state, or any network.",
+      synopsis: "list [--json]",
+    },
+    plan: {
+      description: "Map one exact versioned competitor release into supported, review-required, and intentionally excluded outcomes. Planning changes nothing and reads no source checkout, configuration, host setting, credential, environment value, network, or Discord endpoint; optional HTML exclusively creates a private standalone guide.",
+      synopsis: "plan SOURCE [--html FILE] [--json]",
+    },
+  }),
+  preset: Object.freeze({
+    list: {
+      description: "List deterministic least-privilege read-only setup presets and their stable public contracts without a credential, Discord request, Gateway connection, telemetry export, or local write.",
+      synopsis: "list [--json]",
+    },
+    show: {
+      description: "Show one exact read-only preset's tools, risk classes, scope requirements, Discord permissions, privileged-intent guidance, and zero-write boundary without a credential or Discord access.",
+      synopsis: "show NAME [--json]",
+    },
+    install: {
+      description: "Generate one callback-free, exact-guild-locked Discord bot installation plan for a read-only preset. The command needs no bot token, makes no Discord request, opens no browser, and optionally creates a deterministic private standalone checklist without replacing an existing file.",
+      synopsis: "install NAME --application-id ID --guild-id ID [--html FILE] [--json]",
+    },
+  }),
+  profile: Object.freeze({
+    list: {
+      description: "List private managed profile metadata without resolving a credential, contacting Discord, or changing profile state. Secret values and Discord presentation data are never returned.",
+      synopsis: "list [--json]",
+    },
+    show: {
+      description: "Show one validated non-secret managed profile and its exact policy metadata without resolving a credential, contacting Discord, or changing profile state.",
+      synopsis: "show NAME [--json]",
+    },
+    remove: {
+      description: "Move one exact managed profile into recoverable private trash after exact name confirmation. This removes no external credential, revokes no Discord token, and contacts no network or Discord endpoint.",
+      synopsis: "remove NAME --confirm NAME [--json]",
+    },
+    restore: {
+      description: "Restore one exact recoverably removed managed profile after exact name confirmation. Restoration refuses conflicts, resolves no credential, and contacts no network or Discord endpoint.",
+      synopsis: "restore NAME --confirm NAME [--json]",
+    },
+  }),
+  recipe: Object.freeze({
+    list: {
+      description: "List immutable additive workflow recipes and their stable public contracts without reading a policy or credential, contacting Discord, or changing state.",
+      synopsis: "list [--json]",
+    },
+    show: {
+      description: "Show one recipe's exact capabilities, scopes, tools, Discord permissions, intents, risks, warnings, and outer-boundary requirements without reading a policy or credential or contacting Discord.",
+      synopsis: "show NAME [--json]",
+    },
+    plan: {
+      description: "Apply one recipe and its exact guild, channel, or user scope to a validated policy in memory and return the complete proposed document, changes, requirements, and fresh digest. Planning resolves no credential, contacts no Discord endpoint, and changes no file.",
+      synopsis: "plan NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--json]",
+    },
+    apply: {
+      description: "Recompute one additive recipe plan, require its exact digest and recipe-name confirmation, preserve a recoverable backup, publish atomically, and verify the policy. Application resolves no credential, contacts no Discord endpoint, and never grants Discord authority by itself.",
+      synopsis: "apply NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
+    },
+  }),
+})
+
+function contextualHelpText(
+  topic: CliCommand,
+  action: CliCommandAction,
+): string {
+  if (!isCliActionCommand(topic) || !isCliCommandAction(topic, action)) {
+    throw new ConfigurationError("Contextual help requires one known action")
+  }
+  const entries = CLI_ACTION_HELP[topic] as Partial<
+    Record<CliCommandAction, CliActionHelpEntry>
+  >
+  const entry = entries[action]
+  if (!entry) {
+    throw new ConfigurationError("Contextual help is unavailable for this action")
+  }
+  return [
+    `Usage: ${CONNECTOR_NAME} ${topic} ${entry.synopsis}`,
+    "",
+    entry.description,
+  ].join("\n")
+}
+
+function helpText(
+  topic: CliCommand | undefined,
+  action?: CliCommandAction,
+): string {
+  if (topic !== undefined && action !== undefined) {
+    return contextualHelpText(topic, action)
+  }
   if (topic === "activity") {
     return "Usage: discord-mcp activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure."
   }
@@ -3061,8 +3291,8 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
       case "help":
         safeWrite(
           stdout,
-          helpText(parsed.topic),
-          parsed.topic === "host" ? {} : environment,
+          helpText(parsed.topic, parsed.action),
+          {},
         )
         return CLI_EXIT_CODES.success
       case "host": {

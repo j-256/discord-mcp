@@ -1780,6 +1780,76 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
 })
 
+test("CLI parser accepts strict contextual help for every action", () => {
+  const actions = [
+    ["config", "init"],
+    ["config", "validate"],
+    ["config", "show"],
+    ["config", "explain"],
+    ["config", "workbench"],
+    ["config", "plan"],
+    ["config", "apply"],
+    ["coordination", "list"],
+    ["coordination", "resolve"],
+    ["host", "generate"],
+    ["host", "plan"],
+    ["host", "apply"],
+    ["migrate", "list"],
+    ["migrate", "plan"],
+    ["preset", "list"],
+    ["preset", "show"],
+    ["preset", "install"],
+    ["profile", "list"],
+    ["profile", "show"],
+    ["profile", "remove"],
+    ["profile", "restore"],
+    ["recipe", "list"],
+    ["recipe", "show"],
+    ["recipe", "plan"],
+    ["recipe", "apply"],
+  ] as const
+
+  for (const [topic, action] of actions) {
+    for (const flag of ["--help", "-h"]) {
+      assert.deepEqual(parseCliArguments([topic, action, flag]), {
+        action,
+        command: "help",
+        topic,
+      })
+    }
+    assert.deepEqual(parseCliArguments(["help", topic, action]), {
+      action,
+      command: "help",
+      topic,
+    })
+  }
+
+  assert.deepEqual(parseCliArguments(["-h"]), {
+    command: "help",
+    topic: undefined,
+  })
+  for (const flag of ["--help", "-h"]) {
+    assert.deepEqual(parseCliArguments(["help", flag]), {
+      command: "help",
+      topic: undefined,
+    })
+  }
+  for (const invalid of [
+    ["config", "unknown", "--help"],
+    ["config", "validate", "policy.json", "--help"],
+    ["preset", "install", "--help", "--json"],
+    ["host", "plan", "-h", "--help"],
+    ["help", "config", "unknown"],
+    ["help", "doctor", "online"],
+    ["help", "config", "validate", "extra"],
+  ]) {
+    assert.throws(
+      () => parseCliArguments(invalid),
+      /known action|must be used alone|optional known action/u,
+    )
+  }
+})
+
 test("CLI defaults to the stdio server through the selected config without writing normal output", async () => {
   let serves = 0
   const stdout = outputStream()
@@ -3891,6 +3961,98 @@ test("CLI returns structured migration selection failures", async () => {
   assert.match(report.error.recovery.action, /discord-mcp help migrate/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.equal(stderr.value(), "")
+})
+
+test("CLI renders contextual action help without consulting dependencies or environment", async () => {
+  const cases = [
+    ["config", "init"],
+    ["config", "validate"],
+    ["config", "show"],
+    ["config", "explain"],
+    ["config", "workbench"],
+    ["config", "plan"],
+    ["config", "apply"],
+    ["coordination", "list"],
+    ["coordination", "resolve"],
+    ["host", "generate"],
+    ["host", "plan"],
+    ["host", "apply"],
+    ["migrate", "list"],
+    ["migrate", "plan"],
+    ["preset", "list"],
+    ["preset", "show"],
+    ["preset", "install"],
+    ["profile", "list"],
+    ["profile", "show"],
+    ["profile", "remove"],
+    ["profile", "restore"],
+    ["recipe", "list"],
+    ["recipe", "show"],
+    ["recipe", "plan"],
+    ["recipe", "apply"],
+  ] as const
+  const forbiddenDependencies = new Proxy(dependencies(), {
+    get() {
+      throw new Error("Contextual help consulted an operator dependency")
+    },
+  })
+  const forbiddenEnvironment = new Proxy<NodeJS.ProcessEnv>({}, {
+    get() {
+      throw new Error("Contextual help read the environment")
+    },
+    ownKeys() {
+      throw new Error("Contextual help enumerated the environment")
+    },
+  })
+
+  for (const [index, [topic, action]] of cases.entries()) {
+    const stdout = outputStream()
+    const stderr = outputStream()
+    const exitCode = await runCli({
+      args: [topic, action, index % 2 === 0 ? "--help" : "-h"],
+      dependencies: forbiddenDependencies,
+      environment: forbiddenEnvironment,
+      stderr: stderr.stream,
+      stdout: stdout.stream,
+    })
+
+    assert.equal(exitCode, 0)
+    assert.equal(
+      stdout.value().startsWith(`Usage: discord-mcp ${topic} ${action}`),
+      true,
+    )
+    assert.equal(stderr.value(), "")
+    assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+  }
+
+  for (const args of [["--help"], ["doctor", "--help"], ["help", "--help"]]) {
+    const stdout = outputStream()
+    assert.equal(await runCli({
+      args,
+      dependencies: forbiddenDependencies,
+      environment: forbiddenEnvironment,
+      stdout: stdout.stream,
+    }), 0)
+    assert.match(stdout.value(), /^Usage: discord-mcp/u)
+  }
+
+  const canonical = outputStream()
+  const explicit = outputStream()
+  assert.equal(await runCli({
+    args: ["preset", "install", "--help"],
+    dependencies: forbiddenDependencies,
+    environment: forbiddenEnvironment,
+    stdout: canonical.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["help", "preset", "install"],
+    dependencies: forbiddenDependencies,
+    environment: forbiddenEnvironment,
+    stdout: explicit.stream,
+  }), 0)
+  assert.equal(explicit.value(), canonical.value())
+  assert.match(canonical.value(), /needs no bot token/u)
+  assert.match(canonical.value(), /opens no browser/u)
 })
 
 test("CLI renders smoke, help, and version output", async () => {
