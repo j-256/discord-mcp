@@ -1562,6 +1562,7 @@ export class ChannelOrderingService {
     botId: string,
     request: NormalizedChannelOrderingRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltChannelOrderingPlan> {
     assertSnowflake(applicationId, "Discord connector application ID")
     assertSnowflake(botId, "Discord connector bot ID")
@@ -1570,7 +1571,16 @@ export class ChannelOrderingService {
       "channel-ordering",
       request.operationKeyHash,
     )
-    if (existingReceipt) {
+    if (
+      existingReceipt
+      && !(
+        allowCompletedReceipt
+        && existingReceipt.status === "completed"
+        && existingReceipt.verification === "match"
+        && existingReceipt.guildId === request.guildId
+        && existingReceipt.resourceId === request.channelId
+      )
+    ) {
       throw new ChannelOrderingOperationConflictError(receiptView(existingReceipt))
     }
     const state = await this.#state(botId, request.guildId, options)
@@ -1841,6 +1851,9 @@ export class ChannelOrderingService {
       warnings,
       writeRequired,
     }
+    if (existingReceipt && plan.writeRequired) {
+      throw new ChannelOrderingOperationConflictError(receiptView(existingReceipt))
+    }
     return {
       baselineLayout: state.layout,
       expectedTopology,
@@ -1862,6 +1875,21 @@ export class ChannelOrderingService {
       botId,
       normalizeChannelOrderingRequest(request),
       options,
+    ).then(({ plan }) => plan)
+  }
+
+  reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: ChannelOrderingRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelOrderingPlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeChannelOrderingRequest(request),
+      options,
+      true,
     ).then(({ plan }) => plan)
   }
 
