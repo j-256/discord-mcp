@@ -77,6 +77,25 @@ const EMOJI_CONTROL_OR_SPACE_PATTERN = /[\u0000-\u0020\u007F]/u
 const EMOJI_CODE_POINT_PATTERN = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3)/u
 const BURST_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/
 const ISO_8601_TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/
+const REACTION_AGGREGATE_KEYS = [
+  "burst_colors",
+  "count",
+  "count_details",
+  "emoji",
+  "me",
+  "me_burst",
+] as const
+// Discord can add redundant burst aliases; require exact consistency before normalization
+const REACTION_AGGREGATE_COMPATIBILITY_KEYS = [
+  "burst_count",
+  "burst_colors",
+  "burst_me",
+  "count",
+  "count_details",
+  "emoji",
+  "me",
+  "me_burst",
+] as const
 const STATE_UNAVAILABLE = "reaction-state-unavailable"
 const THREAD_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcementThread,
@@ -480,18 +499,28 @@ export function parseReactionAggregates(
   }
   const keys = new Set<string>()
   const reactions = value.map((entry) => {
+    const hasBurstCountAlias = Boolean(
+      entry
+      && typeof entry === "object"
+      && !Array.isArray(entry)
+      && Object.hasOwn(entry, "burst_count"),
+    )
+    const hasBurstMeAlias = Boolean(
+      entry
+      && typeof entry === "object"
+      && !Array.isArray(entry)
+      && Object.hasOwn(entry, "burst_me"),
+    )
     if (
       !entry
       || typeof entry !== "object"
       || Array.isArray(entry)
-      || !exactKeys(entry as unknown as Record<string, unknown>, [
-        "burst_colors",
-        "count",
-        "count_details",
-        "emoji",
-        "me",
-        "me_burst",
-      ])
+      || !exactKeys(
+        entry as unknown as Record<string, unknown>,
+        hasBurstCountAlias || hasBurstMeAlias
+          ? REACTION_AGGREGATE_COMPATIBILITY_KEYS
+          : REACTION_AGGREGATE_KEYS,
+      )
       || !Number.isSafeInteger(entry.count)
       || entry.count < 1
       || !entry.count_details
@@ -510,6 +539,13 @@ export function parseReactionAggregates(
       || typeof entry.me_burst !== "boolean"
       || entry.me && entry.count_details.normal < 1
       || entry.me_burst && entry.count_details.burst < 1
+      || hasBurstCountAlias !== hasBurstMeAlias
+      || hasBurstCountAlias && (
+        !Number.isSafeInteger(entry.burst_count)
+        || entry.burst_count !== entry.count_details.burst
+        || typeof entry.burst_me !== "boolean"
+        || entry.burst_me !== entry.me_burst
+      )
       || !Array.isArray(entry.burst_colors)
       || entry.burst_colors.length > REACTION_LIMITS.burstColorsPerReaction
       || entry.burst_colors.some((color: unknown) => (
