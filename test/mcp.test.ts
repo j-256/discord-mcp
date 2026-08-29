@@ -9815,6 +9815,11 @@ function serviceFixture(overrides: {
       DiscordToolService["recallConversation"]
     > | null,
   }
+  const messageCatchupCalls = {
+    arguments: null as Parameters<
+      DiscordToolService["catchUpMessages"]
+    > | null,
+  }
   const soundboardPlaybackCalls = {
     checkArguments: null as Parameters<
       DiscordToolService["checkSoundboardPlayback"]
@@ -9888,6 +9893,7 @@ function serviceFixture(overrides: {
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    catchUp: 0,
     coordinationAddressCreate: 0,
     coordinationAddressList: 0,
     coordinationNoteList: 0,
@@ -14618,6 +14624,58 @@ function serviceFixture(overrides: {
         overrides.channelOrderingEffect,
       )
     },
+    async catchUpMessages(...arguments_) {
+      calls.catchUp += 1
+      messageCatchupCalls.arguments = arguments_
+      const request = arguments_[0]
+      return {
+        channels: request.channels.map(({ afterMessageId, channelId }) => ({
+          channel: {
+            guildId: request.guildId,
+            id: channelId,
+            name: "private-channel-name",
+            parentId: null,
+            type: 0,
+            typeName: "guild-text",
+          },
+          messages: [],
+          page: {
+            afterMessageId: afterMessageId ?? null,
+            boundaryVerification: afterMessageId ? "not-required" as const : "not-applicable" as const,
+            messageCount: 0,
+            mode: afterMessageId ? "catch-up" as const : "initialize" as const,
+            newerMessagesMayExist: false,
+            nextAfterMessageId: afterMessageId ?? null,
+            olderMessagesMayExist: false,
+            omittedAutomatedMessageCount: 0,
+            requestedLimit: request.maxMessagesPerChannel ?? 5,
+            scanLimitReached: false,
+            scannedMessageCount: 0,
+          },
+          permissions: {
+            canReadMessages: true as const,
+            confidence: "complete" as const,
+            permissionSourceChannelId: channelId,
+            privateThreadAccess: "not-applicable" as const,
+            requiredReadPermissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"] as const,
+            unknownPermissionBits: "0",
+            warningCount: 0,
+          },
+        })),
+        guildId: request.guildId,
+        privacy: {
+          automaticPagination: "none" as const,
+          cursorCustody: "caller" as const,
+          messageContent: "preview-only" as const,
+          partialResults: "none" as const,
+          persistence: "none" as const,
+          profileExpansion: "omitted" as const,
+          rawPayloads: "omitted" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async readMessages() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -14812,6 +14870,7 @@ function serviceFixture(overrides: {
     welcomeScreenCalls,
     widgetSettingsCalls,
     guildSettingsCalls,
+    messageCatchupCalls,
   }
 }
 
@@ -15289,6 +15348,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "create_coordination_address",
       "list_coordination_addresses",
       "list_coordination_notes",
+      "catch_up_messages",
       "read_messages",
       "list_message_replies",
       "search_messages",
@@ -18211,6 +18271,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "audit_bot_installations",
       "parse_discord_reference",
       "analyze_community_activity",
+      "catch_up_messages",
       "read_messages",
       "list_message_replies",
       "search_messages",
@@ -18229,6 +18290,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "review_application_role_connection_metadata",
       "review_application_skus",
       "inspect_discord_coordination_task",
+      "catch_up_discord_channels",
       "summarize_channel",
       "search_guild_messages",
       "recall_discord_conversation",
@@ -18378,6 +18440,74 @@ test("MCP message reply inspection forwards one bounded cursor and stays read-on
   assert.equal(calls.messageReplies, 1)
   assert.deepEqual(
     listedTool((await client.listTools()).tools, "list_message_replies").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
+  )
+})
+
+test("MCP message catch-up forwards one strict multi-channel cursor set", async (context) => {
+  const { calls, client, messageCatchupCalls } = await connectedFixture(context)
+
+  const valid = await client.callTool({
+    arguments: {
+      channels: [
+        { afterMessageId: MESSAGE_ID, channelId: CHANNEL_ID },
+        { channelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID },
+      ],
+      guildId: GUILD_ID,
+      includeAutomatedMessages: true,
+      maxMessagesPerChannel: 4,
+    },
+    name: "catch_up_messages",
+  })
+  const duplicate = await client.callTool({
+    arguments: {
+      channels: [{ channelId: CHANNEL_ID }, { channelId: CHANNEL_ID }],
+      guildId: GUILD_ID,
+    },
+    name: "catch_up_messages",
+  })
+  const excessive = await client.callTool({
+    arguments: {
+      channels: Array.from({ length: 10 }, (_, index) => ({
+        channelId: String(BigInt(CHANNEL_ID) + BigInt(index)),
+      })),
+      guildId: GUILD_ID,
+      maxMessagesPerChannel: 6,
+    },
+    name: "catch_up_messages",
+  })
+
+  assert.equal(structuredContent(valid).status, "ok")
+  assert.equal(calls.catchUp, 1)
+  assert.equal(duplicate.isError, true)
+  assert.equal(excessive.isError, true)
+  assert.ok(messageCatchupCalls.arguments)
+  const [observedRequest, observedOptions] = messageCatchupCalls.arguments
+  assert.deepEqual(observedRequest, {
+    channels: [
+      { afterMessageId: MESSAGE_ID, channelId: CHANNEL_ID },
+      { channelId: ANNOUNCEMENT_SOURCE_CHANNEL_ID },
+    ],
+    guildId: GUILD_ID,
+    includeAutomatedMessages: true,
+    maxMessagesPerChannel: 4,
+  })
+  assert.ok(observedOptions)
+  assert.equal(observedOptions.signal instanceof AbortSignal, true)
+  assert.equal(observedOptions.signal?.aborted, false)
+  assert.deepEqual(
+    (structuredContent(valid).channels as Array<{
+      page: { nextAfterMessageId: string | null }
+    }>).map(({ page }) => page.nextAfterMessageId),
+    [MESSAGE_ID, null],
+  )
+  assert.deepEqual(
+    listedTool((await client.listTools()).tools, "catch_up_messages").annotations,
     {
       destructiveHint: false,
       idempotentHint: true,
@@ -18722,6 +18852,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    catchUp: 0,
     coordinationAddressCreate: 0,
     coordinationAddressList: 0,
     coordinationNoteList: 0,

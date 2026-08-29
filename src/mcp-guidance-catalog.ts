@@ -147,6 +147,7 @@ export const MCP_RESOURCE_TEMPLATE_URIS = Object.freeze({
 export const MCP_PROMPT_NAMES = Object.freeze({
   auditBotInstallations: "audit_bot_installations",
   authorGuildBlueprint: "author_guild_blueprint",
+  catchUpDiscordChannels: "catch_up_discord_channels",
   findGuildMembers: "find_guild_members",
   inspectDirectedDiscordNotes: "inspect_directed_discord_notes",
   inspectDiscordPoll: "inspect_discord_poll",
@@ -245,6 +246,7 @@ type ToolsetBoundMcpPromptName = Exclude<
 export const MCP_PROMPT_TOOLSETS = Object.freeze({
   [MCP_PROMPT_NAMES.auditBotInstallations]: "connector",
   [MCP_PROMPT_NAMES.authorGuildBlueprint]: "guild-blueprints",
+  [MCP_PROMPT_NAMES.catchUpDiscordChannels]: "messages",
   [MCP_PROMPT_NAMES.findGuildMembers]: "members",
   [MCP_PROMPT_NAMES.inspectDirectedDiscordNotes]: "coordination",
   [MCP_PROMPT_NAMES.inspectDiscordPoll]: "polls",

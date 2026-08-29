@@ -11161,6 +11161,55 @@ test("service normalizes channel messages after enforcing guild scope", async ()
   assert.equal("proxyUrl" in (result.messages[0]?.attachments[0] || {}), false)
 })
 
+test("service validates catch-up locally and pins identity before bounded reads", async () => {
+  const invalid = serviceFixture()
+  await assert.rejects(
+    () => invalid.service.catchUpMessages({
+      channels: [],
+      guildId: GUILD_ID,
+    }),
+    /requires 1-10 channel selections/u,
+  )
+  assert.equal(invalid.calls.application, 0)
+  assert.equal(invalid.calls.user, 0)
+  assert.equal(invalid.calls.listMessages, 0)
+
+  const signal = new AbortController().signal
+  let observedOptions: Parameters<DiscordServiceClient["listMessages"]>[1]
+  const target = serviceFixture({
+    client: {
+      async getGuildMember(_guildId, userId) {
+        return { roles: [], user: bot(userId) }
+      },
+      async listMessages(channelId, options) {
+        target.calls.listMessages += 1
+        assert.equal(channelId, CHANNEL_ID)
+        observedOptions = options
+        return [message({ id: REPLY_MESSAGE_ID })]
+      },
+    },
+  })
+
+  const result = await target.service.catchUpMessages({
+    channels: [{ afterMessageId: MESSAGE_ID, channelId: CHANNEL_ID }],
+    guildId: GUILD_ID,
+    maxMessagesPerChannel: 3,
+  }, { signal })
+
+  assert.equal(target.calls.application, 1)
+  assert.equal(target.calls.user, 1)
+  assert.equal(target.calls.listMessages, 1)
+  assert.deepEqual(observedOptions, {
+    after: MESSAGE_ID,
+    limit: 3,
+    signal,
+  })
+  assert.deepEqual(result.channels[0]?.messages.map(({ id }) => id), [
+    REPLY_MESSAGE_ID,
+  ])
+  assert.equal(result.channels[0]?.page.nextAfterMessageId, REPLY_MESSAGE_ID)
+})
+
 test("service validates reply input locally and pins identity before one bounded scan", async () => {
   const invalid = serviceFixture()
   await assert.rejects(

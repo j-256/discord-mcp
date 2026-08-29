@@ -14,7 +14,7 @@ Discord MCP is a local stdio Model Context Protocol server for safe Discord guil
 | --- | --- |
 | Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
 | Exact targeting | Canonical Discord jump links and official typed mentions convert locally into exact IDs without name lookup, Discord contact, input echo, persistence, or downstream authority |
-| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, exact native attachment reads without local-file persistence, and no private-channel discovery or scope inheritance |
+| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, caller-retained multi-channel catch-up with loss-resistant cursor advancement, exact native attachment reads without local-file persistence, and no private-channel discovery or scope inheritance |
 | Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
@@ -163,7 +163,7 @@ The bounded review collapses each activity into its newest outcome, retains supe
 
 Feature policy uses the same document shape. Reviewed features retain separate capabilities, exact scopes, bounded limits, and documented toolsets; single-member authority never grants batch authority. No environment-policy interface, legacy alias, fallback parser, or automatic migration layer exists.
 
-Use `channel-reader` only when bounded message history and native search are needed. It requires at least one exact channel:
+Use `channel-reader` only when bounded message history, caller-retained channel catch-up, and native search are needed. It requires at least one exact channel:
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.2 setup \
@@ -220,7 +220,7 @@ The exact [installation](docs/reference.md#install), [operator CLI](docs/referen
 
 | Area | Selected capabilities |
 | --- | --- |
-| Discovery and reads | Scoped guild, channel, message, thread, forum, member, moderation, audit, application, event, voice, and configuration reads; exact-ID parsing and attachment access; native search, bounded recall, aggregate activity, and privacy-minimized outputs |
+| Discovery and reads | Scoped guild, channel, message, thread, forum, member, moderation, audit, application, event, voice, and configuration reads; exact-ID parsing and attachment access; caller-retained multi-channel catch-up, native search, bounded recall, aggregate activity, and privacy-minimized outputs |
 | Messages and communities | Idempotent delivery; authority-free directed notes and exact-message task coordination; reviewed private messages; Components V2, remote-free embeds, attachments, reactions, polls, crossposts, forwarding, threads, pins, and exact deletion |
 | Guild structure | Deterministic starters and caller-retained blueprints; additive channels, roles, forums, permissions, onboarding, AutoMod, and publications; reviewed cloning, ordering, metadata, synchronization, and retirement |
 | Members and moderation | Privacy-minimized directories and ban audits; reviewed exact-member moderation, roles, nicknames, verification, voice, and thread membership; resumable batches, native bulk bans, and protected guild pruning |

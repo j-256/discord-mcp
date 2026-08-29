@@ -924,6 +924,13 @@ function exactRequirement(
   if (CHANNEL_READ_OVERRIDES.has(name)) {
     return channel([], ["VIEW_CHANNEL"])
   }
+  if (name === "catch_up_messages") {
+    return channel([], ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"], {
+      conditions: [condition("voice-or-stage-channel", ["CONNECT"])],
+      intents: [intent("MESSAGE_CONTENT", "required")],
+      permissionMode: "conditional",
+    })
+  }
   if (name === "add_reaction" || name === "add_reactions") {
     return channel([
       "$.capabilities.interactions",

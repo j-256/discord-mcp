@@ -640,6 +640,11 @@ import {
   normalizeGuild,
   normalizeMessage,
 } from "./normalize.js"
+import type { MessageCatchupRequest } from "./message-catchup-service.js"
+import {
+  MessageCatchupService,
+  normalizeMessageCatchupRequest,
+} from "./message-catchup-service.js"
 import type { MessageReplyPageOptions } from "./message-reply-service.js"
 import {
   assertMessageReplyRequest,
@@ -1622,6 +1627,7 @@ export class ConnectorService {
   readonly #inviteService: InviteService
   readonly #onboardingService: OnboardingService
   readonly #messagePinService: MessagePinService
+  readonly #messageCatchupService: MessageCatchupService
   readonly #messageForwardingService: MessageForwardingService
   readonly #messageReplyService: MessageReplyService
   readonly #messageSearchService: MessageSearchService
@@ -1753,6 +1759,10 @@ export class ConnectorService {
       policy: this.#policy,
     })
     this.#communityActivityService = new CommunityActivityService({
+      client: this.#client,
+      policy: this.#policy,
+    })
+    this.#messageCatchupService = new MessageCatchupService({
       client: this.#client,
       policy: this.#policy,
     })
@@ -3110,6 +3120,20 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async catchUpMessages(
+    request: MessageCatchupRequest,
+    options: RequestOptions = {},
+  ) {
+    const normalized = normalizeMessageCatchupRequest(request)
+    const identity = await this.#verifyIdentity(options)
+    return this.#messageCatchupService.catchUp(
+      identity.bot.id,
+      applicationMessageContentIntent(identity.application),
+      normalized,
+      options,
+    )
   }
 
   async listMessageReplies(

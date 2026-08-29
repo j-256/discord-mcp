@@ -61,10 +61,11 @@ const REFERENCE_GROUPS = Object.freeze([
     ],
   },
   {
-    description: "Bounded community, live recall, search, task coordination, attachment, member, ban, thread, and forum reads",
+    description: "Caller-retained catch-up, bounded community, live recall, search, task coordination, attachment, member, ban, thread, and forum reads",
     label: "Read and discovery",
     slug: "read-and-discovery",
     titles: [
+      "Caller-retained multi-channel message catch-up",
       "Privacy-safe community activity analysis",
       "Search",
       "Discord-native task coordination",

@@ -1381,6 +1381,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "embed-messages",
     workflow: "embed-message",
   },
+  catch_up_messages: {
+    keywords: ["catch up", "cursor", "inbox", "multi-channel", "new messages", "since", "unread"],
+    toolset: "messages",
+  },
   verify_component_message: {
     keywords: ["component", "drift", "message", "receipt", "recover", "verify", "v2"],
     toolset: "interactions",
@@ -1402,7 +1406,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "automod-change",
   },
   read_messages: {
-    keywords: ["context", "around", "channel", "history", "list", "message", "read", "surrounding", "window"],
+    keywords: ["context", "around", "channel", "history", "list", "message", "read", "recent", "summarize", "surrounding", "window"],
     toolset: "messages",
   },
   recall_conversation: {
