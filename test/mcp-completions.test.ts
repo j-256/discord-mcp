@@ -68,6 +68,7 @@ test("policy completion candidates are deterministic, prefix-only, and valid", (
 
 test("completion bindings are immutable, unique, domain-specific, and exact", () => {
   const resourceTemplates = new Set<string>(Object.values(MCP_RESOURCE_TEMPLATE_URIS))
+  resourceTemplates.delete(MCP_RESOURCE_TEMPLATE_URIS.toolAccess)
   const promptNames = new Set<string>(Object.values(MCP_PROMPT_NAMES))
   const keys = new Set<string>()
   const boundResourceTemplates = new Set<string>()

@@ -26,8 +26,8 @@ import { containsSpecificReference } from "./neutrality.mjs"
 
 const PACKAGE_NAME = "@j-256/discord-mcp"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
-const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
-const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v2"
+const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v3"
+const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v3"
 const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
 const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
 const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
@@ -796,12 +796,29 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   invariant(catalog.observabilityExport === "disabled", "installed catalog enabled telemetry export")
   invariant(catalog.activityRecordsCreated === false, "installed catalog created activity records")
   invariant(
+    catalog.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+      && catalog.toolAccessManifest.entries?.length === catalog.toolCount
+      && catalog.toolAccessManifest.requirementCoverage?.complete === true
+      && catalog.toolAccessManifest.requirementCoverage?.unknownEntries === 0
+      && catalog.toolAccessManifest.requirementCoverage?.targetAccessProven === false,
+    "installed catalog static requirement coverage is invalid",
+  )
+  invariant(
+    catalog.toolAccessManifest.entries.every((entry) => (
+      entry?.requirements?.configuration?.evaluation === "operation-runtime"
+      && typeof entry.requirements.authentication === "string"
+      && typeof entry.requirements.discord?.permissionMode === "string"
+      && typeof entry.requirements.targetScope === "string"
+    )),
+    "installed catalog contains an invalid static tool requirement",
+  )
+  invariant(
     Number.isSafeInteger(catalog.completionBindingCount)
       && catalog.completionBindingCount > 0,
     "installed catalog completion binding count is invalid",
   )
   invariant(
-    catalog.completionCatalogValuesExposed === false,
+    catalog.policyCompletionValuesExposed === false,
     "installed catalog exposed completion identifiers",
   )
   invariant(

@@ -19,6 +19,16 @@ import {
   type McpToolName,
   type McpToolRiskClass,
 } from "./observability-catalog.js"
+import {
+  MCP_TOOL_AUTH_CLASSES,
+  MCP_TOOL_PERMISSION_MODES,
+  MCP_TOOL_TARGET_SCOPES,
+  mcpToolStaticRequirements,
+  type McpToolAuthClass,
+  type McpToolPermissionMode,
+  type McpToolStaticRequirements,
+  type McpToolTargetScope,
+} from "./mcp-tool-readiness.js"
 
 export type CanonicalMcpToolName = Exclude<
   McpToolName,
@@ -135,7 +145,13 @@ export const MCP_TOOL_ACCESS_STAGES = Object.freeze([
 export type McpToolAccessStage = typeof MCP_TOOL_ACCESS_STAGES[number]
 
 export const MCP_TOOL_ACCESS_MANIFEST_FORMAT =
-  "discord-mcp.tool-access-manifest.v1"
+  "discord-mcp.tool-access-manifest.v2"
+
+export const MCP_TOOL_ACCESS_INDEX_FORMAT =
+  "discord-mcp.tool-access-index.v2"
+
+export const MCP_TOOL_ACCESS_DOCUMENT_FORMAT =
+  "discord-mcp.tool-access-document.v1"
 
 export interface McpToolAccessContract {
   approval:
@@ -151,6 +167,7 @@ export interface McpToolAccessContract {
   companions: McpToolWorkflowCompanions
   discordRequest: "none" | "read" | "write"
   readiness: "not-applicable" | "target-specific"
+  requirements: McpToolStaticRequirements
   stage: McpToolAccessStage
 }
 
@@ -162,7 +179,7 @@ export interface McpToolWorkflowCompanions {
 
 export type McpToolAccessStageContract = Omit<
   McpToolAccessContract,
-  "companions" | "stage"
+  "companions" | "requirements" | "stage"
 >
 
 export interface McpToolAccessEntry extends McpToolAccessContract {
@@ -174,6 +191,7 @@ export interface McpToolAccessEntry extends McpToolAccessContract {
 
 export interface McpToolAccessManifestEntry {
   name: McpToolName
+  requirements: McpToolStaticRequirements
   stage: McpToolAccessStage
   toolset: McpToolsetName
   workflow: McpToolWorkflow | null
@@ -186,6 +204,16 @@ export interface McpToolAccessManifest {
   entries: readonly McpToolAccessManifestEntry[]
   format: typeof MCP_TOOL_ACCESS_MANIFEST_FORMAT
   readiness: "target-specific"
+  requirementCoverage: {
+    authenticationCounts: Record<McpToolAuthClass, number>
+    complete: true
+    exactToolEntries: number
+    permissionModeCounts: Record<McpToolPermissionMode, number>
+    targetAccessProven: false
+    targetScopeCounts: Record<McpToolTargetScope, number>
+    toolsetEntries: number
+    unknownEntries: 0
+  }
   schemaVersion: number
   stageContracts: Record<McpToolAccessStage, McpToolAccessStageContract>
   stageCounts: Record<McpToolAccessStage, number>
@@ -193,6 +221,49 @@ export interface McpToolAccessManifest {
   toolsetNames: readonly McpToolsetName[]
   warnings: readonly string[]
   workflows: Partial<Record<McpToolWorkflow, McpToolWorkflowCompanions>>
+}
+
+export interface McpToolAccessIndexEntry {
+  name: McpToolName
+  stage: McpToolAccessStage
+  toolset: McpToolsetName
+  workflow: McpToolWorkflow | null
+}
+
+export interface McpToolAccessIndex extends Omit<
+  McpToolAccessManifest,
+  "entries" | "format"
+> {
+  entries: readonly McpToolAccessIndexEntry[]
+  exactRequirementToolNames: readonly McpToolName[]
+  format: typeof MCP_TOOL_ACCESS_INDEX_FORMAT
+  requirementsResource: {
+    uriTemplate: string
+    variable: "toolName"
+  }
+}
+
+export interface McpToolAccessDocument {
+  authorityGranted: false
+  credentialsRequired: false
+  discordContacted: false
+  entry: McpToolAccessEntry
+  format: typeof MCP_TOOL_ACCESS_DOCUMENT_FORMAT
+  readiness: McpToolAccessContract["readiness"]
+  status: "ok"
+  warnings: readonly string[]
+}
+
+export const MCP_TOOL_ACCESS_NAMES = Object.freeze(
+  Object.keys(MCP_TOOL_RISK_CLASSES).sort() as McpToolName[],
+)
+
+const MCP_TOOL_ACCESS_NAME_SET: ReadonlySet<string> = new Set(
+  MCP_TOOL_ACCESS_NAMES,
+)
+
+export function isMcpToolName(value: string): value is McpToolName {
+  return MCP_TOOL_ACCESS_NAME_SET.has(value)
 }
 
 export const MCP_TOOL_CATALOG = Object.freeze({
@@ -1434,6 +1505,7 @@ export function mcpToolAccessContract(
   return {
     ...accessStageContract(stage),
     companions: workflowCompanions(metadata.workflow),
+    requirements: mcpToolStaticRequirements(name, metadata.toolset),
     stage,
   }
 }
@@ -1495,6 +1567,7 @@ export function createMcpToolAccessManifest(
   for (const entry of expandedEntries) assertAccessTopology(entry)
   const entries = expandedEntries.map((entry): McpToolAccessManifestEntry => ({
     name: entry.name,
+    requirements: entry.requirements,
     stage: entry.stage,
     toolset: entry.toolset,
     workflow: entry.workflow,
@@ -1514,6 +1587,20 @@ export function createMcpToolAccessManifest(
       workflows[entry.workflow] = entry.companions
     }
   }
+  const authenticationCounts = Object.fromEntries(
+    MCP_TOOL_AUTH_CLASSES.map((name) => [name, 0]),
+  ) as Record<McpToolAuthClass, number>
+  const permissionModeCounts = Object.fromEntries(
+    MCP_TOOL_PERMISSION_MODES.map((name) => [name, 0]),
+  ) as Record<McpToolPermissionMode, number>
+  const targetScopeCounts = Object.fromEntries(
+    MCP_TOOL_TARGET_SCOPES.map((name) => [name, 0]),
+  ) as Record<McpToolTargetScope, number>
+  for (const { requirements } of entries) {
+    authenticationCounts[requirements.authentication] += 1
+    permissionModeCounts[requirements.discord.permissionMode] += 1
+    targetScopeCounts[requirements.targetScope] += 1
+  }
   return {
     authorityGranted: false,
     credentialsRequired: false,
@@ -1521,6 +1608,20 @@ export function createMcpToolAccessManifest(
     entries,
     format: MCP_TOOL_ACCESS_MANIFEST_FORMAT,
     readiness: "target-specific",
+    requirementCoverage: {
+      authenticationCounts,
+      complete: true,
+      exactToolEntries: entries.filter(({ requirements }) => (
+        requirements.source === "exact-tool"
+      )).length,
+      permissionModeCounts,
+      targetAccessProven: false,
+      targetScopeCounts,
+      toolsetEntries: entries.filter(({ requirements }) => (
+        requirements.source === "toolset"
+      )).length,
+      unknownEntries: 0,
+    },
     schemaVersion: SCHEMA_VERSION,
     stageContracts,
     stageCounts,
@@ -1528,10 +1629,65 @@ export function createMcpToolAccessManifest(
     toolsetNames: selectedToolsets,
     warnings: [
       "Static access contracts classify authorization and never prove target access",
+      "Static requirements cover every selected tool but remain setup guidance rather than authority",
+      "Toolset-sourced requirements are conservative setup envelopes; exact tool and target resolution remains runtime",
       "Presets declare setup permissions; every tool or plan checks exact operation evidence",
       "Every write still enforces policy, target, approval, freshness, rate, recovery, and verification",
     ],
     workflows,
+  }
+}
+
+export function createMcpToolAccessIndex(
+  requirementsUriTemplate: string,
+  toolsets: ReadonlySet<McpToolsetName> = new Set(MCP_TOOLSET_NAMES),
+): McpToolAccessIndex {
+  const manifest = createMcpToolAccessManifest(toolsets)
+  const {
+    entries,
+    format: _format,
+    ...shared
+  } = manifest
+  return {
+    ...shared,
+    entries: entries.map(({ name, stage, toolset, workflow }) => ({
+      name,
+      stage,
+      toolset,
+      workflow,
+    })),
+    exactRequirementToolNames: entries
+      .filter(({ requirements }) => requirements.source === "exact-tool")
+      .map(({ name }) => name),
+    format: MCP_TOOL_ACCESS_INDEX_FORMAT,
+    requirementsResource: {
+      uriTemplate: requirementsUriTemplate,
+      variable: "toolName",
+    },
+    warnings: [
+      ...manifest.warnings,
+      "Read the exact per-tool resource for the complete static setup and access contract",
+    ],
+  }
+}
+
+export function createMcpToolAccessDocument(
+  name: McpToolName,
+): McpToolAccessDocument {
+  const entry = mcpToolAccessEntry(name)
+  assertAccessTopology(entry)
+  return {
+    authorityGranted: false,
+    credentialsRequired: false,
+    discordContacted: false,
+    entry,
+    format: MCP_TOOL_ACCESS_DOCUMENT_FORMAT,
+    readiness: entry.readiness,
+    status: "ok",
+    warnings: [
+      "Static requirements are setup guidance and do not prove access to any target",
+      "The operation runtime remains authoritative for policy, permission, hierarchy, intent, freshness, and approval checks",
+    ],
   }
 }
 

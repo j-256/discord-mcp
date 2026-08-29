@@ -43,7 +43,13 @@ import {
   assertMcpReadResultBudget,
   redactedJson,
 } from "./mcp-output.js"
-import { createMcpToolAccessManifest } from "./mcp-tool-catalog.js"
+import {
+  createMcpToolAccessDocument,
+  createMcpToolAccessIndex,
+  isMcpToolName,
+  MCP_TOOL_ACCESS_NAMES,
+} from "./mcp-tool-catalog.js"
+import type { McpToolName } from "./observability-catalog.js"
 import type { ConnectorService } from "./service.js"
 
 type ResourceProvenance =
@@ -102,6 +108,17 @@ function templateInviteReference(variables: Variables): string {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidParams,
       "inviteRef must be an opaque process-local Discord invite reference",
+    )
+  }
+  return value
+}
+
+function templateToolName(variables: Variables): McpToolName {
+  const value = variables.toolName
+  if (typeof value !== "string" || !isMcpToolName(value)) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      "toolName must be one exact canonical Discord MCP tool name",
     )
   }
   return value
@@ -438,16 +455,48 @@ export function registerDiscordResources(
         cacheScope: "public",
         ttlMs: STATIC_RESOURCE_TTL_MS,
       },
-      description: "Deterministic machine-readable authorization lifecycle for every canonical tool, including reviewed workflow companions and an explicit target-specific readiness boundary.",
+      description: "Budget-safe deterministic index of every canonical tool's authorization lifecycle and exact static setup-resource lookup, with complete coverage and an explicit target-specific live-readiness boundary.",
       mimeType: "application/json",
-      title: "Discord tool access contract",
+      title: "Discord tool access and readiness index",
     },
     async (uri) => jsonResource(
       uri,
       "local-contract",
       "trusted-local-metadata",
       [],
-      () => createMcpToolAccessManifest(),
+      () => createMcpToolAccessIndex(MCP_RESOURCE_TEMPLATE_URIS.toolAccess),
+      0,
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_TEMPLATE_NAMES.toolAccess,
+    new ResourceTemplate(
+      MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+      {
+        complete: {
+          toolName: (value) => MCP_TOOL_ACCESS_NAMES
+            .filter((name) => name.startsWith(value)),
+        },
+        list: undefined,
+      },
+    ),
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: {
+        cacheScope: "public",
+        ttlMs: STATIC_RESOURCE_TTL_MS,
+      },
+      description: "Complete deterministic authorization and static setup contract for one exact canonical tool, including authentication class, policy paths, Discord permissions, Gateway intents, hierarchy, curated setup paths, workflow companions, and the live-readiness boundary.",
+      mimeType: "application/json",
+      title: "Exact Discord tool access and readiness contract",
+    },
+    async (uri, variables) => jsonResource(
+      uri,
+      "local-contract",
+      "trusted-local-metadata",
+      [],
+      () => createMcpToolAccessDocument(templateToolName(variables)),
       0,
     ),
   )

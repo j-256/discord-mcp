@@ -267,7 +267,7 @@ npm install --ignore-scripts ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz
 ./node_modules/.bin/discord-mcp catalog --check --json > catalog-evidence.json
 ```
 
-The evidence must be identical across repeated runs of the same installed archive. Review its exact inventories and accounting fields, preserve its `contractDigest` for contract comparison, and preserve its separate `safetyResourceDigest` for focused safety-guidance comparison. The report must state that credentials, Discord execution, Gateway access, telemetry export, and activity persistence are disabled.
+The evidence must be identical across repeated runs of the same installed archive. Review its exact inventories and accounting fields, including complete per-tool authentication, connector policy, Discord permission, conditional case, Gateway intent, hierarchy, curated setup, access-lifecycle, and live-verification contracts with zero unknown requirement entries. Preserve its `contractDigest` for contract comparison and its separate `safetyResourceDigest` for focused safety-guidance comparison. The report must state that credentials, Discord execution, Gateway access, telemetry export, activity persistence, authority grants, and target-readiness claims are disabled.
 
 Authenticate the container client, pull the exact image, verify its signed root provenance from the OCI registry, inspect the root-bound per-platform SPDX records, and run its credential-free catalog under the recommended restrictions:
 

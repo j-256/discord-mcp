@@ -15716,6 +15716,12 @@ test("minimum MCP read-response budget retains essential static and local surfac
     ["safety resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.safety })],
     ["component template resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.componentTemplates })],
     ["tool access resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess })],
+    ["exact tool access resource", () => client.readResource({
+      uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+        "{toolName}",
+        "execute_channel_order",
+      ),
+    })],
     ["policy resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.policy })],
     ["observability resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.observability })],
     ["plan review app", () => client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI })],

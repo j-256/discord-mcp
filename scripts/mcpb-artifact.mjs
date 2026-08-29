@@ -165,7 +165,7 @@ export async function validateMcpbManifest(document, packageJson) {
 }
 
 function validateCatalogEvidence(document, version) {
-  invariant(document.evidenceFormat === "discord-mcp.catalog-evidence.v2", "MCPB catalog evidence format is invalid")
+  invariant(document.evidenceFormat === "discord-mcp.catalog-evidence.v3", "MCPB catalog evidence format is invalid")
   invariant(document.schemaVersion === 1, "MCPB catalog evidence schema is invalid")
   invariant(document.serverVersion === version, "MCPB catalog evidence version is invalid")
   invariant(document.status === "ok", "MCPB catalog evidence status is invalid")
@@ -175,6 +175,14 @@ function validateCatalogEvidence(document, version) {
   invariant(document.gateway === "disabled", "MCPB catalog evidence enabled Gateway access")
   invariant(document.observabilityExport === "disabled", "MCPB catalog evidence exported telemetry")
   invariant(document.activityRecordsCreated === false, "MCPB catalog evidence persisted activity")
+  invariant(
+    document.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+      && document.toolAccessManifest.entries?.length === document.toolCount
+      && document.toolAccessManifest.requirementCoverage?.complete === true
+      && document.toolAccessManifest.requirementCoverage?.unknownEntries === 0
+      && document.toolAccessManifest.requirementCoverage?.targetAccessProven === false,
+    "MCPB catalog static requirement coverage is invalid",
+  )
   invariant(/^sha256:[0-9a-f]{64}$/.test(document.contractDigest), "MCPB catalog contract digest is invalid")
   invariant(/^sha256:[0-9a-f]{64}$/.test(document.safetyResourceDigest), "MCPB safety resource digest is invalid")
   return document

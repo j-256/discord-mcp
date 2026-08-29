@@ -205,7 +205,7 @@ test("published machine-readable artifacts preserve credential-free evidence", a
   assert.equal(evidence.gateway, "disabled")
   assert.equal(evidence.observabilityExport, "disabled")
   assert.equal(evidence.activityRecordsCreated, false)
-  assert.equal(evidence.completionCatalogValuesExposed, false)
+  assert.equal(evidence.policyCompletionValuesExposed, false)
   assert.equal(evidence.planReviewApp.serverToolAuthority, false)
   assert.deepEqual(evidence.planReviewApp.externalNetworkDomains, [])
   const llms = await readFile(join(DIST_DIRECTORY, "llms.txt"), "utf8")

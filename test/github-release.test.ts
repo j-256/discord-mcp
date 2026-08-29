@@ -75,12 +75,22 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
     activityRecordsCreated: false,
     credentialsRequired: false,
     discordExecution: "disabled",
-    evidenceFormat: "discord-mcp.catalog-evidence.v2",
+    evidenceFormat: "discord-mcp.catalog-evidence.v3",
     gateway: "disabled",
     observabilityExport: "disabled",
     schemaVersion: 1,
     serverVersion: VERSION,
     status: "ok",
+    toolAccessManifest: {
+      entries: [{}],
+      format: "discord-mcp.tool-access-manifest.v2",
+      requirementCoverage: {
+        complete: true,
+        targetAccessProven: false,
+        unknownEntries: 0,
+      },
+    },
+    toolCount: 1,
     ...overrides,
   }
 }
@@ -237,6 +247,20 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
     { catalog: validCatalog({ gateway: "enabled" }), label: "Gateway" },
     { catalog: validCatalog({ observabilityExport: "enabled" }), label: "telemetry" },
     { catalog: validCatalog({ activityRecordsCreated: true }), label: "activity" },
+    {
+      catalog: validCatalog({
+        toolAccessManifest: {
+          entries: [{}],
+          format: "discord-mcp.tool-access-manifest.v2",
+          requirementCoverage: {
+            complete: true,
+            targetAccessProven: false,
+            unknownEntries: 1,
+          },
+        },
+      }),
+      label: "static requirement",
+    },
     { label: "SBOM", sbom: validSbom({ name: "other-package@0.1.2" }) },
   ]
   for (const [index, entry] of cases.entries()) {

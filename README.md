@@ -50,7 +50,7 @@ npx --yes @j-256/discord-mcp@0.1.2 catalog --html ./discord-mcp-contract.html
 npx --yes @j-256/discord-mcp@0.1.2 preset show server-observer
 ```
 
-`catalog --check` verifies the credential-free, execution-disabled production contract. `catalog --html FILE` adds a release-exact inspect-to-recovery tour to the complete offline explorer, binds each live stage to negotiated evidence, states what remains unproven, and uses no external asset, runtime request, credential, or completion ID.
+`catalog --check` verifies the credential-free, execution-disabled production contract, including complete per-tool setup and readiness metadata. `catalog --html FILE` renders it as a release-exact guided, searchable offline explorer with no external asset, runtime request, credential, or configured completion ID.
 
 ### Switch from another Discord MCP
 
@@ -261,7 +261,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 
 | Command | What it proves | Discord access |
 | --- | --- | --- |
-| `discord-mcp catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
+| `discord-mcp catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value policy-completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
 | `discord-mcp catalog --html FILE` | Guided product tour and searchable rendering of the exact negotiated contract, including schemas, filters, completions, app source, resources, and safety guidance | None |
 | `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
@@ -282,7 +282,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `npm run mcpb:verify` | Byte-identical cross-platform bundles, strict ZIP metadata and contents, embedded evidence, Registry hash binding, isolated token mapping, and a real unpacked MCP handshake | None |
 | `npm run security:check` | Dependency vulnerabilities, registry signatures, and attestations | Public package registry only |
 
-`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, tool access lifecycles, policy-completion bindings, tool schemas and annotations, prompts, resources, templates, safety response, review app, and execution guard.
+`catalog --check --json` is designed for independent comparison. It needs no credential, ignores ambient connector authority, returns no configured completion identifiers, executes no Discord operation, opens no Gateway, exports no telemetry, and creates no activity record. Matching contract digests identify matching normalized MCP instructions, server capabilities, tool access lifecycles, policy-completion bindings, tool schemas and annotations, prompts, resources, templates, safety response, review app, and execution guard.
 
 Release automation verifies reproducible npm and MCPB artifacts, a hardened multi-architecture OCI image, SPDX inventories, and signed provenance, then publishes an immutable GitHub Release before registering the exact public MCPB digest. Provenance is a build receipt, an SBOM a parts list, and an attestation their exact artifact-and-issuer binding; none certifies security or completeness. See the [evidence boundaries](docs/reference.md#provenance-sbom-and-attestation-boundaries) and [release runbook](docs/releasing.md).
 

@@ -3,6 +3,7 @@ import test from "node:test"
 
 import type { RegisteredTool, ToolAnnotations } from "@modelcontextprotocol/server"
 
+import { CONFIG_RECIPES } from "../src/config-recipes.js"
 import {
   CONNECTOR_LIMITS,
   MCP_DISCOVERY_TOOL_NAME,
@@ -10,13 +11,18 @@ import {
 import {
   MCP_TOOL_ACCESS_STAGES,
   MCP_TOOL_CATALOG,
+  createMcpToolAccessDocument,
+  createMcpToolAccessIndex,
   createMcpToolAccessManifest,
   createDiscordToolDiscoveryCatalog,
   discoverDiscordTools,
+  mcpToolAccessEntry,
   mcpToolAccessContract,
   type CanonicalMcpToolName,
   type TrackedMcpTool,
 } from "../src/mcp-tool-catalog.js"
+import { mcpToolStaticRequirements } from "../src/mcp-tool-readiness.js"
+import { SETUP_PRESETS } from "../src/setup-presets.js"
 
 const COMPLETE_ANNOTATIONS = Object.freeze({
   destructiveHint: false,
@@ -218,6 +224,8 @@ test("tool discovery promotes reviewed planners without crossing exact risk filt
 
 test("tool access manifest classifies every tool and binds reviewed companions", () => {
   const manifest = createMcpToolAccessManifest()
+  const requirementsUriTemplate = "discord://connector/tool-access/{toolName}"
+  const index = createMcpToolAccessIndex(requirementsUriTemplate)
   assert.equal(
     manifest.entries.length,
     Object.keys(MCP_TOOL_CATALOG).length + 1,
@@ -239,6 +247,70 @@ test("tool access manifest classifies every tool and binds reviewed companions",
   assert.equal(manifest.credentialsRequired, false)
   assert.equal(manifest.discordContacted, false)
   assert.equal(manifest.readiness, "target-specific")
+  assert.deepEqual(manifest.requirementCoverage, {
+    authenticationCounts: Object.fromEntries(
+      ["bot", "bot-and-stored-webhook-token", "none", "short-lived-interaction-token"]
+        .map((name) => [name, manifest.entries.filter(({ requirements }) => (
+          requirements.authentication === name
+        )).length]),
+    ),
+    complete: true,
+    exactToolEntries: manifest.entries.filter(({ requirements }) => (
+      requirements.source === "exact-tool"
+    )).length,
+    permissionModeCounts: Object.fromEntries(
+      ["all-listed", "conditional", "delegated-runtime", "none"]
+        .map((name) => [name, manifest.entries.filter(({ requirements }) => (
+          requirements.discord.permissionMode === name
+        )).length]),
+    ),
+    targetAccessProven: false,
+    targetScopeCounts: Object.fromEntries(
+      ["application", "channel", "guild", "interaction", "local", "user", "webhook"]
+        .map((name) => [name, manifest.entries.filter(({ requirements }) => (
+          requirements.targetScope === name
+        )).length]),
+    ),
+    toolsetEntries: manifest.entries.filter(({ requirements }) => (
+      requirements.source === "toolset"
+    )).length,
+    unknownEntries: 0,
+  })
+  assert.equal(
+    manifest.requirementCoverage.exactToolEntries
+      + manifest.requirementCoverage.toolsetEntries,
+    manifest.entries.length,
+  )
+  assert.deepEqual(index.entries, manifest.entries.map(({
+    name,
+    stage,
+    toolset,
+    workflow,
+  }) => ({ name, stage, toolset, workflow })))
+  assert.deepEqual(index.exactRequirementToolNames, manifest.entries
+    .filter(({ requirements }) => requirements.source === "exact-tool")
+    .map(({ name }) => name))
+  assert.deepEqual(index.requirementsResource, {
+    uriTemplate: requirementsUriTemplate,
+    variable: "toolName",
+  })
+  assert.deepEqual(index.requirementCoverage, manifest.requirementCoverage)
+  assert.deepEqual(index.stageContracts, manifest.stageContracts)
+  assert.deepEqual(index.workflows, manifest.workflows)
+  assert.equal(index.entries.every((entry) => !("requirements" in entry)), true)
+  const channelOrderDocument = createMcpToolAccessDocument(
+    "execute_channel_order",
+  )
+  assert.deepEqual(
+    channelOrderDocument.entry,
+    mcpToolAccessEntry("execute_channel_order"),
+  )
+  assert.equal(channelOrderDocument.authorityGranted, false)
+  assert.equal(channelOrderDocument.discordContacted, false)
+  assert.equal(
+    createMcpToolAccessDocument("get_gateway_status").readiness,
+    "not-applicable",
+  )
   assert.deepEqual(manifest.stageContracts["review-execute"], {
     approval: "host-write-and-signed-interactive",
     authorizationEvidence: "fresh-plan-recheck",
@@ -275,6 +347,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     companions: { execute: [], plan: [], verify: [] },
     discordRequest: "none",
     readiness: "not-applicable",
+    requirements: mcpToolStaticRequirements("get_gateway_status", "gateway"),
     stage: "local",
   })
   assert.deepEqual(mcpToolAccessContract("plan_message_deletion"), {
@@ -287,6 +360,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     },
     discordRequest: "read",
     readiness: "target-specific",
+    requirements: mcpToolStaticRequirements("plan_message_deletion", "deletion"),
     stage: "review-plan",
   })
   assert.deepEqual(mcpToolAccessContract("delete_messages"), {
@@ -299,6 +373,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     },
     discordRequest: "write",
     readiness: "target-specific",
+    requirements: mcpToolStaticRequirements("delete_messages", "deletion"),
     stage: "review-execute",
   })
   assert.equal(
@@ -311,8 +386,186 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     companions: { execute: [], plan: [], verify: [] },
     discordRequest: "write",
     readiness: "target-specific",
+    requirements: mcpToolStaticRequirements("send_message", "interactions"),
     stage: "guarded-write",
   })
+})
+
+test("tool readiness distinguishes static setup, credentials, and live proof", () => {
+  const manifest = createMcpToolAccessManifest()
+  const byName = new Map(manifest.entries.map((entry) => [entry.name, entry]))
+
+  assert.deepEqual(byName.get("get_gateway_status")?.requirements.discord, {
+    conditions: [],
+    hierarchy: "not-applicable",
+    intents: [],
+    permissionMode: "none",
+    permissions: [],
+    verification: "not-applicable",
+  })
+  assert.equal(
+    byName.get("send_webhook_message")?.requirements.authentication,
+    "bot-and-stored-webhook-token",
+  )
+  assert.deepEqual(
+    byName.get("send_webhook_message")?.requirements.discord.permissions,
+    ["VIEW_CHANNEL"],
+  )
+  assert.deepEqual(
+    byName.get("send_webhook_message")?.requirements.configuration.policyPaths,
+    [
+      "$.capabilities.webhookMessageDelivery",
+      "$.readScope.channelIds",
+      "$.readScope.guildIds",
+      "$.scopes.webhookMessageChannelIds",
+      "$.storage.webhookCredentialRoot",
+    ],
+  )
+  assert.equal(
+    byName.get("get_connector_status")?.requirements.authentication,
+    "bot",
+  )
+  assert.deepEqual(
+    byName.get("get_connector_status")?.requirements.configuration.policyPaths,
+    ["$.readScope.guildIds"],
+  )
+  assert.equal(
+    byName.get("audit_application_commands")?.requirements.targetScope,
+    "guild",
+  )
+  assert.deepEqual(
+    byName.get("inspect_application_activity_instance")?.requirements.configuration.policyPaths,
+    ["$.readScope.channelIds", "$.readScope.guildIds"],
+  )
+  assert.equal(
+    byName.get("respond_to_discord_interaction")?.requirements.authentication,
+    "short-lived-interaction-token",
+  )
+  assert.deepEqual(
+    byName.get("plan_bulk_guild_ban")?.requirements.discord.permissions,
+    ["BAN_MEMBERS", "MANAGE_GUILD"],
+  )
+  assert.equal(
+    byName.get("plan_bulk_guild_ban")?.requirements.discord.hierarchy,
+    "required",
+  )
+  assert.deepEqual(
+    byName.get("read_messages")?.requirements.configuration.presetNames,
+    ["channel-reader"],
+  )
+  assert.deepEqual(
+    byName.get("plan_guild_blueprint")?.requirements.configuration.recipeNames,
+    ["guild-builder"],
+  )
+  assert.equal(
+    byName.get("plan_guild_blueprint")?.requirements.discord.permissionMode,
+    "delegated-runtime",
+  )
+  assert.deepEqual(
+    byName.get("plan_component_message")?.requirements.discord.permissions,
+    ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+  )
+  assert.deepEqual(
+    byName.get("plan_component_message")?.requirements.discord.conditions,
+    [
+      { case: "direct-channel", permissions: ["SEND_MESSAGES"] },
+      { case: "thread-channel", permissions: ["SEND_MESSAGES_IN_THREADS"] },
+    ],
+  )
+  assert.deepEqual(
+    byName.get("verify_component_message")?.requirements.discord.conditions,
+    [],
+  )
+  assert.deepEqual(
+    byName.get("list_voice_regions")?.requirements.configuration.policyPaths,
+    [],
+  )
+  assert.deepEqual(
+    byName.get("list_default_soundboard_sounds")?.requirements.configuration.policyPaths,
+    ["$.capabilities.soundboardAudit"],
+  )
+  assert.deepEqual(
+    byName.get("get_current_bot_profile")?.requirements.configuration.policyPaths,
+    ["$.capabilities.botProfileAudit"],
+  )
+  assert.deepEqual(
+    byName.get("parse_discord_reference")?.requirements.configuration.policyPaths,
+    ["$.readScope.channelIds", "$.readScope.guildIds"],
+  )
+  assert.deepEqual(
+    byName.get("add_reaction")?.requirements.discord.conditions,
+    [{
+      case: "reaction-not-already-present",
+      permissions: ["ADD_REACTIONS"],
+    }],
+  )
+  assert.deepEqual(
+    byName.get("list_archived_threads")?.requirements.discord,
+    {
+      conditions: [{ case: "private-archive", permissions: ["MANAGE_THREADS"] }],
+      hierarchy: "not-applicable",
+      intents: [],
+      permissionMode: "conditional",
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      verification: "operation-runtime",
+    },
+  )
+  for (const entry of manifest.entries) {
+    if (entry.requirements.targetScope === "guild") {
+      assert.equal(
+        entry.requirements.configuration.policyPaths.includes("$.readScope.guildIds"),
+        true,
+      )
+    }
+    if (entry.requirements.targetScope === "channel") {
+      assert.equal(
+        entry.requirements.configuration.policyPaths.includes("$.readScope.guildIds")
+          && entry.requirements.configuration.policyPaths.includes("$.readScope.channelIds"),
+        true,
+      )
+    }
+  }
+  assert.equal(
+    manifest.entries.every(({ requirements }) => (
+      requirements.discord.verification === "not-applicable"
+        ? requirements.authentication === "none"
+        : requirements.authentication !== "none"
+    )),
+    true,
+  )
+  assert.deepEqual(
+    manifest.entries.filter(({ stage, requirements }) => (
+      stage === "local" && requirements.authentication !== "none"
+      || stage !== "local" && requirements.authentication === "none"
+    )),
+    [],
+  )
+  assert.equal(
+    manifest.entries.every(({ requirements }) => (
+      Object.isFrozen(requirements)
+      && Object.isFrozen(requirements.configuration)
+      && Object.isFrozen(requirements.configuration.policyPaths)
+      && Object.isFrozen(requirements.discord)
+      && Object.isFrozen(requirements.discord.conditions)
+      && requirements.discord.conditions.every(Object.isFrozen)
+      && Object.isFrozen(requirements.discord.intents)
+      && requirements.discord.intents.every(Object.isFrozen)
+      && Object.isFrozen(requirements.discord.permissions)
+    )),
+    true,
+  )
+  for (const entry of manifest.entries) {
+    for (const presetName of entry.requirements.configuration.presetNames) {
+      const preset = SETUP_PRESETS.find(({ name }) => name === presetName)
+      assert.ok(preset)
+      assert.equal(preset.toolNames.includes(entry.name), true)
+    }
+    for (const recipeName of entry.requirements.configuration.recipeNames) {
+      const recipe = CONFIG_RECIPES.find(({ name }) => name === recipeName)
+      assert.ok(recipe)
+      assert.equal(recipe.toolNames.includes(entry.name), true)
+    }
+  }
 })
 
 test("tool discovery returns the canonical access contract in compact results", () => {

@@ -27,7 +27,7 @@ import {
   type McpToolName,
 } from "./observability-catalog.js"
 
-export const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v2"
+export const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v3"
 
 const ANNOTATION_NAMES = [
   "readOnlyHint",
@@ -290,6 +290,12 @@ function toolMarkup(
     metadata.access.approval,
     metadata.access.authorizationEvidence,
     metadata.access.stage,
+    metadata.access.requirements.authentication,
+    metadata.access.requirements.discord.hierarchy,
+    metadata.access.requirements.discord.permissionMode,
+    metadata.access.requirements.discord.permissions.join(" "),
+    metadata.access.requirements.discord.intents.map(({ name }) => name).join(" "),
+    metadata.access.requirements.configuration.policyPaths.join(" "),
     metadata.toolset,
     metadata.workflow,
   ].join(" ").toLocaleLowerCase()
@@ -298,16 +304,40 @@ function toolMarkup(
   const appBadge = ui?.resourceUri === MCP_PLAN_REVIEW_APP_URI
     ? '<span class="badge app-badge">Plan review app</span>'
     : ""
+  const requirements = metadata.access.requirements
+  const { requirements: _requirements, ...accessLifecycle } = metadata.access
+  const permissionSummary = requirements.discord.permissionMode === "none"
+    ? "No Discord permission"
+    : requirements.discord.permissions.length > 0
+      ? requirements.discord.permissions.join(", ")
+      : "Runtime-dependent permission"
+  const intentSummary = requirements.discord.intents.length === 0
+    ? "No Gateway intent"
+    : requirements.discord.intents
+        .map(({ name, status }) => `${name} (${status})`)
+        .join(", ")
+  const conditionSummary = requirements.discord.conditions.length === 0
+    ? "None"
+    : requirements.discord.conditions
+        .map((condition) => (
+          `${condition.case}: ${condition.permissions.length > 0 ? condition.permissions.join(", ") : "no added permission"}`
+        ))
+        .join("; ")
+  const curatedSetupSummary = [
+    ...requirements.configuration.presetNames.map((name) => `preset:${name}`),
+    ...requirements.configuration.recipeNames.map((name) => `recipe:${name}`),
+  ].join(", ") || "None"
   return `<article class="tool-card" data-tool data-search="${escapeHtml(search)}" data-access="${escapeHtml(metadata.access.stage)}" data-risk="${escapeHtml(metadata.risk)}" data-toolset="${escapeHtml(metadata.toolset)}" data-workflow="${escapeHtml(metadata.workflow)}">
   <details id="tool-${escapeHtml(tool.name)}">
     <summary>
       <span class="summary-copy"><strong>${escapeHtml(title)}</strong><code>${escapeHtml(tool.name)}</code></span>
-      <span class="badges">${appBadge}<span class="badge risk-${escapeHtml(metadata.risk)}">${escapeHtml(displayName(metadata.risk))}</span><span class="badge">${escapeHtml(metadata.access.stage)}</span><span class="badge">${escapeHtml(metadata.toolset)}</span></span>
+      <span class="badges">${appBadge}<span class="badge risk-${escapeHtml(metadata.risk)}">${escapeHtml(displayName(metadata.risk))}</span><span class="badge">${escapeHtml(metadata.access.stage)}</span><span class="badge">${escapeHtml(requirements.authentication)}</span><span class="badge">${escapeHtml(metadata.toolset)}</span></span>
     </summary>
     <div class="tool-body">
       <p>${escapeHtml(description)}</p>
-      <div class="tool-meta"><span><b>Toolset</b> ${escapeHtml(metadata.toolset)}</span><span><b>Workflow</b> ${escapeHtml(metadata.workflow)}</span><span><b>Access</b> ${escapeHtml(metadata.access.stage)}</span><span><b>Readiness</b> ${escapeHtml(metadata.access.readiness)}</span><a href="#tool-${escapeHtml(tool.name)}" aria-label="Link to ${escapeHtml(tool.name)}">Permalink</a></div>
-      <details class="contract-card"><summary><strong>Access lifecycle</strong><code>${escapeHtml(metadata.access.authorizationEvidence)}</code></summary><div><p>This static contract classifies authorization but does not prove access to a Discord target.</p><pre tabindex="0"><code>${jsonText(metadata.access)}</code></pre></div></details>
+      <div class="tool-meta"><span><b>Toolset</b> ${escapeHtml(metadata.toolset)}</span><span><b>Workflow</b> ${escapeHtml(metadata.workflow)}</span><span><b>Access</b> ${escapeHtml(metadata.access.stage)}</span><span><b>Readiness</b> ${escapeHtml(metadata.access.readiness)}</span><span><b>Authentication</b> ${escapeHtml(requirements.authentication)}</span><a href="#tool-${escapeHtml(tool.name)}" aria-label="Link to ${escapeHtml(tool.name)}">Permalink</a></div>
+      <details class="contract-card"><summary><strong>Static setup requirements</strong><code>${escapeHtml(requirements.discord.permissionMode)}</code></summary><div><p><b>Target:</b> ${escapeHtml(requirements.targetScope)} (${escapeHtml(requirements.source)})<br><b>Permissions:</b> ${escapeHtml(permissionSummary)}<br><b>Conditional permissions:</b> ${escapeHtml(conditionSummary)}<br><b>Intents:</b> ${escapeHtml(intentSummary)}<br><b>Hierarchy:</b> ${escapeHtml(requirements.discord.hierarchy)}<br><b>Curated setup:</b> ${escapeHtml(curatedSetupSummary)}<br><b>Live verification:</b> ${escapeHtml(requirements.discord.verification)}</p><p>Policy paths are exact for an exact-tool source and form a conservative setup envelope for a toolset source. Presets and recipes are listed only when their curated contract includes this tool. This static record grants no authority and cannot prove target access.</p><pre tabindex="0"><code>${jsonText(requirements)}</code></pre></div></details>
+      <details class="contract-card"><summary><strong>Access lifecycle</strong><code>${escapeHtml(metadata.access.authorizationEvidence)}</code></summary><div><p>This static contract classifies authorization but does not prove access to a Discord target.</p><pre tabindex="0"><code>${jsonText(accessLifecycle)}</code></pre></div></details>
       <dl class="annotations" aria-label="MCP tool annotations">${annotationMarkup(annotations)}</dl>
       <div class="schema-grid">
         <section><h4>Input schema</h4><pre tabindex="0"><code>${jsonText(tool.inputSchema)}</code></pre></section>
@@ -425,7 +455,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
       <div class="proof" role="listitem"><strong>${report.planReviewApp.linkedToolCount}</strong><span>Interactive plan reviews</span></div>
     </div>
     <div class="guarantees">
-      <section class="panel"><h2>What this proves</h2><ul class="checks"><li>Production registrations negotiated</li><li>Complete tool annotations checked</li><li>Every access lifecycle classified</li><li>Known and unknown calls blocked identically</li><li>Policy completion routes return zero catalog IDs</li><li>No credential or Discord execution available</li></ul></section>
+      <section class="panel"><h2>What this proves</h2><ul class="checks"><li>Production registrations negotiated</li><li>Complete tool annotations checked</li><li>Every access lifecycle classified</li><li>Every static setup requirement classified</li><li>Known and unknown calls blocked identically</li><li>Policy completion routes return zero catalog IDs</li><li>No credential or Discord execution available</li></ul></section>
       <section class="panel"><h2>Risk distribution</h2>${riskBars(snapshot)}<h3>Access lifecycle</h3>${accessBars(snapshot)}<p class="digest"><b>Contract</b><br>${escapeHtml(report.contractDigest)}<br><br><b>Tool access</b><br>${escapeHtml(report.toolAccessResourceDigest)}<br><br><b>Safety</b><br>${escapeHtml(report.safetyResourceDigest)}<br><br><b>Plan-review HTML</b><br>${escapeHtml(report.planReviewApp.htmlDigest)}</p></section>
     </div>
   </header>
@@ -436,7 +466,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
       ${tourMarkup}
     </section>
     <section id="tools">
-      <div class="section-head"><div><p class="eyebrow">Exact callable surface</p><h2>Tools</h2></div><p>Search names and descriptions, then narrow by internal toolset, MCP risk class, access lifecycle, or complete reviewed workflow. Static access metadata never claims target readiness.</p></div>
+      <div class="section-head"><div><p class="eyebrow">Exact callable surface</p><h2>Tools</h2></div><p>Search names, permissions, intents, policy paths, and descriptions, then narrow by internal toolset, MCP risk class, access lifecycle, or complete reviewed workflow. Static setup metadata never claims target readiness.</p></div>
       <div class="controls" role="group" aria-label="Tool filters">
         <label for="tool-search">Search<input id="tool-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search tools and capabilities"></label>
         <label for="toolset-filter">Toolset<select id="toolset-filter"><option value="">All toolsets</option>${optionMarkup(toolsets)}</select></label>
