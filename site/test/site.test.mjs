@@ -17,6 +17,7 @@ const SITE_BASE = "/discord-mcp"
 const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`
 const REQUIRED_CSP = "default-src 'none'"
 const STABLE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u
+const SAFE_LINK_PROTOCOLS = new Set(["data:", "http:", "https:", "mailto:"])
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex")
@@ -169,9 +170,13 @@ test("built documentation has complete local navigation and no remote runtime as
     for (const tag of htmlAttributes(markup)) {
       for (const attributeName of ["href", "src"]) {
         const value = tag.attributes.get(attributeName)
-        if (!value || value.startsWith("#") || value.startsWith("data:") || value.startsWith("mailto:")) continue
-        assert.ok(!value.startsWith("javascript:"), `${sourceUrl.href} contains a JavaScript URL`)
+        if (!value || value.startsWith("#")) continue
         const target = new URL(value, sourceUrl)
+        assert.ok(
+          SAFE_LINK_PROTOCOLS.has(target.protocol),
+          `${sourceUrl.href} contains an unsafe URL scheme`,
+        )
+        if (target.protocol === "data:" || target.protocol === "mailto:") continue
         if (target.origin !== SITE_ORIGIN) {
           assert.equal(tag.name, "a", `${sourceUrl.href} loads a remote ${tag.name} resource: ${target.href}`)
           continue
