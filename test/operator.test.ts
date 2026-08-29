@@ -492,6 +492,7 @@ function toolService(
   }
   return {
     addReaction: unexpected,
+    addReactions: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     playSoundboardSound: unexpected,

@@ -1565,6 +1565,14 @@ const addReactionInputSchema = z.strictObject({
   emoji: reactionEmojiInputSchema,
   messageId: positiveSnowflakeSchema,
 })
+const addReactionsInputSchema = z.strictObject({
+  channelId: positiveSnowflakeSchema,
+  emojis: z.array(reactionEmojiInputSchema)
+    .min(REACTION_LIMITS.addSetEmojisMinimum)
+    .max(REACTION_LIMITS.addSetEmojis)
+    .describe("Ordered unique Unicode or exact name:snowflake reactions"),
+  messageId: positiveSnowflakeSchema,
+})
 const reactionUserPageInputSchema = z.strictObject({
   after: positiveSnowflakeSchema
     .optional()
@@ -10346,6 +10354,7 @@ const toolOutputSchema = z.looseObject({
 
 export interface DiscordToolService {
   addReaction: ConnectorService["addReaction"]
+  addReactions: ConnectorService["addReactions"]
   checkSoundboardPlayback: ConnectorService["checkSoundboardPlayback"]
   analyzeCommunityActivity: ConnectorService["analyzeCommunityActivity"]
   auditApplicationCommands: ConnectorService["auditApplicationCommands"]
@@ -11464,10 +11473,15 @@ function errorEnvelope(error: unknown, secrets: readonly (string | undefined)[])
       const resultStatus = String(error.result.status)
       if (resultStatus === "uncertain") status = "outcome-uncertain"
       if (resultStatus === "failed") status = "interaction-failed"
+      if (resultStatus === "rate-limited") status = "rate-limited"
       if (resultStatus === "completed-audit-failed") status = resultStatus
     }
     if (error.cause instanceof DiscordApiError && error.cause.status === 429) {
       details.retryAfterMs = error.cause.retryAfterMs ?? null
+      status = "rate-limited"
+    }
+    if (error.cause instanceof InteractionRateLimitError) {
+      details.retryAfterMs = error.cause.retryAfterMs
       status = "rate-limited"
     }
   }
@@ -23117,6 +23131,33 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord own reaction ${state} on message ${result.messageId} in channel ${result.channelId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("add_reactions", server.registerTool(
+    "add_reactions",
+    {
+      annotations: WRITE_ANNOTATIONS,
+      description: `Idempotently add an ordered set of ${REACTION_LIMITS.addSetEmojisMinimum}-${REACTION_LIMITS.addSetEmojis} unique verified-bot reactions to one exact message in an explicitly allowlisted Discord channel. Validates the complete set before writing, stops at the first failure, and can be safely retried with the identical order.`,
+      inputSchema: addReactionsInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Add own Discord reactions",
+    },
+    safeToolHandler("add_reactions", async (
+      input: z.infer<typeof addReactionsInputSchema>,
+      context,
+    ) => {
+      const result = await service.addReactions(
+        input,
+        { signal: context.mcpReq.signal },
+      )
+      const state = result.status === "noop"
+        ? "was already present"
+        : `completed with ${result.addedCount} added and ${result.existingCount} already present`
+      return toolResult(
+        result,
+        `Discord own reaction set ${state} on message ${result.messageId} in channel ${result.channelId}`,
       )
     }, secrets, observability),
   ))

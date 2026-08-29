@@ -437,7 +437,7 @@ function serviceFixture(overrides: {
     removeMember: 0,
     user: 0,
   }
-  let ownReaction: string | null = null
+  const ownReactions = new Set<string>()
   const client: DiscordServiceClient = {
     async addThreadMember() {
       throw new Error("Unexpected thread-member add")
@@ -456,7 +456,7 @@ function serviceFixture(overrides: {
     },
     async addOwnReaction(_channelId, _messageId, emoji) {
       calls.addReaction += 1
-      ownReaction = emoji
+      ownReactions.add(emoji)
     },
     async bulkDeleteMessages() {},
     async bulkGuildBan() {
@@ -641,8 +641,8 @@ function serviceFixture(overrides: {
     async deleteInvite() {
       throw new Error("Unexpected invite deletion")
     },
-    async deleteOwnReaction() {
-      ownReaction = null
+    async deleteOwnReaction(_channelId, _messageId, emoji) {
+      ownReactions.delete(emoji)
     },
     async deleteUserReaction() {
       throw new Error("Unexpected reaction moderation")
@@ -818,19 +818,25 @@ function serviceFixture(overrides: {
       throw new Error("Unexpected Stage-instance lookup")
     },
     async getMessage() {
-      const customReaction = ownReaction?.includes(":") ?? false
-      const [reactionName, reactionId] = customReaction
-        ? ownReaction?.split(":") || []
-        : [ownReaction, null]
       return message({
-        reactions: ownReaction === null ? [] : [{
-          burst_colors: [],
-          count: 1,
-          count_details: { burst: 0, normal: 1 },
-          emoji: { animated: false, id: reactionId ?? null, name: reactionName ?? null },
-          me: true,
-          me_burst: false,
-        }],
+        reactions: [...ownReactions].map((reaction) => {
+          const customReaction = reaction.includes(":")
+          const [reactionName, reactionId] = customReaction
+            ? reaction.split(":")
+            : [reaction, null]
+          return {
+            burst_colors: [],
+            count: 1,
+            count_details: { burst: 0, normal: 1 },
+            emoji: {
+              animated: false,
+              id: reactionId ?? null,
+              name: reactionName ?? null,
+            },
+            me: true,
+            me_burst: false,
+          }
+        }),
       })
     },
     async getThreadMember(threadId, userId) {
@@ -3754,13 +3760,20 @@ test("service verifies bot identity before delegating safe message interactions"
     emoji: "🔥",
     messageId: MESSAGE_ID,
   })
+  const reactions = await service.addReactions({
+    channelId: CHANNEL_ID,
+    emojis: ["🔥", "✅"],
+    messageId: MESSAGE_ID,
+  })
 
   assert.equal(sent.messageId, MESSAGE_ID)
   assert.equal(reaction.messageId, MESSAGE_ID)
+  assert.equal(reactions.addedCount, 1)
+  assert.equal(reactions.existingCount, 1)
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(calls.createMessage, 1)
-  assert.equal(calls.addReaction, 1)
+  assert.equal(calls.addReaction, 2)
   assert.deepEqual(writeCoordinator.intents, [])
 })
 

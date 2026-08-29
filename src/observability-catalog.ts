@@ -1,5 +1,6 @@
 export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   add_reaction: "interaction-write",
+  add_reactions: "interaction-write",
   check_soundboard_playback: "discord-read",
   analyze_community_activity: "discord-read",
   audit_application_commands: "discord-read",
