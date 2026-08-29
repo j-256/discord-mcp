@@ -1023,6 +1023,31 @@ test("already-current ordering spends no key and records no activity", async () 
   assert.equal(target.operationStore.reserveCalls, 0)
 })
 
+test("channel-ordering reconciliation admits only a matching completed receipt and live state", async () => {
+  const target = fixture()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, request())
+  await target.service.execute(APPLICATION_ID, BOT_ID, request(), plan.digest)
+
+  const reconciled = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+  assert.equal(reconciled.status, "already-current")
+  assert.equal(reconciled.writeRequired, false)
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, request()),
+    ChannelOrderingOperationConflictError,
+  )
+
+  target.client.channels = new FixtureClient().channels
+  target.client.source.publish(layoutSnapshot(target.client.channels, 3))
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, request()),
+    ChannelOrderingOperationConflictError,
+  )
+})
+
 test("fresh layout drift and reserved operation keys block before mutation", async () => {
   const changed = fixture()
   const plan = await changed.service.plan(APPLICATION_ID, BOT_ID, request())
