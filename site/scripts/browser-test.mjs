@@ -14,9 +14,11 @@ const HOST = "127.0.0.1"
 const PORT = 4327
 const ORIGIN = `http://${HOST}:${PORT}`
 const BASE_URL = `${ORIGIN}/discord-mcp`
-const PREVIEW_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm"
+const ASTRO_CLI = join(SITE_DIRECTORY, "node_modules", "astro", "bin", "astro.mjs")
 const START_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
+const PAGE_TIMEOUT_MS = 30_000
+const ACCESSIBILITY_TIMEOUT_MS = 45_000
 const EXPECTED_NOT_FOUND_CONSOLE = "error: Failed to load resource: the server responded with a status of 404 (Not Found)"
 const TEST_PATHS = [
   "/",
@@ -32,6 +34,27 @@ const TEST_PATHS = [
 
 function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
+}
+
+function reportProgress(message) {
+  process.stdout.write(`Documentation browser: ${message}\n`)
+}
+
+async function withTimeout(label, milliseconds, operation) {
+  let timeout
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise((_resolvePromise, rejectPromise) => {
+        timeout = setTimeout(
+          () => rejectPromise(new Error(`${label} exceeded ${milliseconds}ms`)),
+          milliseconds,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function waitForPreview(processHandle) {
@@ -71,9 +94,11 @@ async function stopPreview(processHandle) {
 }
 
 async function assertAccessible(page, path) {
-  const result = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-    .analyze()
+  const result = await withTimeout(`Accessibility scan for ${path}`, ACCESSIBILITY_TIMEOUT_MS, () => (
+    new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+      .analyze()
+  ))
   assert.deepEqual(
     result.violations.map(({ id, impact, nodes }) => ({
       id,
@@ -87,8 +112,8 @@ async function assertAccessible(page, path) {
 
 async function main() {
   const preview = spawn(
-    PREVIEW_COMMAND,
-    ["exec", "--", "astro", "preview", "--host", HOST, "--port", String(PORT)],
+    process.execPath,
+    [ASTRO_CLI, "preview", "--host", HOST, "--port", String(PORT)],
     {
       cwd: SITE_DIRECTORY,
       env: { ...process.env, ASTRO_PREVIEW_BACKGROUND: "1", NO_COLOR: "1" },
@@ -99,11 +124,15 @@ async function main() {
   preview.stdout.on("data", (chunk) => { previewOutput += chunk })
   preview.stderr.on("data", (chunk) => { previewOutput += chunk })
   try {
+    reportProgress("starting preview")
     await waitForPreview(preview)
+    reportProgress("preview ready")
     const browser = await chromium.launch({ headless: true })
     try {
       const context = await browser.newContext({ viewport: { height: 900, width: 1440 } })
       const page = await context.newPage()
+      page.setDefaultTimeout(PAGE_TIMEOUT_MS)
+      page.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS)
       const consoleFailures = []
       const pageFailures = []
       const remoteRequests = []
@@ -116,6 +145,7 @@ async function main() {
       })
 
       for (const path of TEST_PATHS) {
+        reportProgress(`checking ${path}`)
         const response = await page.goto(`${BASE_URL}${path}`, { waitUntil: "networkidle" })
         assert.equal(response?.status(), 200, path)
         await page.getByRole("heading", { level: 1 }).waitFor()
@@ -124,6 +154,7 @@ async function main() {
         assert.ok(overflow <= 1, `${path} overflows the desktop viewport by ${overflow}px`)
       }
 
+      reportProgress("checking primary navigation")
       await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("link", { name: "Get a verified read" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Switch from another Discord MCP" }).count(), 1)
@@ -135,6 +166,7 @@ async function main() {
       await page.waitForURL(`${BASE_URL}/start/getting-started/`)
       assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Getting started: first verified Discord read")
 
+      reportProgress("checking migration and search")
       await page.goto(`${BASE_URL}/start/migration/`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Migrate from another Discord MCP")
 
@@ -148,6 +180,7 @@ async function main() {
       await searchInput.fill("provenance SBOM")
       await page.locator("#starlight__search a").first().waitFor({ state: "visible" })
 
+      reportProgress("checking contract explorer")
       await page.goto(`${BASE_URL}/generated/contract-explorer.html`, { waitUntil: "networkidle" })
       assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Discord MCP Contract Explorer")
       const scopeTab = page.getByRole("tab", { name: /Scope/u })
@@ -167,6 +200,7 @@ async function main() {
       assert.match(await page.getByRole("status").innerText(), /tools shown/u)
       await assertAccessible(page, "/generated/contract-explorer.html")
 
+      reportProgress("checking not-found behavior")
       const consoleCountBeforeNotFound = consoleFailures.length
       const notFound = await page.goto(`${BASE_URL}/route-that-does-not-exist/`, { waitUntil: "networkidle" })
       assert.equal(notFound?.status(), 404)
@@ -178,6 +212,7 @@ async function main() {
         `Not-found route emitted unexpected console output: ${notFoundConsole.join("\n")}`,
       )
 
+      reportProgress("checking mobile layouts")
       await page.setViewportSize({ height: 844, width: 390 })
       await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" })
       const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
@@ -208,6 +243,7 @@ async function main() {
       assert.deepEqual(remoteRequests, [], "Documentation made remote runtime requests")
       assert.deepEqual(pageFailures, [], "Documentation raised page errors")
       assert.deepEqual(consoleFailures, [], "Documentation emitted console warnings or errors")
+      reportProgress("closing browser context")
       await context.close()
     } finally {
       await browser.close()

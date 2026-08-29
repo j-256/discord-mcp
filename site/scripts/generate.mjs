@@ -346,14 +346,27 @@ function json(value) {
   return `${JSON.stringify(sortedValue(value), null, 2)}\n`
 }
 
+function stripInlineHtml(value) {
+  let stripped = ""
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "<") {
+      stripped += value[index]
+      continue
+    }
+    const closingBracket = value.indexOf(">", index + 1)
+    if (closingBracket !== -1) index = closingBracket
+  }
+  return stripped
+}
+
 function createSlugger() {
   const seen = new Map()
   return (heading) => {
-    const base = heading
+    const markdownText = heading
       .normalize("NFKD")
       .toLocaleLowerCase("en-US")
       .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-      .replace(/<[^>]*>/gu, "")
+    const base = stripInlineHtml(markdownText)
       .replace(/[`*_~]/gu, "")
       .replace(/[^\p{Letter}\p{Number}\s_-]/gu, "")
       .trim()
