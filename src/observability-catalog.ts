@@ -20,6 +20,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   compile_component_template: "local-read",
   compile_guild_blueprint_starter: "local-read",
   create_coordination_address: "local-read",
+  catch_up_messages: "discord-read",
   preview_guild_blueprint: "local-read",
   execute_application_emoji_change: "destructive-write",
   execute_application_entitlement_consumption: "destructive-write",

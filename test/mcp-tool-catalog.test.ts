@@ -140,6 +140,29 @@ test("tool discovery rewards distinct token evidence without substring collision
   assert.equal(collision.matches.some(({ name }) => name === "plan_role_order"), false)
 })
 
+test("tool discovery prefers caller-retained multi-channel catch-up", () => {
+  const catalog = createDiscordToolDiscoveryCatalog([
+    trackedTool({
+      description: "Catch up across bounded exact Discord channels with independent cursors",
+      name: "catch_up_messages",
+      title: "Catch up across Discord channels",
+    }),
+    trackedTool({
+      description: "Read one bounded page of Discord messages",
+      name: "read_messages",
+      title: "Read Discord messages",
+    }),
+  ], "full")
+
+  const result = discoverDiscordTools({
+    detail: "compact",
+    limit: 1,
+    query: "catch up on new unread messages across channels",
+  }, catalog)
+
+  assert.equal(result.matches[0]?.name, "catch_up_messages")
+})
+
 test("tool discovery normalizes safe variants while rejecting weak multi-term matches", () => {
   const catalog = createDiscordToolDiscoveryCatalog([
     trackedTool({ name: "list_roles", title: "List Discord roles" }),
@@ -498,6 +521,28 @@ test("tool readiness distinguishes static setup, credentials, and live proof", (
   assert.deepEqual(
     byName.get("read_messages")?.requirements.configuration.presetNames,
     ["channel-reader"],
+  )
+  assert.deepEqual(
+    byName.get("catch_up_messages")?.requirements.configuration.presetNames,
+    ["channel-reader"],
+  )
+  assert.deepEqual(
+    byName.get("catch_up_messages")?.requirements.discord,
+    {
+      conditions: [{
+        case: "voice-or-stage-channel",
+        permissions: ["CONNECT"],
+      }],
+      hierarchy: "not-applicable",
+      intents: [{
+        name: "MESSAGE_CONTENT",
+        privileged: true,
+        status: "required",
+      }],
+      permissionMode: "conditional",
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      verification: "operation-runtime",
+    },
   )
   assert.deepEqual(
     byName.get("list_message_replies")?.requirements.configuration.presetNames,

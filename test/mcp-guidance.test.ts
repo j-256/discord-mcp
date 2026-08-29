@@ -363,6 +363,7 @@ function guidanceService(options: {
   const service: DiscordToolService = {
     addReaction: unexpected,
     addReactions: unexpected,
+    catchUpMessages: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     createCoordinationAddress: unexpectedSync,
@@ -5306,6 +5307,36 @@ test("MCP read prompts render bounded literal inputs without invoking services",
   assert.match(directedNotes, /do not call create_coordination_address/u)
   assert.match(directedNotes, /Persist no address, cursor, note, tag, reaction, profile, or result data/u)
 
+  const catchUp = promptText(await client.getPrompt({
+    arguments: {
+      requestJson: JSON.stringify({
+        channels: [
+          { afterMessageId: MESSAGE_ID, channelId: CHANNEL_ID },
+          { channelId: SECOND_CHANNEL_ID },
+        ],
+        guildId: GUILD_ID,
+        maxMessagesPerChannel: 4,
+      }),
+    },
+    name: MCP_PROMPT_NAMES.catchUpDiscordChannels,
+  }))
+  assert.deepEqual(JSON.parse(catchUp.split("\n")[1] || ""), {
+    channels: [
+      { afterMessageId: MESSAGE_ID, channelId: CHANNEL_ID },
+      { channelId: SECOND_CHANNEL_ID },
+    ],
+    guildId: GUILD_ID,
+    includeAutomatedMessages: false,
+    maxMessagesPerChannel: 4,
+  })
+  assert.match(catchUp, /query `catch_up_messages`, detail `full`, and limit 1/u)
+  assert.match(catchUp, /Call catch_up_messages exactly once/u)
+  assert.match(catchUp, /Initialization is a bounded baseline, not an unread claim/u)
+  assert.match(catchUp, /machine-copyable `Next cursors` JSON object/u)
+  assert.match(catchUp, /These cursors remain with the caller and grant no authority/u)
+  assert.match(catchUp, /Do not fetch another page/u)
+  assert.match(catchUp, /persist content, profiles, channel state, or cursors/u)
+
   const summary = promptText(await client.getPrompt({
     arguments: {
       channelId: CHANNEL_ID,
@@ -8116,6 +8147,15 @@ test("MCP prompts reject unsafe bounds and invalid action parameters before rend
     {
       arguments: { channelId: CHANNEL_ID, limit: "0" },
       name: MCP_PROMPT_NAMES.summarizeChannel,
+    },
+    {
+      arguments: {
+        requestJson: JSON.stringify({
+          channels: [{ channelId: CHANNEL_ID }, { channelId: CHANNEL_ID }],
+          guildId: GUILD_ID,
+        }),
+      },
+      name: MCP_PROMPT_NAMES.catchUpDiscordChannels,
     },
     {
       arguments: { guildId: GUILD_ID, query: "   " },

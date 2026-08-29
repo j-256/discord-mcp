@@ -496,6 +496,7 @@ function toolService(
   return {
     addReaction: unexpected,
     addReactions: unexpected,
+    catchUpMessages: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     createCoordinationAddress: unexpectedSync,
@@ -6194,6 +6195,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.deepEqual(report.promptNames, [
     "audit_bot_installations",
     "author_guild_blueprint",
+    "catch_up_discord_channels",
     "find_guild_members",
     "inspect_directed_discord_notes",
     "inspect_discord_coordination_task",
@@ -6586,9 +6588,10 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 9)
+  assert.equal(report.toolCount, 10)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
+    "catch_up_discord_channels",
     "inspect_discord_coordination_task",
     "recall_discord_conversation",
     "route_discord_goal",
@@ -6597,6 +6600,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   ])
   assert.deepEqual(report.readOnlyTools, [
     "analyze_community_activity",
+    "catch_up_messages",
     "discover_discord_tools",
     "get_message",
     "list_activity",

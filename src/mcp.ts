@@ -1366,6 +1366,48 @@ const messagePageInputSchema = z.strictObject({
   ({ after, around, before }) => [after, around, before].filter(Boolean).length <= 1,
   { message: "after, around, and before are mutually exclusive" },
 )
+const messageCatchupSelectionInputSchema = z.strictObject({
+  afterMessageId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional caller-retained nextAfterMessageId from an earlier catch-up"),
+  channelId: positiveSnowflakeSchema
+    .describe("Exact readable Discord guild channel or thread ID"),
+})
+const messageCatchupInputSchema = z.strictObject({
+  channels: z.array(messageCatchupSelectionInputSchema)
+    .min(1)
+    .max(CONNECTOR_LIMITS.messageCatchupChannels)
+    .describe("Unique exact channels and their independently retained cursors"),
+  guildId: positiveSnowflakeSchema
+    .describe("Exact permitted Discord guild containing every selected channel"),
+  includeAutomatedMessages: z.boolean()
+    .default(false)
+    .describe("Include bot- and webhook-authored messages in previews"),
+  maxMessagesPerChannel: z.number().int()
+    .min(2)
+    .max(CONNECTOR_LIMITS.messageCatchupMessagesPerChannel)
+    .default(CONNECTOR_LIMITS.messageCatchupMessagesDefault)
+    .describe("Maximum messages scanned once per channel"),
+}).superRefine((input, context) => {
+  const channelIds = input.channels.map(({ channelId }) => channelId)
+  if (new Set(channelIds).size !== channelIds.length) {
+    context.addIssue({
+      code: "custom",
+      message: "channel selections must be unique",
+      path: ["channels"],
+    })
+  }
+  if (
+    input.channels.length * input.maxMessagesPerChannel
+    > CONNECTOR_LIMITS.messageCatchupMessagesTotal
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: `catch-up may scan at most ${CONNECTOR_LIMITS.messageCatchupMessagesTotal} messages`,
+      path: ["maxMessagesPerChannel"],
+    })
+  }
+})
 const messageReplyPageInputSchema = z.strictObject({
   afterMessageId: positiveSnowflakeSchema
     .optional()
@@ -10689,6 +10731,7 @@ export interface DiscordToolService {
   planWebhookMessageDeletion: ConnectorService["planWebhookMessageDeletion"]
   previewComponentLayout: ConnectorService["previewComponentLayout"]
   previewEmbedMessage: ConnectorService["previewEmbedMessage"]
+  catchUpMessages: ConnectorService["catchUpMessages"]
   readMessages: ConnectorService["readMessages"]
   recallConversation: ConnectorService["recallConversation"]
   removeOwnReaction: ConnectorService["removeOwnReaction"]
@@ -22168,6 +22211,43 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord scanned ${result.page.scannedMessageCount} messages and returned ${result.notes.length} matching untrusted coordination notes from channel ${input.channelId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("catch_up_messages", () => server.registerTool(
+    "catch_up_messages",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Catch up across bounded exact Discord guild channels in one privacy-minimized read. Each selection starts from its caller-retained cursor or explicitly initializes from the newest bounded page. All channels, connector membership, Message Content intent, and complete read permissions are verified before message reads; results are chronological compact previews with honest coverage and safe next cursors. Bot and webhook messages are omitted by default while still advancing coverage. The connector never persists cursors, inbox state, profiles, raw payloads, or message content.",
+      inputSchema: messageCatchupInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Catch up across Discord channels",
+    },
+    safeToolHandler("catch_up_messages", async (
+      input: z.infer<typeof messageCatchupInputSchema>,
+      context,
+    ) => {
+      const result = await service.catchUpMessages({
+        channels: input.channels.map(({ afterMessageId, channelId }) => ({
+          ...(afterMessageId ? { afterMessageId } : {}),
+          channelId,
+        })),
+        guildId: input.guildId,
+        includeAutomatedMessages: input.includeAutomatedMessages,
+        maxMessagesPerChannel: input.maxMessagesPerChannel,
+      }, { signal: context.mcpReq.signal })
+      const scanned = result.channels.reduce(
+        (count, channelResult) => count + channelResult.page.scannedMessageCount,
+        0,
+      )
+      const returned = result.channels.reduce(
+        (count, channelResult) => count + channelResult.page.messageCount,
+        0,
+      )
+      return toolResult(
+        result,
+        `Discord scanned ${scanned} messages and returned ${returned} compact previews across ${result.channels.length} channels`,
       )
     }, secrets, observability),
   ))
