@@ -42,11 +42,17 @@ const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-starter",
   "guild-builder",
+  "coordination-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
 ]
 const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
+  "coordination-channel": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
   "channel-publisher": Object.freeze({
     evidenceConnection: "none",
     eventFeedPolicy: "unchanged",
@@ -389,12 +395,14 @@ assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
 assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
   "guild-starter",
   "guild-builder",
+  "coordination-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
 ])
 assert.equal(connector.getConfigRecipe("guild-starter").writeCapable, true)
 assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
+assert.equal(connector.getConfigRecipe("coordination-channel").writeCapable, true)
 assert.equal(connector.getConfigRecipe("direct-messenger").writeCapable, true)
 assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
 assert.equal(typeof connector.planConfigRecipe, "function")

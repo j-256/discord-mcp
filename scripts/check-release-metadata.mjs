@@ -595,6 +595,7 @@ async function checkDocumentation(packageJson) {
     "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
     "--inspect-host-file",
     "incident-response",
+    "coordination-channel",
     "recipe list",
     "recipe plan guild-starter",
     "recipe apply guild-starter",
@@ -606,6 +607,7 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("guided product tour and searchable standalone explorer"), "complete reference lacks the guided catalog tour")
   invariant(reference.includes("recipe show guild-starter --json"), "complete reference lacks starter recipe inspection")
   invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks broad blueprint recipe inspection")
+  invariant(reference.includes("recipe show coordination-channel --json"), "complete reference lacks coordination recipe inspection")
   invariant(reference.includes("## Complete bot-installation drift audit"), "complete reference lacks bot-installation drift guidance")
   invariant(reference.includes("`discord://connector/installations`"), "complete reference lacks the bot-installation resource")
   invariant(reference.includes("`audit_bot_installations`"), "complete reference lacks the bot-installation tool and prompt")

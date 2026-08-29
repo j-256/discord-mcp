@@ -49,6 +49,7 @@ const CONFIG_RECIPE_PLAN_FORMAT = "discord-mcp.config-recipe-plan.v1"
 export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-starter",
   "guild-builder",
+  "coordination-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
@@ -299,6 +300,40 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Permission-overwrite convergence remains unavailable until permissionOverwrites is enabled and every exact channel is added to permissionOverwriteChannelIds; the recipe cannot infer future scaffold channel IDs",
       "Guild-settings, Community, and onboarding evidence activate a privacy-minimized GUILDS-only Gateway layout connection while the configured event-feed policy remains unchanged",
       "Static Components V2 and rich-embed publications remain unavailable until exact channels are added through the channel-publisher recipe",
+    ],
+  },
+  {
+    botPermissions: [
+      "VIEW_CHANNEL",
+      "SEND_MESSAGES",
+      "READ_MESSAGE_HISTORY",
+      "SEND_MESSAGES_IN_THREADS",
+    ],
+    capabilities: ["interactions"],
+    description: "Add authority-free directed-note reads and guarded idempotent publication for exact channels or their documented active-thread scope without enabling general message, reaction, component, or embed tools.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "coordination-channel",
+    privilegedIntents: [],
+    risks: [
+      "Coordination-note sends and replies make visible Discord changes",
+      "An optional separately allowlisted exact-user notification creates a visible Discord mention",
+    ],
+    scope: {
+      kind: "channel",
+      names: ["interactionChannelIds"],
+    },
+    toolsets: ["coordination"],
+    warnings: [
+      "Routing labels are visible, copyable, spoofable, and caller-retained; they never identify a participant, register a session, prove liveness, or grant authority",
+      "Only strict messages authored by the pinned current bot are eligible, so Discord's app-authored-message exception keeps the privileged Message Content intent unnecessary",
+      "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the reviewed note",
+      "The recipe creates no alias registry, persona store, listener, timer, background poller, coordination database, or execution authority",
+      "Aggregate reaction status remains unavailable until the interactions toolset is selected separately; reaction-user audit and reaction moderation remain separately gated",
+      "A newly scaffolded coordination channel must be added after its exact Discord ID is known",
     ],
   },
   {

@@ -13,6 +13,11 @@ import test from "node:test"
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
 import type { ConnectorConfig } from "../src/config.js"
 import {
+  COORDINATION_ADDRESS_PATTERN,
+  COORDINATION_NOTE_FORMAT,
+  encodeCoordinationNote,
+} from "../src/coordination-note.js"
+import {
   loadFixtureConfig as loadConnectorConfig,
   type FixtureConfigOverrides,
 } from "./config-fixture.js"
@@ -3776,6 +3781,108 @@ test("service verifies bot identity before delegating safe message interactions"
   assert.equal(calls.createMessage, 1)
   assert.equal(calls.addReaction, 2)
   assert.deepEqual(writeCoordinator.intents, [])
+})
+
+test("service issues stateless coordination addresses without identity or network access", () => {
+  const { calls, service } = serviceFixture()
+
+  const report = service.createCoordinationAddress()
+
+  assert.match(report.address, COORDINATION_ADDRESS_PATTERN)
+  assert.equal(report.authorityGranted, false)
+  assert.equal(report.authenticated, false)
+  assert.equal(report.discordContacted, false)
+  assert.equal(report.networkContacted, false)
+  assert.equal(report.persisted, false)
+  assert.equal(report.registered, false)
+  assert.equal(calls.application, 0)
+  assert.equal(calls.user, 0)
+  assert.equal(calls.listMessages, 0)
+  assert.equal(calls.activityAppends, 0)
+})
+
+test("service sends coordination notes only through the guarded message interaction path", async () => {
+  const sender = "dca_AAAAAAAAAAAAAAAAAAAAAA"
+  const recipient = "dca_AQEBAQEBAQEBAQEBAQEBAQ"
+  const privateBody = "private-coordination-body"
+  const privateIdempotencyKey = "coordination-note-request-0001"
+  let createCalls = 0
+  let createdContent = ""
+  const { calls, service } = serviceFixture({
+    client: {
+      async createMessage(_channelId, input) {
+        createCalls += 1
+        createdContent = input.content
+        assert.deepEqual(input.allowedMentions, {
+          replied_user: false,
+          users: [MEMBER_USER_ID],
+        })
+        return message({
+          author: bot(),
+          content: input.content,
+          mentions: [{
+            id: MEMBER_USER_ID,
+            username: "private-notification-profile",
+          }],
+          nonce: input.nonce,
+        })
+      },
+    },
+    configOverrides: {
+      capabilities: { interactions: true },
+      limits: { interactionMinWriteIntervalMs: 0 },
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+      scopes: {
+        interactionChannelIds: [CHANNEL_ID],
+        mentionUserIds: [MEMBER_USER_ID],
+      },
+    },
+  })
+
+  const result = await service.sendCoordinationNote({
+    body: privateBody,
+    channelId: CHANNEL_ID,
+    fromAddress: sender,
+    idempotencyKey: privateIdempotencyKey,
+    notifyUserId: MEMBER_USER_ID,
+    tags: ["handoff", "release"],
+    to: { address: recipient, kind: "address" },
+  })
+
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(createCalls, 1)
+  assert.equal(calls.activityAppends, 2)
+  assert.match(createdContent, new RegExp(`^\\[${COORDINATION_NOTE_FORMAT.replaceAll(".", "\\.")}\\]`, "u"))
+  assert.match(createdContent, new RegExp(`to=${recipient}`, "u"))
+  assert.match(createdContent, new RegExp(`from=${sender}`, "u"))
+  assert.match(createdContent, new RegExp(`<@${MEMBER_USER_ID}>`, "u"))
+  assert.match(createdContent, new RegExp(`${privateBody}$`, "u"))
+  assert.deepEqual(result.coordination, {
+    addressAuthority: "none",
+    bodyCharacters: privateBody.length,
+    bodyReturned: false,
+    connectorPersistence: "none",
+    format: COORDINATION_NOTE_FORMAT,
+    notificationRequested: true,
+    recipientKind: "address",
+    schemaVersion: 1,
+    tagCount: 2,
+    writePath: "send_message",
+  })
+  for (const serialized of [
+    JSON.stringify(result),
+    JSON.stringify(calls.activityEntries),
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(privateBody, "u"))
+    assert.doesNotMatch(serialized, new RegExp(privateIdempotencyKey, "u"))
+    assert.doesNotMatch(serialized, new RegExp(sender, "u"))
+    assert.doesNotMatch(serialized, new RegExp(recipient, "u"))
+    assert.doesNotMatch(serialized, new RegExp(MEMBER_USER_ID, "u"))
+  }
 })
 
 test("service verifies bot identity before signaling command processing", async () => {
@@ -11115,6 +11222,123 @@ test("service validates reply input locally and pins identity before one bounded
   assert.equal(calls.application, 1)
   assert.equal(calls.user, 1)
   assert.equal(scanCalls, 1)
+})
+
+test("service validates coordination reads locally and uses the app-authored content exemption", async () => {
+  const recipient = "dca_AQEBAQEBAQEBAQEBAQEBAQ"
+  const invalid = serviceFixture()
+  await assert.rejects(
+    () => invalid.service.listCoordinationNotes(
+      CHANNEL_ID,
+      "friendly-name",
+    ),
+    /recipient address is invalid/u,
+  )
+  assert.equal(invalid.calls.application, 0)
+  assert.equal(invalid.calls.user, 0)
+  assert.equal(invalid.calls.listMessages, 0)
+
+  const withoutMessageContent = serviceFixture({
+    application: { ...application(), flags: 0 },
+    configOverrides: {
+      tools: { toolsets: ["coordination"] },
+    },
+  })
+  const observed = await withoutMessageContent.service.listCoordinationAddresses(CHANNEL_ID)
+  const posture = await withoutMessageContent.service.getApplicationPosture()
+  assert.equal(observed.status, "ok")
+  assert.equal(posture.connectorFit.messageContentIntent, "not-required")
+  assert.equal(withoutMessageContent.calls.application, 1)
+  assert.equal(withoutMessageContent.calls.user, 1)
+  assert.equal(withoutMessageContent.calls.listMessages, 1)
+
+  const mismatched = serviceFixture({
+    application: { ...application(), id: OTHER_GUILD_ID },
+  })
+  await assert.rejects(
+    () => mismatched.service.listCoordinationNotes(
+      CHANNEL_ID,
+      recipient,
+    ),
+    /token belongs to application/u,
+  )
+  assert.equal(mismatched.calls.listMessages, 0)
+})
+
+test("service routes one bounded coordination page through freshly pinned identities", async () => {
+  const sender = "dca_AAAAAAAAAAAAAAAAAAAAAA"
+  const recipient = "dca_AQEBAQEBAQEBAQEBAQEBAQ"
+  const privateBody = "private-directed-body"
+  const coordinationMessageId = "500000000000000010"
+  let scanCalls = 0
+  const signal = new AbortController().signal
+  const { calls, service } = serviceFixture({
+    client: {
+      async listMessages(channelId, options) {
+        scanCalls += 1
+        assert.equal(channelId, CHANNEL_ID)
+        assert.deepEqual(options, {
+          after: MESSAGE_ID,
+          limit: 7,
+          signal,
+        })
+        return [message({
+          author: bot(),
+          components: [],
+          content: encodeCoordinationNote({
+            body: privateBody,
+            fromAddress: sender,
+            tags: ["handoff"],
+            to: { address: recipient, kind: "address" },
+          }),
+          id: coordinationMessageId,
+          mention_everyone: false,
+          mention_roles: [],
+          mentions: [],
+          reactions: [],
+          sticker_items: [],
+          tts: false,
+        })]
+      },
+    },
+    configOverrides: {
+      readScope: {
+        channelIds: [CHANNEL_ID],
+        guildIds: [GUILD_ID],
+      },
+    },
+  })
+
+  const result = await service.listCoordinationNotes(
+    CHANNEL_ID,
+    recipient,
+    {
+      afterMessageId: MESSAGE_ID,
+      scanLimit: 7,
+      signal,
+    },
+  )
+
+  assert.equal(result.applicationId, APPLICATION_ID)
+  assert.equal(result.botId, BOT_ID)
+  assert.equal(result.notes[0]?.body, privateBody)
+  assert.equal(result.notes[0]?.fromAddress, sender)
+  assert.equal(result.page.nextAfterMessageId, coordinationMessageId)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(scanCalls, 1)
+
+  const addresses = await service.listCoordinationAddresses(CHANNEL_ID, {
+    afterMessageId: MESSAGE_ID,
+    scanLimit: 7,
+    signal,
+  })
+  assert.deepEqual(addresses.addresses.map(({ address }) => address), [sender])
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(scanCalls, 2)
+  assert.doesNotMatch(JSON.stringify(addresses), new RegExp(privateBody, "u"))
+  assert.doesNotMatch(JSON.stringify(addresses), new RegExp(recipient, "u"))
 })
 
 test("service pins identity through one exact transient attachment read", async () => {

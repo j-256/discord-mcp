@@ -354,6 +354,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     toolset: "guild-blueprints",
     workflow: "guild-blueprint",
   },
+  create_coordination_address: {
+    keywords: ["address", "agent", "coordination", "directed", "issue", "local", "routing"],
+    toolset: "coordination",
+  },
   preview_guild_blueprint: {
     keywords: ["blueprint", "dependency", "dry run", "guild", "intent", "local", "manifest", "normalize", "preview", "reference", "review", "sequence"],
     toolset: "guild-blueprints",
@@ -916,6 +920,14 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["aggregate", "count", "emoji", "list", "message", "reaction"],
     toolset: "interactions",
   },
+  list_coordination_addresses: {
+    keywords: ["address", "agent", "coordination", "directory", "discover", "list", "routing"],
+    toolset: "coordination",
+  },
+  list_coordination_notes: {
+    keywords: ["address", "agent", "coordination", "directed", "handoff", "list", "note", "routing", "task"],
+    toolset: "coordination",
+  },
   list_message_replies: {
     keywords: ["agent", "claim", "coordination", "handoff", "list", "message", "replies", "response", "task"],
     toolset: "messages",
@@ -1412,6 +1424,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   send_message: {
     keywords: ["create", "message", "reply", "send", "write"],
     toolset: "interactions",
+  },
+  send_coordination_note: {
+    keywords: ["address", "agent", "coordination", "directed", "handoff", "note", "route", "send", "task"],
+    toolset: "coordination",
   },
   signal_command_processing: {
     keywords: ["command", "indicator", "processing", "response", "signal", "typing", "working"],

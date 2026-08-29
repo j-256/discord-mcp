@@ -490,13 +490,20 @@ function toolService(
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected smoke service call")
   }
+  const unexpectedSync = (): never => {
+    throw new Error("Unexpected smoke service call")
+  }
   return {
     addReaction: unexpected,
     addReactions: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
+    createCoordinationAddress: unexpectedSync,
+    listCoordinationAddresses: unexpected,
+    listCoordinationNotes: unexpected,
     playSoundboardSound: unexpected,
     listMessageReplies: unexpected,
+    sendCoordinationNote: unexpected,
     auditApplicationCommands: unexpected,
     auditBotInstallations: unexpected,
     auditApplicationEntitlements: unexpected,
@@ -6188,6 +6195,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "audit_bot_installations",
     "author_guild_blueprint",
     "find_guild_members",
+    "inspect_directed_discord_notes",
     "inspect_discord_coordination_task",
     "inspect_discord_poll",
     "inspect_guild_ban",
