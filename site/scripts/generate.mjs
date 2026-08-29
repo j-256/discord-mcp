@@ -145,7 +145,7 @@ const REFERENCE_GROUPS = Object.freeze([
     slug: "publishing-and-members",
     titles: [
       "Reviewed local-file attachment messages",
-      "Reviewed static Components V2 messages",
+      "Reviewed Components V2 messages",
       "Reviewed static rich-embed messages",
       "Reaction lifecycle",
       "Exact one-to-one private-message lifecycle",
@@ -209,7 +209,7 @@ const SECURITY_GROUPS = Object.freeze([
       "Exact-recipient direct messages",
       "Native attachment reads",
       "Attachment messages",
-      "Static Components V2 messages",
+      "Reviewed Components V2 messages",
       "Static rich-embed messages",
       "Application-owned emojis",
       "Guild expressions",
