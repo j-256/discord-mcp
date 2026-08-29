@@ -2243,6 +2243,7 @@ export class ConnectorService {
       domains: {
         automod: this.#automodService,
         channelMetadata: this.#channelMetadataService,
+        channelOrdering: this.#channelOrderingService,
         channelPermissionOverwrite: this.#permissionOverwriteService,
         component: this.#componentMessageService,
         community: this.#guildCommunityService,
@@ -5516,6 +5517,13 @@ export class ConnectorService {
         ),
         executeChannelMetadata: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeChannelMetadataChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeChannelOrdering: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeChannelOrder(
             nestedRequest,
             nestedDigest,
             nestedOptions,

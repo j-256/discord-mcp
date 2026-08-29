@@ -1462,7 +1462,9 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     secretValuesRead: false,
   })
   invariant(recipePlan.proposedDocument.capabilities.guildScaffolds === true, "installed guild-builder recipe omitted guild scaffolds")
+  invariant(recipePlan.proposedDocument.capabilities.channelOrderingChanges === true, "installed guild-builder recipe omitted channel ordering")
   for (const scope of [
+    "channelOrderingGuildIds",
     "guildScaffoldGuildIds",
     "guildProfileGuildIds",
     "guildSettingsGuildIds",

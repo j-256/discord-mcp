@@ -90,11 +90,14 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "verify_guild_blueprint",
   ])
   assert.deepEqual(guildStarter.capabilities, [
+    "channelOrderingAudit",
+    "channelOrderingChanges",
     "guildScaffolds",
     "guildSettingsAudit",
     "guildSettingsChanges",
   ])
   assert.deepEqual(guildStarter.requirements.scope.targets, [
+    "$.scopes.channelOrderingGuildIds",
     "$.scopes.guildScaffoldGuildIds",
     "$.scopes.guildSettingsGuildIds",
   ])
@@ -136,10 +139,13 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   ])
   assert.equal(guildBuilder.capabilities.includes("automodAudit"), true)
   assert.equal(guildBuilder.capabilities.includes("automodChanges"), true)
+  assert.equal(guildBuilder.capabilities.includes("channelOrderingAudit"), true)
+  assert.equal(guildBuilder.capabilities.includes("channelOrderingChanges"), true)
   assert.equal(guildBuilder.capabilities.includes("guildCommunityAudit"), true)
   assert.equal(guildBuilder.capabilities.includes("guildCommunityChanges"), true)
   assert.deepEqual(guildBuilder.requirements.scope.targets, [
     "$.scopes.automodGuildIds",
+    "$.scopes.channelOrderingGuildIds",
     "$.scopes.guildScaffoldGuildIds",
     "$.scopes.guildCommunityGuildIds",
     "$.scopes.guildProfileGuildIds",
@@ -365,11 +371,14 @@ test("guild-starter plans only its public layout policy", async (context) => {
       .filter(([, enabled]) => enabled)
       .map(([name]) => name),
     [
+      "channelOrderingAudit",
+      "channelOrderingChanges",
       "guildScaffolds",
       "guildSettingsAudit",
       "guildSettingsChanges",
     ],
   )
+  assert.deepEqual(plan.proposedDocument.scopes.channelOrderingGuildIds, [GUILD_ID])
   assert.deepEqual(plan.proposedDocument.scopes.guildScaffoldGuildIds, [GUILD_ID])
   assert.deepEqual(plan.proposedDocument.scopes.guildSettingsGuildIds, [GUILD_ID])
   assert.equal("guildProfileGuildIds" in plan.proposedDocument.scopes, false)

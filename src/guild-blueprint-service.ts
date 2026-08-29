@@ -51,6 +51,13 @@ import {
   type ChannelMetadataChangeResult,
   normalizeChannelMetadataChangeRequest,
 } from "./channel-metadata-service.js"
+import {
+  type ChannelOrderMode,
+  type ChannelOrderingPlan,
+  type ChannelOrderingRequest,
+  type ChannelOrderingResult,
+  normalizeChannelOrderingRequest,
+} from "./channel-ordering-service.js"
 import { DiscordApiError, GuildBlueprintPlanChangedError } from "./errors.js"
 import {
   type GuildProfileChangePlan,
@@ -124,6 +131,7 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "auditReason",
   "autoModerationRules",
   "channelMetadata",
+  "channelOrders",
   "channelPermissionOverwrites",
   "community",
   "guildId",
@@ -136,6 +144,10 @@ const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "scaffold",
   "settings",
   "welcomeScreen",
+] as const)
+const BLUEPRINT_CHANNEL_ORDER_KEYS = Object.freeze([
+  "acknowledgeReparenting",
+  "channels",
 ] as const)
 const BLUEPRINT_CHANNEL_PERMISSION_OVERWRITE_DELETE_KEYS = Object.freeze([
   "channelId",
@@ -294,6 +306,7 @@ export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "role-configuration",
   "role-ordering",
   "channel-metadata",
+  "channel-ordering",
   "channel-permission-overwrite",
   "profile",
   "settings",
@@ -309,6 +322,7 @@ export type GuildBlueprintSingletonPhase = Exclude<
   GuildBlueprintPhase,
   | "auto-moderation"
   | "channel-metadata"
+  | "channel-ordering"
   | "channel-permission-overwrite"
   | "publication"
   | "role-configuration"
@@ -319,6 +333,7 @@ const GUILD_BLUEPRINT_SINGLETON_PHASES: ReadonlySet<string> = new Set(
   GUILD_BLUEPRINT_PHASES.filter((phase) => (
     phase !== "auto-moderation"
     && phase !== "channel-metadata"
+    && phase !== "channel-ordering"
     && phase !== "channel-permission-overwrite"
     && phase !== "publication"
     && phase !== "role-configuration"
@@ -347,6 +362,16 @@ export interface GuildBlueprintScaffoldChannelReference {
 export type GuildBlueprintChannelReference =
   | GuildBlueprintExactChannelReference
   | GuildBlueprintScaffoldChannelReference
+
+export interface GuildBlueprintChannelOrderInput {
+  acknowledgeReparenting?: true
+  channels: readonly GuildBlueprintChannelReference[]
+}
+
+export interface NormalizedGuildBlueprintChannelOrderInput {
+  acknowledgeReparenting?: true
+  channels: GuildBlueprintChannelReference[]
+}
 
 export interface GuildBlueprintExactRoleReference {
   kind: "exact"
@@ -527,6 +552,7 @@ export interface GuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: readonly GuildBlueprintAutoModerationRuleInput[]
   channelMetadata?: readonly GuildBlueprintChannelMetadataInput[]
+  channelOrders?: readonly GuildBlueprintChannelOrderInput[]
   channelPermissionOverwrites?: readonly GuildBlueprintChannelPermissionOverwriteInput[]
   community?: GuildBlueprintCommunityInput
   guildId: string
@@ -564,6 +590,7 @@ export interface NormalizedGuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: NormalizedGuildBlueprintAutoModerationRuleInput[]
   channelMetadata?: GuildBlueprintChannelMetadataInput[]
+  channelOrders?: NormalizedGuildBlueprintChannelOrderInput[]
   channelPermissionOverwrites?: NormalizedGuildBlueprintChannelPermissionOverwriteInput[]
   community?: GuildBlueprintCommunityInput
   guildId: string
@@ -600,6 +627,11 @@ const AUTOMOD_EXEMPT_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
   "forum",
   "text",
 ])
+const CHANNEL_ORDERING_SCAFFOLD_KINDS = new Set<GuildBlueprintBinding["kind"]>([
+  "category",
+  "forum",
+  "text",
+])
 
 interface GuildBlueprintPlanStepBase {
   nestedPlanDigest: string | null
@@ -628,6 +660,15 @@ export interface GuildBlueprintChannelMetadataPlanStep
   channelId: string
   index: number
   kind: "channel-metadata"
+}
+
+export interface GuildBlueprintChannelOrderingPlanStep
+  extends GuildBlueprintPlanStepBase {
+  anchorChannelId: string | null
+  channelId: string | null
+  index: number
+  kind: "channel-ordering"
+  mode: ChannelOrderMode | null
 }
 
 export interface GuildBlueprintRoleConfigurationPlanStep
@@ -675,6 +716,7 @@ export interface GuildBlueprintAutoModerationPlanStep
 export type GuildBlueprintPlanStep =
   | GuildBlueprintAutoModerationPlanStep
   | GuildBlueprintChannelMetadataPlanStep
+  | GuildBlueprintChannelOrderingPlanStep
   | GuildBlueprintChannelPermissionOverwritePlanStep
   | GuildBlueprintPublicationPlanStep
   | GuildBlueprintRoleConfigurationPlanStep
@@ -713,8 +755,20 @@ export interface GuildBlueprintCommunityBlocker {
   verificationReason: "community-phase-required"
 }
 
+export interface GuildBlueprintChannelOrderingBlocker {
+  anchorChannelId: string
+  channelId: string
+  destinationParentChannelId: string | null
+  index: number
+  kind: "channel-ordering"
+  operationKeyHash: string
+  sourceParentChannelId: string | null
+  verificationReason: "reparenting-acknowledgement-required"
+}
+
 export type GuildBlueprintBlocker =
   | GuildBlueprintAutoModerationBlocker
+  | GuildBlueprintChannelOrderingBlocker
   | GuildBlueprintCommunityBlocker
   | GuildBlueprintPublicationBlocker
 
@@ -732,6 +786,14 @@ export type GuildBlueprintFrontier =
       index: number
       kind: "channel-metadata"
       plan: ChannelMetadataChangePlan
+      writeRequired: true
+    }
+  | {
+      anchorChannelId: string
+      channelId: string
+      index: number
+      kind: "channel-ordering"
+      plan: ChannelOrderingPlan
       writeRequired: true
     }
   | {
@@ -827,6 +889,7 @@ export interface GuildBlueprintPlan {
 export type GuildBlueprintNestedResult =
   | AutoModerationResult
   | ChannelMetadataChangeResult
+  | ChannelOrderingResult
   | ChannelPermissionOverwriteResult
   | ComponentMessageResult
   | GuildCommunityChangeResult
@@ -844,6 +907,7 @@ export interface GuildBlueprintResult {
   executedPhase: GuildBlueprintPhase | null
   executedAutoModerationRuleIndex: number | null
   executedChannelMetadataIndex: number | null
+  executedChannelOrderingIndex: number | null
   executedChannelPermissionOverwriteIndex: number | null
   executedPublicationIndex: number | null
   executedRoleConfigurationIndex: number | null
@@ -858,10 +922,12 @@ export interface GuildBlueprintResult {
 }
 
 export interface GuildBlueprintVerificationStep {
+  anchorChannelId?: string | null
   anchorRoleId?: string | null
   channelId?: string | null
   index?: number
   kind: GuildBlueprintPhase
+  mode?: ChannelOrderMode | null
   messageId?: string | null
   nestedPlanDigest: string | null
   operationKeyHash: string
@@ -874,6 +940,7 @@ export interface GuildBlueprintVerificationStep {
   targetType?: "member" | "role"
   verificationReason?: GuildBlueprintAutoModerationBlockerReason
     | ComponentMessageVerificationReason
+    | "reparenting-acknowledgement-required"
     | null
   verificationStatus?: AutoModerationVerificationResult["status"]
     | ComponentMessageVerificationResult["status"]
@@ -944,6 +1011,14 @@ export interface GuildBlueprintDomainServices {
       request: ChannelMetadataChangeRequest,
       options?: RequestOptions,
     ): Promise<ChannelMetadataChangePlan>
+  }
+  channelOrdering: {
+    reconcilePlan(
+      applicationId: string,
+      botId: string,
+      request: ChannelOrderingRequest,
+      options?: RequestOptions,
+    ): Promise<ChannelOrderingPlan>
   }
   channelPermissionOverwrite: {
     reconcilePlan(
@@ -1052,6 +1127,11 @@ export interface GuildBlueprintExecutors {
     planDigest: string,
     options?: RequestOptions,
   ): Promise<ChannelMetadataChangeResult>
+  executeChannelOrdering(
+    request: ChannelOrderingRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<ChannelOrderingResult>
   executeChannelPermissionOverwrite(
     request: ChannelPermissionOverwriteRequest,
     planDigest: string,
@@ -1120,6 +1200,11 @@ type GuildBlueprintFrontierRequest =
       index: number
       kind: "channel-metadata"
       request: ChannelMetadataChangeRequest
+    }
+  | {
+      index: number
+      kind: "channel-ordering"
+      request: ChannelOrderingRequest
     }
   | {
       index: number
@@ -1293,6 +1378,19 @@ function derivedRoleOrderingOperationKey(
     .update(roleReferenceKey(role))
     .update("\0")
     .update(roleReferenceKey(anchor))
+    .digest("hex")}`
+}
+
+function derivedChannelOrderingOperationKey(
+  operationKey: string,
+  channel: GuildBlueprintChannelReference,
+  anchor: GuildBlueprintChannelReference,
+): string {
+  return `blueprint-channel-order:${createHmac("sha256", operationKey)
+    .update("discord-mcp-guild-blueprint-channel-order.v1\0")
+    .update(channelReferenceKey(channel))
+    .update("\0")
+    .update(channelReferenceKey(anchor))
     .digest("hex")}`
 }
 
@@ -2548,6 +2646,116 @@ function canonicalRoleOrder(
   )
 }
 
+function scaffoldChannelOrderFamily(
+  kind: GuildBlueprintBinding["kind"],
+): "category" | "text" | null {
+  if (kind === "category") return "category"
+  if (kind === "forum" || kind === "text") return "text"
+  return null
+}
+
+function canonicalChannelOrders(
+  request: GuildBlueprintRequest,
+  channelKinds: ReadonlyMap<string, GuildBlueprintBinding["kind"]>,
+  channelParents: ReadonlyMap<string, string | null>,
+): NormalizedGuildBlueprintChannelOrderInput[] | undefined {
+  if (request.channelOrders === undefined) return undefined
+  if (
+    !Array.isArray(request.channelOrders)
+    || request.channelOrders.length < 1
+    || request.channelOrders.length > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets
+  ) {
+    throw new RangeError("Discord guild blueprint channel-order chains are invalid")
+  }
+  const seen = new Set<string>()
+  let totalReferences = 0
+  return request.channelOrders.map((value, chainIndex) => {
+    exactObject(
+      value,
+      BLUEPRINT_CHANNEL_ORDER_KEYS,
+      `Discord guild blueprint channel-order chain ${chainIndex} must be an exact object`,
+    )
+    const input = value as unknown as GuildBlueprintChannelOrderInput
+    if (
+      own(input, "acknowledgeReparenting")
+      && input.acknowledgeReparenting !== true
+    ) {
+      throw new RangeError(
+        `Discord guild blueprint channel-order chain ${chainIndex} reparenting acknowledgement must be literal true`,
+      )
+    }
+    if (
+      !Array.isArray(input.channels)
+      || input.channels.length < 2
+      || input.channels.length > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets
+    ) {
+      throw new RangeError(
+        `Discord guild blueprint channel-order chain ${chainIndex} must contain a bounded top-to-bottom chain`,
+      )
+    }
+    totalReferences += input.channels.length
+    if (totalReferences > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets) {
+      throw new RangeError(
+        "Discord guild blueprint channel-order references exceed the convergence bound",
+      )
+    }
+    const families = new Set<"category" | "text">()
+    const parents = new Set<string | null>()
+    const channels = input.channels.map((item, referenceIndex) => {
+      const reference = normalizeChannelReference(
+        item,
+        channelKinds,
+        CHANNEL_ORDERING_SCAFFOLD_KINDS,
+        `Discord guild blueprint channel-order chain ${chainIndex} reference ${referenceIndex}`,
+      )
+      if (reference === null) {
+        throw new RangeError(
+          `Discord guild blueprint channel-order chain ${chainIndex} must not contain null`,
+        )
+      }
+      const identity = channelReferenceKey(reference)
+      if (seen.has(identity)) {
+        throw new RangeError(
+          "Discord guild blueprint channel-order references must be globally unique",
+        )
+      }
+      seen.add(identity)
+      if (reference.kind === "scaffold") {
+        const scaffoldKind = channelKinds.get(reference.key)
+        if (scaffoldKind === undefined) {
+          throw new RangeError(
+            `Discord guild blueprint channel-order chain ${chainIndex} scaffold reference is missing`,
+          )
+        }
+        const family = scaffoldChannelOrderFamily(scaffoldKind)
+        if (family === null) {
+          throw new RangeError(
+            `Discord guild blueprint channel-order chain ${chainIndex} scaffold family is invalid`,
+          )
+        }
+        families.add(family)
+        parents.add(channelParents.get(reference.key) ?? null)
+      }
+      return reference
+    })
+    if (families.size > 1) {
+      throw new RangeError(
+        `Discord guild blueprint channel-order chain ${chainIndex} mixes incompatible scaffold families`,
+      )
+    }
+    const acknowledgeReparenting = input.acknowledgeReparenting === true
+    if (!acknowledgeReparenting && parents.size > 1) {
+      throw new RangeError(
+        `Discord guild blueprint channel-order chain ${chainIndex} requires explicit reparenting acknowledgement for differing scaffold parents`,
+      )
+    }
+    return {
+      ...(acknowledgeReparenting ? { acknowledgeReparenting: true as const } : {}),
+      channels,
+    }
+  })
+}
+
 function canonicalChannelPermissionOverwriteInputs(
   request: GuildBlueprintRequest,
   scaffoldRoleKeys: ReadonlySet<string>,
@@ -2692,6 +2900,7 @@ export function normalizeGuildBlueprintRequest(
   if (
     request.autoModerationRules === undefined
     && request.channelMetadata === undefined
+    && request.channelOrders === undefined
     && request.channelPermissionOverwrites === undefined
     && request.community === undefined
     && request.onboarding === undefined
@@ -2712,6 +2921,12 @@ export function normalizeGuildBlueprintRequest(
   const channelKinds = new Map(
     scaffold.channels.map((channel) => [channel.key, channel.kind] as const),
   )
+  const channelParents = new Map(
+    scaffold.channels.map((channel) => [
+      channel.key,
+      channel.parentKey ?? null,
+    ] as const),
+  )
   const scaffoldRoleKeys = new Set(scaffold.roles.map((role) => role.key))
   const autoModerationRules = canonicalAutoModerationInputs(
     request,
@@ -2719,6 +2934,11 @@ export function normalizeGuildBlueprintRequest(
     scaffoldRoleKeys,
   )
   const channelMetadata = canonicalChannelMetadataInputs(request)
+  const channelOrders = canonicalChannelOrders(
+    request,
+    channelKinds,
+    channelParents,
+  )
   const channelPermissionOverwrites = canonicalChannelPermissionOverwriteInputs(
     request,
     scaffoldRoleKeys,
@@ -2755,6 +2975,7 @@ export function normalizeGuildBlueprintRequest(
     auditReason: scaffold.auditReason,
     ...(autoModerationRules === undefined ? {} : { autoModerationRules }),
     ...(channelMetadata === undefined ? {} : { channelMetadata }),
+    ...(channelOrders === undefined ? {} : { channelOrders }),
     ...(channelPermissionOverwrites === undefined
       ? {}
       : { channelPermissionOverwrites }),
@@ -2793,6 +3014,9 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.channelMetadata === undefined
       ? {}
       : { channelMetadata: request.channelMetadata }),
+    ...(request.channelOrders === undefined
+      ? {}
+      : { channelOrders: request.channelOrders }),
     ...(request.channelPermissionOverwrites === undefined
       ? {}
       : { channelPermissionOverwrites: request.channelPermissionOverwrites }),
@@ -2818,7 +3042,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v7\0")
+    .update("discord-mcp-guild-blueprint-request.v8\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -2937,6 +3161,105 @@ function assertResolvedRoleOrderUnique(
   if (new Set(resolvedIds).size !== resolvedIds.length) {
     throw new RangeError(
       "Discord guild blueprint resolved role-order references must be unique",
+    )
+  }
+}
+
+interface GuildBlueprintChannelOrderAdjacency {
+  acknowledgeReparenting: boolean
+  anchor: GuildBlueprintChannelReference
+  chainIndex: number
+  channel: GuildBlueprintChannelReference
+  channelIndex: number
+  index: number
+}
+
+function channelOrderAdjacencies(
+  request: NormalizedGuildBlueprintRequest,
+): GuildBlueprintChannelOrderAdjacency[] {
+  const result: GuildBlueprintChannelOrderAdjacency[] = []
+  for (const [chainIndex, chain] of (request.channelOrders ?? []).entries()) {
+    for (let channelIndex = chain.channels.length - 2;
+      channelIndex >= 0;
+      channelIndex -= 1) {
+      const channel = chain.channels[channelIndex]
+      const anchor = chain.channels[channelIndex + 1]
+      if (channel === undefined || anchor === undefined) {
+        throw new RangeError(
+          "Discord guild blueprint channel-order adjacency is missing",
+        )
+      }
+      result.push({
+        acknowledgeReparenting: chain.acknowledgeReparenting === true,
+        anchor,
+        chainIndex,
+        channel,
+        channelIndex,
+        index: result.length,
+      })
+    }
+  }
+  return result
+}
+
+function channelOrderingRequest(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+  adjacency: GuildBlueprintChannelOrderAdjacency,
+): ChannelOrderingRequest {
+  const anchorChannelId = resolveChannelReference(
+    adjacency.anchor,
+    bindings,
+    `Discord guild blueprint channel-order adjacency ${adjacency.index} anchor`,
+  )
+  const channelId = resolveChannelReference(
+    adjacency.channel,
+    bindings,
+    `Discord guild blueprint channel-order adjacency ${adjacency.index} target`,
+  )
+  if (typeof anchorChannelId !== "string" || typeof channelId !== "string") {
+    throw new RangeError(
+      `Discord guild blueprint channel-order adjacency ${adjacency.index} is unresolved`,
+    )
+  }
+  const resolved: ChannelOrderingRequest = {
+    anchorChannelId,
+    auditReason: request.auditReason,
+    channelId,
+    guildId: request.guildId,
+    operationKey: derivedChannelOrderingOperationKey(
+      request.operationKey,
+      adjacency.channel,
+      adjacency.anchor,
+    ),
+    placement: "above",
+  }
+  normalizeChannelOrderingRequest(resolved)
+  return resolved
+}
+
+function assertResolvedChannelOrderUnique(
+  request: NormalizedGuildBlueprintRequest,
+  bindings: ReadonlyMap<string, GuildBlueprintBinding>,
+): void {
+  const resolvedIds = (request.channelOrders ?? []).flatMap((chain, chainIndex) => (
+    chain.channels.map((reference, channelIndex) => {
+      const channelId = resolveChannelReference(
+        reference,
+        bindings,
+        `Discord guild blueprint channel-order chain ${chainIndex} reference ${channelIndex}`,
+      )
+      if (typeof channelId !== "string") {
+        throw new RangeError(
+          `Discord guild blueprint channel-order chain ${chainIndex} is unresolved`,
+        )
+      }
+      return channelId
+    })
+  ))
+  if (new Set(resolvedIds).size !== resolvedIds.length) {
+    throw new RangeError(
+      "Discord guild blueprint resolved channel-order references must be globally unique",
     )
   }
 }
@@ -3780,6 +4103,53 @@ function appendWaitingChannelMetadata(
   }
 }
 
+function channelOrderingOperationKeyHash(
+  request: NormalizedGuildBlueprintRequest,
+  adjacency: GuildBlueprintChannelOrderAdjacency,
+): string {
+  return operationKeyHash(derivedChannelOrderingOperationKey(
+    request.operationKey,
+    adjacency.channel,
+    adjacency.anchor,
+  ))
+}
+
+function waitingChannelOrderingStep(
+  request: NormalizedGuildBlueprintRequest,
+  adjacency: GuildBlueprintChannelOrderAdjacency,
+): GuildBlueprintChannelOrderingPlanStep {
+  return {
+    anchorChannelId: adjacency.anchor.kind === "exact"
+      ? adjacency.anchor.channelId
+      : null,
+    channelId: adjacency.channel.kind === "exact"
+      ? adjacency.channel.channelId
+      : null,
+    index: adjacency.index,
+    kind: "channel-ordering",
+    mode: null,
+    nestedPlanDigest: null,
+    operationKeyHash: channelOrderingOperationKeyHash(request, adjacency),
+    state: "waiting",
+    writeRequired: false,
+  }
+}
+
+function appendWaitingChannelOrders(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+  startIndex = 0,
+): void {
+  const adjacencies = channelOrderAdjacencies(request)
+  for (let index = startIndex; index < adjacencies.length; index += 1) {
+    const adjacency = adjacencies[index]
+    if (adjacency === undefined) {
+      throw new RangeError("Discord guild blueprint channel-order adjacency is missing")
+    }
+    steps.push(waitingChannelOrderingStep(request, adjacency))
+  }
+}
+
 function channelPermissionOverwriteOperationKeyHash(
   request: NormalizedGuildBlueprintRequest,
   index: number,
@@ -4035,6 +4405,33 @@ function assertRoleOrderingPlanBinding(
   }
 }
 
+function assertChannelOrderingPlanBinding(
+  applicationId: string,
+  botId: string,
+  request: ChannelOrderingRequest,
+  plan: ChannelOrderingPlan,
+): void {
+  const normalized = normalizeChannelOrderingRequest(request)
+  assertNestedIdentity(applicationId, botId, normalized.guildId, plan)
+  assertNestedPlanBinding(normalized.operationKey, plan)
+  const expectedMode = plan.sourceParentChannelId === plan.destinationParentChannelId
+    ? "same-parent-order"
+    : "cross-parent-move"
+  if (
+    plan.guild.id !== normalized.guildId
+    || plan.channel.id !== normalized.channelId
+    || plan.anchor.id !== normalized.anchorChannelId
+    || plan.channel.parentChannelId !== plan.sourceParentChannelId
+    || plan.anchor.parentChannelId !== plan.destinationParentChannelId
+    || plan.mode !== expectedMode
+    || plan.placement !== "above"
+    || plan.permissionOverwriteBehavior !== "preserve"
+    || plan.writeRequired !== (plan.status === "planned")
+  ) {
+    throw new RangeError("Discord guild blueprint channel-ordering target changed")
+  }
+}
+
 function assertChannelPermissionOverwritePlanBinding(
   applicationId: string,
   botId: string,
@@ -4252,6 +4649,15 @@ function digestStep(step: GuildBlueprintPlanStep) {
       index: step.index,
     }
   }
+  if (step.kind === "channel-ordering") {
+    return {
+      ...base,
+      anchorChannelId: step.anchorChannelId,
+      channelId: step.channelId,
+      index: step.index,
+      mode: step.mode,
+    }
+  }
   if (step.kind === "channel-permission-overwrite") {
     return {
       ...base,
@@ -4318,6 +4724,15 @@ function verificationStep(
       ...base,
       channelId: step.channelId,
       index: step.index,
+    }
+  }
+  if (step.kind === "channel-ordering") {
+    return {
+      ...base,
+      anchorChannelId: step.anchorChannelId,
+      channelId: step.channelId,
+      index: step.index,
+      mode: step.mode,
     }
   }
   if (step.kind === "channel-permission-overwrite") {
@@ -4431,12 +4846,14 @@ export class GuildBlueprintService {
       appendWaitingRoleConfigurations(request, steps)
       appendWaitingRoleOrder(request, steps)
       appendWaitingChannelMetadata(request, steps)
+      appendWaitingChannelOrders(request, steps)
       appendWaitingChannelPermissionOverwrites(request, steps)
       appendWaitingPostConvergencePhases(request, steps)
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
       const bindingsByKey = bindingMap(bindings)
       assertResolvedRoleOrderUnique(request, bindingsByKey)
+      assertResolvedChannelOrderUnique(request, bindingsByKey)
       assertResolvedChannelPermissionOverwriteTargetsUnique(
         request,
         bindingsByKey,
@@ -4487,6 +4904,7 @@ export class GuildBlueprintService {
             appendWaitingRoleConfigurations(request, steps, index + 1)
             appendWaitingRoleOrder(request, steps)
             appendWaitingChannelMetadata(request, steps)
+            appendWaitingChannelOrders(request, steps)
             appendWaitingChannelPermissionOverwrites(request, steps)
             appendWaitingPostConvergencePhases(request, steps)
             break
@@ -4541,6 +4959,7 @@ export class GuildBlueprintService {
             }
             appendWaitingRoleOrder(request, steps, index - 1)
             appendWaitingChannelMetadata(request, steps)
+            appendWaitingChannelOrders(request, steps)
             appendWaitingChannelPermissionOverwrites(request, steps)
             appendWaitingPostConvergencePhases(request, steps)
             break
@@ -4592,6 +5011,91 @@ export class GuildBlueprintService {
               request: requestedChannel,
             }
             appendWaitingChannelMetadata(request, steps, index + 1)
+            appendWaitingChannelOrders(request, steps)
+            appendWaitingChannelPermissionOverwrites(request, steps)
+            appendWaitingPostConvergencePhases(request, steps)
+            break
+          }
+        }
+      }
+
+      if (frontier === null && request.channelOrders !== undefined) {
+        const adjacencies = channelOrderAdjacencies(request)
+        for (const adjacency of adjacencies) {
+          const requestedOrdering = channelOrderingRequest(
+            request,
+            bindingsByKey,
+            adjacency,
+          )
+          const orderingPlan = await this.#domains.channelOrdering.reconcilePlan(
+            applicationId,
+            botId,
+            requestedOrdering,
+            options,
+          )
+          assertChannelOrderingPlanBinding(
+            applicationId,
+            botId,
+            requestedOrdering,
+            orderingPlan,
+          )
+          if (
+            orderingPlan.mode === "cross-parent-move"
+            && !adjacency.acknowledgeReparenting
+          ) {
+            blocker = {
+              anchorChannelId: requestedOrdering.anchorChannelId,
+              channelId: requestedOrdering.channelId,
+              destinationParentChannelId: orderingPlan.destinationParentChannelId,
+              index: adjacency.index,
+              kind: "channel-ordering",
+              operationKeyHash: orderingPlan.operationKeyHash,
+              sourceParentChannelId: orderingPlan.sourceParentChannelId,
+              verificationReason: "reparenting-acknowledgement-required",
+            }
+            steps.push({
+              anchorChannelId: requestedOrdering.anchorChannelId,
+              channelId: requestedOrdering.channelId,
+              index: adjacency.index,
+              kind: "channel-ordering",
+              mode: orderingPlan.mode,
+              nestedPlanDigest: orderingPlan.digest,
+              operationKeyHash: orderingPlan.operationKeyHash,
+              state: "blocked",
+              writeRequired: false,
+            })
+            appendWaitingChannelOrders(request, steps, adjacency.index + 1)
+            appendWaitingChannelPermissionOverwrites(request, steps)
+            appendWaitingPostConvergencePhases(request, steps)
+            break
+          }
+          const orderingSatisfied = !orderingPlan.writeRequired
+          steps.push({
+            anchorChannelId: requestedOrdering.anchorChannelId,
+            channelId: requestedOrdering.channelId,
+            index: adjacency.index,
+            kind: "channel-ordering",
+            mode: orderingPlan.mode,
+            nestedPlanDigest: orderingPlan.digest,
+            operationKeyHash: orderingPlan.operationKeyHash,
+            state: orderingSatisfied ? "satisfied" : "ready",
+            writeRequired: !orderingSatisfied,
+          })
+          if (!orderingSatisfied) {
+            frontier = {
+              anchorChannelId: requestedOrdering.anchorChannelId,
+              channelId: requestedOrdering.channelId,
+              index: adjacency.index,
+              kind: "channel-ordering",
+              plan: orderingPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              index: adjacency.index,
+              kind: "channel-ordering",
+              request: requestedOrdering,
+            }
+            appendWaitingChannelOrders(request, steps, adjacency.index + 1)
             appendWaitingChannelPermissionOverwrites(request, steps)
             appendWaitingPostConvergencePhases(request, steps)
             break
@@ -4601,6 +5105,7 @@ export class GuildBlueprintService {
 
       if (
         frontier === null
+        && blocker === null
         && request.channelPermissionOverwrites !== undefined
       ) {
         const bindingsByKey = bindingMap(bindings)
@@ -4660,7 +5165,7 @@ export class GuildBlueprintService {
         }
       }
 
-      if (frontier === null) {
+      if (frontier === null && blocker === null) {
         const requestedProfile = profileRequest(request)
         if (requestedProfile !== undefined) {
           const profilePlan = await this.#domains.profile.reconcilePlan(
@@ -4700,7 +5205,7 @@ export class GuildBlueprintService {
         }
       }
 
-      if (frontier === null) {
+      if (frontier === null && blocker === null) {
         const requestedSettings = settingsRequest(request, bindingMap(bindings))
         if (requestedSettings !== undefined) {
           const settingsPlan = await this.#domains.settings.reconcilePlan(
@@ -4737,7 +5242,7 @@ export class GuildBlueprintService {
         }
       }
 
-      if (frontier === null) {
+      if (frontier === null && blocker === null) {
         const requestedCommunity = communityRequest(
           request,
           bindingMap(bindings),
@@ -4787,6 +5292,7 @@ export class GuildBlueprintService {
 
       if (
         frontier === null
+        && blocker === null
         && request.community === undefined
         && (
           request.welcomeScreen?.enabled === true
@@ -5425,6 +5931,7 @@ export class GuildBlueprintService {
             nestedPlanDigest: frontier.plan.digest,
             ...(frontier.kind === "auto-moderation"
               || frontier.kind === "channel-metadata"
+              || frontier.kind === "channel-ordering"
               || frontier.kind === "channel-permission-overwrite"
               || frontier.kind === "publication"
               || frontier.kind === "role-configuration"
@@ -5439,7 +5946,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v9",
+      version: "guild-blueprint-plan.v10",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -5471,6 +5978,8 @@ export class GuildBlueprintService {
         "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
         "Existing-role configuration and channel-metadata convergence uses only separately allowlisted exact IDs; it never discovers, matches, or adopts a target by name",
         "Role-order chains resolve only exact or receipt-bound scaffold roles and converge bottom-up through one reviewed adjacency per plan",
+        "Channel-order chains resolve globally unique exact or receipt-bound scaffold channels and converge bottom-up through one reviewed above-placement adjacency per plan",
+        "Cross-parent channel movement requires explicit per-chain acknowledgement and preserves the target's exact permission overwrites without synchronizing them",
         "Permission-overwrite convergence retains the standalone exact-channel allowlist and changes only one exact target per plan",
         "A failed, drifting, or uncertain nested operation remains quarantined under its existing domain workflow",
         "Community enablement requires temporary guild ownership or complete Administrator authority; routing-only changes require Manage Guild",
@@ -5514,6 +6023,7 @@ export class GuildBlueprintService {
         digest: built.plan.digest,
         executedAutoModerationRuleIndex: null,
         executedChannelMetadataIndex: null,
+        executedChannelOrderingIndex: null,
         executedChannelPermissionOverwriteIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
@@ -5534,6 +6044,7 @@ export class GuildBlueprintService {
         digest: built.plan.digest,
         executedAutoModerationRuleIndex: null,
         executedChannelMetadataIndex: null,
+        executedChannelOrderingIndex: null,
         executedChannelPermissionOverwriteIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
@@ -5557,6 +6068,12 @@ export class GuildBlueprintService {
       )
     } else if (built.frontierRequest.kind === "channel-metadata") {
       nestedResult = await executors.executeChannelMetadata(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else if (built.frontierRequest.kind === "channel-ordering") {
+      nestedResult = await executors.executeChannelOrdering(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,
@@ -5631,6 +6148,10 @@ export class GuildBlueprintService {
           : null,
       executedChannelMetadataIndex:
         built.frontierRequest.kind === "channel-metadata"
+          ? built.frontierRequest.index
+          : null,
+      executedChannelOrderingIndex:
+        built.frontierRequest.kind === "channel-ordering"
           ? built.frontierRequest.index
           : null,
       executedChannelPermissionOverwriteIndex:

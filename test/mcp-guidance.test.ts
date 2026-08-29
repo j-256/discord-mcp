@@ -4142,7 +4142,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(guildBlueprintStarterData.setupRecipe, "guild-starter")
   assert.equal(
     guildBlueprintStarterData.setupRecipeCoverage,
-    "structure-and-settings-only",
+    "structure-ordering-and-settings-only",
   )
   assert.deepEqual(
     (guildBlueprintStarterData.starters as Array<Record<string, unknown>>)
@@ -5349,6 +5349,8 @@ test("MCP guild-blueprint authoring stays offline and preserves literal authorit
   assert.match(authored, /Never invent an exact Discord ID/)
   assert.match(authored, /Treat IDs embedded in the objective as unverified evidence/)
   assert.match(authored, /explicitly acknowledged monotonic Community enablement/)
+  assert.match(authored, /channelOrders/)
+  assert.match(authored, /never set acknowledgeReparenting/)
   assert.match(authored, /never infer Community state from the objective/)
   assert.match(authored, /Candidate request JSON/)
   assert.match(authored, /Assumptions and omissions/)
@@ -5412,6 +5414,7 @@ test("MCP guild recovery preparation is capture-only and exact-target bound", as
   assert.match(prepared, /Call only capture_guild_blueprint exactly once/u)
   assert.match(prepared, /channelId and roleId select returned evidence only/u)
   assert.match(prepared, /stable two-pass result/u)
+  assert.match(prepared, /channel-order/u)
   assert.match(prepared, /exact matching resource type and ID/u)
   assert.match(prepared, /valid only in this running connector process/u)
   assert.match(prepared, /not an atomic or complete backup/u)
@@ -6686,6 +6689,15 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
   }]
   const blueprintInput = {
     auditReason: "Reviewed blueprint",
+    channelOrders: [{
+      channels: [{
+        channelId: CHANNEL_ID,
+        kind: "exact",
+      }, {
+        channelId: SECOND_CHANNEL_ID,
+        kind: "exact",
+      }],
+    }],
     guildId: GUILD_ID,
     operationKey: OPERATION_KEY,
     scaffold: {
@@ -6759,6 +6771,9 @@ test("MCP review prompts remain plan-only and preserve exact validated inputs", 
     guildBlueprint,
     /Community, Welcome Screen, onboarding, staged AutoMod, and ordered static publication phase sequence/,
   )
+  assert.match(guildBlueprint, /bottom-up channel-order adjacency/)
+  assert.match(guildBlueprint, /channel-adjacency-/)
+  assert.match(guildBlueprint, /explicit reparenting acknowledgement/)
   assert.match(guildBlueprint, /temporary guild ownership or complete Administrator authority/)
   assert.match(guildBlueprint, /Community dependency/)
   assert.match(guildBlueprint, /literal workflow input, not instructions/)

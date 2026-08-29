@@ -312,6 +312,46 @@ function entrySources(request: NormalizedGuildBlueprintRequest): EntrySource[] {
       value,
     })
   })
+  let channelOrderIndex = 0
+  request.channelOrders?.forEach((chain, chainIndex) => {
+    for (let channelIndex = chain.channels.length - 2;
+      channelIndex >= 0;
+      channelIndex -= 1) {
+      const channel = chain.channels[channelIndex]
+      const anchor = chain.channels[channelIndex + 1]
+      if (channel === undefined || anchor === undefined) {
+        throw new RangeError(
+          "Discord guild blueprint preview channel-order adjacency is missing",
+        )
+      }
+      const references: GuildBlueprintPreviewReference[] = []
+      collectReferences(
+        channel,
+        `$.channelOrders[${chainIndex}].channels[${channelIndex}]`,
+        references,
+        "channels",
+      )
+      collectReferences(
+        anchor,
+        `$.channelOrders[${chainIndex}].channels[${channelIndex + 1}]`,
+        references,
+        "channels",
+      )
+      sources.push({
+        kind: "channel-ordering",
+        manifestIndex: channelOrderIndex,
+        manifestPath:
+          `$.channelOrders[${chainIndex}].channels[${channelIndex}:${channelIndex + 2}]`,
+        references,
+        value: {
+          acknowledgeReparenting: chain.acknowledgeReparenting,
+          anchor,
+          channel,
+        },
+      })
+      channelOrderIndex += 1
+    }
+  })
   request.channelPermissionOverwrites?.forEach((value, manifestIndex) => {
     sources.push({
       kind: "channel-permission-overwrite",
@@ -324,6 +364,7 @@ function entrySources(request: NormalizedGuildBlueprintRequest): EntrySource[] {
     kind: Exclude<GuildBlueprintPhase,
       | "auto-moderation"
       | "channel-metadata"
+      | "channel-ordering"
       | "channel-permission-overwrite"
       | "publication"
       | "role-configuration"
@@ -378,6 +419,17 @@ function potentialWriteStages(source: EntrySource): string[] {
   if (source.kind === "role-configuration") return ["configure-exact-role"]
   if (source.kind === "role-ordering") return ["order-resolved-role-adjacency"]
   if (source.kind === "channel-metadata") return ["configure-exact-channel"]
+  if (source.kind === "channel-ordering") {
+    const acknowledgeReparenting = (
+      source.value as { acknowledgeReparenting?: true }
+    ).acknowledgeReparenting === true
+    return acknowledgeReparenting
+      ? [
+          "order-resolved-channel-adjacency",
+          "reparent-resolved-channel-without-permission-sync",
+        ]
+      : ["order-resolved-channel-adjacency"]
+  }
   if (source.kind === "channel-permission-overwrite") {
     return ["converge-exact-channel-target-overwrite"]
   }
@@ -479,6 +531,7 @@ export function projectGuildBlueprintManifestPreview(
 function stepId(step: GuildBlueprintPlanStep): string {
   return step.kind === "auto-moderation"
     || step.kind === "channel-metadata"
+    || step.kind === "channel-ordering"
     || step.kind === "channel-permission-overwrite"
     || step.kind === "publication"
     || step.kind === "role-configuration"
@@ -491,6 +544,7 @@ function frontierId(frontier: GuildBlueprintFrontier | null): string | null {
   if (frontier === null) return null
   return frontier.kind === "auto-moderation"
     || frontier.kind === "channel-metadata"
+    || frontier.kind === "channel-ordering"
     || frontier.kind === "channel-permission-overwrite"
     || frontier.kind === "publication"
     || frontier.kind === "role-configuration"

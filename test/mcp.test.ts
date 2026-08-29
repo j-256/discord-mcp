@@ -8318,6 +8318,7 @@ function guildBlueprintPlan(
   autoModerationFrontier = false,
   communityFrontier = false,
   roleOrderingFrontier = false,
+  channelOrderingFrontier = false,
   channelPermissionOverwriteFrontier = false,
 ): GuildBlueprintPlan {
   const requestDigest = `hmac-sha256:${"b".repeat(64)}`
@@ -8414,6 +8415,25 @@ function guildBlueprintPlan(
         operationKey: request.operationKey,
         placement: "above",
         roleId: orderedRole.kind === "exact" ? orderedRole.roleId : ROLE_ID,
+      })
+  const channelOrder = request.channelOrders?.[0]
+  const channelOrderIndex = (channelOrder?.channels.length ?? 1) - 2
+  const orderedChannel = channelOrder?.channels[channelOrderIndex]
+  const orderedChannelAnchor = channelOrder?.channels[channelOrderIndex + 1]
+  const desiredChannelOrdering = orderedChannel === undefined
+    || orderedChannelAnchor === undefined
+    ? null
+    : channelOrderingPlan({
+        anchorChannelId: orderedChannelAnchor.kind === "exact"
+          ? orderedChannelAnchor.channelId
+          : CHANNEL_ORDERING_ANCHOR_ID,
+        auditReason: request.auditReason,
+        channelId: orderedChannel.kind === "exact"
+          ? orderedChannel.channelId
+          : CHANNEL_ID,
+        guildId: request.guildId,
+        operationKey: request.operationKey,
+        placement: "above",
       })
   const permissionOverwrite = request.channelPermissionOverwrites?.[0]
   const permissionOverwriteTargetId = permissionOverwrite === undefined
@@ -8548,6 +8568,9 @@ function guildBlueprintPlan(
   const useRoleOrderingFrontier = writeRequired
     && roleOrderingFrontier
     && desiredRoleOrdering !== null
+  const useChannelOrderingFrontier = writeRequired
+    && channelOrderingFrontier
+    && desiredChannelOrdering !== null
   const useChannelPermissionOverwriteFrontier = writeRequired
     && channelPermissionOverwriteFrontier
     && permissionOverwrite !== undefined
@@ -8590,6 +8613,7 @@ function guildBlueprintPlan(
       && !useAutoModerationFrontier
       && !usePublicationFrontier
       && !useRoleOrderingFrontier
+      && !useChannelOrderingFrontier
       && !useChannelPermissionOverwriteFrontier
       && publicationBlocker === null
       ? []
@@ -8620,16 +8644,25 @@ function guildBlueprintPlan(
             roleId: desiredRoleOrdering.role.id,
             writeRequired: true,
           }
-        : useChannelPermissionOverwriteFrontier
+        : useChannelOrderingFrontier
           ? {
-              channelId: permissionOverwrite.channelId,
+              anchorChannelId: desiredChannelOrdering.anchor.id,
+              channelId: desiredChannelOrdering.channel.id,
               index: 0,
-              kind: "channel-permission-overwrite",
-              plan: desiredChannelPermissionOverwrite,
-              targetId: permissionOverwriteTargetId,
-              targetType: permissionOverwrite.target.kind,
+              kind: "channel-ordering",
+              plan: desiredChannelOrdering,
               writeRequired: true,
             }
+          : useChannelPermissionOverwriteFrontier
+            ? {
+                channelId: permissionOverwrite.channelId,
+                index: 0,
+                kind: "channel-permission-overwrite",
+                plan: desiredChannelPermissionOverwrite,
+                targetId: permissionOverwriteTargetId,
+                targetType: permissionOverwrite.target.kind,
+                writeRequired: true,
+              }
       : useCommunityFrontier
         ? { kind: "community", plan: desiredCommunity, writeRequired: true }
         : useOnboardingFrontier
@@ -8731,7 +8764,7 @@ function guildBlueprintPlan(
             state: "ready",
             writeRequired: true,
           }]
-        : useChannelPermissionOverwriteFrontier
+        : useChannelOrderingFrontier
           ? [{
               kind: "structure",
               nestedPlanDigest: nested.digest,
@@ -8739,16 +8772,34 @@ function guildBlueprintPlan(
               state: "satisfied",
               writeRequired: false,
             }, {
-              channelId: permissionOverwrite.channelId,
+              anchorChannelId: desiredChannelOrdering.anchor.id,
+              channelId: desiredChannelOrdering.channel.id,
               index: 0,
-              kind: "channel-permission-overwrite",
-              nestedPlanDigest: desiredChannelPermissionOverwrite.digest,
-              operationKeyHash: desiredChannelPermissionOverwrite.operationKeyHash,
+              kind: "channel-ordering",
+              mode: desiredChannelOrdering.mode,
+              nestedPlanDigest: desiredChannelOrdering.digest,
+              operationKeyHash: desiredChannelOrdering.operationKeyHash,
               state: "ready",
-              targetId: permissionOverwriteTargetId,
-              targetType: permissionOverwrite.target.kind,
               writeRequired: true,
             }]
+          : useChannelPermissionOverwriteFrontier
+            ? [{
+                kind: "structure",
+                nestedPlanDigest: nested.digest,
+                operationKeyHash: OPERATION_KEY_HASH,
+                state: "satisfied",
+                writeRequired: false,
+              }, {
+                channelId: permissionOverwrite.channelId,
+                index: 0,
+                kind: "channel-permission-overwrite",
+                nestedPlanDigest: desiredChannelPermissionOverwrite.digest,
+                operationKeyHash: desiredChannelPermissionOverwrite.operationKeyHash,
+                state: "ready",
+                targetId: permissionOverwriteTargetId,
+                targetType: permissionOverwrite.target.kind,
+                writeRequired: true,
+              }]
       : useCommunityFrontier
         ? [{
             kind: "structure",
@@ -9053,6 +9104,22 @@ function guildBlueprintRoleOrderingToolInput(planDigest?: string) {
     }, {
       kind: "exact" as const,
       roleId: ROLE_ORDERING_ANCHOR_ID,
+    }],
+  }
+}
+
+function guildBlueprintChannelOrderingToolInput(planDigest?: string) {
+  const { settings: _settings, ...input } = guildBlueprintToolInput(planDigest)
+  return {
+    ...input,
+    channelOrders: [{
+      channels: [{
+        channelId: CHANNEL_ID,
+        kind: "exact" as const,
+      }, {
+        channelId: CHANNEL_ORDERING_ANCHOR_ID,
+        kind: "exact" as const,
+      }],
     }],
   }
 }
@@ -9496,6 +9563,7 @@ function serviceFixture(overrides: {
   guildBlueprintBlocked?: boolean
   guildBlueprintCaptureResult?: GuildBlueprintCaptureResult
   guildBlueprintCommunityFrontier?: boolean
+  guildBlueprintChannelOrderingFrontier?: boolean
   guildBlueprintChannelPermissionOverwriteFrontier?: boolean
   guildBlueprintOnboardingFrontier?: boolean
   guildBlueprintPlanDigest?: string
@@ -12640,6 +12708,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintAutoModerationFrontier ?? false,
         overrides.guildBlueprintCommunityFrontier ?? false,
         overrides.guildBlueprintRoleOrderingFrontier ?? false,
+        overrides.guildBlueprintChannelOrderingFrontier ?? false,
         overrides.guildBlueprintChannelPermissionOverwriteFrontier ?? false,
       )
       const result: GuildBlueprintResult = {
@@ -12651,6 +12720,10 @@ function serviceFixture(overrides: {
             : null,
         executedChannelMetadataIndex:
           planned.frontier?.kind === "channel-metadata"
+            ? planned.frontier.index
+            : null,
+        executedChannelOrderingIndex:
+          planned.frontier?.kind === "channel-ordering"
             ? planned.frontier.index
             : null,
         executedChannelPermissionOverwriteIndex:
@@ -14061,6 +14134,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintAutoModerationFrontier ?? false,
         overrides.guildBlueprintCommunityFrontier ?? false,
         overrides.guildBlueprintRoleOrderingFrontier ?? false,
+        overrides.guildBlueprintChannelOrderingFrontier ?? false,
         overrides.guildBlueprintChannelPermissionOverwriteFrontier ?? false,
       )
     },
@@ -14077,6 +14151,7 @@ function serviceFixture(overrides: {
         overrides.guildBlueprintAutoModerationFrontier ?? false,
         overrides.guildBlueprintCommunityFrontier ?? false,
         overrides.guildBlueprintRoleOrderingFrontier ?? false,
+        overrides.guildBlueprintChannelOrderingFrontier ?? false,
         overrides.guildBlueprintChannelPermissionOverwriteFrontier ?? false,
       )
       const result: GuildBlueprintVerification = {
@@ -33369,7 +33444,7 @@ test("MCP guild blueprint starters compile strict authority-free planner inputs"
     policyGranted: false,
     writeAuthorityGranted: false,
   })
-  assert.deepEqual(result.starter, { name: "support", version: 1 })
+  assert.deepEqual(result.starter, { name: "support", version: 2 })
   assert.equal((result.next as Record<string, unknown>).setupRecipe, "guild-starter")
   assert.equal(
     (result.next as Record<string, unknown>).previewTool,
@@ -33662,6 +33737,33 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
         { kind: "exact", roleId: ROLE_ID },
         { key: "reviewer-role", kind: "scaffold" },
       ],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const plannedChannelOrdering = await client.callTool({
+    arguments: guildBlueprintChannelOrderingToolInput(),
+    name: "plan_guild_blueprint",
+  })
+  const duplicateChannelOrderReference = await client.callTool({
+    arguments: {
+      ...guildBlueprintChannelOrderingToolInput(),
+      channelOrders: [{
+        channels: [
+          { channelId: CHANNEL_ID, kind: "exact" },
+          { channelId: CHANNEL_ID, kind: "exact" },
+        ],
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const invalidChannelOrderAcknowledgement = await client.callTool({
+    arguments: {
+      ...guildBlueprintChannelOrderingToolInput(),
+      channelOrders: [{
+        acknowledgeReparenting: false,
+        channels: guildBlueprintChannelOrderingToolInput()
+          .channelOrders[0]!.channels,
+      }],
     },
     name: "plan_guild_blueprint",
   })
@@ -33965,6 +34067,7 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(structuredContent(plannedPublication).status, "planned")
   assert.equal(structuredContent(plannedConvergence).status, "planned")
   assert.equal(structuredContent(plannedHierarchyConvergence).status, "planned")
+  assert.equal(structuredContent(plannedChannelOrdering).status, "planned")
   assert.equal(missingPostPhase.isError, true)
   assert.equal(emptySettings.isError, true)
   assert.equal(unknownManifestField.isError, true)
@@ -33992,7 +34095,9 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(missingRoleOrderReference.isError, true)
   assert.equal(missingOverwriteRoleReference.isError, true)
   assert.equal(invalidOverwriteDelete.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 8)
+  assert.equal(duplicateChannelOrderReference.isError, true)
+  assert.equal(invalidChannelOrderAcknowledgement.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 9)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -34098,6 +34203,33 @@ test("MCP guild blueprints review and execute one role-ordering adjacency", asyn
   assert.match(confirmationMessage, new RegExp(ROLE_ORDERING_ANCHOR_ID))
   assert.match(confirmationMessage, /Placement: above/u)
   assert.match(confirmationMessage, /Role hierarchy changes can alter moderation authority/u)
+  assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
+})
+
+test("MCP guild blueprints review and execute one channel-ordering adjacency", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+    serviceOverrides: { guildBlueprintChannelOrderingFrontier: true },
+  })
+  const result = await client.callTool({
+    arguments: guildBlueprintChannelOrderingToolInput(DIGEST),
+    name: "execute_guild_blueprint",
+  })
+
+  assert.equal(structuredContent(result).executedPhase, "channel-ordering")
+  assert.equal(structuredContent(result).executedChannelOrderingIndex, 0)
+  assert.equal(calls.guildBlueprintPlan, 1)
+  assert.equal(calls.guildBlueprintExecute, 1)
+  assert.match(confirmationMessage, /Frontier phase: channel-ordering/u)
+  assert.match(confirmationMessage, /Approve this Discord channel-ordering change/u)
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ORDERING_ANCHOR_ID))
+  assert.match(confirmationMessage, /Placement: above/u)
+  assert.match(confirmationMessage, /Permission-overwrite behavior: preserve/u)
   assert.doesNotMatch(confirmationMessage, new RegExp(GUILD_BLUEPRINT_OPERATION_KEY))
 })
 

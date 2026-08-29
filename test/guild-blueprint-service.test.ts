@@ -21,6 +21,11 @@ import type {
   ChannelMetadataChangeResult,
 } from "../src/channel-metadata-service.js"
 import type {
+  ChannelOrderingPlan,
+  ChannelOrderingRequest,
+  ChannelOrderingResult,
+} from "../src/channel-ordering-service.js"
+import type {
   ComponentMessagePlan,
   ComponentMessageRequest,
   ComponentMessageResult,
@@ -504,6 +509,28 @@ function roleOrderingPlan(
   } as RoleOrderingPlan
 }
 
+function channelOrderingPlan(
+  value: ChannelOrderingRequest,
+  writeRequired: boolean,
+): ChannelOrderingPlan {
+  return {
+    anchor: { id: value.anchorChannelId, parentChannelId: CATEGORY_ID },
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channel: { id: value.channelId, parentChannelId: CATEGORY_ID },
+    destinationParentChannelId: CATEGORY_ID,
+    digest: `hmac-sha256:${(writeRequired ? "a" : "b").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild", ownerId: OWNER_ID },
+    mode: "same-parent-order",
+    operationKeyHash: operationKeyHash(value.operationKey),
+    permissionOverwriteBehavior: "preserve",
+    placement: value.placement,
+    sourceParentChannelId: CATEGORY_ID,
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as ChannelOrderingPlan
+}
+
 function channelPermissionOverwritePlan(
   value: ChannelPermissionOverwriteRequest,
   writeRequired: boolean,
@@ -724,6 +751,11 @@ interface FixtureOptions {
     index: number,
   ) => AutoModerationVerificationResult
   channelMetadataWrite?: boolean
+  channelOrderingPlanTransform?: (
+    plan: ChannelOrderingPlan,
+    request: ChannelOrderingRequest,
+  ) => ChannelOrderingPlan
+  channelOrderingWrite?: boolean
   channelPermissionOverwritePlanTransform?: (
     plan: ChannelPermissionOverwritePlan,
     request: ChannelPermissionOverwriteRequest,
@@ -766,6 +798,7 @@ function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
   const resolvedAutoModeration: AutoModerationChangeRequest[] = []
   const resolvedChannelMetadata: ChannelMetadataChangeRequest[] = []
+  const resolvedChannelOrderings: ChannelOrderingRequest[] = []
   const resolvedChannelPermissionOverwrites: ChannelPermissionOverwriteRequest[] = []
   let resolvedOnboarding: OnboardingChangeRequest | null = null
   const resolvedPublications: ComponentMessageRequest[] = []
@@ -872,6 +905,17 @@ function fixture(options: FixtureOptions = {}) {
           value,
           options.channelMetadataWrite ?? false,
         )
+      },
+    },
+    channelOrdering: {
+      async reconcilePlan(_applicationId, _botId, value) {
+        calls.push("plan-channel-ordering")
+        resolvedChannelOrderings.push(value)
+        const plan = channelOrderingPlan(
+          value,
+          options.channelOrderingWrite ?? false,
+        )
+        return options.channelOrderingPlanTransform?.(plan, value) ?? plan
       },
     },
     channelPermissionOverwrite: {
@@ -1028,6 +1072,9 @@ function fixture(options: FixtureOptions = {}) {
     get resolvedChannelMetadata() {
       return resolvedChannelMetadata
     },
+    get resolvedChannelOrderings() {
+      return resolvedChannelOrderings
+    },
     get resolvedChannelPermissionOverwrites() {
       return resolvedChannelPermissionOverwrites
     },
@@ -1084,6 +1131,24 @@ function executors(calls: string[]): GuildBlueprintExecutors {
         schemaVersion: 1,
         status: "completed",
       } as ChannelMetadataChangeResult
+    },
+    async executeChannelOrdering(value, planDigest) {
+      calls.push(`execute-channel-ordering:${planDigest}`)
+      return {
+        activityId: "activity-channel-ordering",
+        anchorChannelId: value.anchorChannelId,
+        baselineLayoutRevision: 1,
+        channelId: value.channelId,
+        guildId: value.guildId,
+        layoutMatched: true,
+        observedAffectedChannels: [],
+        observedLayoutRevision: 2,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+        verification: "match",
+      } as ChannelOrderingResult
     },
     async executeChannelPermissionOverwrite(value, planDigest) {
       calls.push(`execute-channel-permission-overwrite:${planDigest}`)
@@ -1531,6 +1596,103 @@ test("guild blueprint normalizes role order and one-target permission convergenc
   )
 })
 
+test("guild blueprint normalizes bounded globally unique channel-order chains", () => {
+  const channelOrders: NonNullable<GuildBlueprintRequest["channelOrders"]> = [{
+    channels: [
+      { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+      { channelId: PUBLICATION_CHANNEL_ID, kind: "exact" },
+      { key: "private-system-channel", kind: "scaffold" },
+    ],
+  }]
+  const value = request({ channelOrders })
+  delete value.profile
+  delete value.settings
+  const normalized = normalizeGuildBlueprintRequest(value)
+
+  assert.deepEqual(normalized.channelOrders, channelOrders)
+  assert.notEqual(
+    guildBlueprintRequestDigest(value),
+    guildBlueprintRequestDigest({
+      ...value,
+      channelOrders: [{ channels: [...channelOrders[0]!.channels].reverse() }],
+    }),
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...value,
+      channelOrders: [
+        { channels: channelOrders[0]!.channels.slice(0, 2) },
+        {
+          channels: [
+            channelOrders[0]!.channels[1]!,
+            { channelId: CHANNEL_ID, kind: "exact" },
+          ],
+        },
+      ],
+    }),
+    /channel-order references must be globally unique/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...value,
+      channelOrders: [{
+        acknowledgeReparenting: false,
+        channels: channelOrders[0]!.channels,
+      } as never],
+    }),
+    /acknowledgement must be literal true/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest({
+      ...value,
+      channelOrders: [{
+        channels: [
+          { key: "private-category", kind: "scaffold" },
+          { key: "private-system-channel", kind: "scaffold" },
+        ],
+      }],
+    }),
+    /mixes incompatible scaffold families/u,
+  )
+
+  const crossParentScaffold = request().scaffold
+  crossParentScaffold.channels = [
+    ...crossParentScaffold.channels,
+    { key: "second-category", kind: "category", name: "Second Category" },
+    {
+      key: "second-channel",
+      kind: "text",
+      name: "second-channel",
+      parentKey: "second-category",
+    },
+  ]
+  const crossParent = request({
+    channelOrders: [{
+      channels: [
+        { key: "private-system-channel", kind: "scaffold" },
+        { key: "second-channel", kind: "scaffold" },
+      ],
+    }],
+    scaffold: crossParentScaffold,
+  })
+  delete crossParent.profile
+  delete crossParent.settings
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(crossParent),
+    /requires explicit reparenting acknowledgement/u,
+  )
+  assert.equal(
+    normalizeGuildBlueprintRequest({
+      ...crossParent,
+      channelOrders: [{
+        acknowledgeReparenting: true,
+        channels: crossParent.channelOrders![0]!.channels,
+      }],
+    }).channelOrders?.[0]?.acknowledgeReparenting,
+    true,
+  )
+})
+
 test("guild blueprint sequences bottom-up role order before exact permission targets", async () => {
   const manifest = request({
     channelPermissionOverwrites: [{
@@ -1617,6 +1779,156 @@ test("guild blueprint sequences bottom-up role order before exact permission tar
   )
 })
 
+test("guild blueprint sequences bottom-up channel order before permission overwrites", async () => {
+  const manifest = request({
+    channelOrders: [{
+      channels: [
+        { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+        { channelId: PUBLICATION_CHANNEL_ID, kind: "exact" },
+        { channelId: CHANNEL_ID, kind: "exact" },
+      ],
+    }],
+    channelPermissionOverwrites: [{
+      changes: [{ permission: "VIEW_CHANNEL", state: "allow" }],
+      channelId: CHANNEL_ID,
+      mode: "update",
+      target: { kind: "member", userId: NOTIFICATION_USER_ID },
+    }],
+  })
+  delete manifest.profile
+  delete manifest.settings
+
+  const ordering = fixture({ channelOrderingWrite: true })
+  const orderingPlan = await ordering.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(orderingPlan.frontier?.kind, "channel-ordering")
+  if (orderingPlan.frontier?.kind !== "channel-ordering") {
+    throw new Error("Expected channel-ordering frontier")
+  }
+  assert.equal(orderingPlan.frontier.index, 0)
+  assert.equal(orderingPlan.frontier.channelId, PUBLICATION_CHANNEL_ID)
+  assert.equal(orderingPlan.frontier.anchorChannelId, CHANNEL_ID)
+  assert.deepEqual(ordering.calls, ["plan-structure", "plan-channel-ordering"])
+  assert.deepEqual(
+    orderingPlan.steps.map((step) => [
+      step.kind,
+      "index" in step ? step.index : null,
+      step.state,
+    ]),
+    [
+      ["structure", null, "satisfied"],
+      ["channel-ordering", 0, "ready"],
+      ["channel-ordering", 1, "waiting"],
+      ["channel-permission-overwrite", 0, "waiting"],
+    ],
+  )
+
+  const overwrite = fixture({ channelPermissionOverwriteWrite: true })
+  const overwritePlan = await overwrite.service.plan(APPLICATION_ID, BOT_ID, manifest)
+  assert.equal(overwritePlan.frontier?.kind, "channel-permission-overwrite")
+  assert.deepEqual(overwrite.resolvedChannelOrderings.map((entry) => [
+    entry.channelId,
+    entry.anchorChannelId,
+    entry.placement,
+  ]), [
+    [PUBLICATION_CHANNEL_ID, CHANNEL_ID, "above"],
+    [SECOND_CHANNEL_ID, PUBLICATION_CHANNEL_ID, "above"],
+  ])
+  assert.deepEqual(overwritePlan.manifestPreview.entries.map(({ id }) => id), [
+    "structure",
+    "channel-ordering:0",
+    "channel-ordering:1",
+    "channel-permission-overwrite:0",
+  ])
+  const lowerOrderingPreview = overwritePlan.manifestPreview.entries.find(({ id }) => (
+    id === "channel-ordering:0"
+  ))
+  assert.equal(
+    lowerOrderingPreview?.manifestPath,
+    "$.channelOrders[0].channels[1:3]",
+  )
+  assert.deepEqual(
+    lowerOrderingPreview?.references.map(({ path }) => path),
+    [
+      "$.channelOrders[0].channels[1].channelId",
+      "$.channelOrders[0].channels[2].channelId",
+    ],
+  )
+  assert.deepEqual(
+    lowerOrderingPreview?.potentialWriteStages,
+    ["order-resolved-channel-adjacency"],
+  )
+})
+
+test("guild blueprint blocks unacknowledged live channel reparenting", async () => {
+  const baseManifest = request({
+    channelOrders: [{
+      channels: [
+        { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+        { channelId: CHANNEL_ID, kind: "exact" },
+      ],
+    }],
+  })
+  delete baseManifest.profile
+  delete baseManifest.settings
+  const crossParentPlan = (plan: ChannelOrderingPlan): ChannelOrderingPlan => ({
+    ...plan,
+    anchor: { ...plan.anchor, parentChannelId: null },
+    destinationParentChannelId: null,
+    mode: "cross-parent-move",
+    sourceParentChannelId: CATEGORY_ID,
+    status: "planned",
+    writeRequired: true,
+  })
+  const blocked = fixture({
+    channelOrderingPlanTransform: crossParentPlan,
+    channelOrderingWrite: true,
+  })
+  const blockedPlan = await blocked.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    baseManifest,
+  )
+  assert.equal(blockedPlan.status, "blocked")
+  assert.deepEqual(blockedPlan.blocker, {
+    anchorChannelId: CHANNEL_ID,
+    channelId: SECOND_CHANNEL_ID,
+    destinationParentChannelId: null,
+    index: 0,
+    kind: "channel-ordering",
+    operationKeyHash: blockedPlan.steps[1]?.operationKeyHash,
+    sourceParentChannelId: CATEGORY_ID,
+    verificationReason: "reparenting-acknowledgement-required",
+  })
+  assert.equal(blockedPlan.frontier, null)
+  assert.equal(blockedPlan.steps[1]?.state, "blocked")
+
+  const acknowledgedManifest: GuildBlueprintRequest = {
+    ...baseManifest,
+    channelOrders: [{
+      acknowledgeReparenting: true,
+      channels: baseManifest.channelOrders![0]!.channels,
+    }],
+  }
+  const acknowledged = fixture({
+    channelOrderingPlanTransform: crossParentPlan,
+    channelOrderingWrite: true,
+  })
+  const acknowledgedPlan = await acknowledged.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    acknowledgedManifest,
+  )
+  assert.equal(acknowledgedPlan.status, "planned")
+  assert.equal(acknowledgedPlan.frontier?.kind, "channel-ordering")
+  assert.deepEqual(
+    acknowledgedPlan.manifestPreview.entries[1]?.potentialWriteStages,
+    [
+      "order-resolved-channel-adjacency",
+      "reparent-resolved-channel-without-permission-sync",
+    ],
+  )
+})
+
 test("guild blueprint rejects duplicate role identities after scaffold resolution", async () => {
   const roleManifest = request({
     roleOrder: [
@@ -1633,6 +1945,23 @@ test("guild blueprint rejects duplicate role identities after scaffold resolutio
     /resolved role-order references must be unique/u,
   )
   assert.deepEqual(roleFixture.calls, ["plan-structure"])
+
+  const channelManifest = request({
+    channelOrders: [{
+      channels: [
+        { channelId: CHANNEL_ID, kind: "exact" },
+        { key: "private-system-channel", kind: "scaffold" },
+      ],
+    }],
+  })
+  delete channelManifest.profile
+  delete channelManifest.settings
+  const channelFixture = fixture()
+  await assert.rejects(
+    channelFixture.service.plan(APPLICATION_ID, BOT_ID, channelManifest),
+    /resolved channel-order references must be globally unique/u,
+  )
+  assert.deepEqual(channelFixture.calls, ["plan-structure"])
 
   const overwriteManifest = request({
     channelPermissionOverwrites: [{
@@ -1685,6 +2014,27 @@ test("guild blueprint rejects changed hierarchy-domain plan bindings", async () 
   await assert.rejects(
     changedRole.service.plan(APPLICATION_ID, BOT_ID, roleManifest),
     /role-ordering target changed/u,
+  )
+
+  const channelManifest = request({
+    channelOrders: [{
+      channels: [
+        { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+        { channelId: CHANNEL_ID, kind: "exact" },
+      ],
+    }],
+  })
+  delete channelManifest.profile
+  delete channelManifest.settings
+  const changedChannel = fixture({
+    channelOrderingPlanTransform(plan) {
+      plan.anchor.id = PUBLICATION_CHANNEL_ID
+      return plan
+    },
+  })
+  await assert.rejects(
+    changedChannel.service.plan(APPLICATION_ID, BOT_ID, channelManifest),
+    /channel-ordering target changed/u,
   )
 
   const overwriteManifest = request({
@@ -3370,6 +3720,42 @@ test("guild blueprint execution dispatches one hierarchy convergence frontier", 
     1,
   )
   assert.match(roleState.calls.at(-1) as string, /^execute-role-ordering:/u)
+
+  const channelManifest = request({
+    channelOrders: [{
+      channels: [
+        { channelId: SECOND_CHANNEL_ID, kind: "exact" },
+        { channelId: CHANNEL_ID, kind: "exact" },
+      ],
+    }],
+  })
+  delete channelManifest.profile
+  delete channelManifest.settings
+  const channelState = fixture({ channelOrderingWrite: true })
+  const channelPlan = await channelState.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    channelManifest,
+  )
+  channelState.calls.length = 0
+  const channelResult = await channelState.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    channelManifest,
+    channelPlan.digest,
+    executors(channelState.calls),
+  )
+  assert.equal(channelResult.executedPhase, "channel-ordering")
+  assert.equal(channelResult.executedChannelOrderingIndex, 0)
+  assert.equal(channelResult.executedChannelPermissionOverwriteIndex, null)
+  assert.equal(
+    channelState.calls.filter((call) => call.startsWith("execute-")).length,
+    1,
+  )
+  assert.match(
+    channelState.calls.at(-1) as string,
+    /^execute-channel-ordering:/u,
+  )
 
   const overwriteManifest = request({
     channelPermissionOverwrites: [{
