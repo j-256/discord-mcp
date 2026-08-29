@@ -6623,7 +6623,9 @@ function roleConfigurationPlan(
   const basePermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
   const grantBits = discordPermissionBitfield(request.grantPermissions || [])
   const revokeBits = discordPermissionBitfield(request.revokePermissions || [])
-  const desiredPermissions = (basePermissions | grantBits) & ~revokeBits
+  const desiredPermissions = request.permissions === undefined
+    ? (basePermissions | grantBits) & ~revokeBits
+    : discordPermissionBitfield(request.permissions)
   const base: NormalizedDiscordRole = {
     colors: {
       primaryColor: 0,
@@ -6730,6 +6732,7 @@ function roleConfigurationPlan(
     "hoist",
     "mentionable",
     "name",
+    "permissions",
     "primaryColor",
     "revokePermissions",
     "roleIcon",
@@ -6798,6 +6801,9 @@ function roleConfigurationPlan(
       : null,
     requestedFields,
     requestedGrantPermissions: [...(request.grantPermissions || [])].sort(),
+    requestedPermissions: request.permissions === undefined
+      ? null
+      : [...request.permissions].sort(),
     requestedRevokePermissions: [...(request.revokePermissions || [])].sort(),
     revokedPermissions,
     risks: ["One non-retried partial PATCH followed by complete verification"],
@@ -12481,12 +12487,20 @@ function serviceFixture(overrides: {
           planned.frontier?.kind === "auto-moderation"
             ? planned.frontier.index
             : null,
+        executedChannelMetadataIndex:
+          planned.frontier?.kind === "channel-metadata"
+            ? planned.frontier.index
+            : null,
         executedPhase: planned.status === "blocked"
           ? null
           : planned.frontier?.kind ?? null,
         executedPublicationIndex: planned.frontier?.kind === "publication"
           ? planned.frontier.index
           : null,
+        executedRoleConfigurationIndex:
+          planned.frontier?.kind === "role-configuration"
+            ? planned.frontier.index
+            : null,
         guildId: request.guildId,
         nestedResult: null,
         nextAction: planned.status === "blocked"
@@ -33304,6 +33318,48 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
     arguments: guildBlueprintPublicationToolInput(),
     name: "plan_guild_blueprint",
   })
+  const plannedConvergence = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      channelMetadata: [{ channelId: CHANNEL_ID, topic: null }],
+      roleConfigurations: [{
+        permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+        roleId: ROLE_ID,
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const duplicateConvergenceTarget = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      channelMetadata: [
+        { channelId: CHANNEL_ID, name: "one" },
+        { channelId: CHANNEL_ID, name: "two" },
+      ],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const mixedRolePermissionIntent = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      roleConfigurations: [{
+        grantPermissions: ["SEND_MESSAGES"],
+        permissions: ["VIEW_CHANNEL"],
+        roleId: ROLE_ID,
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
+  const administratorRolePermissions = await client.callTool({
+    arguments: {
+      ...guildBlueprintToolInput(),
+      roleConfigurations: [{
+        permissions: ["ADMINISTRATOR"],
+        roleId: ROLE_ID,
+      }],
+    },
+    name: "plan_guild_blueprint",
+  })
   const { settings: _settings, ...withoutPostPhase } = guildBlueprintToolInput()
   const missingPostPhase = await client.callTool({
     arguments: withoutPostPhase,
@@ -33524,6 +33580,7 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(structuredContent(plannedOnboarding).status, "planned")
   assert.equal(structuredContent(plannedAutoModeration).status, "planned")
   assert.equal(structuredContent(plannedPublication).status, "planned")
+  assert.equal(structuredContent(plannedConvergence).status, "planned")
   assert.equal(missingPostPhase.isError, true)
   assert.equal(emptySettings.isError, true)
   assert.equal(unknownManifestField.isError, true)
@@ -33544,7 +33601,10 @@ test("MCP guild blueprints validate and plan one exact caller-retained manifest"
   assert.equal(duplicatePublicationKey.isError, true)
   assert.equal(createPublicationMessageId.isError, true)
   assert.equal(publicationReply.isError, true)
-  assert.equal(calls.guildBlueprintPlan, 6)
+  assert.equal(duplicateConvergenceTarget.isError, true)
+  assert.equal(mixedRolePermissionIntent.isError, true)
+  assert.equal(administratorRolePermissions.isError, true)
+  assert.equal(calls.guildBlueprintPlan, 7)
 })
 
 test("MCP guild blueprint verification returns content-free fresh evidence", async (context) => {
@@ -36886,6 +36946,16 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
     }),
     name: "plan_role_configuration",
   })
+  const plannedExactPermissions = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: ROLE_CONFIGURATION_OPERATION_KEY,
+      permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+      roleId: ROLE_ID,
+    },
+    name: "plan_role_configuration",
+  })
   const missingChange = await client.callTool({
     arguments: {
       auditReason: AUDIT_REASON,
@@ -36899,10 +36969,26 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
     arguments: roleConfigurationInput({ grantPermissions: ["ADMINISTRATOR"] }),
     name: "plan_role_configuration",
   })
+  const exactAdministrator = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: ROLE_CONFIGURATION_OPERATION_KEY,
+      permissions: ["ADMINISTRATOR"],
+      roleId: ROLE_ID,
+    },
+    name: "plan_role_configuration",
+  })
   const overlap = await client.callTool({
     arguments: roleConfigurationInput({
       grantPermissions: ["SEND_MESSAGES"],
       revokePermissions: ["SEND_MESSAGES"],
+    }),
+    name: "plan_role_configuration",
+  })
+  const mixedPermissionIntent = await client.callTool({
+    arguments: roleConfigurationInput({
+      permissions: ["VIEW_CHANNEL"],
     }),
     name: "plan_role_configuration",
   })
@@ -36931,6 +37017,10 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
 
   const content = structuredContent(planned)
   assert.equal(content.status, "planned")
+  assert.deepEqual(
+    structuredContent(plannedExactPermissions).requestedPermissions,
+    ["SEND_MESSAGES", "VIEW_CHANNEL"],
+  )
   assert.deepEqual(content.requestedFields, [
     "grantPermissions",
     "hoist",
@@ -36945,12 +37035,14 @@ test("MCP role configuration plans exact partial intent and rejects unsafe schem
   assert.doesNotMatch(JSON.stringify(planned), new RegExp(ROLE_CONFIGURATION_OPERATION_KEY))
   assert.equal(missingChange.isError, true)
   assert.equal(administrator.isError, true)
+  assert.equal(exactAdministrator.isError, true)
   assert.equal(overlap.isError, true)
+  assert.equal(mixedPermissionIntent.isError, true)
   assert.equal(extra.isError, true)
   assert.equal(invalidUnicodeIcon.isError, true)
   assert.equal(remoteImage.isError, true)
   assert.equal(ambiguousClear.isError, true)
-  assert.equal(calls.roleConfigurationPlan, 1)
+  assert.equal(calls.roleConfigurationPlan, 2)
 })
 
 test("MCP role configuration binds signed approval to exact state and permission deltas", async (context) => {

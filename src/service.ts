@@ -2242,10 +2242,12 @@ export class ConnectorService {
     this.#guildBlueprintService = new GuildBlueprintService({
       domains: {
         automod: this.#automodService,
+        channelMetadata: this.#channelMetadataService,
         component: this.#componentMessageService,
         community: this.#guildCommunityService,
         onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
+        roleConfiguration: this.#roleConfigurationService,
         scaffold: this.#guildScaffoldService,
         settings: this.#guildSettingsService,
         welcomeScreen: this.#welcomeScreenService,
@@ -5510,6 +5512,13 @@ export class ConnectorService {
             nestedOptions,
           )
         ),
+        executeChannelMetadata: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeChannelMetadataChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
         executeComponent: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeComponentMessage(
             nestedRequest,
@@ -5533,6 +5542,13 @@ export class ConnectorService {
         ),
         executeProfile: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeGuildProfileChange(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeRoleConfiguration: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeRoleConfiguration(
             nestedRequest,
             nestedDigest,
             nestedOptions,

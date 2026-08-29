@@ -38,6 +38,12 @@ import {
   type ComponentMessageVerificationResult,
   normalizeComponentMessageRequest,
 } from "./component-message-service.js"
+import {
+  type ChannelMetadataChangePlan,
+  type ChannelMetadataChangeRequest,
+  type ChannelMetadataChangeResult,
+  normalizeChannelMetadataChangeRequest,
+} from "./channel-metadata-service.js"
 import { DiscordApiError, GuildBlueprintPlanChangedError } from "./errors.js"
 import {
   type GuildProfileChangePlan,
@@ -82,6 +88,12 @@ import {
 } from "./reviewed-plan.js"
 import type { RequestOptions } from "./types.js"
 import {
+  type RoleConfigurationPlan,
+  type RoleConfigurationRequest,
+  type RoleConfigurationResult,
+  normalizeRoleConfigurationRequest,
+} from "./role-configuration-service.js"
+import {
   type WelcomeScreenChangePlan,
   type WelcomeScreenChangeRequest,
   type WelcomeScreenChangeResult,
@@ -92,15 +104,43 @@ const BLUEPRINT_REQUEST_DIGEST_PREFIX = "hmac-sha256:"
 const BLUEPRINT_TOP_LEVEL_KEYS = Object.freeze([
   "auditReason",
   "autoModerationRules",
+  "channelMetadata",
   "community",
   "guildId",
   "onboarding",
   "operationKey",
   "profile",
   "publications",
+  "roleConfigurations",
   "scaffold",
   "settings",
   "welcomeScreen",
+] as const)
+const BLUEPRINT_CHANNEL_METADATA_KEYS = Object.freeze([
+  "bitrate",
+  "channelId",
+  "defaultAutoArchiveDuration",
+  "defaultThreadRateLimitPerUser",
+  "name",
+  "nsfw",
+  "rateLimitPerUser",
+  "rtcRegion",
+  "topic",
+  "userLimit",
+  "videoQualityMode",
+] as const)
+const BLUEPRINT_ROLE_CONFIGURATION_KEYS = Object.freeze([
+  "grantPermissions",
+  "hoist",
+  "mentionable",
+  "name",
+  "permissions",
+  "primaryColor",
+  "revokePermissions",
+  "roleIcon",
+  "roleId",
+  "secondaryColor",
+  "tertiaryColor",
 ] as const)
 const BLUEPRINT_COMMUNITY_KEYS = Object.freeze([
   "acknowledgeCommunityEnablement",
@@ -213,6 +253,8 @@ const BLUEPRINT_PUBLICATION_EDIT_KEYS = Object.freeze([
 
 export const GUILD_BLUEPRINT_PHASES = Object.freeze([
   "structure",
+  "role-configuration",
+  "channel-metadata",
   "profile",
   "settings",
   "community",
@@ -225,12 +267,18 @@ export const GUILD_BLUEPRINT_PHASES = Object.freeze([
 export type GuildBlueprintPhase = typeof GUILD_BLUEPRINT_PHASES[number]
 export type GuildBlueprintSingletonPhase = Exclude<
   GuildBlueprintPhase,
-  "auto-moderation" | "publication"
+  | "auto-moderation"
+  | "channel-metadata"
+  | "publication"
+  | "role-configuration"
 >
 export type GuildBlueprintPhaseState = "blocked" | "ready" | "satisfied" | "waiting"
 const GUILD_BLUEPRINT_SINGLETON_PHASES: ReadonlySet<string> = new Set(
   GUILD_BLUEPRINT_PHASES.filter((phase) => (
-    phase !== "auto-moderation" && phase !== "publication"
+    phase !== "auto-moderation"
+    && phase !== "channel-metadata"
+    && phase !== "publication"
+    && phase !== "role-configuration"
   )),
 )
 
@@ -387,15 +435,27 @@ export type GuildBlueprintPublicationInput =
   | GuildBlueprintCreatePublicationInput
   | GuildBlueprintEditPublicationInput
 
+export type GuildBlueprintChannelMetadataInput = Omit<
+  ChannelMetadataChangeRequest,
+  "auditReason" | "guildId" | "operationKey"
+>
+
+export type GuildBlueprintRoleConfigurationInput = Omit<
+  RoleConfigurationRequest,
+  "auditReason" | "guildId" | "operationKey"
+>
+
 export interface GuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: readonly GuildBlueprintAutoModerationRuleInput[]
+  channelMetadata?: readonly GuildBlueprintChannelMetadataInput[]
   community?: GuildBlueprintCommunityInput
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
   operationKey: string
   profile?: GuildBlueprintProfileInput
   publications?: readonly GuildBlueprintPublicationInput[]
+  roleConfigurations?: readonly GuildBlueprintRoleConfigurationInput[]
   scaffold: GuildBlueprintScaffoldInput
   settings?: GuildBlueprintSettingsInput
   welcomeScreen?: GuildBlueprintWelcomeScreenInput
@@ -423,6 +483,7 @@ export type NormalizedGuildBlueprintPublicationInput = {
 export interface NormalizedGuildBlueprintRequest {
   auditReason: string
   autoModerationRules?: NormalizedGuildBlueprintAutoModerationRuleInput[]
+  channelMetadata?: GuildBlueprintChannelMetadataInput[]
   community?: GuildBlueprintCommunityInput
   guildId: string
   onboarding?: GuildBlueprintOnboardingInput
@@ -430,6 +491,7 @@ export interface NormalizedGuildBlueprintRequest {
   operationKeyHash: string
   profile?: GuildBlueprintProfileInput
   publications?: NormalizedGuildBlueprintPublicationInput[]
+  roleConfigurations?: GuildBlueprintRoleConfigurationInput[]
   scaffold: GuildBlueprintScaffoldInput & { stepLimit: number }
   settings?: NormalizedGuildBlueprintSettingsInput
   welcomeScreen?: GuildBlueprintWelcomeScreenInput
@@ -479,6 +541,20 @@ export interface GuildBlueprintPublicationPlanStep extends GuildBlueprintPlanSte
   verificationStatus: ComponentMessageVerificationResult["status"] | null
 }
 
+export interface GuildBlueprintChannelMetadataPlanStep
+  extends GuildBlueprintPlanStepBase {
+  channelId: string
+  index: number
+  kind: "channel-metadata"
+}
+
+export interface GuildBlueprintRoleConfigurationPlanStep
+  extends GuildBlueprintPlanStepBase {
+  index: number
+  kind: "role-configuration"
+  roleId: string
+}
+
 export type GuildBlueprintAutoModerationBlockerReason =
   | AutoModerationVerificationReason
   | "exact-rule-missing"
@@ -499,7 +575,9 @@ export interface GuildBlueprintAutoModerationPlanStep
 
 export type GuildBlueprintPlanStep =
   | GuildBlueprintAutoModerationPlanStep
+  | GuildBlueprintChannelMetadataPlanStep
   | GuildBlueprintPublicationPlanStep
+  | GuildBlueprintRoleConfigurationPlanStep
   | GuildBlueprintSingletonPlanStep
 
 export interface GuildBlueprintPublicationBlocker {
@@ -549,6 +627,13 @@ export type GuildBlueprintFrontier =
       writeRequired: true
     }
   | {
+      channelId: string
+      index: number
+      kind: "channel-metadata"
+      plan: ChannelMetadataChangePlan
+      writeRequired: true
+    }
+  | {
       kind: "community"
       plan: GuildCommunityChangePlan
       writeRequired: true
@@ -568,6 +653,13 @@ export type GuildBlueprintFrontier =
       key: string
       kind: "publication"
       plan: ComponentMessagePlan
+      writeRequired: true
+    }
+  | {
+      index: number
+      kind: "role-configuration"
+      plan: RoleConfigurationPlan
+      roleId: string
       writeRequired: true
     }
   | {
@@ -615,10 +707,12 @@ export interface GuildBlueprintPlan {
 
 export type GuildBlueprintNestedResult =
   | AutoModerationResult
+  | ChannelMetadataChangeResult
   | ComponentMessageResult
   | GuildCommunityChangeResult
   | OnboardingChangeResult
   | GuildProfileChangeResult
+  | RoleConfigurationResult
   | GuildScaffoldResult
   | GuildSettingsChangeResult
   | WelcomeScreenChangeResult
@@ -628,7 +722,9 @@ export interface GuildBlueprintResult {
   digest: string
   executedPhase: GuildBlueprintPhase | null
   executedAutoModerationRuleIndex: number | null
+  executedChannelMetadataIndex: number | null
   executedPublicationIndex: number | null
+  executedRoleConfigurationIndex: number | null
   guildId: string
   nestedResult: GuildBlueprintNestedResult | null
   nextAction: "done" | "inspect" | "replan"
@@ -647,6 +743,7 @@ export interface GuildBlueprintVerificationStep {
   operationKeyHash: string
   state: GuildBlueprintPhaseState
   receiptStatus?: OperationReceiptStatus | null
+  roleId?: string | null
   ruleId?: string | null
   stage?: GuildBlueprintAutoModerationStage | null
   verificationReason?: GuildBlueprintAutoModerationBlockerReason
@@ -714,6 +811,14 @@ export interface GuildBlueprintDomainServices {
       options?: RequestOptions,
     ): Promise<AutoModerationVerificationResult>
   }
+  channelMetadata: {
+    reconcilePlan(
+      applicationId: string,
+      botId: string,
+      request: ChannelMetadataChangeRequest,
+      options?: RequestOptions,
+    ): Promise<ChannelMetadataChangePlan>
+  }
   component: {
     plan(
       applicationId: string,
@@ -737,7 +842,7 @@ export interface GuildBlueprintDomainServices {
       guildId: string,
       options?: RequestOptions,
     ): Promise<GuildCommunityAuditResult>
-    plan(
+    reconcilePlan(
       applicationId: string,
       botId: string,
       request: GuildCommunityChangeRequest,
@@ -745,7 +850,7 @@ export interface GuildBlueprintDomainServices {
     ): Promise<GuildCommunityChangePlan>
   }
   onboarding: {
-    plan(
+    reconcilePlan(
       applicationId: string,
       botId: string,
       request: OnboardingChangeRequest,
@@ -753,12 +858,20 @@ export interface GuildBlueprintDomainServices {
     ): Promise<OnboardingChangePlan>
   }
   profile: {
-    plan(
+    reconcilePlan(
       applicationId: string,
       botId: string,
       request: GuildProfileChangeRequest,
       options?: RequestOptions,
     ): Promise<GuildProfileChangePlan>
+  }
+  roleConfiguration: {
+    reconcilePlan(
+      applicationId: string,
+      botId: string,
+      request: RoleConfigurationRequest,
+      options?: RequestOptions,
+    ): Promise<RoleConfigurationPlan>
   }
   scaffold: {
     plan(
@@ -769,7 +882,7 @@ export interface GuildBlueprintDomainServices {
     ): Promise<GuildScaffoldPlan>
   }
   settings: {
-    plan(
+    reconcilePlan(
       applicationId: string,
       botId: string,
       request: GuildSettingsChangeRequest,
@@ -777,7 +890,7 @@ export interface GuildBlueprintDomainServices {
     ): Promise<GuildSettingsChangePlan>
   }
   welcomeScreen: {
-    plan(
+    reconcilePlan(
       applicationId: string,
       botId: string,
       request: WelcomeScreenChangeRequest,
@@ -792,6 +905,11 @@ export interface GuildBlueprintExecutors {
     planDigest: string,
     options?: RequestOptions,
   ): Promise<AutoModerationResult>
+  executeChannelMetadata(
+    request: ChannelMetadataChangeRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<ChannelMetadataChangeResult>
   executeComponent(
     request: ComponentMessageRequest,
     planDigest: string,
@@ -812,6 +930,11 @@ export interface GuildBlueprintExecutors {
     planDigest: string,
     options?: RequestOptions,
   ): Promise<GuildProfileChangeResult>
+  executeRoleConfiguration(
+    request: RoleConfigurationRequest,
+    planDigest: string,
+    options?: RequestOptions,
+  ): Promise<RoleConfigurationResult>
   executeScaffold(
     request: GuildScaffoldRequest,
     planDigest: string,
@@ -842,6 +965,11 @@ type GuildBlueprintFrontierRequest =
       request: AutoModerationChangeRequest
     }
   | {
+      index: number
+      kind: "channel-metadata"
+      request: ChannelMetadataChangeRequest
+    }
+  | {
       kind: "community"
       request: GuildCommunityChangeRequest
     }
@@ -852,6 +980,11 @@ type GuildBlueprintFrontierRequest =
   | {
       kind: "profile"
       request: GuildProfileChangeRequest
+    }
+  | {
+      index: number
+      kind: "role-configuration"
+      request: RoleConfigurationRequest
     }
   | {
       index: number
@@ -956,6 +1089,36 @@ export function guildBlueprintStepOperationKey(
     throw new RangeError("Discord guild blueprint phase is invalid")
   }
   return derivedOperationKey(operationKey, phase)
+}
+
+type GuildBlueprintExactTargetPhase =
+  | "channel-metadata"
+  | "role-configuration"
+
+function derivedExactTargetOperationKey(
+  operationKey: string,
+  phase: GuildBlueprintExactTargetPhase,
+  targetId: string,
+): string {
+  return `blueprint-target:${createHmac("sha256", operationKey)
+    .update("discord-mcp-guild-blueprint-target.v1\0")
+    .update(phase)
+    .update("\0")
+    .update(targetId)
+    .digest("hex")}`
+}
+
+export function guildBlueprintExactTargetOperationKey(
+  operationKey: string,
+  phase: GuildBlueprintExactTargetPhase,
+  targetId: string,
+): string {
+  operationKeyHash(operationKey)
+  if (phase !== "channel-metadata" && phase !== "role-configuration") {
+    throw new RangeError("Discord guild blueprint target phase is invalid")
+  }
+  positiveSnowflake(targetId, "Discord guild blueprint target ID")
+  return derivedExactTargetOperationKey(operationKey, phase, targetId)
 }
 
 function derivedPublicationOperationKey(operationKey: string, key: string): string {
@@ -2001,6 +2164,172 @@ function canonicalPublicationInputs(
   })
 }
 
+function compareSnowflakes(left: string, right: string): number {
+  const leftId = BigInt(left)
+  const rightId = BigInt(right)
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+}
+
+function canonicalChannelMetadataInputs(
+  request: GuildBlueprintRequest,
+): GuildBlueprintChannelMetadataInput[] | undefined {
+  if (request.channelMetadata === undefined) return undefined
+  if (
+    !Array.isArray(request.channelMetadata)
+    || request.channelMetadata.length < 1
+    || request.channelMetadata.length > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets
+  ) {
+    throw new RangeError(
+      "Discord guild blueprint channel metadata targets are invalid",
+    )
+  }
+  const seen = new Set<string>()
+  return request.channelMetadata.map((input) => {
+    exactObject(
+      input,
+      BLUEPRINT_CHANNEL_METADATA_KEYS,
+      "Discord guild blueprint channel metadata entry must be an exact object",
+    )
+    const candidate = input as unknown as GuildBlueprintChannelMetadataInput
+    positiveSnowflake(
+      candidate.channelId,
+      "Discord guild blueprint channel metadata channel ID",
+    )
+    if (seen.has(candidate.channelId)) {
+      throw new RangeError(
+        `Discord guild blueprint channel metadata target ${candidate.channelId} is duplicated`,
+      )
+    }
+    seen.add(candidate.channelId)
+    const normalized = normalizeChannelMetadataChangeRequest({
+      ...candidate,
+      auditReason: request.auditReason,
+      guildId: request.guildId,
+      operationKey: derivedExactTargetOperationKey(
+        request.operationKey,
+        "channel-metadata",
+        candidate.channelId,
+      ),
+    })
+    const requested = new Set(normalized.requestedFields)
+    return {
+      ...(requested.has("bitrate") ? { bitrate: normalized.bitrate as number } : {}),
+      channelId: normalized.channelId,
+      ...(requested.has("defaultAutoArchiveDuration")
+        ? {
+            defaultAutoArchiveDuration:
+              normalized.defaultAutoArchiveDuration as number,
+          }
+        : {}),
+      ...(requested.has("defaultThreadRateLimitPerUser")
+        ? {
+            defaultThreadRateLimitPerUser:
+              normalized.defaultThreadRateLimitPerUser as number,
+          }
+        : {}),
+      ...(requested.has("name") ? { name: normalized.name as string } : {}),
+      ...(requested.has("nsfw") ? { nsfw: normalized.nsfw as boolean } : {}),
+      ...(requested.has("rateLimitPerUser")
+        ? { rateLimitPerUser: normalized.rateLimitPerUser as number }
+        : {}),
+      ...(requested.has("rtcRegion")
+        ? { rtcRegion: normalized.rtcRegion as string | null }
+        : {}),
+      ...(requested.has("topic")
+        ? { topic: normalized.topic as string | null }
+        : {}),
+      ...(requested.has("userLimit")
+        ? { userLimit: normalized.userLimit as number }
+        : {}),
+      ...(requested.has("videoQualityMode")
+        ? { videoQualityMode: normalized.videoQualityMode }
+        : {}),
+    }
+  }).sort((left, right) => compareSnowflakes(left.channelId, right.channelId))
+}
+
+function canonicalRoleConfigurationInputs(
+  request: GuildBlueprintRequest,
+): GuildBlueprintRoleConfigurationInput[] | undefined {
+  if (request.roleConfigurations === undefined) return undefined
+  if (
+    !Array.isArray(request.roleConfigurations)
+    || request.roleConfigurations.length < 1
+    || request.roleConfigurations.length > CONNECTOR_LIMITS.guildBlueprintConvergenceTargets
+  ) {
+    throw new RangeError(
+      "Discord guild blueprint role configuration targets are invalid",
+    )
+  }
+  const seen = new Set<string>()
+  return request.roleConfigurations.map((input) => {
+    exactObject(
+      input,
+      BLUEPRINT_ROLE_CONFIGURATION_KEYS,
+      "Discord guild blueprint role configuration entry must be an exact object",
+    )
+    const candidate = input as unknown as GuildBlueprintRoleConfigurationInput
+    positiveSnowflake(
+      candidate.roleId,
+      "Discord guild blueprint role configuration role ID",
+    )
+    if (seen.has(candidate.roleId)) {
+      throw new RangeError(
+        `Discord guild blueprint role configuration target ${candidate.roleId} is duplicated`,
+      )
+    }
+    seen.add(candidate.roleId)
+    const normalized = normalizeRoleConfigurationRequest({
+      ...candidate,
+      auditReason: request.auditReason,
+      guildId: request.guildId,
+      operationKey: derivedExactTargetOperationKey(
+        request.operationKey,
+        "role-configuration",
+        candidate.roleId,
+      ),
+    })
+    const requested = new Set(normalized.requestedFields)
+    return {
+      ...(requested.has("grantPermissions")
+        ? { grantPermissions: normalized.grantPermissions }
+        : {}),
+      ...(requested.has("hoist") ? { hoist: normalized.hoist as boolean } : {}),
+      ...(requested.has("mentionable")
+        ? { mentionable: normalized.mentionable as boolean }
+        : {}),
+      ...(requested.has("name") ? { name: normalized.name as string } : {}),
+      ...(requested.has("permissions")
+        ? {
+            permissions: normalized.permissions as NonNullable<
+              RoleConfigurationRequest["permissions"]
+            >,
+          }
+        : {}),
+      ...(requested.has("primaryColor")
+        ? { primaryColor: normalized.primaryColor as number }
+        : {}),
+      ...(requested.has("revokePermissions")
+        ? { revokePermissions: normalized.revokePermissions }
+        : {}),
+      ...(requested.has("roleIcon")
+        ? {
+            roleIcon: normalized.roleIcon as NonNullable<
+              RoleConfigurationRequest["roleIcon"]
+            >,
+          }
+        : {}),
+      roleId: normalized.roleId,
+      ...(requested.has("secondaryColor")
+        ? { secondaryColor: normalized.secondaryColor as number | null }
+        : {}),
+      ...(requested.has("tertiaryColor")
+        ? { tertiaryColor: normalized.tertiaryColor as number | null }
+        : {}),
+    }
+  }).sort((left, right) => compareSnowflakes(left.roleId, right.roleId))
+}
+
 export function normalizeGuildBlueprintRequest(
   request: GuildBlueprintRequest,
 ): NormalizedGuildBlueprintRequest {
@@ -2017,15 +2346,17 @@ export function normalizeGuildBlueprintRequest(
   positiveSnowflake(request.guildId, "Discord guild blueprint guild ID")
   if (
     request.autoModerationRules === undefined
+    && request.channelMetadata === undefined
     && request.community === undefined
     && request.onboarding === undefined
     && request.profile === undefined
     && request.publications === undefined
+    && request.roleConfigurations === undefined
     && request.settings === undefined
     && request.welcomeScreen === undefined
   ) {
     throw new RangeError(
-      "Discord guild blueprint requires a profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
+      "Discord guild blueprint requires an exact role, exact channel, profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase after the scaffold",
     )
   }
   const operationKeyHashValue = operationKeyHash(request.operationKey)
@@ -2040,6 +2371,7 @@ export function normalizeGuildBlueprintRequest(
     channelKinds,
     scaffoldRoleKeys,
   )
+  const channelMetadata = canonicalChannelMetadataInputs(request)
   const community = canonicalCommunityInput(
     request,
     derivedOperationKey(request.operationKey, "community"),
@@ -2056,6 +2388,7 @@ export function normalizeGuildBlueprintRequest(
     derivedOperationKey(request.operationKey, "profile"),
   )
   const publications = canonicalPublicationInputs(request, channelKinds)
+  const roleConfigurations = canonicalRoleConfigurationInputs(request)
   const settings = canonicalSettingsInput(
     request,
     derivedOperationKey(request.operationKey, "settings"),
@@ -2069,6 +2402,7 @@ export function normalizeGuildBlueprintRequest(
   return {
     auditReason: scaffold.auditReason,
     ...(autoModerationRules === undefined ? {} : { autoModerationRules }),
+    ...(channelMetadata === undefined ? {} : { channelMetadata }),
     ...(community === undefined ? {} : { community }),
     guildId: scaffold.guildId,
     ...(onboarding === undefined ? {} : { onboarding }),
@@ -2083,6 +2417,7 @@ export function normalizeGuildBlueprintRequest(
           },
         }),
     ...(publications === undefined ? {} : { publications }),
+    ...(roleConfigurations === undefined ? {} : { roleConfigurations }),
     scaffold: {
       channels: scaffold.channels,
       roles: scaffold.roles,
@@ -2099,6 +2434,9 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.autoModerationRules === undefined
       ? {}
       : { autoModerationRules: request.autoModerationRules }),
+    ...(request.channelMetadata === undefined
+      ? {}
+      : { channelMetadata: request.channelMetadata }),
     ...(request.community === undefined ? {} : { community: request.community }),
     guildId: request.guildId,
     ...(request.onboarding === undefined ? {} : { onboarding: request.onboarding }),
@@ -2107,6 +2445,9 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
     ...(request.publications === undefined
       ? {}
       : { publications: request.publications }),
+    ...(request.roleConfigurations === undefined
+      ? {}
+      : { roleConfigurations: request.roleConfigurations }),
     scaffold: request.scaffold,
     ...(request.settings === undefined ? {} : { settings: request.settings }),
     ...(request.welcomeScreen === undefined
@@ -2117,7 +2458,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v6\0")
+    .update("discord-mcp-guild-blueprint-request.v7\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`
@@ -2135,6 +2476,46 @@ function scaffoldRequest(request: NormalizedGuildBlueprintRequest): GuildScaffol
     operationKey: derivedOperationKey(request.operationKey, "structure"),
     roles: request.scaffold.roles,
     stepLimit: request.scaffold.stepLimit,
+  }
+}
+
+function roleConfigurationRequest(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): RoleConfigurationRequest {
+  const input = request.roleConfigurations?.[index]
+  if (input === undefined) {
+    throw new RangeError("Discord guild blueprint role configuration is missing")
+  }
+  return {
+    ...input,
+    auditReason: request.auditReason,
+    guildId: request.guildId,
+    operationKey: derivedExactTargetOperationKey(
+      request.operationKey,
+      "role-configuration",
+      input.roleId,
+    ),
+  }
+}
+
+function channelMetadataRequest(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): ChannelMetadataChangeRequest {
+  const input = request.channelMetadata?.[index]
+  if (input === undefined) {
+    throw new RangeError("Discord guild blueprint channel metadata entry is missing")
+  }
+  return {
+    ...input,
+    auditReason: request.auditReason,
+    guildId: request.guildId,
+    operationKey: derivedExactTargetOperationKey(
+      request.operationKey,
+      "channel-metadata",
+      input.channelId,
+    ),
   }
 }
 
@@ -2788,6 +3169,103 @@ function publicationRequest(
       }
 }
 
+function roleConfigurationOperationKeyHash(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): string {
+  return operationKeyHash(roleConfigurationRequest(request, index).operationKey)
+}
+
+function waitingRoleConfigurationStep(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): GuildBlueprintRoleConfigurationPlanStep {
+  const input = request.roleConfigurations?.[index]
+  if (input === undefined) {
+    throw new RangeError("Discord guild blueprint role configuration is missing")
+  }
+  return {
+    index,
+    kind: "role-configuration",
+    nestedPlanDigest: null,
+    operationKeyHash: roleConfigurationOperationKeyHash(request, index),
+    roleId: input.roleId,
+    state: "waiting",
+    writeRequired: false,
+  }
+}
+
+function appendWaitingRoleConfigurations(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+  startIndex = 0,
+): void {
+  for (
+    let index = startIndex;
+    index < (request.roleConfigurations?.length ?? 0);
+    index += 1
+  ) {
+    steps.push(waitingRoleConfigurationStep(request, index))
+  }
+}
+
+function channelMetadataOperationKeyHash(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): string {
+  return operationKeyHash(channelMetadataRequest(request, index).operationKey)
+}
+
+function waitingChannelMetadataStep(
+  request: NormalizedGuildBlueprintRequest,
+  index: number,
+): GuildBlueprintChannelMetadataPlanStep {
+  const input = request.channelMetadata?.[index]
+  if (input === undefined) {
+    throw new RangeError("Discord guild blueprint channel metadata entry is missing")
+  }
+  return {
+    channelId: input.channelId,
+    index,
+    kind: "channel-metadata",
+    nestedPlanDigest: null,
+    operationKeyHash: channelMetadataOperationKeyHash(request, index),
+    state: "waiting",
+    writeRequired: false,
+  }
+}
+
+function appendWaitingChannelMetadata(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+  startIndex = 0,
+): void {
+  for (
+    let index = startIndex;
+    index < (request.channelMetadata?.length ?? 0);
+    index += 1
+  ) {
+    steps.push(waitingChannelMetadataStep(request, index))
+  }
+}
+
+function appendWaitingPostConvergencePhases(
+  request: NormalizedGuildBlueprintRequest,
+  steps: GuildBlueprintPlanStep[],
+): void {
+  if (request.profile !== undefined) steps.push(waitingStep(request, "profile"))
+  if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
+  if (request.community !== undefined) steps.push(waitingStep(request, "community"))
+  if (request.welcomeScreen !== undefined) {
+    steps.push(waitingStep(request, "welcome-screen"))
+  }
+  if (request.onboarding !== undefined) {
+    steps.push(waitingStep(request, "onboarding"))
+  }
+  appendWaitingAutoModerationSteps(request, steps)
+  appendWaitingPublications(request, steps)
+}
+
 function phaseOperationKeyHash(
   request: NormalizedGuildBlueprintRequest,
   phase: GuildBlueprintSingletonPhase,
@@ -3128,17 +3606,31 @@ function digestStep(step: GuildBlueprintPlanStep) {
     state: step.state,
     writeRequired: step.writeRequired,
   }
+  if (step.kind === "channel-metadata") {
+    return {
+      ...base,
+      channelId: step.channelId,
+      index: step.index,
+    }
+  }
+  if (step.kind === "role-configuration") {
+    return {
+      ...base,
+      index: step.index,
+      roleId: step.roleId,
+    }
+  }
   if (step.kind === "publication") {
     return {
-        ...base,
-        channelId: step.channelId,
-        index: step.index,
-        key: step.key,
-        messageId: step.messageId,
-        receiptStatus: step.receiptStatus,
-        verificationReason: step.verificationReason,
-        verificationStatus: step.verificationStatus,
-      }
+      ...base,
+      channelId: step.channelId,
+      index: step.index,
+      key: step.key,
+      messageId: step.messageId,
+      receiptStatus: step.receiptStatus,
+      verificationReason: step.verificationReason,
+      verificationStatus: step.verificationStatus,
+    }
   }
   if (step.kind === "auto-moderation") {
     return {
@@ -3165,16 +3657,30 @@ function verificationStep(
     state: step.state,
     writeRequired: step.writeRequired,
   }
+  if (step.kind === "channel-metadata") {
+    return {
+      ...base,
+      channelId: step.channelId,
+      index: step.index,
+    }
+  }
+  if (step.kind === "role-configuration") {
+    return {
+      ...base,
+      index: step.index,
+      roleId: step.roleId,
+    }
+  }
   if (step.kind === "publication") {
     return {
-        ...base,
-        channelId: step.channelId,
-        index: step.index,
-        messageId: step.messageId,
-        receiptStatus: step.receiptStatus,
-        verificationReason: step.verificationReason,
-        verificationStatus: step.verificationStatus,
-      }
+      ...base,
+      channelId: step.channelId,
+      index: step.index,
+      messageId: step.messageId,
+      receiptStatus: step.receiptStatus,
+      verificationReason: step.verificationReason,
+      verificationStatus: step.verificationStatus,
+    }
   }
   if (step.kind === "auto-moderation") {
     return {
@@ -3245,59 +3751,156 @@ export class GuildBlueprintService {
         writeRequired: structurePlan.counts.ready > 0,
       }
       frontierRequest = { kind: "structure", request: structureRequest }
-      if (request.profile !== undefined) steps.push(waitingStep(request, "profile"))
-      if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
-      if (request.community !== undefined) steps.push(waitingStep(request, "community"))
-      if (request.welcomeScreen !== undefined) {
-        steps.push(waitingStep(request, "welcome-screen"))
-      }
-      if (request.onboarding !== undefined) {
-        steps.push(waitingStep(request, "onboarding"))
-      }
-      appendWaitingAutoModerationSteps(request, steps)
-      appendWaitingPublications(request, steps)
+      appendWaitingRoleConfigurations(request, steps)
+      appendWaitingChannelMetadata(request, steps)
+      appendWaitingPostConvergencePhases(request, steps)
     } else {
       bindings = exactScaffoldBindings(request, structurePlan)
-      const requestedProfile = profileRequest(request)
-      if (requestedProfile !== undefined) {
-        const profilePlan = await this.#domains.profile.plan(
-          applicationId,
-          botId,
-          requestedProfile,
-          options,
-        )
-        assertNestedIdentity(applicationId, botId, request.guildId, profilePlan)
-        assertNestedPlanBinding(requestedProfile.operationKey, profilePlan)
-        const profileSatisfied = !profilePlan.writeRequired
-        steps.push({
-          kind: "profile",
-          nestedPlanDigest: profilePlan.digest,
-          operationKeyHash: profilePlan.operationKeyHash,
-          state: profileSatisfied ? "satisfied" : "ready",
-          writeRequired: !profileSatisfied,
-        })
-        if (!profileSatisfied) {
-          frontier = { kind: "profile", plan: profilePlan, writeRequired: true }
-          frontierRequest = { kind: "profile", request: requestedProfile }
-          if (request.settings !== undefined) steps.push(waitingStep(request, "settings"))
-          if (request.community !== undefined) {
-            steps.push(waitingStep(request, "community"))
+
+      if (request.roleConfigurations !== undefined) {
+        for (const [index, input] of request.roleConfigurations.entries()) {
+          const requestedRole = roleConfigurationRequest(request, index)
+          const rolePlan = await this.#domains.roleConfiguration.reconcilePlan(
+            applicationId,
+            botId,
+            requestedRole,
+            options,
+          )
+          assertNestedIdentity(applicationId, botId, request.guildId, rolePlan)
+          assertNestedPlanBinding(requestedRole.operationKey, rolePlan)
+          if (
+            rolePlan.roleId !== input.roleId
+            || rolePlan.guild.id !== request.guildId
+          ) {
+            throw new RangeError(
+              "Discord guild blueprint role-configuration target changed",
+            )
           }
-          if (request.welcomeScreen !== undefined) {
-            steps.push(waitingStep(request, "welcome-screen"))
+          const roleSatisfied = !rolePlan.writeRequired
+          steps.push({
+            index,
+            kind: "role-configuration",
+            nestedPlanDigest: rolePlan.digest,
+            operationKeyHash: rolePlan.operationKeyHash,
+            roleId: input.roleId,
+            state: roleSatisfied ? "satisfied" : "ready",
+            writeRequired: !roleSatisfied,
+          })
+          if (!roleSatisfied) {
+            frontier = {
+              index,
+              kind: "role-configuration",
+              plan: rolePlan,
+              roleId: input.roleId,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              index,
+              kind: "role-configuration",
+              request: requestedRole,
+            }
+            appendWaitingRoleConfigurations(request, steps, index + 1)
+            appendWaitingChannelMetadata(request, steps)
+            appendWaitingPostConvergencePhases(request, steps)
+            break
           }
-          if (request.onboarding !== undefined) {
-            steps.push(waitingStep(request, "onboarding"))
+        }
+      }
+
+      if (frontier === null && request.channelMetadata !== undefined) {
+        for (const [index, input] of request.channelMetadata.entries()) {
+          const requestedChannel = channelMetadataRequest(request, index)
+          const channelPlan = await this.#domains.channelMetadata.reconcilePlan(
+            applicationId,
+            botId,
+            requestedChannel,
+            options,
+          )
+          assertNestedIdentity(applicationId, botId, request.guildId, channelPlan)
+          assertNestedPlanBinding(requestedChannel.operationKey, channelPlan)
+          if (
+            channelPlan.current.id !== input.channelId
+            || channelPlan.desired.id !== input.channelId
+            || channelPlan.guild.id !== request.guildId
+          ) {
+            throw new RangeError(
+              "Discord guild blueprint channel-metadata target changed",
+            )
           }
-          appendWaitingAutoModerationSteps(request, steps)
-          appendWaitingPublications(request, steps)
+          const channelSatisfied = !channelPlan.writeRequired
+          steps.push({
+            channelId: input.channelId,
+            index,
+            kind: "channel-metadata",
+            nestedPlanDigest: channelPlan.digest,
+            operationKeyHash: channelPlan.operationKeyHash,
+            state: channelSatisfied ? "satisfied" : "ready",
+            writeRequired: !channelSatisfied,
+          })
+          if (!channelSatisfied) {
+            frontier = {
+              channelId: input.channelId,
+              index,
+              kind: "channel-metadata",
+              plan: channelPlan,
+              writeRequired: true,
+            }
+            frontierRequest = {
+              index,
+              kind: "channel-metadata",
+              request: requestedChannel,
+            }
+            appendWaitingChannelMetadata(request, steps, index + 1)
+            appendWaitingPostConvergencePhases(request, steps)
+            break
+          }
+        }
+      }
+
+      if (frontier === null) {
+        const requestedProfile = profileRequest(request)
+        if (requestedProfile !== undefined) {
+          const profilePlan = await this.#domains.profile.reconcilePlan(
+            applicationId,
+            botId,
+            requestedProfile,
+            options,
+          )
+          assertNestedIdentity(applicationId, botId, request.guildId, profilePlan)
+          assertNestedPlanBinding(requestedProfile.operationKey, profilePlan)
+          const profileSatisfied = !profilePlan.writeRequired
+          steps.push({
+            kind: "profile",
+            nestedPlanDigest: profilePlan.digest,
+            operationKeyHash: profilePlan.operationKeyHash,
+            state: profileSatisfied ? "satisfied" : "ready",
+            writeRequired: !profileSatisfied,
+          })
+          if (!profileSatisfied) {
+            frontier = { kind: "profile", plan: profilePlan, writeRequired: true }
+            frontierRequest = { kind: "profile", request: requestedProfile }
+            if (request.settings !== undefined) {
+              steps.push(waitingStep(request, "settings"))
+            }
+            if (request.community !== undefined) {
+              steps.push(waitingStep(request, "community"))
+            }
+            if (request.welcomeScreen !== undefined) {
+              steps.push(waitingStep(request, "welcome-screen"))
+            }
+            if (request.onboarding !== undefined) {
+              steps.push(waitingStep(request, "onboarding"))
+            }
+            appendWaitingAutoModerationSteps(request, steps)
+            appendWaitingPublications(request, steps)
+          }
         }
       }
 
       if (frontier === null) {
         const requestedSettings = settingsRequest(request, bindingMap(bindings))
         if (requestedSettings !== undefined) {
-          const settingsPlan = await this.#domains.settings.plan(
+          const settingsPlan = await this.#domains.settings.reconcilePlan(
             applicationId,
             botId,
             requestedSettings,
@@ -3337,7 +3940,7 @@ export class GuildBlueprintService {
           bindingMap(bindings),
         )
         if (requestedCommunity !== undefined) {
-          const communityPlan = await this.#domains.community.plan(
+          const communityPlan = await this.#domains.community.reconcilePlan(
             applicationId,
             botId,
             requestedCommunity,
@@ -3428,7 +4031,7 @@ export class GuildBlueprintService {
           bindingMap(bindings),
         )
         if (requestedWelcomeScreen !== undefined) {
-          const welcomeScreenPlan = await this.#domains.welcomeScreen.plan(
+          const welcomeScreenPlan = await this.#domains.welcomeScreen.reconcilePlan(
             applicationId,
             botId,
             requestedWelcomeScreen,
@@ -3477,7 +4080,7 @@ export class GuildBlueprintService {
           bindingMap(bindings),
         )
         if (requestedOnboarding !== undefined) {
-          const onboardingPlan = await this.#domains.onboarding.plan(
+          const onboardingPlan = await this.#domains.onboarding.reconcilePlan(
             applicationId,
             botId,
             requestedOnboarding,
@@ -4012,7 +4615,10 @@ export class GuildBlueprintService {
         : {
             kind: frontier.kind,
             nestedPlanDigest: frontier.plan.digest,
-            ...(frontier.kind === "auto-moderation" || frontier.kind === "publication"
+            ...(frontier.kind === "auto-moderation"
+              || frontier.kind === "channel-metadata"
+              || frontier.kind === "publication"
+              || frontier.kind === "role-configuration"
               ? { index: frontier.index }
               : {}),
             ...(frontier.kind === "auto-moderation"
@@ -4023,7 +4629,7 @@ export class GuildBlueprintService {
       guildId: request.guildId,
       requestDigest,
       steps: steps.map(digestStep),
-      version: "guild-blueprint-plan.v6",
+      version: "guild-blueprint-plan.v7",
     })
     const plan: GuildBlueprintPlan = {
       applicationId,
@@ -4052,6 +4658,7 @@ export class GuildBlueprintService {
       warnings: [
         "The exact blueprint manifest and master operation key remain caller-retained and are not persisted by the connector",
         "One execution call can run only this fresh reviewed frontier; plan again before any later phase",
+        "Existing role and channel convergence uses only separately allowlisted exact IDs; it never discovers, matches, or adopts a target by name",
         "A failed, drifting, or uncertain nested operation remains quarantined under its existing domain workflow",
         "Community enablement requires temporary guild ownership or complete Administrator authority; routing-only changes require Manage Guild",
         "Unbound AutoMod identity recovery uses only an exact request-bound receipt; names and singleton trigger types are never adopted",
@@ -4093,8 +4700,10 @@ export class GuildBlueprintService {
         blocker: built.plan.blocker,
         digest: built.plan.digest,
         executedAutoModerationRuleIndex: null,
+        executedChannelMetadataIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
+        executedRoleConfigurationIndex: null,
         guildId: built.plan.guild.id,
         nestedResult: null,
         nextAction: "inspect",
@@ -4109,8 +4718,10 @@ export class GuildBlueprintService {
         blocker: null,
         digest: built.plan.digest,
         executedAutoModerationRuleIndex: null,
+        executedChannelMetadataIndex: null,
         executedPhase: null,
         executedPublicationIndex: null,
+        executedRoleConfigurationIndex: null,
         guildId: built.plan.guild.id,
         nestedResult: null,
         nextAction: "done",
@@ -4123,6 +4734,12 @@ export class GuildBlueprintService {
     let nestedResult: GuildBlueprintNestedResult
     if (built.frontierRequest.kind === "auto-moderation") {
       nestedResult = await executors.executeAutoModeration(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else if (built.frontierRequest.kind === "channel-metadata") {
+      nestedResult = await executors.executeChannelMetadata(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,
@@ -4141,6 +4758,12 @@ export class GuildBlueprintService {
       )
     } else if (built.frontierRequest.kind === "profile") {
       nestedResult = await executors.executeProfile(
+        built.frontierRequest.request,
+        built.plan.frontier.plan.digest,
+        options,
+      )
+    } else if (built.frontierRequest.kind === "role-configuration") {
+      nestedResult = await executors.executeRoleConfiguration(
         built.frontierRequest.request,
         built.plan.frontier.plan.digest,
         options,
@@ -4177,10 +4800,18 @@ export class GuildBlueprintService {
         built.frontierRequest.kind === "auto-moderation"
           ? built.frontierRequest.index
           : null,
+      executedChannelMetadataIndex:
+        built.frontierRequest.kind === "channel-metadata"
+          ? built.frontierRequest.index
+          : null,
       executedPhase: built.frontierRequest.kind,
       executedPublicationIndex: built.frontierRequest.kind === "publication"
         ? built.frontierRequest.index
         : null,
+      executedRoleConfigurationIndex:
+        built.frontierRequest.kind === "role-configuration"
+          ? built.frontierRequest.index
+          : null,
       guildId: built.plan.guild.id,
       nestedResult,
       nextAction: "replan",

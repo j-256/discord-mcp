@@ -626,6 +626,26 @@ test("guild profile operation keys are one-shot", async () => {
   )
 })
 
+test("guild profile reconciliation accepts only completed matching convergence", async () => {
+  const target = fixture()
+  const desired = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, desired)
+  await target.service.execute(APPLICATION_ID, BOT_ID, desired, plan.digest)
+
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    desired,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  target.state.profile.name = "Later drift"
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, desired),
+    GuildProfileOperationConflictError,
+  )
+})
+
 test("uncertain guild profile outcomes quarantine only the shared operation store", async () => {
   const target = fixture({ state: { mutationError: new Error("network lost") } })
   const first = request()

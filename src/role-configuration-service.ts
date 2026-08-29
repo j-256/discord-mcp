@@ -75,6 +75,7 @@ export const ROLE_CONFIGURATION_REQUEST_FIELDS = [
   "hoist",
   "mentionable",
   "name",
+  "permissions",
   "primaryColor",
   "revokePermissions",
   "roleIcon",
@@ -115,6 +116,7 @@ const ROLE_CONFIGURATION_REQUEST_KEYS = [
   "mentionable",
   "name",
   "operationKey",
+  "permissions",
   "primaryColor",
   "revokePermissions",
   "roleIcon",
@@ -139,6 +141,7 @@ export interface RoleConfigurationRequest {
   mentionable?: boolean
   name?: string
   operationKey: string
+  permissions?: readonly DiscordPermissionName[]
   primaryColor?: number
   revokePermissions?: readonly DiscordPermissionName[]
   roleIcon?: RoleConfigurationIconRequest
@@ -167,6 +170,7 @@ export type RoleConfigurationDesiredIcon =
 export interface NormalizedRoleConfigurationRequest extends RoleConfigurationRequest {
   grantPermissions: DiscordPermissionName[]
   operationKeyHash: string
+  permissions?: DiscordPermissionName[]
   requestedFields: RoleConfigurationRequestField[]
   revokePermissions: DiscordPermissionName[]
 }
@@ -231,6 +235,7 @@ export interface RoleConfigurationPlan {
   } | null
   requestedFields: RoleConfigurationRequestField[]
   requestedGrantPermissions: DiscordPermissionName[]
+  requestedPermissions: DiscordPermissionName[] | null
   requestedRevokePermissions: DiscordPermissionName[]
   revokedPermissions: DiscordPermissionName[]
   risks: string[]
@@ -292,6 +297,7 @@ interface RoleConfigurationState {
   guild: ValidatedGuild
   memberCount: number
   permission: RoleConfigurationPermissionEvidence
+  priorReceipt: OperationReceipt | null
   roles: NormalizedDiscordRole[]
   target: NormalizedDiscordRole
 }
@@ -450,12 +456,29 @@ export function normalizeRoleConfigurationRequest(
     request.grantPermissions,
     "Discord role permission grants",
   )
+  const permissions = Object.hasOwn(record, "permissions")
+    ? canonicalPermissionNames(request.permissions)
+    : undefined
   const revokePermissions = explicitPermissionNames(
     request.revokePermissions,
     "Discord role permission revocations",
   )
   if (grantPermissions.includes("ADMINISTRATOR")) {
     throw new RangeError("Discord role configuration never grants ADMINISTRATOR")
+  }
+  if (permissions?.includes("ADMINISTRATOR")) {
+    throw new RangeError("Discord role configuration never sets ADMINISTRATOR")
+  }
+  if (
+    permissions !== undefined
+    && (
+      Object.hasOwn(record, "grantPermissions")
+      || Object.hasOwn(record, "revokePermissions")
+    )
+  ) {
+    throw new RangeError(
+      "Discord exact role permissions cannot be combined with permission grants or revocations",
+    )
   }
   const revokeSet = new Set(revokePermissions)
   const overlap = grantPermissions.find((permission) => revokeSet.has(permission))
@@ -471,6 +494,7 @@ export function normalizeRoleConfigurationRequest(
     ...(Object.hasOwn(record, "name") ? { name: request.name } : {}),
     operationKey: request.operationKey,
     operationKeyHash: operationKeyHash(request.operationKey),
+    ...(permissions === undefined ? {} : { permissions }),
     ...(Object.hasOwn(record, "primaryColor")
       ? { primaryColor: request.primaryColor }
       : {}),
@@ -716,9 +740,11 @@ function desiredRole(
       : current.colors.tertiaryColor,
   }
   const currentBits = BigInt(current.permissions)
-  const grantBits = discordPermissionBitfield(request.grantPermissions)
-  const revokeBits = discordPermissionBitfield(request.revokePermissions)
-  const desiredBits = (currentBits | grantBits) & ~revokeBits
+  const desiredBits = request.permissions === undefined
+    ? (currentBits | discordPermissionBitfield(request.grantPermissions))
+      & ~discordPermissionBitfield(request.revokePermissions)
+    : (currentBits & ~ALL_KNOWN_PERMISSION_BITS)
+      | discordPermissionBitfield(request.permissions)
   const desired: NormalizedDiscordRole = {
     ...current,
     colors,
@@ -1020,13 +1046,23 @@ export class RoleConfigurationService {
     botId: string,
     request: NormalizedRoleConfigurationRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<RoleConfigurationState> {
     this.#policy.assertRoleConfigurationAllowed(request.guildId, request.roleId)
     const existingReceipt = await this.#operationStore.get(
       "role-configuration",
       request.operationKeyHash,
     )
-    if (existingReceipt) {
+    if (
+      existingReceipt
+      && !(
+        allowCompletedReceipt
+        && existingReceipt.status === "completed"
+        && existingReceipt.verification === "match"
+        && existingReceipt.guildId === request.guildId
+        && existingReceipt.resourceId === request.roleId
+      )
+    ) {
       throw new RoleConfigurationOperationConflictError(receiptView(existingReceipt))
     }
     const [guildValue, memberValue, rawRoles, countsValue] = await Promise.all([
@@ -1088,9 +1124,14 @@ export class RoleConfigurationService {
     const desired = desiredRole(target, request, guild.features)
     const permissionFieldsRequested = request.requestedFields.includes("grantPermissions")
       || request.requestedFields.includes("revokePermissions")
+      || request.requestedFields.includes("permissions")
     const permissionsChange = permissionFieldsRequested
       && desired.permissions !== target.permissions
-    if (permissionsChange && target.unknownPermissionBits !== "0") {
+    if (
+      permissionsChange
+      && request.permissions === undefined
+      && target.unknownPermissionBits !== "0"
+    ) {
       throw new RoleConfigurationEvidenceError(
         "Discord role permission changes are blocked by unknown permission bits",
       )
@@ -1137,6 +1178,7 @@ export class RoleConfigurationService {
         targetBelowBot: true,
         targetHeldByBot: botMember.roles.includes(target.id),
       },
+      priorReceipt: existingReceipt ?? null,
       roles,
       target,
     }
@@ -1147,10 +1189,16 @@ export class RoleConfigurationService {
     botId: string,
     request: NormalizedRoleConfigurationRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltRoleConfigurationPlan> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(
+      botId,
+      request,
+      options,
+      allowCompletedReceipt,
+    )
     const fileSnapshot = request.roleIcon?.kind === "local-image"
       ? await readRoleIconFileSnapshot({
           filePath: request.roleIcon.filePath,
@@ -1212,6 +1260,7 @@ export class RoleConfigurationService {
         grantPermissions: request.grantPermissions,
         guildId: request.guildId,
         operationKeyHash: request.operationKeyHash,
+        permissions: request.permissions ?? null,
         requestedFields: request.requestedFields,
         revokePermissions: request.revokePermissions,
         roleIcon: request.roleIcon ?? null,
@@ -1244,6 +1293,9 @@ export class RoleConfigurationService {
       ...(fileSnapshot
         ? ["Discord assigns the role icon hash; verification binds the exact reviewed local bytes before the write, then requires the response hash to repeat in both exact readbacks"]
         : []),
+      ...(request.permissions === undefined
+        ? []
+        : ["Exact role permissions replace only names known to this build and preserve every unknown Discord permission bit"]),
       "Guild and role names are untrusted Discord text and are never persisted by this workflow",
       "Same-role serialization is process-local; do not run multiple connector processes with overlapping role-configuration scope",
       "The operation key is one-shot and cannot be retried after reservation, including after an uncertain outcome",
@@ -1292,6 +1344,7 @@ export class RoleConfigurationService {
         : null,
       requestedFields: request.requestedFields,
       requestedGrantPermissions: request.grantPermissions,
+      requestedPermissions: request.permissions ?? null,
       requestedRevokePermissions: request.revokePermissions,
       revokedPermissions: delta.revoked,
       risks,
@@ -1301,6 +1354,11 @@ export class RoleConfigurationService {
       warnings,
       verificationMode: fileSnapshot ? "response-bound-image-hash" : "exact",
       writeRequired: changes.length > 0,
+    }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new RoleConfigurationOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
     }
     return {
       expectedCounts: state.counts,
@@ -1322,6 +1380,21 @@ export class RoleConfigurationService {
       botId,
       normalizeRoleConfigurationRequest(request),
       options,
+    ).then(({ plan }) => plan)
+  }
+
+  reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: RoleConfigurationRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleConfigurationPlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeRoleConfigurationRequest(request),
+      options,
+      true,
     ).then(({ plan }) => plan)
   }
 

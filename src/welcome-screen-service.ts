@@ -296,6 +296,7 @@ interface WelcomeScreenState {
   configuration: WelcomeScreenConfigurationView
   emojis: DiscordGuildEmojiSummary[]
   guild: DiscordGuild & { features: string[]; owner_id: string }
+  priorReceipt: OperationReceipt | null
   roles: ValidatedRole[]
   screen: DiscordGuildWelcomeScreen | null
 }
@@ -1332,6 +1333,7 @@ export class WelcomeScreenService {
     includeText: boolean,
     options: RequestOptions,
     operationKeyHashValue?: string,
+    allowCompletedReceipt = false,
   ): Promise<WelcomeScreenState> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
@@ -1341,12 +1343,24 @@ export class WelcomeScreenService {
     } else {
       this.#policy.assertGuildWelcomeScreenAuditable(guildId)
     }
+    let priorReceipt: OperationReceipt | null = null
     if (operationKeyHashValue) {
-      const receipt = await this.#operationStore.get(
+      priorReceipt = await this.#operationStore.get(
         "welcome-screen-change",
         operationKeyHashValue,
-      )
-      if (receipt) throw new WelcomeScreenOperationConflictError(receiptView(receipt))
+      ) ?? null
+      if (
+        priorReceipt
+        && !(
+          allowCompletedReceipt
+          && priorReceipt.status === "completed"
+          && priorReceipt.verification === "match"
+          && priorReceipt.guildId === guildId
+          && priorReceipt.resourceId === guildId
+        )
+      ) {
+        throw new WelcomeScreenOperationConflictError(receiptView(priorReceipt))
+      }
     }
     const [rawGuild, rawBotMember, rawRoles, rawChannels, rawEmojis] = await Promise.all([
       this.#client.getGuild(guildId, options),
@@ -1397,6 +1411,7 @@ export class WelcomeScreenService {
       configuration,
       emojis,
       guild,
+      priorReceipt,
       roles,
       screen,
     }
@@ -1441,6 +1456,7 @@ export class WelcomeScreenService {
     botId: string,
     desired: NormalizedWelcomeScreenChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltWelcomeScreenPlan> {
     const state = await this.#state(
       applicationId,
@@ -1450,6 +1466,7 @@ export class WelcomeScreenService {
       true,
       options,
       desired.operationKeyHash,
+      allowCompletedReceipt,
     )
     if (!state.screen) {
       throw evidenceError("Discord Welcome Screen state is unavailable for replacement")
@@ -1534,6 +1551,11 @@ export class WelcomeScreenService {
       warnings,
       writeRequired,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new WelcomeScreenOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { desired, plan, state: exactState }
   }
 
@@ -1545,6 +1567,18 @@ export class WelcomeScreenService {
   ): Promise<WelcomeScreenChangePlan> {
     const desired = normalizeWelcomeScreenChangeRequest(request)
     return (await this.#buildPlan(applicationId, botId, desired, options)).plan
+  }
+
+  async reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: WelcomeScreenChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<WelcomeScreenChangePlan> {
+    const desired = normalizeWelcomeScreenChangeRequest(request)
+    return (
+      await this.#buildPlan(applicationId, botId, desired, options, true)
+    ).plan
   }
 
   execute(

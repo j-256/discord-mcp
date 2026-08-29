@@ -481,6 +481,7 @@ interface OnboardingState {
   emojis: DiscordGuildEmojiSummary[]
   guild: DiscordGuild & { features: string[]; owner_id: string }
   onboarding: DiscordGuildOnboarding
+  priorReceipt: OperationReceipt | null
   roles: ValidatedRole[]
 }
 
@@ -1734,6 +1735,7 @@ function onboardingSemanticallyMatches(
   desired: NormalizedOnboardingChangeRequest,
   before: DiscordGuildOnboarding,
   transportPromptPlaceholderIds: ReadonlySet<string> = new Set(),
+  allowReceiptBackedIdentifiers = false,
 ): boolean {
   if (
     !observedIdentifiersAreAuthoritative(observed)
@@ -1755,10 +1757,10 @@ function onboardingSemanticallyMatches(
     if (!expectedPrompt || !actualPrompt) return false
     if (expectedPrompt.promptId !== null) {
       if (actualPrompt.id !== expectedPrompt.promptId) return false
-    } else if (
+    } else if (!allowReceiptBackedIdentifiers && (
       beforePromptIds.has(actualPrompt.id)
       || transportPromptPlaceholderIds.has(actualPrompt.id)
-    ) {
+    )) {
       return false
     }
     if (
@@ -1777,7 +1779,10 @@ function onboardingSemanticallyMatches(
       if (!expectedOption || !actualOption) return false
       if (expectedOption.optionId !== null) {
         if (actualOption.id !== expectedOption.optionId) return false
-      } else if (beforeOptionIds.has(actualOption.id)) {
+      } else if (
+        !allowReceiptBackedIdentifiers
+        && beforeOptionIds.has(actualOption.id)
+      ) {
         return false
       }
       if (
@@ -1988,6 +1993,32 @@ function changeDiff(
     roleAssignmentsAdded: setDifferenceCount(desiredRoles, currentRoles),
     roleAssignmentsRemoved: setDifferenceCount(currentRoles, desiredRoles),
     textChanges,
+  }
+}
+
+function unchangedDiff(current: DiscordGuildOnboarding): OnboardingChangeDiff {
+  return {
+    channelAssignmentsAdded: 0,
+    channelAssignmentsRemoved: 0,
+    defaultChannelsAdded: 0,
+    defaultChannelsRemoved: 0,
+    emojiChanges: 0,
+    enabledChanged: false,
+    modeChanged: false,
+    optionsAdded: 0,
+    optionsModified: 0,
+    optionsRemoved: 0,
+    optionsRetained: current.prompts.reduce(
+      (total, prompt) => total + prompt.options.length,
+      0,
+    ),
+    promptsAdded: 0,
+    promptsModified: 0,
+    promptsRemoved: 0,
+    promptsRetained: current.prompts.length,
+    roleAssignmentsAdded: 0,
+    roleAssignmentsRemoved: 0,
+    textChanges: 0,
   }
 }
 
@@ -2244,6 +2275,7 @@ export class OnboardingService {
     includeText: boolean,
     options: RequestOptions,
     operationKeyHashValue?: string,
+    allowCompletedReceipt = false,
   ): Promise<OnboardingState> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
@@ -2253,12 +2285,24 @@ export class OnboardingService {
     } else {
       this.#policy.assertGuildOnboardingAuditable(guildId)
     }
+    let priorReceipt: OperationReceipt | null = null
     if (operationKeyHashValue) {
-      const receipt = await this.#operationStore.get(
+      priorReceipt = await this.#operationStore.get(
         "onboarding-change",
         operationKeyHashValue,
-      )
-      if (receipt) throw new OnboardingOperationConflictError(receiptView(receipt))
+      ) ?? null
+      if (
+        priorReceipt
+        && !(
+          allowCompletedReceipt
+          && priorReceipt.status === "completed"
+          && priorReceipt.verification === "match"
+          && priorReceipt.guildId === guildId
+          && priorReceipt.resourceId === guildId
+        )
+      ) {
+        throw new OnboardingOperationConflictError(receiptView(priorReceipt))
+      }
     }
     let supportingEvidence: {
       botMember: DiscordGuildMember
@@ -2338,6 +2382,7 @@ export class OnboardingService {
       emojis,
       guild,
       onboarding,
+      priorReceipt,
       roles,
     }
   }
@@ -2382,6 +2427,7 @@ export class OnboardingService {
     botId: string,
     desired: NormalizedOnboardingChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltOnboardingPlan> {
     const state = await this.#state(
       applicationId,
@@ -2391,15 +2437,21 @@ export class OnboardingService {
       true,
       options,
       desired.operationKeyHash,
+      allowCompletedReceipt,
     )
     const desiredView = desiredConfigurationView(desired, state)
     assertDesiredStateSafe(desired, state, desiredView)
-    const writeRequired = !onboardingSemanticallyMatches(
+    const stateMatches = onboardingSemanticallyMatches(
       state.onboarding,
       desired,
       state.onboarding,
+      new Set(),
+      state.priorReceipt !== null,
     )
-    const diff = changeDiff(state.onboarding, desired)
+    const writeRequired = !stateMatches
+    const diff = stateMatches
+      ? unchangedDiff(state.onboarding)
+      : changeDiff(state.onboarding, desired)
     const warnings = writeRequired
       ? planWarnings(state.access, state.channelEvidence)
       : ["The complete desired onboarding state already matches Discord"]
@@ -2487,6 +2539,11 @@ export class OnboardingService {
       warnings,
       writeRequired,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new OnboardingOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { desired, plan, state }
   }
 
@@ -2498,6 +2555,18 @@ export class OnboardingService {
   ): Promise<OnboardingChangePlan> {
     const desired = normalizeOnboardingChangeRequest(request)
     return (await this.#buildPlan(applicationId, botId, desired, options)).plan
+  }
+
+  async reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: OnboardingChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<OnboardingChangePlan> {
+    const desired = normalizeOnboardingChangeRequest(request)
+    return (
+      await this.#buildPlan(applicationId, botId, desired, options, true)
+    ).plan
   }
 
   execute(

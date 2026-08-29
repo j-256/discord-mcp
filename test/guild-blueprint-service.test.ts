@@ -11,6 +11,11 @@ import type {
 import { normalizeAutoModerationChangeRequest } from "../src/automod-service.js"
 import { DiscordApiError, GuildBlueprintPlanChangedError } from "../src/errors.js"
 import type {
+  ChannelMetadataChangePlan,
+  ChannelMetadataChangeRequest,
+  ChannelMetadataChangeResult,
+} from "../src/channel-metadata-service.js"
+import type {
   ComponentMessagePlan,
   ComponentMessageRequest,
   ComponentMessageResult,
@@ -23,6 +28,7 @@ import {
 import {
   GuildBlueprintService,
   guildBlueprintAutoModerationOperationKey,
+  guildBlueprintExactTargetOperationKey,
   guildBlueprintPublicationOperationKey,
   guildBlueprintRequestDigest,
   guildBlueprintStepOperationKey,
@@ -54,6 +60,11 @@ import type {
 } from "../src/guild-settings-service.js"
 import { operationKeyHash } from "../src/operation-store.js"
 import type {
+  RoleConfigurationPlan,
+  RoleConfigurationRequest,
+  RoleConfigurationResult,
+} from "../src/role-configuration-service.js"
+import type {
   OnboardingChangePlan,
   OnboardingChangeRequest,
   OnboardingChangeResult,
@@ -69,8 +80,10 @@ const GUILD_ID = "200000000000000001"
 const BOT_ID = "300000000000000001"
 const OWNER_ID = "400000000000000001"
 const ROLE_ID = "500000000000000001"
+const SECOND_ROLE_ID = "500000000000000002"
 const CATEGORY_ID = "600000000000000001"
 const CHANNEL_ID = "700000000000000001"
+const SECOND_CHANNEL_ID = "700000000000000005"
 const PUBLICATION_CHANNEL_ID = "700000000000000002"
 const PUBLICATION_MESSAGE_ID = "700000000000000003"
 const NOTIFICATION_USER_ID = "700000000000000004"
@@ -426,6 +439,39 @@ function scaffoldPlan(
   }
 }
 
+function roleConfigurationPlan(
+  value: RoleConfigurationRequest,
+  writeRequired: boolean,
+): RoleConfigurationPlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    digest: `hmac-sha256:${(writeRequired ? "1" : "2").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild", ownerId: OWNER_ID },
+    operationKeyHash: operationKeyHash(value.operationKey),
+    roleId: value.roleId,
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as RoleConfigurationPlan
+}
+
+function channelMetadataPlan(
+  value: ChannelMetadataChangeRequest,
+  writeRequired: boolean,
+): ChannelMetadataChangePlan {
+  return {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    current: { id: value.channelId },
+    desired: { id: value.channelId },
+    digest: `hmac-sha256:${(writeRequired ? "3" : "4").repeat(64)}`,
+    guild: { id: GUILD_ID, name: "Private Guild" },
+    operationKeyHash: operationKeyHash(value.operationKey),
+    status: writeRequired ? "planned" : "already-current",
+    writeRequired,
+  } as ChannelMetadataChangePlan
+}
+
 function profilePlan(
   value: GuildProfileChangeRequest,
   writeRequired: boolean,
@@ -622,6 +668,7 @@ interface FixtureOptions {
     request: AutoModerationChangeRequest,
     index: number,
   ) => AutoModerationVerificationResult
+  channelMetadataWrite?: boolean
   componentPlanTransform?: (
     plan: ComponentMessagePlan,
     request: ComponentMessageRequest,
@@ -643,6 +690,7 @@ interface FixtureOptions {
   communityWrite?: boolean
   onboardingWrite?: boolean
   profileWrite?: boolean
+  roleConfigurationWrite?: boolean
   scaffoldTransform?: (plan: GuildScaffoldPlan) => GuildScaffoldPlan
   scaffoldStatus?: GuildScaffoldPlan["status"]
   settingsWrite?: boolean
@@ -652,8 +700,10 @@ interface FixtureOptions {
 function fixture(options: FixtureOptions = {}) {
   const calls: string[] = []
   const resolvedAutoModeration: AutoModerationChangeRequest[] = []
+  const resolvedChannelMetadata: ChannelMetadataChangeRequest[] = []
   let resolvedOnboarding: OnboardingChangeRequest | null = null
   const resolvedPublications: ComponentMessageRequest[] = []
+  const resolvedRoleConfigurations: RoleConfigurationRequest[] = []
   let resolvedCommunity: GuildCommunityChangeRequest | null = null
   let resolvedSettings: GuildSettingsChangeRequest | null = null
   let resolvedWelcomeScreen: WelcomeScreenChangeRequest | null = null
@@ -747,6 +797,16 @@ function fixture(options: FixtureOptions = {}) {
         }
       },
     },
+    channelMetadata: {
+      async reconcilePlan(_applicationId, _botId, value) {
+        calls.push("plan-channel-metadata")
+        resolvedChannelMetadata.push(value)
+        return channelMetadataPlan(
+          value,
+          options.channelMetadataWrite ?? false,
+        )
+      },
+    },
     component: {
       async plan(_applicationId, _botId, intent, value) {
         calls.push("plan-publication")
@@ -778,7 +838,7 @@ function fixture(options: FixtureOptions = {}) {
         const audit = communityAudit(options.communityEnabled ?? true)
         return options.communityAuditTransform?.(audit) ?? audit
       },
-      async plan(_applicationId, _botId, value) {
+      async reconcilePlan(_applicationId, _botId, value) {
         calls.push("plan-community")
         resolvedCommunity = value
         const plan = communityPlan(value, options.communityWrite ?? false)
@@ -786,16 +846,26 @@ function fixture(options: FixtureOptions = {}) {
       },
     },
     onboarding: {
-      async plan(_applicationId, _botId, value) {
+      async reconcilePlan(_applicationId, _botId, value) {
         calls.push("plan-onboarding")
         resolvedOnboarding = value
         return onboardingPlan(value, options.onboardingWrite ?? false)
       },
     },
     profile: {
-      async plan(_applicationId, _botId, value) {
+      async reconcilePlan(_applicationId, _botId, value) {
         calls.push("plan-profile")
         return profilePlan(value, options.profileWrite ?? false)
+      },
+    },
+    roleConfiguration: {
+      async reconcilePlan(_applicationId, _botId, value) {
+        calls.push("plan-role-configuration")
+        resolvedRoleConfigurations.push(value)
+        return roleConfigurationPlan(
+          value,
+          options.roleConfigurationWrite ?? false,
+        )
       },
     },
     scaffold: {
@@ -806,14 +876,14 @@ function fixture(options: FixtureOptions = {}) {
       },
     },
     settings: {
-      async plan(_applicationId, _botId, value) {
+      async reconcilePlan(_applicationId, _botId, value) {
         calls.push("plan-settings")
         resolvedSettings = value
         return settingsPlan(value, options.settingsWrite ?? false)
       },
     },
     welcomeScreen: {
-      async plan(_applicationId, _botId, value) {
+      async reconcilePlan(_applicationId, _botId, value) {
         calls.push("plan-welcome-screen")
         resolvedWelcomeScreen = value
         return welcomeScreenPlan(value, options.welcomeScreenWrite ?? false)
@@ -868,8 +938,14 @@ function fixture(options: FixtureOptions = {}) {
     get resolvedAutoModeration() {
       return resolvedAutoModeration
     },
+    get resolvedChannelMetadata() {
+      return resolvedChannelMetadata
+    },
     get resolvedPublications() {
       return resolvedPublications
+    },
+    get resolvedRoleConfigurations() {
+      return resolvedRoleConfigurations
     },
     get resolvedCommunity() {
       return resolvedCommunity
@@ -903,6 +979,18 @@ function executors(calls: string[]): GuildBlueprintExecutors {
         schemaVersion: 1,
         status: "completed",
       } as AutoModerationResult
+    },
+    async executeChannelMetadata(value, planDigest) {
+      calls.push(`execute-channel-metadata:${planDigest}`)
+      return {
+        activityId: "activity-channel-metadata",
+        channelId: value.channelId,
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        schemaVersion: 1,
+        status: "completed",
+      } as ChannelMetadataChangeResult
     },
     async executeComponent(value, planDigest) {
       calls.push("execute-publication")
@@ -964,6 +1052,18 @@ function executors(calls: string[]): GuildBlueprintExecutors {
         verification: "match",
         warnings: [],
       } as GuildProfileChangeResult
+    },
+    async executeRoleConfiguration(value, planDigest) {
+      calls.push(`execute-role-configuration:${planDigest}`)
+      return {
+        activityId: "activity-role-configuration",
+        guildId: value.guildId,
+        operationKeyHash: operationKeyHash(value.operationKey),
+        planDigest,
+        roleId: value.roleId,
+        schemaVersion: 1,
+        status: "completed",
+      } as RoleConfigurationResult
     },
     async executeScaffold(value, planDigest) {
       calls.push(`execute-structure:${planDigest}`)
@@ -1047,7 +1147,7 @@ test("guild blueprint validation is strict and binds deterministic phase identit
   delete noPostPhase.settings
   assert.throws(
     () => normalizeGuildBlueprintRequest(noPostPhase),
-    /requires a profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase/u,
+    /requires an exact role, exact channel, profile, settings, Community, Welcome Screen, onboarding, AutoMod, or publication phase/u,
   )
   const unknownReference = request({
     settings: {
@@ -1140,6 +1240,77 @@ test("guild blueprint validation is strict and binds deterministic phase identit
       unexpected: true,
     } as GuildBlueprintRequest),
     /must be an exact object/u,
+  )
+})
+
+test("guild blueprint canonicalizes exact convergence targets and identities", () => {
+  const value = request({
+    channelMetadata: [
+      { channelId: SECOND_CHANNEL_ID, topic: null },
+      { channelId: CHANNEL_ID, name: "private-renamed-channel" },
+    ],
+    roleConfigurations: [
+      { permissions: ["VIEW_CHANNEL"], roleId: SECOND_ROLE_ID },
+      { hoist: true, roleId: ROLE_ID },
+    ],
+  })
+  delete value.profile
+  delete value.settings
+  const normalized = normalizeGuildBlueprintRequest(value)
+  assert.deepEqual(
+    normalized.roleConfigurations?.map(({ roleId }) => roleId),
+    [ROLE_ID, SECOND_ROLE_ID],
+  )
+  assert.deepEqual(
+    normalized.channelMetadata?.map(({ channelId }) => channelId),
+    [CHANNEL_ID, SECOND_CHANNEL_ID],
+  )
+  const roleKey = guildBlueprintExactTargetOperationKey(
+    OPERATION_KEY,
+    "role-configuration",
+    ROLE_ID,
+  )
+  const channelKey = guildBlueprintExactTargetOperationKey(
+    OPERATION_KEY,
+    "channel-metadata",
+    CHANNEL_ID,
+  )
+  assert.notEqual(roleKey, channelKey)
+  assert.equal(roleKey.includes(OPERATION_KEY), false)
+  assert.equal(
+    roleKey,
+    guildBlueprintExactTargetOperationKey(
+      OPERATION_KEY,
+      "role-configuration",
+      ROLE_ID,
+    ),
+  )
+  assert.equal(
+    guildBlueprintRequestDigest(value),
+    guildBlueprintRequestDigest({
+      ...value,
+      channelMetadata: [...(value.channelMetadata ?? [])].reverse(),
+      roleConfigurations: [...(value.roleConfigurations ?? [])].reverse(),
+    }),
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      channelMetadata: [
+        { channelId: CHANNEL_ID, name: "one" },
+        { channelId: CHANNEL_ID, name: "two" },
+      ],
+    })),
+    /target .* is duplicated/u,
+  )
+  assert.throws(
+    () => normalizeGuildBlueprintRequest(request({
+      roleConfigurations: [{
+        grantPermissions: ["SEND_MESSAGES"],
+        permissions: ["VIEW_CHANNEL"],
+        roleId: ROLE_ID,
+      }],
+    })),
+    /cannot be combined/u,
   )
 })
 
@@ -1766,6 +1937,85 @@ test("guild blueprint exposes only the structure frontier before later planning"
     ],
   )
   assert.deepEqual(plan.bindings, [])
+})
+
+test("guild blueprint sequences and executes exact convergence one target at a time", async () => {
+  const value = request({
+    channelMetadata: [{ channelId: CHANNEL_ID, topic: null }],
+    roleConfigurations: [{
+      permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+      roleId: ROLE_ID,
+    }],
+  })
+  delete value.profile
+  delete value.settings
+  const roleFixture = fixture({
+    channelMetadataWrite: true,
+    roleConfigurationWrite: true,
+  })
+  const rolePlan = await roleFixture.service.plan(APPLICATION_ID, BOT_ID, value)
+  assert.equal(rolePlan.frontier?.kind, "role-configuration")
+  assert.equal(rolePlan.steps[1]?.kind, "role-configuration")
+  assert.equal(rolePlan.steps[1]?.state, "ready")
+  assert.equal(rolePlan.steps[2]?.kind, "channel-metadata")
+  assert.equal(rolePlan.steps[2]?.state, "waiting")
+  assert.deepEqual(roleFixture.calls, [
+    "plan-structure",
+    "plan-role-configuration",
+  ])
+  assert.deepEqual(roleFixture.resolvedRoleConfigurations[0], {
+    auditReason: AUDIT_REASON,
+    guildId: GUILD_ID,
+    operationKey: guildBlueprintExactTargetOperationKey(
+      OPERATION_KEY,
+      "role-configuration",
+      ROLE_ID,
+    ),
+    permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+    roleId: ROLE_ID,
+  })
+  const roleExecutionCalls: string[] = []
+  const roleResult = await roleFixture.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    value,
+    rolePlan.digest,
+    executors(roleExecutionCalls),
+  )
+  assert.equal(roleResult.executedPhase, "role-configuration")
+  assert.equal(roleResult.executedRoleConfigurationIndex, 0)
+  assert.equal(roleResult.executedChannelMetadataIndex, null)
+  assert.match(roleExecutionCalls[0] as string, /^execute-role-configuration:/u)
+
+  const channelFixture = fixture({
+    channelMetadataWrite: true,
+    roleConfigurationWrite: false,
+  })
+  const channelPlan = await channelFixture.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    value,
+  )
+  assert.equal(channelPlan.frontier?.kind, "channel-metadata")
+  assert.equal(channelPlan.steps[1]?.state, "satisfied")
+  assert.equal(channelPlan.steps[2]?.state, "ready")
+  assert.deepEqual(channelFixture.calls, [
+    "plan-structure",
+    "plan-role-configuration",
+    "plan-channel-metadata",
+  ])
+  const channelExecutionCalls: string[] = []
+  const channelResult = await channelFixture.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    value,
+    channelPlan.digest,
+    executors(channelExecutionCalls),
+  )
+  assert.equal(channelResult.executedPhase, "channel-metadata")
+  assert.equal(channelResult.executedChannelMetadataIndex, 0)
+  assert.equal(channelResult.executedRoleConfigurationIndex, null)
+  assert.match(channelExecutionCalls[0] as string, /^execute-channel-metadata:/u)
 })
 
 test("guild blueprint stops at profile before planning settings", async () => {

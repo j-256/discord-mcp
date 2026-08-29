@@ -701,14 +701,28 @@ async function checkDocumentation(packageJson) {
     "field comparison contains an outcome Discord MCP does not lead",
   )
   const comparisonLines = comparison.split("\n")
+  const sourceHeadSectionStart = comparisonLines.indexOf(
+    "## Broader unregistered field scan",
+  )
+  const sourceHeadSectionEnd = comparisonLines.indexOf(
+    "## Audited releases and source limits",
+  )
+  invariant(
+    sourceHeadSectionStart >= 0 && sourceHeadSectionEnd > sourceHeadSectionStart,
+    "field comparison source-head section cannot be parsed",
+  )
   let scoredComparisonTables = 0
+  let sourceHeadComparisonTables = 0
   for (let index = 0; index < comparisonLines.length; index += 1) {
     const header = comparisonLines[index]
       ?.split("|")
       .slice(1, -1)
       .map((cell) => cell.trim())
     if (header?.[1] !== "Discord MCP") continue
-    scoredComparisonTables += 1
+    const sourceHeadComparison = index > sourceHeadSectionStart
+      && index < sourceHeadSectionEnd
+    if (sourceHeadComparison) sourceHeadComparisonTables += 1
+    else scoredComparisonTables += 1
     const separator = comparisonLines[index + 1]
       ?.split("|")
       .slice(1, -1)
@@ -723,10 +737,12 @@ async function checkDocumentation(packageJson) {
       const line = comparisonLines[rowIndex]
       if (!line?.startsWith("| ")) break
       const cells = line.split("|").slice(1, -1).map((cell) => cell.trim())
-      invariant(
-        cells[1]?.startsWith("**Lead**"),
-        `field comparison table ${header[0]} contains a row Discord MCP does not lead`,
-      )
+      if (!sourceHeadComparison) {
+        invariant(
+          cells[1]?.startsWith("**Lead**"),
+          `field comparison table ${header[0]} contains a row Discord MCP does not lead`,
+        )
+      }
       scoredRows += 1
     }
     invariant(scoredRows > 0, `field comparison table ${header[0]} has no scored rows`)
@@ -734,6 +750,10 @@ async function checkDocumentation(packageJson) {
   invariant(
     scoredComparisonTables > 1,
     "field comparison lacks focused head-to-head tables",
+  )
+  invariant(
+    sourceHeadComparisonTables > 0,
+    "field comparison lacks focused source-head tables",
   )
   invariant(migration.startsWith("# Migrate from another Discord MCP\n"), "migration guide heading is invalid")
   for (const required of [
