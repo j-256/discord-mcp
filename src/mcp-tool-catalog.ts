@@ -916,6 +916,10 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     keywords: ["aggregate", "count", "emoji", "list", "message", "reaction"],
     toolset: "interactions",
   },
+  list_message_replies: {
+    keywords: ["agent", "claim", "coordination", "handoff", "list", "message", "replies", "response", "task"],
+    toolset: "messages",
+  },
   list_reaction_users: {
     keywords: ["emoji", "identity", "list", "reaction", "user"],
     toolset: "interactions",

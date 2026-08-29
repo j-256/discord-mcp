@@ -483,6 +483,7 @@ const TARGET_CHANNEL_LIFECYCLE = Object.freeze([
 const TARGET_MESSAGE_LIFECYCLE = Object.freeze([
   "get_message",
   "list_message_pins",
+  "list_message_replies",
   "read_messages",
   "recall_conversation",
   "search_messages",

@@ -1359,6 +1359,29 @@ const messagePageInputSchema = z.strictObject({
   ({ after, around, before }) => [after, around, before].filter(Boolean).length <= 1,
   { message: "after, around, and before are mutually exclusive" },
 )
+const messageReplyPageInputSchema = z.strictObject({
+  afterMessageId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional exact scan cursor returned as nextAfterMessageId; defaults to messageId"),
+  channelId: positiveSnowflakeSchema
+    .describe("Exact readable Discord channel or thread ID"),
+  messageId: positiveSnowflakeSchema
+    .describe("Exact source message whose direct replies are requested"),
+  scanLimit: z.number().int().min(1).max(DISCORD_LIMITS.channelMessages)
+    .default(CONNECTOR_LIMITS.messagePageDefault)
+    .describe("Maximum channel messages to scan once, including non-replies"),
+}).superRefine((input, context) => {
+  if (
+    input.afterMessageId
+    && BigInt(input.afterMessageId) < BigInt(input.messageId)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "afterMessageId must not precede messageId",
+      path: ["afterMessageId"],
+    })
+  }
+})
 const communityActivityChannelInputSchema = z.strictObject({
   beforeMessageId: positiveSnowflakeSchema
     .optional()
@@ -10501,6 +10524,7 @@ export interface DiscordToolService {
   listDefaultSoundboardSounds: ConnectorService["listDefaultSoundboardSounds"]
   listGuildSoundboardSounds: ConnectorService["listGuildSoundboardSounds"]
   listMessagePins: ConnectorService["listMessagePins"]
+  listMessageReplies: ConnectorService["listMessageReplies"]
   listMessageReactions: ConnectorService["listMessageReactions"]
   listPollAnswerVoters: ConnectorService["listPollAnswerVoters"]
   listReactionUsers: ConnectorService["listReactionUsers"]
@@ -22005,6 +22029,37 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         signal: context.mcpReq.signal,
       })
       return toolResult(result, `Discord returned ${result.messages.length} messages from channel ${input.channelId}`)
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_message_replies", server.registerTool(
+    "list_message_replies",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Inspect direct replies to one exact Discord message by scanning one bounded page after a caller-held exact cursor. Returns a privacy-minimized source and only strict same-channel replies in ascending order plus honest scan coverage and the next cursor; non-replies advance coverage but are omitted, profile and rich payload fields are withheld, and nothing is persisted.",
+      inputSchema: messageReplyPageInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List exact Discord message replies",
+    },
+    safeToolHandler("list_message_replies", async (
+      input: z.infer<typeof messageReplyPageInputSchema>,
+      context,
+    ) => {
+      const result = await service.listMessageReplies(
+        input.channelId,
+        input.messageId,
+        {
+          ...(input.afterMessageId
+            ? { afterMessageId: input.afterMessageId }
+            : {}),
+          scanLimit: input.scanLimit,
+          signal: context.mcpReq.signal,
+        },
+      )
+      return toolResult(
+        result,
+        `Discord scanned ${result.page.scannedMessageCount} messages and returned ${result.replies.length} direct replies to message ${input.messageId} in channel ${input.channelId}`,
+      )
     }, secrets, observability),
   ))
 

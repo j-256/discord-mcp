@@ -20,6 +20,7 @@ import {
   COMPONENT_TEMPLATE_VERSION,
 } from "./component-templates.js"
 import { COMPONENT_LINK_LIMITS } from "./component-link.js"
+import { DISCORD_COORDINATION_PLAYBOOK } from "./coordination-playbook.js"
 import {
   GUILD_BLUEPRINT_STARTER_CATALOG,
   GUILD_BLUEPRINT_STARTER_OMISSIONS,
@@ -448,6 +449,29 @@ export function registerDiscordResources(
           "Use the returned exact components in the reviewed component-message lifecycle",
         ],
       }),
+      0,
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.coordinationPlaybook,
+    MCP_RESOURCE_URIS.coordinationPlaybook,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: {
+        cacheScope: "public",
+        ttlMs: STATIC_RESOURCE_TTL_MS,
+      },
+      description: "Model-neutral local playbook for exact-ID Discord task publication, status signals, replies, bounded inspection, reviewed threads, native polls, and explicit escalation without granting authority or persisting task content.",
+      mimeType: "application/json",
+      title: "Discord coordination playbook",
+    },
+    async (uri) => jsonResource(
+      uri,
+      "local-contract",
+      "trusted-local-metadata",
+      [],
+      () => DISCORD_COORDINATION_PLAYBOOK,
       0,
     ),
   )

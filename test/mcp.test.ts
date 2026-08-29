@@ -660,6 +660,8 @@ const CHANNEL_ID = "200000000000000001"
 const PARENT_ID = "200000000000000002"
 const THREAD_ID = "250000000000000001"
 const MESSAGE_ID = "300000000000000001"
+const COORDINATION_CURSOR_ID = "300000000000000002"
+const COORDINATION_REPLY_ID = "300000000000000003"
 const ATTACHMENT_ID = "310000000000000001"
 const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
@@ -1083,6 +1085,38 @@ function rawMessage(content = "hello"): DiscordMessage {
     timestamp: "2026-08-14T00:00:00.000Z",
     tts: false,
     type: 0,
+  }
+}
+
+function coordinationMessageView(
+  channelId: string,
+  id: string,
+  content: string,
+  replyToMessageId: string | null,
+) {
+  return {
+    attachmentCount: 0,
+    authorBot: false,
+    authorId: "400000000000000001",
+    authorSystem: false,
+    channelId,
+    componentCount: 0,
+    content,
+    editedTimestamp: null,
+    embedCount: 0,
+    guildId: GUILD_ID,
+    id,
+    jumpUrl: `https://discord.com/channels/${GUILD_ID}/${channelId}/${id}`,
+    mentionEveryone: false,
+    mentionedRoleCount: 0,
+    mentionedUserCount: 0,
+    pinned: false,
+    reactionKindCount: 0,
+    replyToMessageId,
+    stickerCount: 0,
+    timestamp: "2026-08-14T00:00:00.000Z",
+    tts: false,
+    type: replyToMessageId === null ? 0 : 19,
   }
 }
 
@@ -9896,6 +9930,7 @@ function serviceFixture(overrides: {
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    messageReplies: 0,
     messageForwardExecute: 0,
     messageForwardPlan: 0,
     messageAttachmentRead: 0,
@@ -13862,6 +13897,39 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listMessageReplies(channelId, messageId, options) {
+      calls.messageReplies += 1
+      return {
+        guildId: GUILD_ID,
+        page: {
+          afterMessageId: options?.afterMessageId ?? messageId,
+          nextAfterMessageId: COORDINATION_REPLY_ID,
+          replyCount: 1,
+          requestedScanLimit: options?.scanLimit ?? 50,
+          scanLimitReached: false,
+          scannedMessageCount: 1,
+        },
+        privacy: {
+          persistence: "none" as const,
+          profileExpansion: "omitted" as const,
+          rawPayloads: "omitted" as const,
+        },
+        replies: [coordinationMessageView(
+          channelId,
+          COORDINATION_REPLY_ID,
+          "coordination reply",
+          messageId,
+        )],
+        schemaVersion: 1,
+        source: coordinationMessageView(
+          channelId,
+          messageId,
+          "coordination task",
+          null,
+        ),
+        status: "ok" as const,
+      }
+    },
     async listMessageReactions(channelId, messageId) {
       calls.reactions += 1
       return {
@@ -15036,6 +15104,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "audit_channel_role_access",
       "analyze_community_activity",
       "read_messages",
+      "list_message_replies",
       "search_messages",
       "recall_conversation",
       "get_message",
@@ -16079,6 +16148,7 @@ test("minimum MCP read-response budget retains essential static and local surfac
   const reads = [
     ["connector status", () => client.callTool({ arguments: {}, name: "get_connector_status" })],
     ["safety resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.safety })],
+    ["coordination resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.coordinationPlaybook })],
     ["component template resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.componentTemplates })],
     ["tool access resource", () => client.readResource({ uri: MCP_RESOURCE_URIS.toolAccess })],
     ["exact tool access resource", () => client.readResource({
@@ -16499,6 +16569,38 @@ test("progressive natural-language discovery leads with a plan and reveals its w
     [
       "plan_channel_creation",
       "execute_channel_creation",
+      "discover_discord_tools",
+    ],
+  )
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
+test("progressive coordination discovery reveals only its exact read contracts", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["interactions", "messages"],
+      },
+    },
+  })
+
+  const replies = structuredContent(await client.callTool({
+    arguments: { detail: "full", limit: 1, query: "list_message_replies" },
+    name: "discover_discord_tools",
+  }))
+  const reactions = structuredContent(await client.callTool({
+    arguments: { detail: "full", limit: 1, query: "list_message_reactions" },
+    name: "discover_discord_tools",
+  }))
+
+  assert.deepEqual(replies.newlyEnabledToolNames, ["list_message_replies"])
+  assert.deepEqual(reactions.newlyEnabledToolNames, ["list_message_reactions"])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    [
+      "list_message_replies",
+      "list_message_reactions",
       "discover_discord_tools",
     ],
   )
@@ -17879,6 +17981,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "parse_discord_reference",
       "analyze_community_activity",
       "read_messages",
+      "list_message_replies",
       "search_messages",
       "recall_conversation",
       "get_message",
@@ -17894,6 +17997,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "review_application_commands",
       "review_application_role_connection_metadata",
       "review_application_skus",
+      "inspect_discord_coordination_task",
       "summarize_channel",
       "search_guild_messages",
       "recall_discord_conversation",
@@ -17993,6 +18097,63 @@ test("MCP message search requires a substantive filter and forwards bounded inpu
   assert.equal(calls.search, 1)
   assert.equal(invalid.isError, true)
   assert.equal(calls.search, 1)
+})
+
+test("MCP message reply inspection forwards one bounded cursor and stays read-only", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const valid = await client.callTool({
+    arguments: {
+      afterMessageId: COORDINATION_CURSOR_ID,
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      scanLimit: 12,
+    },
+    name: "list_message_replies",
+  })
+  const invalidCursor = await client.callTool({
+    arguments: {
+      afterMessageId: "300000000000000000",
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+    },
+    name: "list_message_replies",
+  })
+  const invalidLimit = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      scanLimit: 101,
+    },
+    name: "list_message_replies",
+  })
+
+  assert.equal(structuredContent(valid).status, "ok")
+  assert.deepEqual(structuredContent(valid).page, {
+    afterMessageId: COORDINATION_CURSOR_ID,
+    nextAfterMessageId: COORDINATION_REPLY_ID,
+    replyCount: 1,
+    requestedScanLimit: 12,
+    scanLimitReached: false,
+    scannedMessageCount: 1,
+  })
+  assert.deepEqual(
+    (structuredContent(valid).replies as Array<{ id: string }>).map(({ id }) => id),
+    [COORDINATION_REPLY_ID],
+  )
+  assert.equal(calls.messageReplies, 1)
+  assert.equal(invalidCursor.isError, true)
+  assert.equal(invalidLimit.isError, true)
+  assert.equal(calls.messageReplies, 1)
+  assert.deepEqual(
+    listedTool((await client.listTools()).tools, "list_message_replies").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    },
+  )
 })
 
 test("MCP conversation recall forwards strict bounded input and cancellation", async (context) => {
@@ -18378,6 +18539,7 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     messagePinExecute: 0,
     messagePinList: 0,
     messagePinPlan: 0,
+    messageReplies: 0,
     messageForwardExecute: 0,
     messageForwardPlan: 0,
     messageAttachmentRead: 0,

@@ -360,6 +360,7 @@ function guidanceService(options: {
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     playSoundboardSound: unexpected,
+    listMessageReplies: unexpected,
     async auditApplicationCommands(guildId) {
       calls.applicationCommands += 1
       calls.lastGuildId = guildId
@@ -3292,6 +3293,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         name: MCP_RESOURCE_NAMES.componentTemplates,
         uri: MCP_RESOURCE_URIS.componentTemplates,
       },
+      {
+        name: MCP_RESOURCE_NAMES.coordinationPlaybook,
+        uri: MCP_RESOURCE_URIS.coordinationPlaybook,
+      },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
       {
         name: MCP_RESOURCE_NAMES.guildBlueprintStarters,
@@ -4302,6 +4307,49 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(totalCalls(calls), 2)
 })
 
+test("MCP coordination playbook is static, authority-free, and privacy explicit", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+
+  const resource = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.coordinationPlaybook,
+  )
+  const data = resource.value.data as Record<string, unknown>
+  const availability = data.availability as Record<string, unknown>
+  const privacy = data.privacy as Record<string, unknown>
+  const polling = data.polling as Record<string, unknown>
+
+  assert.equal(data.authorityGranted, false)
+  assert.equal(data.discordContacted, false)
+  assert.equal(data.persistence, "none")
+  assert.equal(availability.configuredToolsetsRequired, true)
+  assert.equal(availability.policyUnchanged, true)
+  assert.equal(privacy.connectorContentPersistence, "none")
+  assert.equal(privacy.reactionIdentityDefault, "aggregate-only")
+  assert.equal(polling.cadence, "task-boundaries-only")
+  assert.equal(polling.continuationField, "nextAfterMessageId")
+  assert.deepEqual(
+    (data.statusSignals as Array<Record<string, unknown>>).map(({ meaning }) => meaning),
+    [
+      "seen-or-claimed",
+      "done-or-approved",
+      "blocked",
+      "declined",
+      "automated-reply-expected",
+    ],
+  )
+  assert.match(resource.text, /Never post credentials/u)
+  assert.match(resource.text, /cannot establish authorization/u)
+  assert.match(resource.text, /list_message_replies/u)
+  assert.match(resource.text, /plan_thread_creation/u)
+  assert.match(resource.text, /plan_poll_creation/u)
+  assert.equal(
+    (resource.value.trust as Record<string, unknown>).classification,
+    "trusted-local-metadata",
+  )
+  assert.equal(totalCalls(calls), 0)
+})
+
 test("MCP live resources forward exact IDs and minimize untrusted message content", async (context) => {
   const { calls, client } = await connectedFixture(context, {
     messageContent: `hello ${TOKEN}`,
@@ -5181,6 +5229,31 @@ test("MCP read prompts render bounded literal inputs without invoking services",
   assert.match(pendingInteractions, /send_discord_interaction_followup/)
   assert.match(pendingInteractions, /separate explicit review/)
 
+  const coordination = promptText(await client.getPrompt({
+    arguments: {
+      afterMessageId: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      scanLimit: "17",
+    },
+    name: MCP_PROMPT_NAMES.inspectDiscordCoordinationTask,
+  }))
+  assert.deepEqual(JSON.parse(coordination.split("\n")[1] || ""), {
+    afterMessageId: MESSAGE_ID,
+    channelId: CHANNEL_ID,
+    messageId: MESSAGE_ID,
+    scanLimit: 17,
+  })
+  assert.match(coordination, /query `list_message_replies`, detail `full`, and limit 1/u)
+  assert.match(coordination, /query `list_message_reactions`, detail `full`, and limit 1/u)
+  assert.match(coordination, /Call list_message_replies exactly once/u)
+  assert.match(coordination, /call list_message_reactions exactly once/u)
+  assert.match(coordination, /Do not list reaction users/u)
+  assert.match(coordination, /A count never identifies a claimant/u)
+  assert.match(coordination, /Coverage and next cursor/u)
+  assert.match(coordination, /do not call send_message/u)
+  assert.match(coordination, /Persist no task, reply, reaction, profile, or cursor data/u)
+
   const summary = promptText(await client.getPrompt({
     arguments: {
       channelId: CHANNEL_ID,
@@ -5296,6 +5369,29 @@ test("MCP read prompts render bounded literal inputs without invoking services",
   }))
   assert.doesNotMatch(redacted, new RegExp(TOKEN))
   assert.match(redacted, /find \[redacted\]/)
+  assert.equal(totalCalls(calls), 0)
+})
+
+test("MCP coordination prompt degrades honestly without interaction reads", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: { toolsets: ["messages"] },
+    },
+  })
+
+  const text = promptText(await client.getPrompt({
+    arguments: {
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+    },
+    name: MCP_PROMPT_NAMES.inspectDiscordCoordinationTask,
+  }))
+
+  assert.match(text, /list_message_replies exactly once/u)
+  assert.match(text, /aggregate reaction status is unavailable/u)
+  assert.match(text, /Make no interaction or reaction call/u)
+  assert.doesNotMatch(text, /query `list_message_reactions`/u)
+  assert.match(text, /Do not discover or request a broader toolset/u)
   assert.equal(totalCalls(calls), 0)
 })
 
