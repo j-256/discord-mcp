@@ -348,6 +348,7 @@ interface ChannelMetadataState {
   botMember: DiscordGuildMember
   guild: ValidatedGuild
   metadata: DiscordChannelMetadata
+  priorReceipt: OperationReceipt | null
   regions: DiscordVoiceRegion[] | null
   roles: DiscordRole[]
 }
@@ -1417,6 +1418,7 @@ export class ChannelMetadataService {
     botId: string,
     request: NormalizedChannelMetadataChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<ChannelMetadataState> {
     const metadata = exactMetadata(
       await this.#client.getGuildChannelMetadata(request.channelId, options),
@@ -1434,7 +1436,16 @@ export class ChannelMetadataService {
       "channel-metadata-change",
       request.operationKeyHash,
     )
-    if (existingReceipt) {
+    if (
+      existingReceipt
+      && !(
+        allowCompletedReceipt
+        && existingReceipt.status === "completed"
+        && existingReceipt.verification === "match"
+        && existingReceipt.guildId === request.guildId
+        && existingReceipt.resourceId === request.channelId
+      )
+    ) {
       throw new ChannelMetadataOperationConflictError(receiptView(existingReceipt))
     }
     const [guildValue, memberValue, rolesValue, regionsValue] = await Promise.all([
@@ -1453,6 +1464,7 @@ export class ChannelMetadataService {
       botMember,
       guild,
       metadata,
+      priorReceipt: existingReceipt ?? null,
       regions: regionsValue === null ? null : exactVoiceRegions(regionsValue),
       roles,
     }
@@ -1463,10 +1475,16 @@ export class ChannelMetadataService {
     botId: string,
     request: NormalizedChannelMetadataChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltChannelMetadataPlan> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(
+      botId,
+      request,
+      options,
+      allowCompletedReceipt,
+    )
     const desired = desiredMetadata(state.metadata, request)
     const voiceSettings = voiceSettingsEvidence({
       guild: state.guild,
@@ -1563,6 +1581,11 @@ export class ChannelMetadataService {
       voiceSettings,
       writeRequired: changes.length > 0,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new ChannelMetadataOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { plan, request, state }
   }
 
@@ -1577,6 +1600,21 @@ export class ChannelMetadataService {
       botId,
       normalizeChannelMetadataChangeRequest(request),
       options,
+    ).then(({ plan }) => plan)
+  }
+
+  reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: ChannelMetadataChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelMetadataChangePlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeChannelMetadataChangeRequest(request),
+      options,
+      true,
     ).then(({ plan }) => plan)
   }
 

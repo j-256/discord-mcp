@@ -778,6 +778,26 @@ test("guild-settings rejects stale plans and reserved one-shot keys", async () =
   )
 })
 
+test("guild-settings reconciliation accepts only completed matching convergence", async () => {
+  const target = fixture()
+  const desired = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, desired)
+  await target.service.execute(APPLICATION_ID, BOT_ID, desired, plan.digest)
+
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    desired,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  target.state.settings.verificationLevel = 0
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, desired),
+    GuildSettingsOperationConflictError,
+  )
+})
+
 test("guild-settings reports response and readback drift without retry", async () => {
   const responseDrift = fixture({ state: { responseDriftField: "verificationLevel" } })
   const desired = request()

@@ -566,6 +566,7 @@ export const CONNECTOR_LIMITS = Object.freeze({
   guildPruneIncludeRoles: 5,
   guildPruneMaximumMembers: 250,
   guildPruneRoleAllowlist: 100,
+  guildBlueprintConvergenceTargets: 25,
   guildBlueprintPublications: 10,
   directMessageMaxWritesPerMinute: 5,
   directMessageMinWriteIntervalMs: 5_000,

@@ -595,6 +595,27 @@ test("Welcome Screen execution reports verified semantic drift and spends the ke
   )
 })
 
+test("Welcome Screen reconciliation accepts only completed matching convergence", async () => {
+  const target = fixture()
+  const desired = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, desired)
+  await target.service.execute(APPLICATION_ID, BOT_ID, desired, plan.digest)
+
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    desired,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  assert.ok(target.state.screen)
+  target.state.screen.description = "Later drift"
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, desired),
+    WelcomeScreenOperationConflictError,
+  )
+})
+
 test("Welcome Screen execution rejects changed plans and blocks on pending activity failure", async () => {
   const stale = fixture()
   const desired = request()

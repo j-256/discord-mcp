@@ -339,6 +339,7 @@ interface GuildSettingsState {
   channelEvidence: GuildChannelEvidence<ValidatedChannel>
   configuration: GuildSettingsConfigurationView
   guild: ValidatedGuildSettings
+  priorReceipt: OperationReceipt | null
   roles: ValidatedRole[]
 }
 
@@ -1163,18 +1164,31 @@ export class GuildSettingsService {
     mode: "audit" | "change",
     options: RequestOptions,
     operationKeyHashValue?: string,
+    allowCompletedReceipt = false,
   ): Promise<GuildSettingsState> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     assertPositiveSnowflake(guildId, "Discord guild-settings guild ID")
     if (mode === "change") this.#policy.assertGuildSettingsChangeable(guildId)
     else this.#policy.assertGuildSettingsAuditable(guildId)
+    let priorReceipt: OperationReceipt | null = null
     if (operationKeyHashValue) {
-      const receipt = await this.#operationStore.get(
+      priorReceipt = await this.#operationStore.get(
         "guild-settings-change",
         operationKeyHashValue,
-      )
-      if (receipt) throw new GuildSettingsOperationConflictError(receiptView(receipt))
+      ) ?? null
+      if (
+        priorReceipt
+        && !(
+          allowCompletedReceipt
+          && priorReceipt.status === "completed"
+          && priorReceipt.verification === "match"
+          && priorReceipt.guildId === guildId
+          && priorReceipt.resourceId === guildId
+        )
+      ) {
+        throw new GuildSettingsOperationConflictError(receiptView(priorReceipt))
+      }
     }
     let supportingEvidence: {
       guild: DiscordGuild
@@ -1230,6 +1244,7 @@ export class GuildSettingsService {
       channelEvidence,
       configuration: configurationView(guild.settings, channelEvidence),
       guild,
+      priorReceipt,
       roles,
     }
   }
@@ -1262,6 +1277,7 @@ export class GuildSettingsService {
     botId: string,
     desiredRequest: NormalizedGuildSettingsChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltGuildSettingsPlan> {
     const state = await this.#state(
       applicationId,
@@ -1270,6 +1286,7 @@ export class GuildSettingsService {
       "change",
       options,
       desiredRequest.operationKeyHash,
+      allowCompletedReceipt,
     )
     const desiredState = desiredSnapshot(state.guild.settings, desiredRequest)
     const desiredView = configurationView(desiredState, state.channelEvidence)
@@ -1352,6 +1369,11 @@ export class GuildSettingsService {
       warnings,
       writeRequired: changed.length > 0,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new GuildSettingsOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { desiredRequest, desiredSnapshot: desiredState, plan, state }
   }
 
@@ -1363,6 +1385,18 @@ export class GuildSettingsService {
   ): Promise<GuildSettingsChangePlan> {
     const desired = normalizeGuildSettingsChangeRequest(request)
     return (await this.#buildPlan(applicationId, botId, desired, options)).plan
+  }
+
+  async reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: GuildSettingsChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildSettingsChangePlan> {
+    const desired = normalizeGuildSettingsChangeRequest(request)
+    return (
+      await this.#buildPlan(applicationId, botId, desired, options, true)
+    ).plan
   }
 
   execute(

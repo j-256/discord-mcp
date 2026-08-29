@@ -644,6 +644,26 @@ test("guild Community execution rejects stale plans and one-shot conflicts", asy
   assert.equal(conflicting.writes.length, 0)
 })
 
+test("guild Community reconciliation accepts only completed matching convergence", async () => {
+  const target = fixture()
+  const desired = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, desired)
+  await target.service.execute(APPLICATION_ID, BOT_ID, desired, plan.digest)
+
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    desired,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  target.state.community.features = ["NEWS"]
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, desired),
+    GuildCommunityOperationConflictError,
+  )
+})
+
 test("pending guild Community activity failure blocks mutation", async () => {
   const blocked = fixture({ state: { activityFailureAt: 1 } })
   const desired = request()

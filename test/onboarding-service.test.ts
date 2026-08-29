@@ -787,6 +787,26 @@ test("onboarding execution reports valid semantic drift and spends the key", asy
   )
 })
 
+test("onboarding reconciliation accepts only completed matching convergence", async () => {
+  const target = fixture()
+  const desired = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, desired)
+  await target.service.execute(APPLICATION_ID, BOT_ID, desired, plan.digest)
+
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    desired,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  target.state.onboarding.enabled = false
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, desired),
+    OnboardingOperationConflictError,
+  )
+})
+
 test("onboarding execution never treats a transport prompt placeholder as authoritative", async () => {
   const { operationStore, service } = fixture({
     state: { responseUsesPromptPlaceholder: true },

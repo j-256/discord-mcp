@@ -289,6 +289,7 @@ interface GuildCommunityState {
   channelEvidence: GuildChannelEvidence<ValidatedChannel>
   configuration: GuildCommunityConfigurationView
   guild: ValidatedGuildCommunity
+  priorReceipt: OperationReceipt | null
   roles: ValidatedRole[]
 }
 
@@ -1089,18 +1090,31 @@ export class GuildCommunityService {
     mode: "audit" | "change",
     options: RequestOptions,
     operationKeyHashValue?: string,
+    allowCompletedReceipt = false,
   ): Promise<GuildCommunityState> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     assertPositiveSnowflake(guildId, "Discord guild Community guild ID")
     if (mode === "change") this.#policy.assertGuildCommunityChangeable(guildId)
     else this.#policy.assertGuildCommunityAuditable(guildId)
+    let priorReceipt: OperationReceipt | null = null
     if (operationKeyHashValue) {
-      const receipt = await this.#operationStore.get(
+      priorReceipt = await this.#operationStore.get(
         "guild-community-change",
         operationKeyHashValue,
-      )
-      if (receipt) throw new GuildCommunityOperationConflictError(receiptView(receipt))
+      ) ?? null
+      if (
+        priorReceipt
+        && !(
+          allowCompletedReceipt
+          && priorReceipt.status === "completed"
+          && priorReceipt.verification === "match"
+          && priorReceipt.guildId === guildId
+          && priorReceipt.resourceId === guildId
+        )
+      ) {
+        throw new GuildCommunityOperationConflictError(receiptView(priorReceipt))
+      }
     }
     let supportingEvidence: {
       guild: DiscordGuild
@@ -1151,6 +1165,7 @@ export class GuildCommunityService {
       channelEvidence,
       configuration: configurationView(guild, roles, channelEvidence),
       guild,
+      priorReceipt,
       roles,
     }
   }
@@ -1194,6 +1209,7 @@ export class GuildCommunityService {
     botId: string,
     desiredRequest: NormalizedGuildCommunityChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltGuildCommunityPlan> {
     const state = await this.#state(
       applicationId,
@@ -1202,6 +1218,7 @@ export class GuildCommunityService {
       "change",
       options,
       desiredRequest.operationKeyHash,
+      allowCompletedReceipt,
     )
     const enablementRequired = !state.configuration.communityEnabled
     if (enablementRequired && !state.access.authorizedForEnablement) {
@@ -1296,6 +1313,11 @@ export class GuildCommunityService {
       warnings,
       writeRequired: changed.length > 0,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new GuildCommunityOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return {
       desiredFeatures: desiredState.features,
       desiredRequest,
@@ -1312,6 +1334,18 @@ export class GuildCommunityService {
   ): Promise<GuildCommunityChangePlan> {
     const desired = normalizeGuildCommunityChangeRequest(request)
     return (await this.#buildPlan(applicationId, botId, desired, options)).plan
+  }
+
+  async reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: GuildCommunityChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildCommunityChangePlan> {
+    const desired = normalizeGuildCommunityChangeRequest(request)
+    return (
+      await this.#buildPlan(applicationId, botId, desired, options, true)
+    ).plan
   }
 
   execute(

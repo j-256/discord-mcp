@@ -380,6 +380,16 @@ test("role configuration normalization preserves explicit fields and canonical n
   assert.deepEqual(normalized.revokePermissions, ["BAN_MEMBERS"])
   assert.equal(normalized.secondaryColor, null)
   assert.match(normalized.operationKeyHash, /^sha256:[a-f0-9]{64}$/)
+
+  const exact = normalizeRoleConfigurationRequest({
+    auditReason: "Reviewed",
+    guildId: GUILD_ID,
+    operationKey: OPERATION_KEY,
+    permissions: [],
+    roleId: TARGET_ROLE_ID,
+  })
+  assert.deepEqual(exact.requestedFields, ["permissions"])
+  assert.deepEqual(exact.permissions, [])
 })
 
 test("role configuration normalization rejects ambiguous, empty, and dangerous input", () => {
@@ -413,6 +423,20 @@ test("role configuration normalization rejects ambiguous, empty, and dangerous i
   assert.throws(
     () => normalizeRoleConfigurationRequest(request({ grantPermissions: ["ADMINISTRATOR"] })),
     /never grants ADMINISTRATOR/,
+  )
+  assert.throws(
+    () => normalizeRoleConfigurationRequest(request({
+      grantPermissions: undefined,
+      name: undefined,
+      permissions: ["ADMINISTRATOR"],
+    })),
+    /never sets ADMINISTRATOR/,
+  )
+  assert.throws(
+    () => normalizeRoleConfigurationRequest(request({
+      permissions: ["VIEW_CHANNEL"],
+    })),
+    /cannot be combined with permission grants/u,
   )
   assert.throws(
     () => normalizeRoleConfigurationRequest(request({ name: "@everyone" })),
@@ -721,6 +745,31 @@ test("role permission changes preserve unrelated bits and enforce grantability a
     /unknown permission bits/,
   )
 
+  const exactFutureClient = new FixtureClient()
+  const futureBit = 1n << 60n
+  ;(exactFutureClient.roles.find((entry) => entry.id === TARGET_ROLE_ID) as DiscordRole)
+    .permissions = (DISCORD_PERMISSIONS.VIEW_CHANNEL | futureBit).toString()
+  const exactFuturePlan = await fixture({ client: exactFutureClient }).service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    request({
+      grantPermissions: undefined,
+      name: undefined,
+      permissions: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+    }),
+  )
+  assert.equal(
+    exactFuturePlan.desired.permissions,
+    (DISCORD_PERMISSIONS.VIEW_CHANNEL
+      | DISCORD_PERMISSIONS.SEND_MESSAGES
+      | futureBit).toString(),
+  )
+  assert.equal(exactFuturePlan.desired.unknownPermissionBits, futureBit.toString())
+  assert.deepEqual(exactFuturePlan.requestedPermissions, [
+    "VIEW_CHANNEL",
+    "SEND_MESSAGES",
+  ])
+
   const metadataClient = new FixtureClient()
   ;(metadataClient.roles.find((entry) => entry.id === TARGET_ROLE_ID) as DiscordRole).permissions = (
     DISCORD_PERMISSIONS.VIEW_CHANNEL | DISCORD_PERMISSIONS.MANAGE_GUILD
@@ -832,6 +881,18 @@ test("role configuration rejects stale plans and spent keys", async () => {
   await spent.service.execute(APPLICATION_ID, BOT_ID, selected, spentPlan.digest)
   await assert.rejects(
     spent.service.plan(APPLICATION_ID, BOT_ID, selected),
+    /already been reserved/,
+  )
+  const converged = await spent.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    selected,
+  )
+  assert.equal(converged.writeRequired, false)
+  ;(spent.client.roles.find((entry) => entry.id === TARGET_ROLE_ID) as DiscordRole).name
+    = "Later drift"
+  await assert.rejects(
+    spent.service.reconcilePlan(APPLICATION_ID, BOT_ID, selected),
     /already been reserved/,
   )
 })

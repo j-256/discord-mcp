@@ -238,6 +238,7 @@ interface GuildProfileState {
   access: GuildProfileAccessEvidence
   botMember: ValidatedBotMember
   guild: ValidatedGuildProfile
+  priorReceipt: OperationReceipt | null
   roles: ValidatedRole[]
 }
 
@@ -675,18 +676,31 @@ export class GuildProfileService {
     mode: "audit" | "change",
     options: RequestOptions,
     operationKeyHashValue?: string,
+    allowCompletedReceipt = false,
   ): Promise<GuildProfileState> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     assertPositiveSnowflake(guildId, "Discord guild profile guild ID")
     if (mode === "change") this.#policy.assertGuildProfileChangeable(guildId)
     else this.#policy.assertGuildProfileAuditable(guildId)
+    let priorReceipt: OperationReceipt | null = null
     if (operationKeyHashValue) {
-      const receipt = await this.#operationStore.get(
+      priorReceipt = await this.#operationStore.get(
         "guild-profile-change",
         operationKeyHashValue,
-      )
-      if (receipt) throw new GuildProfileOperationConflictError(receiptView(receipt))
+      ) ?? null
+      if (
+        priorReceipt
+        && !(
+          allowCompletedReceipt
+          && priorReceipt.status === "completed"
+          && priorReceipt.verification === "match"
+          && priorReceipt.guildId === guildId
+          && priorReceipt.resourceId === guildId
+        )
+      ) {
+        throw new GuildProfileOperationConflictError(receiptView(priorReceipt))
+      }
     }
     const [rawGuild, rawMember, rawRoles] = await Promise.all([
       this.#client.getGuildProfile(guildId, options),
@@ -703,7 +717,7 @@ export class GuildProfileService {
         "Discord connector bot requires guild ownership or complete MANAGE_GUILD authority for guild profile changes",
       )
     }
-    return { access, botMember, guild, roles }
+    return { access, botMember, guild, priorReceipt, roles }
   }
 
   async get(
@@ -733,6 +747,7 @@ export class GuildProfileService {
     botId: string,
     desiredRequest: NormalizedGuildProfileChangeRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltGuildProfilePlan> {
     const state = await this.#state(
       applicationId,
@@ -741,6 +756,7 @@ export class GuildProfileService {
       "change",
       options,
       desiredRequest.operationKeyHash,
+      allowCompletedReceipt,
     )
     const desiredView = desiredProfile(state.guild.profile, desiredRequest)
     const changed = changedFields(
@@ -803,6 +819,11 @@ export class GuildProfileService {
       warnings,
       writeRequired: changed.length > 0,
     }
+    if (state.priorReceipt && plan.writeRequired) {
+      throw new GuildProfileOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { desiredRequest, desiredView, plan, state }
   }
 
@@ -814,6 +835,18 @@ export class GuildProfileService {
   ): Promise<GuildProfileChangePlan> {
     const desired = normalizeGuildProfileChangeRequest(request)
     return (await this.#buildPlan(applicationId, botId, desired, options)).plan
+  }
+
+  async reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: GuildProfileChangeRequest,
+    options: RequestOptions = {},
+  ): Promise<GuildProfileChangePlan> {
+    const desired = normalizeGuildProfileChangeRequest(request)
+    return (
+      await this.#buildPlan(applicationId, botId, desired, options, true)
+    ).plan
   }
 
   execute(

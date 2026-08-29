@@ -774,6 +774,30 @@ test("channel metadata execution rejects stale plans before reservation or write
   assert.equal(typeDriftFixture.operationStore.reserveCalls, 0)
 })
 
+test("channel metadata reconciliation recognizes only a completed matching receipt", async () => {
+  const target = fixture()
+  const change = request()
+  const plan = await target.service.plan(APPLICATION_ID, BOT_ID, change)
+  await target.service.execute(APPLICATION_ID, BOT_ID, change, plan.digest)
+
+  await assert.rejects(
+    target.service.plan(APPLICATION_ID, BOT_ID, change),
+    /already been reserved/,
+  )
+  const converged = await target.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    change,
+  )
+  assert.equal(converged.writeRequired, false)
+
+  target.client.current.name = "later-drift"
+  await assert.rejects(
+    target.service.reconcilePlan(APPLICATION_ID, BOT_ID, change),
+    /already been reserved/,
+  )
+})
+
 test("channel metadata execution rejects voice capability and region inventory drift", async () => {
   const tierFixture = fixture(voiceMetadata())
   tierFixture.client.permissions |= DISCORD_PERMISSIONS.CONNECT
