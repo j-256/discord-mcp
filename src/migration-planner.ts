@@ -6,6 +6,7 @@ import {
 } from "./catalog.js"
 import {
   CONFIG_RECIPE_NAMES,
+  getConfigRecipe,
   type ConfigRecipeName,
 } from "./config-recipes.js"
 import {
@@ -411,11 +412,13 @@ function selectedSource(value: string): MaterializedMigrationSource {
 
 function recipeSteps(recipes: readonly ConfigRecipeName[]): MigrationPlanStep[] {
   return recipes.flatMap((recipe) => {
-    const option = recipe === "direct-messenger"
-      ? `--user-id ${PLACEHOLDER_USER_ID}`
-      : recipe === "guild-builder" || recipe === "incident-response"
-        ? `--guild-id ${PLACEHOLDER_GUILD_ID}`
-        : `--channel-id ${PLACEHOLDER_CHANNEL_ID}`
+    const requirement = getConfigRecipe(recipe).requirements.scope
+    const placeholder = requirement.kind === "guild"
+      ? PLACEHOLDER_GUILD_ID
+      : requirement.kind === "channel"
+        ? PLACEHOLDER_CHANNEL_ID
+        : PLACEHOLDER_USER_ID
+    const option = `${requirement.option} ${placeholder}`
     return [{
       commands: [
         `discord-mcp recipe plan ${recipe} ${TARGET_CONFIG_FILE} ${option}`,

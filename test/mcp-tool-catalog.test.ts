@@ -455,6 +455,14 @@ test("tool readiness distinguishes static setup, credentials, and live proof", (
   )
   assert.deepEqual(
     byName.get("plan_guild_blueprint")?.requirements.configuration.recipeNames,
+    ["guild-starter", "guild-builder"],
+  )
+  assert.deepEqual(
+    byName.get("compile_guild_blueprint_starter")?.requirements.configuration.recipeNames,
+    ["guild-starter", "guild-builder"],
+  )
+  assert.deepEqual(
+    byName.get("capture_guild_blueprint")?.requirements.configuration.recipeNames,
     ["guild-builder"],
   )
   assert.equal(

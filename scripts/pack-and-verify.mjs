@@ -38,6 +38,7 @@ const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
 const MIGRATION_HTML_FORMAT = "discord-mcp.migration-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
+  "guild-starter",
   "guild-builder",
   "channel-publisher",
   "direct-messenger",
@@ -50,6 +51,11 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
     intents: Object.freeze([]),
   }),
   "guild-builder": Object.freeze({
+    evidenceConnection: "guild-layout",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze(["GUILDS"]),
+  }),
+  "guild-starter": Object.freeze({
     evidenceConnection: "guild-layout",
     eventFeedPolicy: "unchanged",
     intents: Object.freeze(["GUILDS"]),
@@ -373,14 +379,18 @@ assert.equal(typeof connector.DiscordClient.prototype.createDirectAttachmentMess
 assert.equal(typeof connector.readDirectAttachmentFileSnapshot, "function")
 assert.equal(typeof connector.RoleConfigurationService, "function")
 assert.equal(typeof connector.ScheduledEventService, "function")
+assert.equal(typeof connector.compileGuildBlueprintStarter, "function")
+assert.deepEqual(connector.GUILD_BLUEPRINT_STARTER_NAMES, ["community", "creator", "project", "support"])
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
 assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
 assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
+  "guild-starter",
   "guild-builder",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
 ])
+assert.equal(connector.getConfigRecipe("guild-starter").writeCapable, true)
 assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
 assert.equal(connector.getConfigRecipe("direct-messenger").writeCapable, true)
 assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)

@@ -14911,6 +14911,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_embed_message",
       "plan_attachment_message",
       "execute_attachment_message",
+      "compile_guild_blueprint_starter",
       "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
@@ -15524,6 +15525,15 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const guildBlueprintCaptureTool = result.tools.find((tool) => (
     tool.name === "capture_guild_blueprint"
   ))
+  assert.deepEqual(
+    listedTool(result.tools, "compile_guild_blueprint_starter").annotations,
+    {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  )
   assert.deepEqual(guildBlueprintCaptureTool?.annotations, {
     destructiveHint: false,
     idempotentHint: true,
@@ -16659,6 +16669,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
 
   assert.deepEqual(discovery.newlyEnabledToolNames, [
     "capture_guild_blueprint",
+    "compile_guild_blueprint_starter",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
     "verify_guild_blueprint",
@@ -16666,6 +16677,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
     [
+      "compile_guild_blueprint_starter",
       "capture_guild_blueprint",
       "plan_guild_blueprint",
       "execute_guild_blueprint",
@@ -33157,6 +33169,90 @@ test("MCP thread creation exposes uncertain and one-shot conflict outcomes safel
     JSON.stringify(conflictResult),
     new RegExp(THREAD_CREATION_OPERATION_KEY),
   )
+})
+
+test("MCP guild blueprint starters compile strict authority-free planner inputs", async (context) => {
+  const { calls, client, guildBlueprintCaptureCalls } = await connectedFixture(context)
+  const compiled = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      guildName: "Reviewed Support Guild",
+      operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+      starter: "support",
+    },
+    name: "compile_guild_blueprint_starter",
+  })
+  const result = structuredContent(compiled)
+
+  assert.equal(compiled.isError, undefined)
+  assert.equal(result.status, "compiled")
+  assert.deepEqual(result.authority, {
+    discordContacted: false,
+    policyGranted: false,
+    writeAuthorityGranted: false,
+  })
+  assert.deepEqual(result.starter, { name: "support", version: 1 })
+  assert.equal((result.next as Record<string, unknown>).setupRecipe, "guild-starter")
+  assert.equal(
+    (result.next as Record<string, unknown>).setupRecipeCoverage,
+    "requires-separate-guild-profile-policy",
+  )
+  const request = result.request as Record<string, unknown>
+  assert.equal(request.guildId, GUILD_ID)
+  assert.equal(request.operationKey, GUILD_BLUEPRINT_OPERATION_KEY)
+  assert.deepEqual(request.profile, { name: "Reviewed Support Guild" })
+  assert.equal(
+    ((request.scaffold as Record<string, unknown>).channels as unknown[]).length,
+    9,
+  )
+  assert.deepEqual((request.scaffold as Record<string, unknown>).roles, [])
+  assert.equal(
+    JSON.stringify(result).includes("ADMINISTRATOR"),
+    false,
+  )
+  assert.equal(calls.guildBlueprintPlan, 0)
+  assert.equal(guildBlueprintCaptureCalls.capture, 0)
+
+  const planned = await client.callTool({
+    arguments: request,
+    name: "plan_guild_blueprint",
+  })
+  assert.equal(structuredContent(planned).status, "planned")
+  assert.equal(calls.guildBlueprintPlan, 1)
+
+  const remoteSource = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+      source: "https://example.com/starter.json",
+      starter: "support",
+    },
+    name: "compile_guild_blueprint_starter",
+  })
+  const unknownStarter = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: GUILD_BLUEPRINT_OPERATION_KEY,
+      starter: "remote",
+    },
+    name: "compile_guild_blueprint_starter",
+  })
+  const invalidKey = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      guildId: GUILD_ID,
+      operationKey: "short",
+      starter: "support",
+    },
+    name: "compile_guild_blueprint_starter",
+  })
+  assert.equal(remoteSource.isError, true)
+  assert.equal(unknownStarter.isError, true)
+  assert.equal(invalidKey.isError, true)
+  assert.equal(JSON.stringify(result).includes(TOKEN), false)
 })
 
 test("MCP guild blueprint capture returns one strict planner-compatible draft", async (context) => {

@@ -3292,6 +3292,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uri: MCP_RESOURCE_URIS.componentTemplates,
       },
       { name: MCP_RESOURCE_NAMES.defaultSoundboard, uri: MCP_RESOURCE_URIS.defaultSoundboard },
+      {
+        name: MCP_RESOURCE_NAMES.guildBlueprintStarters,
+        uri: MCP_RESOURCE_URIS.guildBlueprintStarters,
+      },
       { name: MCP_RESOURCE_NAMES.gatewayEvents, uri: MCP_RESOURCE_URIS.gatewayEvents },
       { name: MCP_RESOURCE_NAMES.gatewayStatus, uri: MCP_RESOURCE_URIS.gatewayStatus },
       { name: MCP_RESOURCE_NAMES.guilds, uri: MCP_RESOURCE_URIS.guilds },
@@ -4118,6 +4122,46 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   assert.equal(componentTemplates.value.provenance, "local-contract")
   assert.equal(
     (componentTemplates.value.trust as Record<string, unknown>).classification,
+    "trusted-local-metadata",
+  )
+
+  const guildBlueprintStarters = await readJsonResource(
+    client,
+    MCP_RESOURCE_URIS.guildBlueprintStarters,
+  )
+  const guildBlueprintStarterData = guildBlueprintStarters.value.data as Record<
+    string,
+    unknown
+  >
+  assert.equal(guildBlueprintStarterData.authorityGranted, false)
+  assert.equal(guildBlueprintStarterData.discordContacted, false)
+  assert.equal(
+    guildBlueprintStarterData.compilerTool,
+    "compile_guild_blueprint_starter",
+  )
+  assert.equal(guildBlueprintStarterData.setupRecipe, "guild-starter")
+  assert.equal(
+    guildBlueprintStarterData.setupRecipeCoverage,
+    "structure-and-settings-only",
+  )
+  assert.deepEqual(
+    (guildBlueprintStarterData.starters as Array<Record<string, unknown>>)
+      .map(({ name }) => name),
+    ["community", "creator", "project", "support"],
+  )
+  assert.equal(
+    (guildBlueprintStarterData.lifecycle as Record<string, unknown>).plan,
+    "plan_guild_blueprint",
+  )
+  assert.equal(
+    (guildBlueprintStarterData.omittedCapabilities as unknown[]).includes(
+      "read-only-enforcement",
+    ),
+    true,
+  )
+  assert.equal(guildBlueprintStarters.value.provenance, "local-contract")
+  assert.equal(
+    (guildBlueprintStarters.value.trust as Record<string, unknown>).classification,
     "trusted-local-metadata",
   )
 

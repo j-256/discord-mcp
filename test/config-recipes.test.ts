@@ -69,6 +69,7 @@ async function configFile(
 
 test("configuration recipes expose frozen catalog-derived requirements", () => {
   assert.deepEqual(CONFIG_RECIPE_NAMES, [
+    "guild-starter",
     "guild-builder",
     "channel-publisher",
     "direct-messenger",
@@ -76,11 +77,56 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   ])
   assert.equal(Object.isFrozen(CONFIG_RECIPES), true)
 
+  const guildStarter = getConfigRecipe(" GUILD-STARTER ")
+  assert.equal(Object.isFrozen(guildStarter), true)
+  assert.deepEqual(guildStarter.toolsets, ["guild-blueprints"])
+  assert.deepEqual(guildStarter.toolNames, [
+    "capture_guild_blueprint",
+    "compile_guild_blueprint_starter",
+    "discover_discord_tools",
+    "execute_guild_blueprint",
+    "plan_guild_blueprint",
+    "verify_guild_blueprint",
+  ])
+  assert.deepEqual(guildStarter.capabilities, [
+    "guildScaffolds",
+    "guildSettingsAudit",
+    "guildSettingsChanges",
+  ])
+  assert.deepEqual(guildStarter.requirements.scope.targets, [
+    "$.scopes.guildScaffoldGuildIds",
+    "$.scopes.guildSettingsGuildIds",
+  ])
+  assert.deepEqual(guildStarter.requirements.botPermissions, [
+    "MANAGE_CHANNELS",
+    "MANAGE_GUILD",
+    "VIEW_CHANNEL",
+  ])
+  assert.deepEqual(guildStarter.requirements.gateway, {
+    evidenceConnection: "guild-layout",
+    eventFeedPolicy: "unchanged",
+    intents: ["GUILDS"],
+  })
+  assert.deepEqual(guildStarter.requirements.privilegedIntents, [])
+  assert.equal(
+    guildStarter.requirements.botPermissions.includes("MANAGE_ROLES"),
+    false,
+  )
+  assert.equal(
+    guildStarter.warnings.some((warning) => warning.includes("ordinary public")),
+    true,
+  )
+  assert.equal(
+    guildStarter.warnings.some((warning) => warning.includes("guildName")),
+    true,
+  )
+
   const guildBuilder = getConfigRecipe(" GUILD-BUILDER ")
   assert.equal(Object.isFrozen(guildBuilder), true)
   assert.deepEqual(guildBuilder.toolsets, ["guild-blueprints"])
   assert.deepEqual(guildBuilder.toolNames, [
     "capture_guild_blueprint",
+    "compile_guild_blueprint_starter",
     "discover_discord_tools",
     "execute_guild_blueprint",
     "plan_guild_blueprint",
@@ -297,6 +343,43 @@ test("configuration recipe requests normalize exact bounded scope", () => {
     }),
     /Discord snowflakes/,
   )
+})
+
+test("guild-starter plans only its public layout policy", async (context) => {
+  const file = await configFile(context)
+  const plan = planConfigRecipe({
+    file,
+    guildIds: [GUILD_ID],
+    name: "guild-starter",
+  })
+
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.proposedDocument.tools.toolsets, [
+    "connector",
+    "guild-blueprints",
+  ])
+  assert.deepEqual(
+    Object.entries(plan.proposedDocument.capabilities)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name),
+    [
+      "guildScaffolds",
+      "guildSettingsAudit",
+      "guildSettingsChanges",
+    ],
+  )
+  assert.deepEqual(plan.proposedDocument.scopes.guildScaffoldGuildIds, [GUILD_ID])
+  assert.deepEqual(plan.proposedDocument.scopes.guildSettingsGuildIds, [GUILD_ID])
+  assert.equal("guildProfileGuildIds" in plan.proposedDocument.scopes, false)
+  assert.equal("guildProfileChanges" in plan.proposedDocument.capabilities, false)
+  assert.equal("guildCommunityGuildIds" in plan.proposedDocument.scopes, false)
+  assert.equal("automodGuildIds" in plan.proposedDocument.scopes, false)
+  assert.equal("guildCommunityChanges" in plan.proposedDocument.capabilities, false)
+  assert.equal("automodChanges" in plan.proposedDocument.capabilities, false)
+  const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.deepEqual([...guildChannelLayoutGuildIds(runtime)], [GUILD_ID])
 })
 
 test("guild-builder plans all declared scopes and preserves unrelated policy", async (context) => {
