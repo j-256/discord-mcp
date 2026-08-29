@@ -8,10 +8,25 @@ import {
   componentLinkOrigin,
   normalizeComponentLinkUrl,
 } from "./component-link.js"
+import {
+  createRequestButtonCustomId,
+  createRequestButtonRoute,
+  DISCORD_REQUEST_BUTTON_STYLES,
+  isManagedRequestButtonCustomId,
+  parseRequestButtonCustomId,
+  REQUEST_BUTTON_LIMITS,
+  REQUEST_BUTTON_STYLES,
+  requestButtonLayoutDigest,
+  type RequestButtonRouteBinding,
+  type RequestButtonScope,
+  type RequestButtonStyle,
+  verifyRequestButtonCustomId,
+} from "./request-button.js"
 
 export const COMPONENT_LAYOUT_KINDS = [
   "container",
   "link-row",
+  "request-row",
   "separator",
   "text",
 ] as const
@@ -38,6 +53,7 @@ export const DISCORD_COMPONENT_TYPES = Object.freeze({
 
 export const DISCORD_BUTTON_STYLES = Object.freeze({
   link: 5,
+  ...DISCORD_REQUEST_BUTTON_STYLES,
 })
 
 export const DISCORD_SEPARATOR_SPACING = Object.freeze({
@@ -69,10 +85,23 @@ export interface ComponentLinkRowInput {
   kind: "link-row"
 }
 
+export interface ComponentRequestButtonInput {
+  label: string
+  style?: RequestButtonStyle
+}
+
+export interface ComponentRequestRowInput {
+  buttons: readonly ComponentRequestButtonInput[]
+  kind: "request-row"
+}
+
 export interface ComponentContainerInput {
   accentColor?: number
   components: readonly (
-    ComponentLinkRowInput | ComponentTextInput | ComponentSeparatorInput
+    | ComponentLinkRowInput
+    | ComponentRequestRowInput
+    | ComponentTextInput
+    | ComponentSeparatorInput
   )[]
   kind: "container"
   spoiler?: boolean
@@ -81,6 +110,7 @@ export interface ComponentContainerInput {
 export type ComponentLayoutInput =
   | ComponentContainerInput
   | ComponentLinkRowInput
+  | ComponentRequestRowInput
   | ComponentSeparatorInput
   | ComponentTextInput
 
@@ -105,10 +135,23 @@ export interface NormalizedComponentLinkRow {
   kind: "link-row"
 }
 
+export interface NormalizedComponentRequestButton {
+  label: string
+  style: RequestButtonStyle
+}
+
+export interface NormalizedComponentRequestRow {
+  buttons: NormalizedComponentRequestButton[]
+  kind: "request-row"
+}
+
 export interface NormalizedComponentContainer {
   accentColor: number | null
   components: (
-    NormalizedComponentLinkRow | NormalizedComponentText | NormalizedComponentSeparator
+    | NormalizedComponentLinkRow
+    | NormalizedComponentRequestRow
+    | NormalizedComponentText
+    | NormalizedComponentSeparator
   )[]
   kind: "container"
   spoiler: boolean
@@ -117,6 +160,7 @@ export interface NormalizedComponentContainer {
 export type NormalizedComponent =
   | NormalizedComponentContainer
   | NormalizedComponentLinkRow
+  | NormalizedComponentRequestRow
   | NormalizedComponentSeparator
   | NormalizedComponentText
 
@@ -140,8 +184,15 @@ export interface DiscordLinkButtonComponent {
   url: string
 }
 
+export interface DiscordRequestButtonComponent {
+  custom_id: string
+  label: string
+  style: 1 | 2 | 3 | 4
+  type: 2
+}
+
 export interface DiscordActionRowComponent {
-  components: DiscordLinkButtonComponent[]
+  components: DiscordLinkButtonComponent[] | DiscordRequestButtonComponent[]
   type: 1
 }
 
@@ -164,6 +215,7 @@ export interface ComponentLayoutCounts {
   actionRows: number
   containers: number
   linkButtons: number
+  requestButtons: number
   separators: number
   textDisplays: number
   topLevel: number
@@ -183,10 +235,36 @@ export interface ComponentLayoutReview {
   warnings: string[]
 }
 
+export interface ComponentLayoutRequestButtonBinding {
+  binding: RequestButtonRouteBinding
+  key: Uint8Array
+}
+
+export interface ComponentLayoutRequestButtonVerification {
+  key: Uint8Array
+  operationKeyHash?: string
+  scope: RequestButtonScope
+}
+
+export interface ManagedRequestButton {
+  customId: string
+  index: number
+  label: string
+  route: string
+  style: RequestButtonStyle
+}
+
+export interface ParsedManagedComponentLayout {
+  layout: NormalizedComponentLayout
+  requestButtons: ManagedRequestButton[]
+  route: string | null
+}
+
 interface LayoutAccumulator {
   actionRows: number
   containers: number
   linkButtons: number
+  requestButtons: number
   separators: number
   textCharacters: number
   textDisplays: number
@@ -198,6 +276,8 @@ const TEXT_KEYS = new Set(["content", "kind"])
 const SEPARATOR_KEYS = new Set(["divider", "kind", "spacing"])
 const LINK_BUTTON_KEYS = new Set(["label", "url"])
 const LINK_ROW_KEYS = new Set(["buttons", "kind"])
+const REQUEST_BUTTON_KEYS = new Set(["label", "style"])
+const REQUEST_ROW_KEYS = new Set(["buttons", "kind"])
 const CONTAINER_KEYS = new Set(["accentColor", "components", "kind", "spoiler"])
 const DISCORD_TEXT_KEYS = new Set(["content", "id", "type"])
 const DISCORD_SEPARATOR_KEYS = new Set(["divider", "id", "spacing", "type"])
@@ -208,6 +288,14 @@ const DISCORD_LINK_BUTTON_KEYS = new Set([
   "style",
   "type",
   "url",
+])
+const DISCORD_REQUEST_BUTTON_KEYS = new Set([
+  "custom_id",
+  "disabled",
+  "id",
+  "label",
+  "style",
+  "type",
 ])
 const DISCORD_ACTION_ROW_KEYS = new Set(["components", "id", "type"])
 const DISCORD_CONTAINER_KEYS = new Set([
@@ -220,6 +308,12 @@ const DISCORD_CONTAINER_KEYS = new Set([
 const DISCORD_TEXT_REQUEST_KEYS = new Set(["content", "type"])
 const DISCORD_SEPARATOR_REQUEST_KEYS = new Set(["divider", "spacing", "type"])
 const DISCORD_LINK_BUTTON_REQUEST_KEYS = new Set(["label", "style", "type", "url"])
+const DISCORD_REQUEST_BUTTON_REQUEST_KEYS = new Set([
+  "custom_id",
+  "label",
+  "style",
+  "type",
+])
 const DISCORD_ACTION_ROW_REQUEST_KEYS = new Set(["components", "type"])
 const DISCORD_CONTAINER_REQUEST_KEYS = new Set([
   "accent_color",
@@ -278,6 +372,26 @@ function assertLinkLabel(value: unknown, path: string): string {
   if (unicodeLength(value) > COMPONENT_LINK_LIMITS.labelCharacters) {
     throw new RangeError(
       `${path} must not exceed ${COMPONENT_LINK_LIMITS.labelCharacters} Unicode characters`,
+    )
+  }
+  if (TEXT_CONTROL_PATTERN.test(value) || /[\n\r\u2028\u2029]/u.test(value)) {
+    throw new RangeError(`${path} must be single-line text without control characters`)
+  }
+  try {
+    encodeURIComponent(value)
+  } catch (error) {
+    throw new RangeError(`${path} contains invalid Unicode`, { cause: error })
+  }
+  return value
+}
+
+function assertRequestButtonLabel(value: unknown, path: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new RangeError(`${path} must be non-blank text`)
+  }
+  if ([...value].length > REQUEST_BUTTON_LIMITS.labelCharacters) {
+    throw new RangeError(
+      `${path} must not exceed ${REQUEST_BUTTON_LIMITS.labelCharacters} Unicode characters`,
     )
   }
   if (TEXT_CONTROL_PATTERN.test(value) || /[\n\r\u2028\u2029]/u.test(value)) {
@@ -370,6 +484,44 @@ function normalizeLinkRow(
   return { buttons, kind: "link-row" }
 }
 
+function normalizeRequestRow(
+  value: Record<string, unknown>,
+  path: string,
+  accumulator: LayoutAccumulator,
+): NormalizedComponentRequestRow {
+  assertKeys(value, REQUEST_ROW_KEYS, path)
+  if (
+    !Array.isArray(value.buttons)
+    || value.buttons.length < 1
+    || value.buttons.length > REQUEST_BUTTON_LIMITS.buttonsPerRow
+  ) {
+    throw new RangeError(
+      `${path}.buttons must contain 1-${REQUEST_BUTTON_LIMITS.buttonsPerRow} request buttons`,
+    )
+  }
+  accumulator.actionRows += 1
+  const buttons = value.buttons.map((button, index) => {
+    const buttonPath = `${path}.buttons[${index}]`
+    const buttonRecord = record(button, buttonPath)
+    assertKeys(buttonRecord, REQUEST_BUTTON_KEYS, buttonPath)
+    if (
+      buttonRecord.style !== undefined
+      && !REQUEST_BUTTON_STYLES.includes(buttonRecord.style as RequestButtonStyle)
+    ) {
+      throw new RangeError(
+        `${buttonPath}.style must be primary, secondary, success, or danger`,
+      )
+    }
+    addNode(accumulator, buttonPath)
+    accumulator.requestButtons += 1
+    return {
+      label: assertRequestButtonLabel(buttonRecord.label, `${buttonPath}.label`),
+      style: (buttonRecord.style ?? "secondary") as RequestButtonStyle,
+    }
+  })
+  return { buttons, kind: "request-row" }
+}
+
 function normalizeContainer(
   value: Record<string, unknown>,
   path: string,
@@ -391,7 +543,7 @@ function normalizeContainer(
   }
   if (!Array.isArray(value.components) || value.components.length < 1) {
     throw new RangeError(
-      `${path}.components must contain at least one text, separator, or link row`,
+      `${path}.components must contain at least one text, separator, link row, or request row`,
     )
   }
   accumulator.containers += 1
@@ -408,10 +560,15 @@ function normalizeContainer(
     if (childRecord.kind === "link-row") {
       return normalizeLinkRow(childRecord, childPath, accumulator)
     }
+    if (childRecord.kind === "request-row") {
+      return normalizeRequestRow(childRecord, childPath, accumulator)
+    }
     if (childRecord.kind === "container") {
       throw new RangeError(`${childPath} cannot nest a container`)
     }
-    throw new RangeError(`${childPath}.kind must be link-row, separator, or text`)
+    throw new RangeError(
+      `${childPath}.kind must be link-row, request-row, separator, or text`,
+    )
   })
   return {
     accentColor: (value.accentColor as number | undefined) ?? null,
@@ -431,8 +588,11 @@ function normalizeNode(
   if (node.kind === "text") return normalizeText(node, path, accumulator)
   if (node.kind === "separator") return normalizeSeparator(node, path, accumulator)
   if (node.kind === "link-row") return normalizeLinkRow(node, path, accumulator)
+  if (node.kind === "request-row") return normalizeRequestRow(node, path, accumulator)
   if (node.kind === "container") return normalizeContainer(node, path, accumulator)
-  throw new RangeError(`${path}.kind must be container, link-row, separator, or text`)
+  throw new RangeError(
+    `${path}.kind must be container, link-row, request-row, separator, or text`,
+  )
 }
 
 export function normalizeComponentLayout(input: unknown): NormalizedComponentLayout {
@@ -449,6 +609,7 @@ export function normalizeComponentLayout(input: unknown): NormalizedComponentLay
     actionRows: 0,
     containers: 0,
     linkButtons: 0,
+    requestButtons: 0,
     separators: 0,
     textCharacters: 0,
     textDisplays: 0,
@@ -469,7 +630,17 @@ export function normalizeComponentLayout(input: unknown): NormalizedComponentLay
   return layout
 }
 
-function compileNode(component: NormalizedComponent): DiscordStaticComponent {
+interface ComponentCompilationState {
+  buttonIndex: number
+  layoutDigest: string
+  requestButtons: ComponentLayoutRequestButtonBinding | undefined
+  route: string | undefined
+}
+
+function compileNode(
+  component: NormalizedComponent,
+  state: ComponentCompilationState,
+): DiscordStaticComponent {
   if (component.kind === "text") {
     return {
       content: component.content,
@@ -494,11 +665,41 @@ function compileNode(component: NormalizedComponent): DiscordStaticComponent {
       type: DISCORD_COMPONENT_TYPES.actionRow,
     }
   }
+  if (component.kind === "request-row") {
+    if (!state.requestButtons || !state.route) {
+      throw new RangeError(
+        "Managed Discord request buttons require an explicit authenticated binding",
+      )
+    }
+    const requestButtons = state.requestButtons
+    const route = state.route
+    return {
+      components: component.buttons.map((button) => {
+        const index = state.buttonIndex
+        state.buttonIndex += 1
+        return {
+          custom_id: createRequestButtonCustomId(
+            requestButtons.key,
+            requestButtons.binding,
+            state.layoutDigest,
+            route,
+            { index, label: button.label, style: button.style },
+          ),
+          label: button.label,
+          style: DISCORD_REQUEST_BUTTON_STYLES[button.style] as 1 | 2 | 3 | 4,
+          type: DISCORD_COMPONENT_TYPES.button,
+        }
+      }),
+      type: DISCORD_COMPONENT_TYPES.actionRow,
+    }
+  }
   return {
     ...(component.accentColor === null
       ? {}
       : { accent_color: component.accentColor }),
-    components: component.components.map(compileNode) as DiscordContainerComponent["components"],
+    components: component.components.map((child) => (
+      compileNode(child, state)
+    )) as DiscordContainerComponent["components"],
     spoiler: component.spoiler,
     type: DISCORD_COMPONENT_TYPES.container,
   }
@@ -522,10 +723,48 @@ function parseCompiledLinkButton(
   }
 }
 
+function parseCompiledRequestButton(
+  input: unknown,
+  path: string,
+): ComponentRequestButtonInput & { customId: string } {
+  const value = record(input, path)
+  assertKeys(value, DISCORD_REQUEST_BUTTON_REQUEST_KEYS, path)
+  const style = Object.entries(DISCORD_REQUEST_BUTTON_STYLES)
+    .find(([, numeric]) => numeric === value.style)?.[0] as RequestButtonStyle | undefined
+  if (
+    value.type !== DISCORD_COMPONENT_TYPES.button
+    || !style
+    || typeof value.custom_id !== "string"
+    || !parseRequestButtonCustomId(value.custom_id)
+  ) {
+    throw new RangeError(`${path} must be a managed Discord request Button`)
+  }
+  return {
+    customId: value.custom_id,
+    label: value.label as string,
+    style,
+  }
+}
+
 export function compileComponentLayout(
   layout: NormalizedComponentLayout,
+  requestButtons?: ComponentLayoutRequestButtonBinding,
 ): DiscordStaticComponent[] {
-  return layout.map(compileNode)
+  const layoutDigest = requestButtonLayoutDigest(layout)
+  const route = requestButtons
+    ? createRequestButtonRoute(
+        requestButtons.key,
+        requestButtons.binding,
+        layoutDigest,
+      )
+    : undefined
+  const state: ComponentCompilationState = {
+    buttonIndex: 0,
+    layoutDigest,
+    requestButtons,
+    route,
+  }
+  return layout.map((component) => compileNode(component, state))
 }
 
 function parseCompiledNode(
@@ -557,6 +796,21 @@ function parseCompiledNode(
     if (!Array.isArray(value.components)) {
       throw new RangeError(`${path}.components must be an array`)
     }
+    const managed = value.components.some((entry) => (
+      isManagedRequestButtonCustomId(record(entry, `${path}.components[]`).custom_id)
+    ))
+    if (managed) {
+      return {
+        buttons: value.components.map((entry, index) => {
+          const { customId: _customId, ...button } = parseCompiledRequestButton(
+            entry,
+            `${path}.components[${index}]`,
+          )
+          return button
+        }),
+        kind: "request-row",
+      }
+    }
     return {
       buttons: value.components.map((entry, index) => (
         parseCompiledLinkButton(entry, `${path}.components[${index}]`)
@@ -577,13 +831,16 @@ function parseCompiledNode(
       components: value.components.map((entry, index) => (
         parseCompiledNode(entry, `${path}.components[${index}]`, true)
       )) as (
-        ComponentLinkRowInput | ComponentTextInput | ComponentSeparatorInput
+        | ComponentLinkRowInput
+        | ComponentRequestRowInput
+        | ComponentTextInput
+        | ComponentSeparatorInput
       )[],
       kind: "container",
       spoiler: value.spoiler as boolean,
     }
   }
-  throw new RangeError(`${path}.type is not a supported static Discord component`)
+  throw new RangeError(`${path}.type is not a supported Discord component`)
 }
 
 export function assertCompiledComponentLayout(
@@ -595,7 +852,32 @@ export function assertCompiledComponentLayout(
   const parsed = input.map((entry, index) => (
     parseCompiledNode(entry, `components[${index}]`, false)
   ))
-  const canonical = compileComponentLayout(normalizeComponentLayout(parsed))
+  const normalized = normalizeComponentLayout(parsed)
+  if (componentLayoutHasRequestButtons(normalized)) {
+    const customIds: string[] = []
+    const collect = (entry: unknown): void => {
+      const value = record(entry, "compiled component")
+      if (value.type === DISCORD_COMPONENT_TYPES.button && value.style !== 5) {
+        if (typeof value.custom_id !== "string") {
+          throw new RangeError("Compiled Discord request Button lacks a custom ID")
+        }
+        customIds.push(value.custom_id)
+      }
+      if (Array.isArray(value.components)) value.components.forEach(collect)
+    }
+    input.forEach(collect)
+    const identities = customIds.map(parseRequestButtonCustomId)
+    if (
+      identities.some((identity) => !identity)
+      || new Set(customIds).size !== customIds.length
+      || new Set(identities.map((identity) => identity?.route)).size !== 1
+      || identities.some((identity, index) => identity?.index !== index)
+    ) {
+      throw new RangeError("Compiled Discord request Buttons have invalid managed identities")
+    }
+    return
+  }
+  const canonical = compileComponentLayout(normalized)
   if (stableString(input) !== stableString(canonical)) {
     throw new RangeError("Compiled Discord component layout is not canonical")
   }
@@ -643,14 +925,55 @@ function parseDiscordLinkButton(
   }
 }
 
+interface RawManagedRequestButton {
+  customId: string
+  label: string
+  style: RequestButtonStyle
+}
+
+interface DiscordLayoutParseState {
+  ids: Set<number>
+  requestButtons: RawManagedRequestButton[]
+}
+
+function parseDiscordRequestButton(
+  input: unknown,
+  path: string,
+  state: DiscordLayoutParseState,
+): ComponentRequestButtonInput {
+  const value = record(input, path)
+  componentId(value, path, state.ids)
+  assertKeys(value, DISCORD_REQUEST_BUTTON_KEYS, path)
+  const style = Object.entries(DISCORD_REQUEST_BUTTON_STYLES)
+    .find(([, numeric]) => numeric === value.style)?.[0] as RequestButtonStyle | undefined
+  if (
+    value.type !== DISCORD_COMPONENT_TYPES.button
+    || !style
+    || typeof value.custom_id !== "string"
+    || !parseRequestButtonCustomId(value.custom_id)
+  ) {
+    throw new RangeError(`${path} must be an authenticated Discord request Button`)
+  }
+  if (value.disabled !== undefined && value.disabled !== false) {
+    throw new RangeError(`${path}.disabled must be false when Discord includes it`)
+  }
+  const label = value.label as string
+  state.requestButtons.push({
+    customId: value.custom_id,
+    label,
+    style,
+  })
+  return { label, style }
+}
+
 function parseDiscordNode(
   input: unknown,
   path: string,
-  ids: Set<number>,
+  state: DiscordLayoutParseState,
   child: boolean,
 ): ComponentLayoutInput {
   const value = record(input, path)
-  componentId(value, path, ids)
+  componentId(value, path, state.ids)
   if (value.type === DISCORD_COMPONENT_TYPES.textDisplay) {
     assertKeys(value, DISCORD_TEXT_KEYS, path)
     return { content: value.content as string, kind: "text" }
@@ -673,12 +996,29 @@ function parseDiscordNode(
     if (!Array.isArray(value.components)) {
       throw new RangeError(`${path}.components must be an array`)
     }
-    return {
-      buttons: value.components.map((entry, index) => (
-        parseDiscordLinkButton(entry, `${path}.components[${index}]`, ids)
-      )),
-      kind: "link-row",
-    }
+    const requestRow = value.components.some((entry, index) => {
+      const button = record(entry, `${path}.components[${index}]`)
+      return [1, 2, 3, 4].includes(button.style as number)
+        || button.style !== DISCORD_BUTTON_STYLES.link
+          && button.custom_id !== undefined
+    })
+    return requestRow
+      ? {
+          buttons: value.components.map((entry, index) => (
+            parseDiscordRequestButton(
+              entry,
+              `${path}.components[${index}]`,
+              state,
+            )
+          )),
+          kind: "request-row",
+        }
+      : {
+          buttons: value.components.map((entry, index) => (
+            parseDiscordLinkButton(entry, `${path}.components[${index}]`, state.ids)
+          )),
+          kind: "link-row",
+        }
   }
   if (value.type === DISCORD_COMPONENT_TYPES.container) {
     if (child) throw new RangeError(`${path} cannot contain a nested Discord container`)
@@ -691,26 +1031,88 @@ function parseDiscordNode(
         ? {}
         : { accentColor: value.accent_color as number }),
       components: value.components.map((entry, index) => (
-        parseDiscordNode(entry, `${path}.components[${index}]`, ids, true)
+        parseDiscordNode(entry, `${path}.components[${index}]`, state, true)
       )) as (
-        ComponentLinkRowInput | ComponentTextInput | ComponentSeparatorInput
+        | ComponentLinkRowInput
+        | ComponentRequestRowInput
+        | ComponentTextInput
+        | ComponentSeparatorInput
       )[],
       kind: "container",
       ...(value.spoiler === undefined ? {} : { spoiler: value.spoiler as boolean }),
     }
   }
-  throw new RangeError(`${path}.type is not a supported static Discord component`)
+  throw new RangeError(`${path}.type is not a supported Discord component`)
 }
 
-export function parseDiscordComponentLayout(input: unknown): NormalizedComponentLayout {
+export function parseDiscordManagedComponentLayout(
+  input: unknown,
+  requestButtonVerification?: ComponentLayoutRequestButtonVerification,
+): ParsedManagedComponentLayout {
   if (!Array.isArray(input)) {
     throw new RangeError("Discord component response must be an array")
   }
-  const ids = new Set<number>()
+  const state: DiscordLayoutParseState = {
+    ids: new Set<number>(),
+    requestButtons: [],
+  }
   const parsed = input.map((entry, index) => (
-    parseDiscordNode(entry, `components[${index}]`, ids, false)
+    parseDiscordNode(entry, `components[${index}]`, state, false)
   ))
-  return normalizeComponentLayout(parsed)
+  const layout = normalizeComponentLayout(parsed)
+  if (state.requestButtons.length === 0) {
+    return { layout, requestButtons: [], route: null }
+  }
+  if (!requestButtonVerification) {
+    throw new RangeError(
+      "Discord response contains request buttons without an authenticated verification binding",
+    )
+  }
+  const layoutDigest = requestButtonLayoutDigest(layout)
+  let route: string | null = null
+  const requestButtons = state.requestButtons.map((button, index): ManagedRequestButton => {
+    const identity = verifyRequestButtonCustomId(
+      requestButtonVerification.key,
+      requestButtonVerification.scope,
+      layoutDigest,
+      button.customId,
+      { index, label: button.label, style: button.style },
+    )
+    if (!identity || (route !== null && route !== identity.route)) {
+      throw new RangeError("Discord response contains an invalid managed request Button")
+    }
+    route ??= identity.route
+    return {
+      customId: button.customId,
+      index,
+      label: button.label,
+      route: identity.route,
+      style: button.style,
+    }
+  })
+  if (requestButtonVerification.operationKeyHash !== undefined) {
+    const expectedRoute = createRequestButtonRoute(
+      requestButtonVerification.key,
+      {
+        ...requestButtonVerification.scope,
+        operationKeyHash: requestButtonVerification.operationKeyHash,
+      },
+      layoutDigest,
+    )
+    if (route !== expectedRoute) {
+      throw new RangeError(
+        "Discord response request Buttons do not match the reviewed operation",
+      )
+    }
+  }
+  return { layout, requestButtons, route }
+}
+
+export function parseDiscordComponentLayout(
+  input: unknown,
+  requestButtonVerification?: ComponentLayoutRequestButtonVerification,
+): NormalizedComponentLayout {
+  return parseDiscordManagedComponentLayout(input, requestButtonVerification).layout
 }
 
 export function componentLayoutsEqual(
@@ -718,6 +1120,16 @@ export function componentLayoutsEqual(
   right: NormalizedComponentLayout,
 ): boolean {
   return stableString(left) === stableString(right)
+}
+
+export function componentLayoutHasRequestButtons(
+  layout: NormalizedComponentLayout,
+): boolean {
+  return layout.some((component) => (
+    component.kind === "request-row"
+    || component.kind === "container"
+      && component.components.some((child) => child.kind === "request-row")
+  ))
 }
 
 export function componentLayoutText(layout: NormalizedComponentLayout): string {
@@ -755,6 +1167,7 @@ export function componentLayoutCounts(
     actionRows: 0,
     containers: 0,
     linkButtons: 0,
+    requestButtons: 0,
     separators: 0,
     textDisplays: 0,
     topLevel: layout.length,
@@ -767,6 +1180,11 @@ export function componentLayoutCounts(
     if (component.kind === "link-row") {
       counts.actionRows += 1
       counts.linkButtons += component.buttons.length
+      counts.total += component.buttons.length
+    }
+    if (component.kind === "request-row") {
+      counts.actionRows += 1
+      counts.requestButtons += component.buttons.length
       counts.total += component.buttons.length
     }
     if (component.kind === "container") {
@@ -804,6 +1222,16 @@ function previewLines(layout: NormalizedComponentLayout): string[] {
       lines.push(`[${path}] Text Display: ${JSON.stringify(component.content)}`)
       return
     }
+    if (component.kind === "request-row") {
+      lines.push(`[${path}] Action Row: ${component.buttons.length} request button(s)`)
+      component.buttons.forEach((button, buttonIndex) => {
+        const buttonPath = `${path}.${buttonIndex + 1}`
+        lines.push(
+          `  [${buttonPath}] Request Button (${button.style}): ${JSON.stringify(button.label)}`,
+        )
+      })
+      return
+    }
     if (component.kind === "separator") {
       lines.push(
         `[${path}] Separator: divider=${component.divider} spacing=${component.spacing}`,
@@ -834,12 +1262,20 @@ function previewLines(layout: NormalizedComponentLayout): string[] {
         lines.push(
           `  [${childPath}] Separator: divider=${child.divider} spacing=${child.spacing}`,
         )
-      } else {
+      } else if (child.kind === "link-row") {
         lines.push(`  [${childPath}] Action Row: ${child.buttons.length} link button(s)`)
         child.buttons.forEach((button, buttonIndex) => {
           const buttonPath = `${childPath}.${buttonIndex + 1}`
           lines.push(
             `    [${buttonPath}] Link Button: ${JSON.stringify(button.label)} -> ${button.url}`,
+          )
+        })
+      } else {
+        lines.push(`  [${childPath}] Action Row: ${child.buttons.length} request button(s)`)
+        child.buttons.forEach((button, buttonIndex) => {
+          const buttonPath = `${childPath}.${buttonIndex + 1}`
+          lines.push(
+            `    [${buttonPath}] Request Button (${button.style}): ${JSON.stringify(button.label)}`,
           )
         })
       }
@@ -864,8 +1300,9 @@ export function reviewComponentLayout(
     (userId) => !notificationSet.has(userId),
   )
   const links = componentLayoutLinks(layout)
+  const counts = componentLayoutCounts(layout)
   return {
-    counts: componentLayoutCounts(layout),
+    counts,
     layout,
     linkOrigins: links.origins,
     linkUrls: links.urls,
@@ -881,9 +1318,19 @@ export function reviewComponentLayout(
         ? [
             "Link buttons open external HTTPS URLs without callback authority",
             "The connector does not fetch links or verify redirects or final destinations",
-            "This static layout registers no custom-ID button, select, modal, or callback authority",
           ]
-        : ["This static layout registers no button, select, modal, or callback authority"]),
+        : []),
+      ...(counts.requestButtons > 0
+        ? [
+            "Request buttons open private bounded broker requests and never execute a Discord action directly",
+            "Request-button clicks require ready native Interaction ingress and exact guild, channel, and user scope",
+            "Button styling, including danger, grants no write or destructive authority",
+            "Managed custom IDs are authenticated; rotating the bot token invalidates existing request buttons",
+            "This layout registers no select, modal, caller-defined custom ID, or arbitrary callback authority",
+          ]
+        : links.urls.length > 0
+          ? ["This static layout registers no custom-ID button, select, modal, or callback authority"]
+          : ["This static layout registers no button, select, modal, or callback authority"]),
       ...(suppressedUserMentionIds.length > 0
         ? ["Visible user mentions omitted from notifyUserIds are rendered without notification"]
         : []),

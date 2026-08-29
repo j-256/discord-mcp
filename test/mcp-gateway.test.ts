@@ -35,6 +35,12 @@ class NativeInteractionFeed implements NativeInteractionSource {
   readonly enabled = true
   readonly #listeners = new Set<NativeInteractionChangeListener>()
 
+  getRequestButtonReadiness(
+    _guildId: string,
+  ): ReturnType<NativeInteractionSource["getRequestButtonReadiness"]> {
+    throw new Error("Request-button readiness is outside this notification test")
+  }
+
   getStatus(): ReturnType<NativeInteractionSource["getStatus"]> {
     throw new Error("Status read is outside this notification test")
   }

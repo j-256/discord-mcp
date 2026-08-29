@@ -12,14 +12,18 @@ import type {
 } from "./activity-log.js"
 import {
   compileComponentLayout,
+  componentLayoutHasRequestButtons,
   componentLayoutText,
   componentLayoutsEqual,
-  parseDiscordComponentLayout,
+  parseDiscordManagedComponentLayout,
   reviewComponentLayout,
   type ComponentLayoutCounts,
   type ComponentLayoutInput,
+  type ComponentLayoutRequestButtonBinding,
+  type ComponentLayoutRequestButtonVerification,
   type ComponentLayoutReview,
   type NormalizedComponentLayout,
+  type ParsedManagedComponentLayout,
 } from "./component-layout.js"
 import {
   DISCORD_CHANNEL_TYPES,
@@ -54,6 +58,7 @@ import {
   type OperationStore,
   operationKeyHash,
 } from "./operation-store.js"
+import type { NativeInteractionRequestButtonReadiness } from "./native-interaction-broker.js"
 import {
   DISCORD_PERMISSIONS,
   evaluateBotChannelPermissions,
@@ -66,6 +71,7 @@ import {
   REVIEWED_PLAN_DIGEST_PATTERN,
   reviewedPlanDigest,
 } from "./reviewed-plan.js"
+import { requestButtonRouteHash } from "./request-button.js"
 import type {
   DiscordChannel,
   DiscordGuild,
@@ -118,6 +124,8 @@ const PRIVACY_OMITTED_FIELDS = [
   "parsedUserMentionIds",
   "rawOperationKey",
   "rawPayloads",
+  "requestButtonCustomIds",
+  "requestButtonRoutes",
   "replyAuthorId",
 ] as const
 const CREATE_REQUEST_KEYS: ReadonlySet<string> = new Set([
@@ -181,6 +189,17 @@ export interface ComponentMessagePermissionEvidence {
   requiredPermissionNames: DiscordPermissionName[]
 }
 
+export interface ComponentMessageRequestButtonIngress {
+  authorizedUserIds: string[]
+  commandId: string
+  commandVersion: string
+  gatewayDelivery: "verified"
+  guildId: string
+  phase: "ready"
+  ready: true
+  schemaVersion: number
+}
+
 export interface ComponentMessagePlan {
   action: ComponentMessageAction
   applicationId: string
@@ -199,6 +218,8 @@ export interface ComponentMessagePlan {
     parsedUserMentionIds: string[]
     pinned: boolean
     preview: string
+    requestButtonCount: number
+    requestButtonRouteHash: string | null
     timestamp: string
   } | null
   digest: string
@@ -217,6 +238,10 @@ export interface ComponentMessagePlan {
     messageId: string
     type: number
   } | null
+  requestButtons: {
+    count: number
+    ingress: ComponentMessageRequestButtonIngress | null
+  }
   schemaVersion: number
   status: "already-current" | "planned"
   target: {
@@ -297,6 +322,10 @@ export interface ComponentMessageServiceOptions {
   planKey?: Uint8Array
   policy: ScopePolicy
   randomId?: () => string
+  requestButtonKey?: Uint8Array
+  requestButtonReadiness?: (
+    guildId: string,
+  ) => NativeInteractionRequestButtonReadiness | Promise<NativeInteractionRequestButtonReadiness>
   verificationKey?: Uint8Array
 }
 
@@ -307,6 +336,8 @@ interface ExistingComponentMessage {
   message: DiscordMessage
   parsedUserMentionIds: string[]
   pinned: boolean
+  requestButtonCount: number
+  requestButtonRouteHash: string | null
   timestamp: string
 }
 
@@ -825,12 +856,25 @@ function exactFlags(flags: unknown): number {
   return flags as number
 }
 
+function exactManagedLayout(
+  components: unknown,
+  verification: ComponentLayoutRequestButtonVerification,
+  message: string,
+): ParsedManagedComponentLayout {
+  try {
+    return parseDiscordManagedComponentLayout(components, verification)
+  } catch (error) {
+    throw evidenceError(message, error)
+  }
+}
+
 function exactExistingMessage(
   message: DiscordMessage,
   botId: string,
   channelId: string,
   guildId: string,
   messageId: string,
+  requestButtonVerification: ComponentLayoutRequestButtonVerification,
 ): ExistingComponentMessage {
   exactMessageBase(message, botId, channelId, guildId, messageId)
   if (
@@ -843,12 +887,12 @@ function exactExistingMessage(
   ) {
     throw evidenceError("Discord edit target is not an exact default component message")
   }
-  let layout: NormalizedComponentLayout
-  try {
-    layout = parseDiscordComponentLayout(message.components)
-  } catch (error) {
-    throw evidenceError("Discord edit target has an unsupported component layout", error)
-  }
+  const parsedLayout = exactManagedLayout(
+    message.components,
+    requestButtonVerification,
+    "Discord edit target has an unsupported component layout",
+  )
+  const layout = parsedLayout.layout
   const parsedUserMentionIds = exactParsedUserMentionIds(message)
   const visibleUserMentionIds = new Set(
     discordMentionedUserIds(componentLayoutText(layout)),
@@ -863,6 +907,10 @@ function exactExistingMessage(
     message,
     parsedUserMentionIds,
     pinned: message.pinned,
+    requestButtonCount: parsedLayout.requestButtons.length,
+    requestButtonRouteHash: parsedLayout.route === null
+      ? null
+      : requestButtonRouteHash(parsedLayout.route),
     timestamp: message.timestamp,
   }
 }
@@ -900,6 +948,7 @@ function exactCreatedMessage(
   expectedMessageId: string,
   expectedParsedUserMentionIds: readonly string[],
   requireNonce: boolean,
+  requestButtonVerification: ComponentLayoutRequestButtonVerification,
 ): ExistingComponentMessage {
   exactMessageBase(message, botId, request.channelId, guildId, expectedMessageId)
   const expectedType = request.replyToMessageId === null ? 0 : 19
@@ -922,12 +971,12 @@ function exactCreatedMessage(
     guildId,
     request.replyToMessageId,
   )
-  let layout: NormalizedComponentLayout
-  try {
-    layout = parseDiscordComponentLayout(message.components)
-  } catch (error) {
-    throw evidenceError("Discord created an unsupported component layout", error)
-  }
+  const parsedLayout = exactManagedLayout(
+    message.components,
+    requestButtonVerification,
+    "Discord created an unsupported component layout",
+  )
+  const layout = parsedLayout.layout
   if (!componentLayoutsEqual(layout, request.components)) {
     throw evidenceError("Discord created a component layout that differs from the plan")
   }
@@ -945,6 +994,10 @@ function exactCreatedMessage(
     message,
     parsedUserMentionIds,
     pinned: false,
+    requestButtonCount: parsedLayout.requestButtons.length,
+    requestButtonRouteHash: parsedLayout.route === null
+      ? null
+      : requestButtonRouteHash(parsedLayout.route),
     timestamp: message.timestamp,
   }
 }
@@ -955,6 +1008,7 @@ function exactEditedMessage(
   request: NormalizedComponentMessageRequest,
   guildId: string,
   current: ExistingComponentMessage,
+  requestButtonVerification: ComponentLayoutRequestButtonVerification,
 ): ExistingComponentMessage {
   const messageId = request.messageId as string
   exactMessageBase(message, botId, request.channelId, guildId, messageId)
@@ -969,12 +1023,12 @@ function exactEditedMessage(
   ) {
     throw evidenceError("Discord edited component-message state differs from the reviewed identity")
   }
-  let layout: NormalizedComponentLayout
-  try {
-    layout = parseDiscordComponentLayout(message.components)
-  } catch (error) {
-    throw evidenceError("Discord edited an unsupported component layout", error)
-  }
+  const parsedLayout = exactManagedLayout(
+    message.components,
+    requestButtonVerification,
+    "Discord edited an unsupported component layout",
+  )
+  const layout = parsedLayout.layout
   if (!componentLayoutsEqual(layout, request.components)) {
     throw evidenceError("Discord edited component layout differs from the plan")
   }
@@ -992,6 +1046,10 @@ function exactEditedMessage(
     message,
     parsedUserMentionIds,
     pinned: current.pinned,
+    requestButtonCount: parsedLayout.requestButtons.length,
+    requestButtonRouteHash: parsedLayout.route === null
+      ? null
+      : requestButtonRouteHash(parsedLayout.route),
     timestamp: current.timestamp,
   }
 }
@@ -1005,6 +1063,8 @@ function exactReadbackMatch(
     || response.pinned !== readback.pinned
     || response.timestamp !== readback.timestamp
     || response.editedTimestamp !== readback.editedTimestamp
+    || response.requestButtonCount !== readback.requestButtonCount
+    || response.requestButtonRouteHash !== readback.requestButtonRouteHash
     || JSON.stringify(response.parsedUserMentionIds)
       !== JSON.stringify(readback.parsedUserMentionIds)
     || !componentLayoutsEqual(response.layout, readback.layout)
@@ -1117,7 +1177,90 @@ function operationReceipt(options: {
   }
 }
 
+function requestButtonBinding(
+  key: Uint8Array,
+  applicationId: string,
+  botId: string,
+  request: NormalizedComponentMessageRequest,
+  guildId: string,
+): ComponentLayoutRequestButtonBinding | undefined {
+  return componentLayoutHasRequestButtons(request.components)
+    ? {
+        binding: {
+          applicationId,
+          botId,
+          channelId: request.channelId,
+          guildId,
+          operationKeyHash: request.operationKeyHash,
+        },
+        key,
+      }
+    : undefined
+}
+
+function requestButtonVerification(
+  key: Uint8Array,
+  applicationId: string,
+  botId: string,
+  channelId: string,
+  guildId: string,
+  operationKeyHash?: string,
+): ComponentLayoutRequestButtonVerification {
+  return {
+    key,
+    ...(operationKeyHash === undefined ? {} : { operationKeyHash }),
+    scope: {
+      applicationId,
+      botId,
+      channelId,
+      guildId,
+    },
+  }
+}
+
+function exactRequestButtonIngress(
+  readiness: NativeInteractionRequestButtonReadiness,
+  guildId: string,
+  authorizedUserIds: readonly string[],
+): ComponentMessageRequestButtonIngress {
+  const exactAuthorizedUserIds = [...authorizedUserIds]
+  if (
+    !readiness
+    || typeof readiness !== "object"
+    || Array.isArray(readiness)
+    || readiness.guildId !== guildId
+    || readiness.phase !== "ready"
+    || readiness.ready !== true
+    || !positiveSnowflake(readiness.commandId)
+    || !positiveSnowflake(readiness.commandVersion)
+    || readiness.gatewayDelivery !== "verified"
+    || readiness.schemaVersion !== SCHEMA_VERSION
+    || exactAuthorizedUserIds.length < 1
+    || exactAuthorizedUserIds.some((userId) => !positiveSnowflake(userId))
+    || new Set(exactAuthorizedUserIds).size !== exactAuthorizedUserIds.length
+    || JSON.stringify(exactAuthorizedUserIds)
+      !== JSON.stringify([...exactAuthorizedUserIds].sort())
+  ) {
+    throw evidenceError(
+      "Discord request-button publication requires a ready, verified native Interaction ingress for the exact guild",
+    )
+  }
+  return {
+    authorizedUserIds: exactAuthorizedUserIds,
+    commandId: readiness.commandId,
+    commandVersion: readiness.commandVersion,
+    gatewayDelivery: "verified",
+    guildId,
+    phase: "ready",
+    ready: true,
+    schemaVersion: SCHEMA_VERSION,
+  }
+}
+
 function createInput(
+  applicationId: string,
+  botId: string,
+  requestButtonKey: Uint8Array,
   request: NormalizedComponentMessageRequest,
   guildId: string,
 ): CreateComponentMessageInput {
@@ -1126,7 +1269,16 @@ function createInput(
       request.notifyUserIds,
       request.notifyReplyAuthor,
     ),
-    components: compileComponentLayout(request.components),
+    components: compileComponentLayout(
+      request.components,
+      requestButtonBinding(
+        requestButtonKey,
+        applicationId,
+        botId,
+        request,
+        guildId,
+      ),
+    ),
     nonce: componentMessageNonce(request.channelId, request.operationKey),
     ...(request.replyToMessageId === null
       ? {}
@@ -1140,12 +1292,25 @@ function createInput(
 }
 
 function editInput(
+  applicationId: string,
+  botId: string,
+  requestButtonKey: Uint8Array,
   request: NormalizedComponentMessageRequest,
   current: ExistingComponentMessage,
+  guildId: string,
 ): EditComponentMessageInput {
   return {
     allowedMentions: discordAllowedMentions(request.notifyUserIds, false),
-    components: compileComponentLayout(request.components),
+    components: compileComponentLayout(
+      request.components,
+      requestButtonBinding(
+        requestButtonKey,
+        applicationId,
+        botId,
+        request,
+        guildId,
+      ),
+    ),
     flags: current.flags,
   }
 }
@@ -1169,6 +1334,10 @@ export class ComponentMessageService {
   readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
   readonly #randomId: () => string
+  readonly #requestButtonKey: Uint8Array
+  readonly #requestButtonReadiness: ((
+    guildId: string,
+  ) => NativeInteractionRequestButtonReadiness | Promise<NativeInteractionRequestButtonReadiness>) | undefined
   readonly #verificationKey: Uint8Array
 
   constructor(options: ComponentMessageServiceOptions) {
@@ -1180,16 +1349,20 @@ export class ComponentMessageService {
     this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
+    this.#requestButtonKey = options.requestButtonKey || this.#planKey
+    this.#requestButtonReadiness = options.requestButtonReadiness
     this.#verificationKey = options.verificationKey || this.#planKey
   }
 
   async #state(
+    applicationId: string,
     botId: string,
     intent: ComponentMessageContentIntentStatus,
     request: NormalizedComponentMessageRequest,
     options: RequestOptions,
     stateOptions: ComponentMessageStateOptions = {},
   ): Promise<ComponentMessageState> {
+    assertPositiveSnowflake(applicationId, "Discord connector application ID")
     assertPositiveSnowflake(botId, "Discord connector bot ID")
     if (intent !== "enabled") {
       throw evidenceError(
@@ -1282,6 +1455,13 @@ export class ComponentMessageService {
           request.channelId,
           guildId,
           request.messageId as string,
+          requestButtonVerification(
+            this.#requestButtonKey,
+            applicationId,
+            botId,
+            request.channelId,
+            guildId,
+          ),
         )
     return {
       botMember,
@@ -1305,7 +1485,24 @@ export class ComponentMessageService {
   ): Promise<BuiltComponentMessagePlan> {
     assertPositiveSnowflake(applicationId, "Discord connector application ID")
     this.#policy.assertComponentLinkOrigins(request.review.linkOrigins)
-    const state = await this.#state(botId, intent, request, options)
+    const state = await this.#state(applicationId, botId, intent, request, options)
+    let requestButtonIngress: ComponentMessageRequestButtonIngress | null = null
+    if (componentLayoutHasRequestButtons(request.components)) {
+      const authorizedUserIds = this.#policy.assertNativeInteractionTargetAllowed(
+        state.guildId,
+        request.channelId,
+      )
+      if (!this.#requestButtonReadiness) {
+        throw evidenceError(
+          "Discord request-button publication requires a paired native Interaction broker",
+        )
+      }
+      requestButtonIngress = exactRequestButtonIngress(
+        await this.#requestButtonReadiness(state.guildId),
+        state.guildId,
+        authorizedUserIds,
+      )
+    }
     const writeRequired = request.action === "create"
       || state.current === null
       || !componentLayoutsEqual(state.current.layout, request.components)
@@ -1328,7 +1525,13 @@ export class ComponentMessageService {
             "The operation key cannot be reused after reservation, including after an uncertain outcome",
           ]
         : ["The exact notification-free edit is a record-free no-op that does not reserve the operation key"]),
-      "Durable records omit component text, component trees, link destinations, generated component IDs, notification IDs, raw payloads, and the raw operation key",
+      ...(requestButtonIngress === null
+        ? []
+        : [
+            "Each request Button creates only a private bounded broker request after fresh authenticated source-message validation",
+            "Request Buttons grant no write or administration authority and accept clicks only from the exact configured user scope",
+          ]),
+      "Durable records omit component text, component trees, link destinations, request-button IDs and routes, notification IDs, raw payloads, and the raw operation key",
     ]
     const currentSnapshot = state.current === null
       ? null
@@ -1339,6 +1542,8 @@ export class ComponentMessageService {
           messageId: state.current.message.id,
           parsedUserMentionIds: state.current.parsedUserMentionIds,
           pinned: state.current.pinned,
+          requestButtonCount: state.current.requestButtonCount,
+          requestButtonRouteHash: state.current.requestButtonRouteHash,
           reference: referenceSnapshot(state.current.message),
           timestamp: state.current.timestamp,
           type: state.current.message.type,
@@ -1370,6 +1575,10 @@ export class ComponentMessageService {
             timestamp: state.reply.timestamp,
             type: state.reply.type,
           },
+      requestButtons: {
+        count: request.review.counts.requestButtons,
+        ingress: requestButtonIngress,
+      },
       request: {
         action: request.action,
         channelId: request.channelId,
@@ -1404,6 +1613,8 @@ export class ComponentMessageService {
             parsedUserMentionIds: state.current.parsedUserMentionIds,
             pinned: state.current.pinned,
             preview: reviewComponentLayout(state.current.layout, []).preview,
+            requestButtonCount: state.current.requestButtonCount,
+            requestButtonRouteHash: state.current.requestButtonRouteHash,
             timestamp: state.current.timestamp,
           },
       digest,
@@ -1421,6 +1632,10 @@ export class ComponentMessageService {
             messageId: state.reply.id,
             type: state.reply.type,
           },
+      requestButtons: {
+        count: request.review.counts.requestButtons,
+        ingress: requestButtonIngress,
+      },
       schemaVersion: SCHEMA_VERSION,
       status,
       target: {
@@ -1563,6 +1778,7 @@ export class ComponentMessageService {
     }
 
     const state = await this.#state(
+      applicationId,
       botId,
       intent,
       normalized,
@@ -1590,6 +1806,15 @@ export class ComponentMessageService {
       }
     }
 
+    const completedRequestButtonVerification = requestButtonVerification(
+      this.#requestButtonKey,
+      applicationId,
+      botId,
+      normalized.channelId,
+      state.guildId,
+      normalized.operationKeyHash,
+    )
+
     try {
       const rawMessage = await this.#client.getMessage(
         normalized.channelId,
@@ -1605,6 +1830,7 @@ export class ComponentMessageService {
           messageId,
           expectedCreateParsedUserMentionIds(normalized, state.reply),
           false,
+          completedRequestButtonVerification,
         )
       } else {
         const current = exactExistingMessage(
@@ -1613,6 +1839,7 @@ export class ComponentMessageService {
           normalized.channelId,
           state.guildId,
           messageId,
+          completedRequestButtonVerification,
         )
         if (
           !componentLayoutsEqual(current.layout, normalized.components)
@@ -1788,12 +2015,26 @@ export class ComponentMessageService {
     const expectedParsedUserMentionIds = normalized.action === "create"
       ? expectedCreateParsedUserMentionIds(normalized, state.reply)
       : normalized.notifyUserIds
+    const completedRequestButtonVerification = requestButtonVerification(
+      this.#requestButtonKey,
+      applicationId,
+      botId,
+      normalized.channelId,
+      state.guildId,
+      normalized.operationKeyHash,
+    )
     try {
       let response: ExistingComponentMessage
       if (normalized.action === "create") {
         const created = await this.#client.createComponentMessage(
           normalized.channelId,
-          createInput(normalized, state.guildId),
+          createInput(
+            applicationId,
+            botId,
+            this.#requestButtonKey,
+            normalized,
+            state.guildId,
+          ),
           options,
         )
         mutationResolved = true
@@ -1806,6 +2047,7 @@ export class ComponentMessageService {
           created.id,
           expectedParsedUserMentionIds,
           true,
+          completedRequestButtonVerification,
         )
       } else {
         if (!state.current || !normalized.messageId) {
@@ -1814,7 +2056,14 @@ export class ComponentMessageService {
         const edited = await this.#client.editComponentMessage(
           normalized.channelId,
           normalized.messageId,
-          editInput(normalized, state.current),
+          editInput(
+            applicationId,
+            botId,
+            this.#requestButtonKey,
+            normalized,
+            state.current,
+            state.guildId,
+          ),
           options,
         )
         mutationResolved = true
@@ -1824,6 +2073,7 @@ export class ComponentMessageService {
           normalized,
           state.guildId,
           state.current,
+          completedRequestButtonVerification,
         )
       }
       responseMatched = true
@@ -1844,6 +2094,7 @@ export class ComponentMessageService {
             messageId,
             expectedParsedUserMentionIds,
             false,
+            completedRequestButtonVerification,
           )
         : exactEditedMessage(
             rawReadback,
@@ -1851,6 +2102,7 @@ export class ComponentMessageService {
             normalized,
             state.guildId,
             state.current as ExistingComponentMessage,
+            completedRequestButtonVerification,
           )
       exactReadbackMatch(response, readback)
       readbackMatched = true

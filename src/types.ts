@@ -279,6 +279,8 @@ export interface DiscordMessage {
   interaction_metadata?: {
     authorizing_integration_owners: Record<string, string>
     id: string
+    interacted_message_id?: string
+    original_response_message_id?: string
     type: number
     user: DiscordUser
   }

@@ -2497,7 +2497,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
         "pass",
-        "Message interactions and reviewed static component messages are disabled",
+        "Message interactions and reviewed component messages are disabled",
       ))
     } else if (config.interactionChannelIds.size === 0) {
       checks.push(check(
@@ -2509,7 +2509,7 @@ export async function diagnoseConnector(
       checks.push(check(
         DOCTOR_CHECK_IDS.interactionPolicy,
         "pass",
-        `Message interactions and reviewed static component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users, ${config.componentLinkOrigins.size} exact link origins, and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
+        `Message interactions and reviewed component messages are constrained to ${config.interactionChannelIds.size} channels with ${config.mentionUserIds.size} notification users, ${config.componentLinkOrigins.size} exact link origins, and a shared ${config.interactionMaxWritesPerMinute}-write rolling budget`,
       ))
     }
     if (!config.allowEmbedMessages) {
@@ -3928,7 +3928,7 @@ export async function diagnoseConnector(
           && config.messageForwardTargetChannelIds.size > 0
         const contentDependentWrites = [
           ...(announcementCrosspostsConfigured ? ["announcement crossposts"] : []),
-          ...(componentMessagesConfigured ? ["static component messages"] : []),
+          ...(componentMessagesConfigured ? ["component messages"] : []),
           ...(embedMessagesConfigured ? ["static rich-embed messages"] : []),
           ...(messageForwardingConfigured ? ["message forwarding"] : []),
         ]
@@ -4319,7 +4319,7 @@ export async function prepareSetup(
     ...(config.allowInteractions
       && config.interactionChannelIds.size > 0
       && config.mcpToolsets.has("interactions")
-      ? ["static component messages"]
+      ? ["component messages"]
       : []),
     ...(config.allowEmbedMessages
       && config.embedMessageChannelIds.size > 0

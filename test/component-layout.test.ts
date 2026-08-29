@@ -9,11 +9,40 @@ import {
   componentLayoutsEqual,
   normalizeComponentLayout,
   parseDiscordComponentLayout,
+  parseDiscordManagedComponentLayout,
   reviewComponentLayout,
 } from "../src/component-layout.js"
+import { operationKeyHash } from "../src/operation-store.js"
+import {
+  createRequestButtonCustomId,
+  createRequestButtonRoute,
+  parseRequestButtonCustomId,
+  REQUEST_BUTTON_LIMITS,
+  requestButtonLayoutDigest,
+  requestButtonVerificationKey,
+} from "../src/request-button.js"
 
+const APPLICATION_ID = "100000000000000001"
+const BOT_ID = "200000000000000001"
+const CHANNEL_ID = "300000000000000001"
+const GUILD_ID = "500000000000000001"
 const USER_ID = "400000000000000001"
 const OTHER_USER_ID = "400000000000000002"
+
+function withDiscordComponentIds(input: unknown[]): unknown[] {
+  let nextId = 1
+  const visit = (entry: unknown): unknown => {
+    assert.ok(entry && typeof entry === "object" && !Array.isArray(entry))
+    const value = entry as Record<string, unknown>
+    const result: Record<string, unknown> = { ...value, id: nextId }
+    nextId += 1
+    if (Array.isArray(value.components)) {
+      result.components = value.components.map(visit)
+    }
+    return result
+  }
+  return input.map(visit)
+}
 
 test("normalizes explicit static defaults and compiles only supported Discord fields", () => {
   const layout = normalizeComponentLayout([
@@ -61,6 +90,7 @@ test("normalizes explicit static defaults and compiles only supported Discord fi
     actionRows: 0,
     containers: 1,
     linkButtons: 0,
+    requestButtons: 0,
     separators: 2,
     textDisplays: 2,
     topLevel: 3,
@@ -159,6 +189,7 @@ test("normalizes and compiles bounded callback-free link rows", () => {
     actionRows: 2,
     containers: 1,
     linkButtons: 3,
+    requestButtons: 0,
     separators: 0,
     textDisplays: 2,
     topLevel: 3,
@@ -180,6 +211,221 @@ test("normalizes and compiles bounded callback-free link rows", () => {
       },
     ]),
     /unsupported fields: custom_id/,
+  )
+})
+
+test("authenticates bounded request rows across compile and Discord readback", () => {
+  const key = requestButtonVerificationKey("test-bot-token")
+  const scope = {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+  }
+  const operationKeyHashValue = operationKeyHash("request-buttons-0001")
+  const layout = normalizeComponentLayout([
+    { content: "Choose the next step", kind: "text" },
+    {
+      buttons: [
+        { label: "Acknowledge", style: "primary" },
+        { label: "Resolve", style: "success" },
+      ],
+      kind: "request-row",
+    },
+    {
+      components: [
+        { content: "Escalation", kind: "text" },
+        {
+          buttons: [
+            { label: "Escalate", style: "danger" },
+            { label: "Later" },
+          ],
+          kind: "request-row",
+        },
+      ],
+      kind: "container",
+    },
+  ])
+  const compiled = compileComponentLayout(layout, {
+    binding: { ...scope, operationKeyHash: operationKeyHashValue },
+    key,
+  })
+
+  assert.deepEqual(componentLayoutCounts(layout), {
+    actionRows: 2,
+    containers: 1,
+    linkButtons: 0,
+    requestButtons: 4,
+    separators: 0,
+    textDisplays: 2,
+    topLevel: 3,
+    total: 9,
+  })
+  const rendered = JSON.stringify(compiled)
+  assert.doesNotMatch(rendered, /test-bot-token|request-buttons-0001/)
+  assert.equal((compiled[1] as { components: unknown[] }).components.length, 2)
+  assert.doesNotThrow(() => assertCompiledComponentLayout(compiled))
+  const wire = withDiscordComponentIds(compiled)
+  const parsed = parseDiscordManagedComponentLayout(wire, {
+    key,
+    operationKeyHash: operationKeyHashValue,
+    scope,
+  })
+  assert.deepEqual(parsed.layout, layout)
+  assert.equal(parsed.requestButtons.length, 4)
+  assert.deepEqual(parsed.requestButtons.map(({ index, label, style }) => ({
+    index,
+    label,
+    style,
+  })), [
+    { index: 0, label: "Acknowledge", style: "primary" },
+    { index: 1, label: "Resolve", style: "success" },
+    { index: 2, label: "Escalate", style: "danger" },
+    { index: 3, label: "Later", style: "secondary" },
+  ])
+  assert.equal(new Set(parsed.requestButtons.map(({ route }) => route)).size, 1)
+  assert.equal(parsed.route, parsed.requestButtons[0]?.route)
+  assert.deepEqual(
+    parseDiscordComponentLayout(wire, {
+      key,
+      operationKeyHash: operationKeyHashValue,
+      scope,
+    }),
+    layout,
+  )
+})
+
+test("rejects unauthenticated, tampered, and cross-scope request Buttons", () => {
+  const key = requestButtonVerificationKey("test-bot-token")
+  const scope = {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+  }
+  const operationKeyHashValue = operationKeyHash("request-buttons-0002")
+  const layout = normalizeComponentLayout([
+    { content: "Review", kind: "text" },
+    {
+      buttons: [{ label: "Approve", style: "primary" }],
+      kind: "request-row",
+    },
+  ])
+  assert.throws(
+    () => compileComponentLayout(layout),
+    /explicit authenticated binding/,
+  )
+  const wire = withDiscordComponentIds(compileComponentLayout(layout, {
+    binding: { ...scope, operationKeyHash: operationKeyHashValue },
+    key,
+  }))
+  assert.throws(
+    () => parseDiscordComponentLayout(wire),
+    /without an authenticated verification binding/,
+  )
+  assert.throws(
+    () => parseDiscordComponentLayout(wire, {
+      key: requestButtonVerificationKey("rotated-token"),
+      operationKeyHash: operationKeyHashValue,
+      scope,
+    }),
+    /invalid managed request Button/,
+  )
+  assert.throws(
+    () => parseDiscordComponentLayout(wire, {
+      key,
+      operationKeyHash: operationKeyHash("request-buttons-other"),
+      scope,
+    }),
+    /do not match the reviewed operation/,
+  )
+  assert.throws(
+    () => parseDiscordComponentLayout(wire, {
+      key,
+      operationKeyHash: operationKeyHashValue,
+      scope: { ...scope, channelId: "300000000000000002" },
+    }),
+    /invalid managed request Button/,
+  )
+  const tampered = structuredClone(wire) as Record<string, unknown>[]
+  const row = tampered[1] as { components: Record<string, unknown>[] }
+  row.components[0]!.label = "Deny"
+  assert.throws(
+    () => parseDiscordComponentLayout(tampered, {
+      key,
+      operationKeyHash: operationKeyHashValue,
+      scope,
+    }),
+    /invalid managed request Button/,
+  )
+})
+
+test("bounds managed request-button indexes to the component message space", () => {
+  const key = requestButtonVerificationKey("test-bot-token")
+  const scope = {
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelId: CHANNEL_ID,
+    guildId: GUILD_ID,
+  }
+  const layoutDigest = requestButtonLayoutDigest([
+    { content: "Review", kind: "text" },
+  ])
+  const route = createRequestButtonRoute(key, {
+    ...scope,
+    operationKeyHash: operationKeyHash("request-buttons-index-bound"),
+  }, layoutDigest)
+
+  assert.throws(
+    () => createRequestButtonCustomId(key, scope, layoutDigest, route, {
+      index: REQUEST_BUTTON_LIMITS.buttonsPerMessage,
+      label: "Review",
+      style: "primary",
+    }),
+    /index is invalid/,
+  )
+  assert.equal(
+    parseRequestButtonCustomId(
+      `dmcp1.${"A".repeat(22)}.${REQUEST_BUTTON_LIMITS.buttonsPerMessage.toString(36)}.${"B".repeat(22)}`,
+    ),
+    undefined,
+  )
+})
+
+test("reviews request-button styles and rejects unsupported button authority", () => {
+  const review = reviewComponentLayout([
+    { content: "Incident controls", kind: "text" },
+    {
+      buttons: [
+        { label: "Acknowledge", style: "primary" },
+        { label: "Resolve", style: "success" },
+      ],
+      kind: "request-row",
+    },
+  ], [])
+  assert.equal(review.counts.requestButtons, 2)
+  assert.match(review.preview, /Request Button \(primary\): "Acknowledge"/)
+  assert.ok(review.warnings.some((warning) => warning.includes("never execute")))
+  assert.ok(review.warnings.some((warning) => warning.includes("danger")))
+  assert.throws(
+    () => normalizeComponentLayout([
+      { content: "Incident controls", kind: "text" },
+      {
+        buttons: [{ label: "Unknown", style: "link" }],
+        kind: "request-row",
+      },
+    ]),
+    /style must be primary, secondary, success, or danger/,
+  )
+  assert.throws(
+    () => normalizeComponentLayout([
+      { content: "Incident controls", kind: "text" },
+      {
+        buttons: Array.from({ length: 6 }, (_, index) => ({ label: `Button ${index}` })),
+        kind: "request-row",
+      },
+    ]),
+    /must contain 1-5 request buttons/,
   )
 })
 
@@ -406,7 +652,7 @@ test("rejects invalid Discord-generated component evidence", () => {
   )
   assert.throws(
     () => parseDiscordComponentLayout([{ content: "Hello", id: 1, type: 9 }]),
-    /not a supported static Discord component/,
+    /not a supported Discord component/,
   )
   assert.throws(
     () => parseDiscordComponentLayout([{
@@ -436,6 +682,7 @@ test("returns a deterministic privacy-aware review", () => {
     actionRows: 0,
     containers: 1,
     linkButtons: 0,
+    requestButtons: 0,
     separators: 1,
     textDisplays: 2,
     topLevel: 2,

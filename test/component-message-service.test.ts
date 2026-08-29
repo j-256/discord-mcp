@@ -7,6 +7,7 @@ import type {
 } from "../src/activity-log.js"
 import type {
   DiscordLinkButtonComponent,
+  DiscordRequestButtonComponent,
   DiscordStaticComponent,
 } from "../src/component-layout.js"
 import {
@@ -63,6 +64,7 @@ const OPERATION_KEY = "component-operation-0001"
 const PLAN_DIGEST = `hmac-sha256:${"a".repeat(64)}`
 const NOW = "2026-08-22T00:00:00.000Z"
 const EDITED = "2026-08-22T00:01:00.000Z"
+const REQUEST_BUTTON_KEY = new Uint8Array(32).fill(9)
 const CURRENT_LAYOUT = [{ content: "Before", kind: "text" as const }]
 const TARGET_LAYOUT = [{
   accentColor: 0x58_65_F2,
@@ -115,7 +117,10 @@ function withGeneratedIds(
 ): unknown[] {
   let nextId = 1
   const visit = (
-    component: DiscordLinkButtonComponent | DiscordStaticComponent,
+    component:
+      | DiscordLinkButtonComponent
+      | DiscordRequestButtonComponent
+      | DiscordStaticComponent,
   ): Record<string, unknown> => {
     const id = nextId
     nextId += 1
@@ -225,6 +230,8 @@ function configuredPolicy(options: {
   enabled?: boolean
   interactionChannelIds?: readonly string[]
   mentionUserIds?: readonly string[]
+  nativeInteractionsEnabled?: boolean
+  nativeInteractionChannelIds?: readonly string[]
   permissions?: bigint
   readChannelIds?: readonly string[]
 } = {}): { policy: ScopePolicy; roles: DiscordRole[] } {
@@ -249,6 +256,16 @@ function configuredPolicy(options: {
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 0,
       mentionUserIds: new Set(options.mentionUserIds ?? [REPLY_AUTHOR_ID]),
+      allowNativeInteractions: options.nativeInteractionsEnabled ?? false,
+      nativeInteractionChannelIds: new Set(
+        options.nativeInteractionChannelIds ?? [],
+      ),
+      nativeInteractionGuildIds: new Set(
+        options.nativeInteractionsEnabled ? [GUILD_ID] : [],
+      ),
+      nativeInteractionUserIds: new Set(
+        options.nativeInteractionsEnabled ? [REPLY_AUTHOR_ID] : [],
+      ),
       protectedUserIds: new Set(),
     }),
     roles: [role(GUILD_ID, 0n), role(BOT_ROLE_ID, permissions)],
@@ -304,6 +321,8 @@ function fixture(options: {
   policyOptions?: Parameters<typeof configuredPolicy>[0]
   state?: Partial<FixtureState>
   verificationKey?: Uint8Array
+  requestButtonKey?: Uint8Array
+  requestButtonReadiness?: ComponentMessageServiceOptions["requestButtonReadiness"]
 } = {}) {
   const configured = configuredPolicy(options.policyOptions)
   const state: FixtureState = {
@@ -462,6 +481,10 @@ function fixture(options: {
     planKey: new Uint8Array(32).fill(8),
     policy: configured.policy,
     randomId: () => "activity-component-1",
+    requestButtonKey: options.requestButtonKey ?? REQUEST_BUTTON_KEY,
+    ...(options.requestButtonReadiness === undefined
+      ? {}
+      : { requestButtonReadiness: options.requestButtonReadiness }),
     ...(options.verificationKey === undefined
       ? {}
       : { verificationKey: options.verificationKey }),
@@ -574,6 +597,8 @@ test("component-message planning binds exact identity, permissions, and transien
     "parsedUserMentionIds",
     "rawOperationKey",
     "rawPayloads",
+    "requestButtonCustomIds",
+    "requestButtonRoutes",
     "replyAuthorId",
   ])
   assert.deepEqual(first.permission.requiredPermissionNames, [
@@ -652,6 +677,197 @@ test("component-message planning requires every exact link origin before Discord
     /outside the exact configured origin scope/,
   )
   assert.deepEqual(revoked.events, [])
+})
+
+test("component-message request Buttons bind ready exact ingress and authenticated readback", async () => {
+  const request = createRequest({
+    components: [
+      { content: "Choose a private request", kind: "text" },
+      {
+        buttons: [
+          { label: "Summarize release", style: "primary" },
+          { label: "Assess blockers", style: "danger" },
+        ],
+        kind: "request-row",
+      },
+    ],
+    notifyUserIds: [],
+  })
+  const current = fixture({
+    policyOptions: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionsEnabled: true,
+    },
+    requestButtonReadiness: (guildId) => ({
+      commandId: "700000000000000001",
+      commandVersion: "700000000000000002",
+      gatewayDelivery: "verified",
+      guildId,
+      phase: "ready",
+      ready: true,
+      schemaVersion: 1,
+    }),
+  })
+
+  const plan = await current.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+
+  assert.equal(plan.requestButtons.count, 2)
+  assert.deepEqual(plan.requestButtons.ingress, {
+    authorizedUserIds: [REPLY_AUTHOR_ID],
+    commandId: "700000000000000001",
+    commandVersion: "700000000000000002",
+    gatewayDelivery: "verified",
+    guildId: GUILD_ID,
+    phase: "ready",
+    ready: true,
+    schemaVersion: 1,
+  })
+  assert.match(plan.warnings.join("\n"), /grant no write or administration authority/)
+  assert.equal(JSON.stringify(plan).includes("dmcp1."), false)
+
+  const result = await current.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+
+  assert.equal(result.status, "completed")
+  const compiled = current.createInput?.components as unknown as readonly Record<string, unknown>[]
+  const row = compiled[1]
+  const buttons = row?.components as readonly Record<string, unknown>[]
+  assert.equal(buttons.length, 2)
+  assert.equal(typeof buttons[0]?.custom_id, "string")
+  assert.match(String(buttons[0]?.custom_id), /^dmcp1\./)
+  assert.notEqual(buttons[0]?.custom_id, buttons[1]?.custom_id)
+  assert.equal(JSON.stringify(current.activities).includes("Summarize release"), false)
+  assert.equal(JSON.stringify(current.activities).includes("dmcp1."), false)
+  assert.equal(JSON.stringify(current.operationStore.receipt).includes("dmcp1."), false)
+
+  const restarted = fixture({
+    operationStore: current.operationStore,
+    state: { created: current.state.created },
+  })
+  const verification = await restarted.service.verify(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  assert.equal(verification.status, "verified")
+  assert.equal(restarted.events.includes("write:create"), false)
+})
+
+test("component-message request Button execution rejects changed ingress readiness", async () => {
+  const request = createRequest({
+    components: [
+      { content: "Choose a private request", kind: "text" },
+      {
+        buttons: [{ label: "Private request" }],
+        kind: "request-row",
+      },
+    ],
+    notifyUserIds: [],
+  })
+  let commandVersion = "700000000000000002"
+  const current = fixture({
+    policyOptions: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionsEnabled: true,
+    },
+    requestButtonReadiness: (guildId) => ({
+      commandId: "700000000000000001",
+      commandVersion,
+      gatewayDelivery: "verified",
+      guildId,
+      phase: "ready",
+      ready: true,
+      schemaVersion: 1,
+    }),
+  })
+  const plan = await current.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+
+  commandVersion = "700000000000000003"
+  await assert.rejects(
+    current.service.execute(
+      APPLICATION_ID,
+      BOT_ID,
+      "enabled",
+      request,
+      plan.digest,
+    ),
+    ComponentMessagePlanChangedError,
+  )
+  assert.equal(current.events.includes("write:create"), false)
+})
+
+test("component-message request Button publication fails closed without exact ready ingress", async () => {
+  const request = createRequest({
+    components: [
+      { content: "Choose a private request", kind: "text" },
+      {
+        buttons: [{ label: "Private request" }],
+        kind: "request-row",
+      },
+    ],
+    notifyUserIds: [],
+  })
+  const missingBroker = fixture({
+    policyOptions: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionsEnabled: true,
+    },
+  })
+  await assert.rejects(
+    missingBroker.service.plan(APPLICATION_ID, BOT_ID, "enabled", request),
+    /paired native Interaction broker/,
+  )
+
+  const checking = fixture({
+    policyOptions: {
+      nativeInteractionChannelIds: [CHANNEL_ID],
+      nativeInteractionsEnabled: true,
+    },
+    requestButtonReadiness: (guildId) => ({
+      commandId: "700000000000000001",
+      commandVersion: "700000000000000002",
+      gatewayDelivery: null,
+      guildId,
+      phase: "checking",
+      ready: false,
+      schemaVersion: 1,
+    }),
+  })
+  await assert.rejects(
+    checking.service.plan(APPLICATION_ID, BOT_ID, "enabled", request),
+    /ready, verified native Interaction ingress/,
+  )
+
+  const wrongChannel = fixture({
+    policyOptions: {
+      nativeInteractionChannelIds: [PARENT_CHANNEL_ID],
+      nativeInteractionsEnabled: true,
+    },
+    requestButtonReadiness: () => {
+      throw new Error("readiness must not be consulted outside exact scope")
+    },
+  })
+  await assert.rejects(
+    wrongChannel.service.plan(APPLICATION_ID, BOT_ID, "enabled", request),
+    /outside the native Interaction scope/,
+  )
+  assert.equal(wrongChannel.events.includes("write:create"), false)
 })
 
 test("component-message planning rejects incomplete legacy and unsafe mention evidence", async () => {

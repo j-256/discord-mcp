@@ -80,6 +80,7 @@ import {
   type WidgetSettingsActivity,
 } from "../src/activity-log.js"
 import { DISCORD_CHANNEL_TYPES } from "../src/constants.js"
+import { REQUEST_BUTTON_LIMITS } from "../src/request-button.js"
 
 function attachmentMessage(
   id: string,
@@ -3475,6 +3476,42 @@ test("JSONL activity log keeps native Interaction command and response evidence 
     response: "private follow-up text",
     token: "private follow-up token",
   } as NativeInteractionActivity)
+  await store.append({
+    ...nativeInteraction("7", "accepted"),
+    customId: "dmcp1.private-route.0.private-tag",
+    request: "private button label",
+    requestButtonIndex: 0,
+    requestButtonStyle: "primary",
+    source: "request-button",
+    sourceMessageId: "500",
+  } as NativeInteractionActivity)
+  await store.append({
+    ...nativeInteraction("8", "rejected"),
+    requestButtonIndex: null,
+    requestButtonStyle: null,
+    source: "request-button",
+    sourceMessageId: null,
+  })
+  await assert.rejects(
+    store.append({
+      ...nativeInteraction("9", "accepted"),
+      requestButtonIndex: null,
+      requestButtonStyle: null,
+      source: "request-button",
+      sourceMessageId: null,
+    }),
+    /invalid content-free shape/,
+  )
+  await assert.rejects(
+    store.append({
+      ...nativeInteraction("10", "accepted"),
+      requestButtonIndex: REQUEST_BUTTON_LIMITS.buttonsPerMessage,
+      requestButtonStyle: "primary",
+      source: "request-button",
+      sourceMessageId: "500",
+    }),
+    /invalid content-free shape/,
+  )
   await appendFile(
     file,
     `${JSON.stringify({
@@ -3494,8 +3531,8 @@ test("JSONL activity log keeps native Interaction command and response evidence 
   const result = await store.list()
   const persisted = await readFile(file, "utf8")
 
-  assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk|private request text|private response text|private Interaction token/)
-  assert.deepEqual(result.entries.map(({ id }) => id), ["4", "3", "6", "2", "1"])
+  assert.doesNotMatch(persisted, /must-not-persist|must-never-reach-disk|private request text|private response text|private Interaction token|private button label|dmcp1\./)
+  assert.deepEqual(result.entries.map(({ id }) => id), ["4", "3", "8", "7", "6", "2", "1"])
   assert.equal(result.skippedLines, 1)
   assert.doesNotMatch(
     JSON.stringify(result),

@@ -162,6 +162,8 @@ import {
   componentMessageVerificationKey,
   ComponentMessageService,
 } from "./component-message-service.js"
+import type { NativeInteractionSource } from "./native-interaction-broker.js"
+import { requestButtonVerificationKey } from "./request-button.js"
 import {
   CommunityActivityService,
   type CommunityActivityRequest,
@@ -1187,6 +1189,7 @@ export interface ConnectorServiceOptions {
     ComponentMessageServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  nativeInteractions?: NativeInteractionSource
   embedMessageOptions?: Pick<
     EmbedMessageServiceOptions,
     "clock" | "planKey" | "randomId"
@@ -1915,6 +1918,14 @@ export class ConnectorService {
       operationStore,
       policy: this.#policy,
       ...options.componentMessageOptions,
+      requestButtonKey: requestButtonVerificationKey(options.config.token),
+      ...(options.nativeInteractions
+        ? {
+            requestButtonReadiness: options.nativeInteractions.getRequestButtonReadiness.bind(
+              options.nativeInteractions,
+            ),
+          }
+        : {}),
       verificationKey: componentMessageVerificationKey(options.config.token),
     })
     this.#embedMessageService = new EmbedMessageService({

@@ -2,6 +2,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { ActivityEntry, ActivityStore } from "../src/activity-log.js"
+import {
+  compileComponentLayout,
+  normalizeComponentLayout,
+} from "../src/component-layout.js"
 import { DISCORD_MESSAGE_FLAGS } from "../src/constants.js"
 import {
   DiscordApiError,
@@ -33,11 +37,15 @@ const COMMAND_VERSION = "700000000000000001"
 const INTERACTION_ID = "800000000000000001"
 const MESSAGE_ID = "900000000000000001"
 const FOLLOWUP_MESSAGE_ID = "900000000000000002"
+const SOURCE_MESSAGE_ID = "900000000000000003"
 const COMMAND_NAME = "discord-mcp"
 const TOKEN = "private.interaction-token"
 const REQUEST = "Summarize the release discussion"
+const REQUEST_BUTTON_LABEL = "Summarize release discussion"
 const RESPONSE = "The release discussion is ready for review."
 const NOW_MS = Date.parse("2026-08-22T00:00:00.000Z")
+const REQUEST_BUTTON_KEY = new Uint8Array(32).fill(7)
+const OPERATION_KEY_HASH = `sha256:${"a".repeat(64)}`
 
 function command(
   overrides: Partial<DiscordApplicationCommand> = {},
@@ -86,6 +94,95 @@ function interaction(overrides: Record<string, unknown> = {}): Record<string, un
     },
     token: TOKEN,
     type: 2,
+    version: 1,
+    ...overrides,
+  }
+}
+
+function withDiscordComponentIds(input: unknown): unknown {
+  let nextId = 0
+  const visit = (value: unknown): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value
+    const record = value as Record<string, unknown>
+    nextId += 1
+    return {
+      ...record,
+      id: nextId,
+      ...(Array.isArray(record.components)
+        ? { components: record.components.map(visit) }
+        : {}),
+    }
+  }
+  return Array.isArray(input) ? input.map(visit) : input
+}
+
+function requestButtonSourceMessage(
+  overrides: Partial<DiscordMessage> = {},
+): DiscordMessage {
+  const layout = normalizeComponentLayout([{
+    content: "Choose a private request",
+    kind: "text",
+  }, {
+    buttons: [{ label: REQUEST_BUTTON_LABEL, style: "primary" }],
+    kind: "request-row",
+  }])
+  const components = withDiscordComponentIds(compileComponentLayout(layout, {
+    binding: {
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      channelId: CHANNEL_ID,
+      guildId: GUILD_ID,
+      operationKeyHash: OPERATION_KEY_HASH,
+    },
+    key: REQUEST_BUTTON_KEY,
+  })) as unknown[]
+  return {
+    attachments: [],
+    author: { bot: true, id: BOT_ID, username: "connector" },
+    channel_id: CHANNEL_ID,
+    components,
+    content: "",
+    embeds: [],
+    flags: DISCORD_MESSAGE_FLAGS.isComponentsV2,
+    guild_id: GUILD_ID,
+    id: SOURCE_MESSAGE_ID,
+    mention_everyone: false,
+    mention_roles: [],
+    mentions: [],
+    pinned: false,
+    timestamp: new Date(NOW_MS).toISOString(),
+    tts: false,
+    type: 0,
+    ...overrides,
+  }
+}
+
+function requestButtonInteraction(
+  sourceMessage = requestButtonSourceMessage(),
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const actionRow = sourceMessage.components?.find((component) => (
+    (component as Record<string, unknown>).type === 1
+  )) as Record<string, unknown>
+  const button = (actionRow.components as Record<string, unknown>[])[0]
+  return {
+    application_id: APPLICATION_ID,
+    authorizing_integration_owners: { "0": GUILD_ID },
+    channel_id: CHANNEL_ID,
+    context: 0,
+    data: {
+      component_type: 2,
+      custom_id: button?.custom_id,
+    },
+    guild_id: GUILD_ID,
+    id: INTERACTION_ID,
+    member: {
+      permissions: "0",
+      user: { id: USER_ID, username: "private-user" },
+    },
+    message: sourceMessage,
+    token: TOKEN,
+    type: 3,
     version: 1,
     ...overrides,
   }
@@ -194,11 +291,14 @@ interface FixtureState {
   immediateError: unknown
   inventoryError: unknown
   preflightGate: Promise<void> | null
+  sourceMessage: DiscordMessage | null
+  sourceMessageError: unknown
 }
 
 function fixture(options: {
   maximumPending?: number
   policy?: ScopePolicy
+  requestButtonKey?: Uint8Array
   state?: Partial<FixtureState>
 } = {}) {
   let nowMs = NOW_MS
@@ -225,6 +325,8 @@ function fixture(options: {
     immediateError: undefined,
     inventoryError: undefined,
     preflightGate: null,
+    sourceMessage: null,
+    sourceMessageError: undefined,
     ...options.state,
   }
   const activities: ActivityEntry[] = []
@@ -322,6 +424,14 @@ function fixture(options: {
         { id: messageId, type: 0 },
       )
     },
+    async getMessage() {
+      events.push("read:source-message")
+      if (state.sourceMessageError) throw state.sourceMessageError
+      if (!state.sourceMessage) {
+        throw new Error("unexpected component source-message read")
+      }
+      return state.sourceMessage
+    },
     async listGuildApplicationCommands() {
       events.push("read:commands")
       if (state.inventoryError) throw state.inventoryError
@@ -352,6 +462,7 @@ function fixture(options: {
       referenceNumber += 1
       return `iref_${referenceNumber.toString(16).padStart(32, "0")}`
     },
+    requestButtonKey: options.requestButtonKey ?? REQUEST_BUTTON_KEY,
     scheduler,
   })
   return {
@@ -390,6 +501,7 @@ test("disabled source stays inert and exposes no pending requests", async () => 
   })
   assert.equal(source.enabled, false)
   assert.equal(source.getStatus().phase, "disabled")
+  assert.equal((await source.getRequestButtonReadiness(GUILD_ID)).ready, false)
   assert.deepEqual((await source.listContinuations()).continuations, [])
   assert.deepEqual((await source.listPending()).interactions, [])
   await assert.rejects(
@@ -480,6 +592,61 @@ test("preflight requires exact identity, Gateway ingress, and one managed comman
   )
 })
 
+test("request-button readiness refreshes the exact live command inventory", async () => {
+  const setup = fixture()
+  await setup.broker.start()
+  setup.state.commandInventory = [command({ version: "700000000000000002" })]
+
+  assert.deepEqual(await setup.broker.getRequestButtonReadiness(GUILD_ID), {
+    commandId: COMMAND_ID,
+    commandVersion: "700000000000000002",
+    gatewayDelivery: "verified",
+    guildId: GUILD_ID,
+    phase: "ready",
+    ready: true,
+    schemaVersion: 1,
+  })
+
+  setup.state.commandInventory = []
+  assert.equal((await setup.broker.getRequestButtonReadiness(GUILD_ID)).ready, false)
+  assert.equal(setup.broker.getStatus().lastError?.category, "command-contract-mismatch")
+  assert.equal(setup.broker.getStatus().command.verifiedGuildCount, 0)
+
+  setup.state.commandInventory = [command({ version: "700000000000000003" })]
+  assert.equal(
+    (await setup.broker.getRequestButtonReadiness(GUILD_ID)).commandVersion,
+    "700000000000000003",
+  )
+  assert.equal(setup.broker.getStatus().command.verifiedGuildCount, 1)
+
+  setup.state.inventoryError = new Error("network unavailable")
+  assert.equal((await setup.broker.getRequestButtonReadiness(GUILD_ID)).ready, false)
+  assert.equal(
+    setup.broker.getStatus().lastError?.category,
+    "validation-evidence-unavailable",
+  )
+  assert.equal(setup.broker.getStatus().command.verifiedGuildCount, 1)
+
+  setup.state.inventoryError = undefined
+  setup.state.applicationEndpoint = "https://example.test/interactions"
+  assert.equal((await setup.broker.getRequestButtonReadiness(GUILD_ID)).ready, false)
+  assert.equal(
+    setup.broker.getStatus().lastError?.category,
+    "application-endpoint-conflict",
+  )
+
+  setup.state.applicationEndpoint = null
+  setup.state.botId = "500000000000000002"
+  assert.equal((await setup.broker.getRequestButtonReadiness(GUILD_ID)).ready, false)
+  assert.equal(setup.broker.getStatus().lastError?.category, "identity-mismatch")
+
+  setup.state.botId = BOT_ID
+  assert.equal(
+    (await setup.broker.getRequestButtonReadiness(GUILD_ID)).gatewayDelivery,
+    "verified",
+  )
+})
+
 test("managed Interaction defers first and exposes only freshly validated token-free state", async () => {
   const setup = fixture()
   await setup.broker.start()
@@ -502,6 +669,198 @@ test("managed Interaction defers first and exposes only freshly validated token-
   assert.ok(setup.events.indexOf("callback:defer") < setup.events.indexOf("read:commands"))
   assert.ok(setup.events.indexOf("activity:accepted") > setup.events.indexOf("read:commands"))
   assert.equal(setup.broker.getStatus().totals.accepted, 1)
+})
+
+test("managed request Button accepts a non-administrator only after fresh source validation", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({ state: { sourceMessage } })
+  await setup.broker.start()
+  setup.events.length = 0
+
+  await setup.broker.ingestInteraction(requestButtonInteraction(sourceMessage))
+  const pending = await setup.broker.listPending()
+
+  assert.equal(pending.status, "ok")
+  assert.deepEqual(pending.interactions, [{
+    channelId: CHANNEL_ID,
+    commandId: null,
+    commandVersion: null,
+    createdAt: new Date(NOW_MS).toISOString(),
+    expiresAt: new Date(NOW_MS + 60_000).toISOString(),
+    guildId: GUILD_ID,
+    interactionId: INTERACTION_ID,
+    reference: `iref_${"1".padStart(32, "0")}`,
+    request: REQUEST_BUTTON_LABEL,
+    requestButtonIndex: 0,
+    requestButtonStyle: "primary",
+    schemaVersion: 1,
+    source: "request-button",
+    sourceMessageId: SOURCE_MESSAGE_ID,
+    userId: USER_ID,
+  }])
+  assert.equal(JSON.stringify(pending).includes("dmcp1."), false)
+  assert.equal(JSON.stringify(pending).includes(TOKEN), false)
+  assert.deepEqual(setup.deferred, [{ id: INTERACTION_ID, token: TOKEN }])
+  assert.ok(setup.events.indexOf("callback:defer") < setup.events.indexOf("read:source-message"))
+  assert.ok(setup.events.indexOf("read:source-message") < setup.events.indexOf("activity:accepted"))
+  const activity = setup.activities.at(-1)
+  assert.equal(activity?.kind === "native-interaction" ? activity.source : null, "request-button")
+  assert.equal(
+    activity?.kind === "native-interaction" ? activity.sourceMessageId : null,
+    SOURCE_MESSAGE_ID,
+  )
+  assert.equal(JSON.stringify(activity).includes(REQUEST_BUTTON_LABEL), false)
+  assert.equal(JSON.stringify(activity).includes("dmcp1."), false)
+})
+
+test("managed request Button recovers from stale cached command drift", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({ state: { sourceMessage } })
+  await setup.broker.start()
+  setup.state.commandInventory = []
+  assert.equal((await setup.broker.getRequestButtonReadiness(GUILD_ID)).ready, false)
+
+  setup.state.commandInventory = [command({ version: "700000000000000004" })]
+  await setup.broker.ingestInteraction(requestButtonInteraction(sourceMessage))
+
+  assert.equal((await setup.broker.listPending()).interactions.length, 1)
+  assert.equal(setup.deferred.length, 1)
+  assert.equal(setup.broker.getStatus().command.verifiedGuildCount, 1)
+})
+
+test("request Button rejects changed fresh source evidence after a private defer", async () => {
+  const attached = requestButtonSourceMessage()
+  const changed = structuredClone(attached)
+  const row = changed.components?.find((component) => (
+    (component as Record<string, unknown>).type === 1
+  )) as Record<string, unknown>
+  const button = (row.components as Record<string, unknown>[])[0]
+  if (button) button.label = "Changed label"
+  const setup = fixture({ state: { sourceMessage: changed } })
+  await setup.broker.start()
+
+  await setup.broker.ingestInteraction(requestButtonInteraction(attached))
+
+  assert.equal(setup.deferred.length, 1)
+  assert.deepEqual((await setup.broker.listPending()).interactions, [])
+  assert.match(setup.edits.at(-1)?.content || "", /source message/)
+  const activity = setup.activities.find((entry) => entry.status === "rejected")
+  assert.equal(
+    activity?.kind === "native-interaction" ? activity.error : null,
+    "request-button-evidence-invalid",
+  )
+  assert.equal(JSON.stringify(setup.activities).includes(REQUEST_BUTTON_LABEL), false)
+})
+
+test("request Button rejects fresh Gateway-delivery drift after a private defer", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({ state: { sourceMessage } })
+  await setup.broker.start()
+  setup.state.applicationEndpoint = "https://example.test/interactions"
+
+  await setup.broker.ingestInteraction(requestButtonInteraction(sourceMessage))
+
+  assert.equal(setup.deferred.length, 1)
+  assert.deepEqual((await setup.broker.listPending()).interactions, [])
+  assert.match(setup.edits.at(-1)?.content || "", /source message/)
+  const activity = setup.activities.find((entry) => entry.status === "rejected")
+  assert.equal(
+    activity?.kind === "native-interaction" ? activity.error : null,
+    "application-endpoint-conflict",
+  )
+})
+
+test("request Button token-key rotation invalidates an existing route", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({
+    requestButtonKey: new Uint8Array(32).fill(8),
+    state: { sourceMessage },
+  })
+  await setup.broker.start()
+
+  await setup.broker.ingestInteraction(requestButtonInteraction(sourceMessage))
+
+  assert.deepEqual((await setup.broker.listPending()).interactions, [])
+  assert.equal(setup.deferred.length, 0)
+  assert.equal(setup.immediate.length, 1)
+  assert.match(setup.immediate[0]?.content || "", /source message/)
+  assert.equal(JSON.stringify(setup.activities).includes(REQUEST_BUTTON_LABEL), false)
+  assert.equal(JSON.stringify(setup.activities).includes("dmcp1."), false)
+})
+
+test("request Button ignores unrelated IDs and privately rejects malformed managed IDs", async () => {
+  const unrelated = fixture()
+  await unrelated.broker.start()
+  await unrelated.broker.ingestInteraction(requestButtonInteraction(
+    requestButtonSourceMessage(),
+    { data: { component_type: 2, custom_id: "someone-else" } },
+  ))
+  assert.equal(unrelated.immediate.length, 0)
+  assert.equal(unrelated.deferred.length, 0)
+
+  const malformed = fixture()
+  await malformed.broker.start()
+  await malformed.broker.ingestInteraction(requestButtonInteraction(
+    requestButtonSourceMessage(),
+    { data: { component_type: 2, custom_id: "dmcp1.invalid" } },
+  ))
+  assert.equal(malformed.deferred.length, 0)
+  assert.equal(malformed.immediate.length, 1)
+  assert.match(malformed.immediate[0]?.content || "", /source message/)
+})
+
+test("request Button ignores an Interaction attributed to a bot user", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({ state: { sourceMessage } })
+  await setup.broker.start()
+  const payload = requestButtonInteraction(sourceMessage)
+  payload.member = {
+    permissions: "0",
+    user: { bot: true, id: USER_ID, username: "private-user" },
+  }
+
+  await setup.broker.ingestInteraction(payload)
+
+  assert.equal(setup.deferred.length, 0)
+  assert.equal(setup.immediate.length, 0)
+  assert.deepEqual((await setup.broker.listPending()).interactions, [])
+})
+
+test("request Button response binds component metadata and the exact source reference", async () => {
+  const sourceMessage = requestButtonSourceMessage()
+  const setup = fixture({
+    state: {
+      editResponse: responseMessage(RESPONSE, {
+        interaction_metadata: {
+          authorizing_integration_owners: { "0": GUILD_ID },
+          id: INTERACTION_ID,
+          interacted_message_id: SOURCE_MESSAGE_ID,
+          type: 3,
+          user: { id: USER_ID, username: "private-user" },
+        },
+        message_reference: {
+          channel_id: CHANNEL_ID,
+          guild_id: GUILD_ID,
+          message_id: SOURCE_MESSAGE_ID,
+          type: 0,
+        },
+        type: 0,
+      }),
+      sourceMessage,
+    },
+  })
+  await setup.broker.start()
+  await setup.broker.ingestInteraction(requestButtonInteraction(sourceMessage))
+  const pending = await setup.broker.listPending()
+
+  const result = await setup.broker.respond(
+    pending.interactions[0]?.reference || "",
+    RESPONSE,
+  )
+
+  assert.equal(result.status, "completed")
+  assert.equal(result.responseMessageId, MESSAGE_ID)
+  assert.deepEqual((await setup.broker.listPending()).interactions, [])
 })
 
 test("scope rejection receives a static private response and content-free activity", async () => {

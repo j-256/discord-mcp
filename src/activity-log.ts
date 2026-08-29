@@ -66,6 +66,11 @@ import {
   type DirectMessageReceiptStage,
 } from "./operation-store.js"
 import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
+import {
+  REQUEST_BUTTON_LIMITS,
+  REQUEST_BUTTON_STYLES,
+  type RequestButtonStyle,
+} from "./request-button.js"
 
 const MAX_ACTIVITY_READ_BYTES = 1_048_576
 const CHANNEL_METADATA_ACTIVITY_FIELDS: ReadonlySet<string> = new Set([
@@ -998,10 +1003,14 @@ export interface NativeInteractionActivity {
   interactionId: string
   kind: "native-interaction"
   referenceHash: string
+  requestButtonIndex?: number | null
+  requestButtonStyle?: RequestButtonStyle | null
   responseStage: "continuation" | "followup" | "initial"
   schemaVersion: number
   sequence: number
   status: NativeInteractionActivityStatus
+  source?: "command" | "request-button"
+  sourceMessageId?: string | null
   timestamp: string
   userId: string
 }
@@ -3735,6 +3744,16 @@ function parseNativeInteractionActivity(
     ? "initial"
     : String(record.responseStage)
   const sequence = record.sequence === undefined ? 0 : record.sequence
+  const source = record.source === undefined ? "command" : String(record.source)
+  const sourceMessageId = record.sourceMessageId === undefined
+    ? null
+    : record.sourceMessageId
+  const requestButtonIndex = record.requestButtonIndex === undefined
+    ? null
+    : record.requestButtonIndex
+  const requestButtonStyle = record.requestButtonStyle === undefined
+    ? null
+    : record.requestButtonStyle
   const errorStatus = [
     "followup-failed",
     "followup-uncertain",
@@ -3757,6 +3776,19 @@ function parseNativeInteractionActivity(
     "followup-pending",
     "followup-uncertain",
   ].includes(status)
+  const authenticatedRequestButton = source === "request-button"
+    && typeof sourceMessageId === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(sourceMessageId)
+    && Number.isInteger(requestButtonIndex)
+    && Number(requestButtonIndex) >= 0
+    && Number(requestButtonIndex) < REQUEST_BUTTON_LIMITS.buttonsPerMessage
+    && REQUEST_BUTTON_STYLES.includes(requestButtonStyle as RequestButtonStyle)
+  const unauthenticatedRequestButtonRejection = source === "request-button"
+    && sourceMessageId === null
+    && requestButtonIndex === null
+    && requestButtonStyle === null
+    && responseStage === "initial"
+    && ["rejected", "response-failed", "response-uncertain"].includes(status)
   if (
     record.schemaVersion !== SCHEMA_VERSION
     || record.kind !== "native-interaction"
@@ -3789,6 +3821,12 @@ function parseNativeInteractionActivity(
     || !DISCORD_SNOWFLAKE_PATTERN.test(record.interactionId)
     || typeof record.referenceHash !== "string"
     || !OPERATION_KEY_HASH_PATTERN.test(record.referenceHash)
+    || !["command", "request-button"].includes(source)
+    || (source === "command"
+      ? sourceMessageId !== null
+        || requestButtonIndex !== null
+        || requestButtonStyle !== null
+      : !authenticatedRequestButton && !unauthenticatedRequestButtonRejection)
     || !["continuation", "followup", "initial"].includes(responseStage)
     || !Number.isInteger(sequence)
     || Number(sequence) < 0
@@ -3815,10 +3853,14 @@ function parseNativeInteractionActivity(
     interactionId: record.interactionId,
     kind: "native-interaction",
     referenceHash: record.referenceHash,
+    requestButtonIndex: requestButtonIndex as number | null,
+    requestButtonStyle: requestButtonStyle as RequestButtonStyle | null,
     responseStage: responseStage as NativeInteractionActivity["responseStage"],
     schemaVersion: SCHEMA_VERSION,
     sequence: Number(sequence),
     status: status as NativeInteractionActivityStatus,
+    source: source as "command" | "request-button",
+    sourceMessageId: sourceMessageId as string | null,
     timestamp: record.timestamp,
     userId: record.userId,
   }
