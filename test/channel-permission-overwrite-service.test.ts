@@ -915,6 +915,30 @@ test("permission-overwrite execution rejects stale plans and spent operation key
   )
 })
 
+test("permission-overwrite reconciliation admits only matching completed state", async () => {
+  const setup = fixture()
+  const plan = await setup.service.plan(APPLICATION_ID, BOT_ID, request())
+  await setup.service.execute(APPLICATION_ID, BOT_ID, request(), plan.digest)
+
+  const reconciled = await setup.service.reconcilePlan(
+    APPLICATION_ID,
+    BOT_ID,
+    request(),
+  )
+  assert.equal(reconciled.action, "none")
+  assert.equal(reconciled.status, "already-current")
+  await assert.rejects(
+    () => setup.service.plan(APPLICATION_ID, BOT_ID, request()),
+    ChannelPermissionOverwriteOperationConflictError,
+  )
+
+  setup.state.channel.permission_overwrites = []
+  await assert.rejects(
+    () => setup.service.reconcilePlan(APPLICATION_ID, BOT_ID, request()),
+    ChannelPermissionOverwriteOperationConflictError,
+  )
+})
+
 test("permission-overwrite execution distinguishes rejected, uncertain, and drifting outcomes", async () => {
   const rejected = fixture({ state: { mutationError: apiError(403) } })
   const rejectedPlan = await rejected.service.plan(APPLICATION_ID, BOT_ID, request())
