@@ -194,6 +194,7 @@ const SECURITY_GROUPS = Object.freeze([
       "Application SKU catalogs",
       "Application monetization audit",
       "Discord permissions",
+      "Directed coordination routing",
       "Command-processing signals",
       "Guild audit logs",
       "MCP tool surface",

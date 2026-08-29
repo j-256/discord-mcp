@@ -91,6 +91,7 @@ export const MCP_TOOLSET_NAMES = [
   "channel-metadata",
   "channel-ordering",
   "connector",
+  "coordination",
   "deletion",
   "direct-messages",
   "embed-messages",

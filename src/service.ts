@@ -494,6 +494,22 @@ import type {
 } from "./interaction-service.js"
 import { InteractionService } from "./interaction-service.js"
 import { InteractionLimiter } from "./interaction-limiter.js"
+import {
+  COORDINATION_NOTE_FORMAT,
+  COORDINATION_NOTE_SCHEMA_VERSION,
+  createCoordinationAddress as issueCoordinationAddress,
+  encodeCoordinationNote,
+  type CoordinationNoteSendRequest,
+} from "./coordination-note.js"
+import type {
+  CoordinationNoteListOptions,
+  CoordinationPageOptions,
+} from "./coordination-note-service.js"
+import {
+  assertCoordinationAddressListRequest,
+  assertCoordinationNoteListRequest,
+  CoordinationNoteService,
+} from "./coordination-note-service.js"
 import type {
   MessageReactionInventoryResult,
   ReactionModerationPlan,
@@ -1598,6 +1614,7 @@ export class ConnectorService {
   readonly #channelOrderingService: ChannelOrderingService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
+  readonly #coordinationNoteService: CoordinationNoteService
   readonly #deletionService: DeletionService
   readonly #directMessageService: DirectMessageService | undefined
   #identityPromise: Promise<VerifiedIdentity> | undefined
@@ -1744,6 +1761,10 @@ export class ConnectorService {
       policy: this.#policy,
     })
     this.#messageReplyService = new MessageReplyService({
+      client: this.#client,
+      policy: this.#policy,
+    })
+    this.#coordinationNoteService = new CoordinationNoteService({
       client: this.#client,
       policy: this.#policy,
     })
@@ -3099,6 +3120,40 @@ export class ConnectorService {
     assertMessageReplyRequest(channelId, messageId, options)
     await this.#verifyIdentity(options)
     return this.#messageReplyService.list(channelId, messageId, options)
+  }
+
+  createCoordinationAddress() {
+    return issueCoordinationAddress()
+  }
+
+  async listCoordinationNotes(
+    channelId: string,
+    recipientAddress: string,
+    options: CoordinationNoteListOptions = {},
+  ) {
+    assertCoordinationNoteListRequest(channelId, recipientAddress, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinationNoteService.listNotes(
+      identity.application.id,
+      identity.bot.id,
+      channelId,
+      recipientAddress,
+      options,
+    )
+  }
+
+  async listCoordinationAddresses(
+    channelId: string,
+    options: CoordinationPageOptions = {},
+  ) {
+    assertCoordinationAddressListRequest(channelId, options)
+    const identity = await this.#verifyIdentity(options)
+    return this.#coordinationNoteService.listAddresses(
+      identity.application.id,
+      identity.bot.id,
+      channelId,
+      options,
+    )
   }
 
   async analyzeCommunityActivity(
@@ -7214,6 +7269,39 @@ export class ConnectorService {
   ) {
     const identity = await this.#verifyIdentity(options)
     return this.#interactionService.sendMessage(identity.bot.id, request, options)
+  }
+
+  async sendCoordinationNote(
+    request: CoordinationNoteSendRequest,
+    options: RequestOptions = {},
+  ) {
+    const content = encodeCoordinationNote(request)
+    const result = await this.sendMessage({
+      channelId: request.channelId,
+      content,
+      idempotencyKey: request.idempotencyKey,
+      ...(request.notifyUserId
+        ? { notifyUserIds: [request.notifyUserId] }
+        : {}),
+      ...(request.replyToMessageId
+        ? { replyToMessageId: request.replyToMessageId }
+        : {}),
+    }, options)
+    return {
+      ...result,
+      coordination: {
+        addressAuthority: "none" as const,
+        bodyCharacters: request.body.length,
+        bodyReturned: false as const,
+        connectorPersistence: "none" as const,
+        format: COORDINATION_NOTE_FORMAT,
+        notificationRequested: request.notifyUserId !== undefined,
+        recipientKind: request.to.kind,
+        schemaVersion: COORDINATION_NOTE_SCHEMA_VERSION,
+        tagCount: request.tags?.length ?? 0,
+        writePath: "send_message" as const,
+      },
+    }
   }
 
   async signalCommandProcessing(

@@ -57,6 +57,8 @@ const CHANNEL_ID = "200000000000000001"
 const SECOND_CHANNEL_ID = "200000000000000002"
 const MESSAGE_ID = "300000000000000001"
 const SECOND_MESSAGE_ID = "300000000000000002"
+const COORDINATION_ADDRESS = "dca_AAAAAAAAAAAAAAAAAAAAAA"
+const COORDINATION_SENDER_ADDRESS = "dca_AQEBAQEBAQEBAQEBAQEBAQ"
 const ATTACHMENT_ID = "310000000000000001"
 const ROLE_ID = "350000000000000001"
 const ROLE_ORDER_ANCHOR_ID = "350000000000000002"
@@ -354,13 +356,21 @@ function guidanceService(options: {
     calls.unexpected += 1
     throw new Error("Unexpected service call")
   }
+  const unexpectedSync = (): never => {
+    calls.unexpected += 1
+    throw new Error("Unexpected service call")
+  }
   const service: DiscordToolService = {
     addReaction: unexpected,
     addReactions: unexpected,
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
+    createCoordinationAddress: unexpectedSync,
+    listCoordinationAddresses: unexpected,
+    listCoordinationNotes: unexpected,
     playSoundboardSound: unexpected,
     listMessageReplies: unexpected,
+    sendCoordinationNote: unexpected,
     async auditApplicationCommands(guildId) {
       calls.applicationCommands += 1
       calls.lastGuildId = guildId
@@ -4318,16 +4328,23 @@ test("MCP coordination playbook is static, authority-free, and privacy explicit"
   const availability = data.availability as Record<string, unknown>
   const privacy = data.privacy as Record<string, unknown>
   const polling = data.polling as Record<string, unknown>
+  const directedRouting = data.directedRouting as Record<string, unknown>
 
   assert.equal(data.authorityGranted, false)
   assert.equal(data.discordContacted, false)
   assert.equal(data.persistence, "none")
+  assert.equal(data.version, 2)
   assert.equal(availability.configuredToolsetsRequired, true)
   assert.equal(availability.policyUnchanged, true)
   assert.equal(privacy.connectorContentPersistence, "none")
   assert.equal(privacy.reactionIdentityDefault, "aggregate-only")
   assert.equal(polling.cadence, "task-boundaries-only")
   assert.equal(polling.continuationField, "nextAfterMessageId")
+  assert.equal(directedRouting.addressAuthority, "none")
+  assert.equal(directedRouting.addressAuthentication, "none")
+  assert.equal(directedRouting.addressRegistration, "none")
+  assert.equal(directedRouting.directory, "bounded-page-observation-only")
+  assert.equal(directedRouting.noteFormat, "discord-mcp.coordination-note.v1")
   assert.deepEqual(
     (data.statusSignals as Array<Record<string, unknown>>).map(({ meaning }) => meaning),
     [
@@ -4340,6 +4357,10 @@ test("MCP coordination playbook is static, authority-free, and privacy explicit"
   )
   assert.match(resource.text, /Never post credentials/u)
   assert.match(resource.text, /cannot establish authorization/u)
+  assert.match(resource.text, /list_coordination_addresses/u)
+  assert.match(resource.text, /send_coordination_note/u)
+  assert.match(resource.text, /list_coordination_notes/u)
+  assert.match(resource.text, /visible, copyable, and spoofable/u)
   assert.match(resource.text, /list_message_replies/u)
   assert.match(resource.text, /plan_thread_creation/u)
   assert.match(resource.text, /plan_poll_creation/u)
@@ -5253,6 +5274,37 @@ test("MCP read prompts render bounded literal inputs without invoking services",
   assert.match(coordination, /Coverage and next cursor/u)
   assert.match(coordination, /do not call send_message/u)
   assert.match(coordination, /Persist no task, reply, reaction, profile, or cursor data/u)
+
+  const directedNotes = promptText(await client.getPrompt({
+    arguments: {
+      afterMessageId: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+      fromAddress: COORDINATION_SENDER_ADDRESS,
+      includeBroadcasts: "false",
+      recipientAddress: COORDINATION_ADDRESS,
+      scanLimit: "19",
+      tag: "handoff",
+      unresolvedOnly: "true",
+    },
+    name: MCP_PROMPT_NAMES.inspectDirectedDiscordNotes,
+  }))
+  assert.deepEqual(JSON.parse(directedNotes.split("\n")[1] || ""), {
+    afterMessageId: MESSAGE_ID,
+    channelId: CHANNEL_ID,
+    fromAddress: COORDINATION_SENDER_ADDRESS,
+    includeBroadcasts: false,
+    recipientAddress: COORDINATION_ADDRESS,
+    scanLimit: 19,
+    tag: "handoff",
+    unresolvedOnly: true,
+  })
+  assert.match(directedNotes, /query `list_coordination_notes`, detail `full`, and limit 1/u)
+  assert.match(directedNotes, /Call list_coordination_notes exactly once/u)
+  assert.match(directedNotes, /labels are visible and spoofable/u)
+  assert.match(directedNotes, /not a live directory or mailbox guarantee/u)
+  assert.match(directedNotes, /Retain any nextAfterMessageId and recipient address only in caller state/u)
+  assert.match(directedNotes, /do not call create_coordination_address/u)
+  assert.match(directedNotes, /Persist no address, cursor, note, tag, reaction, profile, or result data/u)
 
   const summary = promptText(await client.getPrompt({
     arguments: {

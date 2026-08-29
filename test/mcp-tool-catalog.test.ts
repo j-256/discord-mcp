@@ -519,6 +519,71 @@ test("tool readiness distinguishes static setup, credentials, and live proof", (
     },
   )
   assert.deepEqual(
+    byName.get("create_coordination_address")?.requirements,
+    {
+      authentication: "none",
+      configuration: {
+        evaluation: "operation-runtime",
+        policyPaths: [],
+        presetNames: [],
+        recipeNames: ["coordination-channel"],
+      },
+      discord: {
+        conditions: [],
+        hierarchy: "not-applicable",
+        intents: [],
+        permissionMode: "none",
+        permissions: [],
+        verification: "not-applicable",
+      },
+      source: "exact-tool",
+      targetScope: "local",
+    },
+  )
+  assert.deepEqual(
+    byName.get("list_coordination_addresses")?.requirements,
+    byName.get("list_coordination_notes")?.requirements,
+  )
+  assert.deepEqual(
+    byName.get("list_coordination_notes")?.requirements.discord,
+    {
+      conditions: [],
+      hierarchy: "not-applicable",
+      intents: [],
+      permissionMode: "all-listed",
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      verification: "operation-runtime",
+    },
+  )
+  assert.deepEqual(
+    byName.get("send_coordination_note")?.requirements.configuration.policyPaths,
+    [
+      "$.capabilities.interactions",
+      "$.readScope.channelIds",
+      "$.readScope.guildIds",
+      "$.scopes.interactionChannelIds",
+      "$.scopes.mentionUserIds",
+    ],
+  )
+  assert.deepEqual(
+    byName.get("send_coordination_note")?.requirements.configuration.recipeNames,
+    ["coordination-channel"],
+  )
+  assert.deepEqual(
+    byName.get("send_coordination_note")?.requirements.discord,
+    {
+      conditions: [
+        { case: "direct-channel", permissions: ["SEND_MESSAGES"] },
+        { case: "thread-channel", permissions: ["SEND_MESSAGES_IN_THREADS"] },
+      ],
+      hierarchy: "not-applicable",
+      intents: [],
+      permissionMode: "conditional",
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      verification: "operation-runtime",
+    },
+  )
+  assert.deepEqual(
     byName.get("plan_guild_blueprint")?.requirements.configuration.recipeNames,
     ["guild-starter", "guild-builder"],
   )

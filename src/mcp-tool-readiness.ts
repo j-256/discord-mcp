@@ -72,6 +72,7 @@ export interface McpToolStaticRequirements {
     evaluation: "operation-runtime"
     policyPaths: readonly string[]
     recipeNames: readonly (
+      | "coordination-channel"
       | "channel-publisher"
       | "direct-messenger"
       | "guild-builder"
@@ -290,6 +291,7 @@ const MCP_TOOLSET_REQUIREMENTS = Object.freeze({
     intents: [intent("GUILDS", "required")],
   }),
   connector: application(),
+  coordination: channel([], ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"]),
   deletion: channel([
     "$.capabilities.deletions",
     "$.scopes.deleteChannelIds",
@@ -721,6 +723,7 @@ const LOCAL_TOOL_NAMES: ReadonlySet<McpToolName> = new Set([
   MCP_DISCOVERY_TOOL_NAME,
   "compile_component_template",
   "compile_guild_blueprint_starter",
+  "create_coordination_address",
   "preview_guild_blueprint",
   "get_gateway_events",
   "get_gateway_status",
@@ -963,6 +966,19 @@ function exactRequirement(
       permissionMode: "conditional",
     })
   }
+  if (name === "send_coordination_note") {
+    return channel([
+      "$.capabilities.interactions",
+      "$.scopes.interactionChannelIds",
+      "$.scopes.mentionUserIds",
+    ], ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"], {
+      conditions: [
+        condition("direct-channel", ["SEND_MESSAGES"]),
+        condition("thread-channel", ["SEND_MESSAGES_IN_THREADS"]),
+      ],
+      permissionMode: "conditional",
+    })
+  }
   if (toolset === "native-interactions") return application(
     MCP_TOOLSET_REQUIREMENTS["native-interactions"].policyPaths ?? [],
   )
@@ -1026,6 +1042,7 @@ function curatedSetup(toolset: McpToolsetName, toolName: McpToolName) {
     "messages",
   ]
   const recipeByToolset = Object.freeze({
+    coordination: "coordination-channel",
     "direct-messages": "direct-messenger",
     "embed-messages": "channel-publisher",
     "guild-blueprints": "guild-builder",

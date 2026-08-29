@@ -85,6 +85,13 @@ import {
   type ComponentLayoutInput,
 } from "./component-layout.js"
 import {
+  COORDINATION_ADDRESS_PATTERN,
+  COORDINATION_NOTE_BODY_CHARACTERS,
+  COORDINATION_NOTE_TAG_CHARACTERS,
+  COORDINATION_NOTE_TAG_PATTERN,
+  COORDINATION_NOTE_TAGS,
+} from "./coordination-note.js"
+import {
   COMPONENT_LINK_LIMITS,
   normalizeComponentLinkUrl,
 } from "./component-link.js"
@@ -1382,6 +1389,48 @@ const messageReplyPageInputSchema = z.strictObject({
     })
   }
 })
+const coordinationAddressSchema = z.string()
+  .regex(COORDINATION_ADDRESS_PATTERN)
+  .describe("Opaque caller-retained Discord coordination routing label")
+const coordinationTagSchema = z.string()
+  .max(COORDINATION_NOTE_TAG_CHARACTERS)
+  .regex(COORDINATION_NOTE_TAG_PATTERN)
+const coordinationTagsSchema = z.array(coordinationTagSchema)
+  .max(COORDINATION_NOTE_TAGS)
+  .refine(
+    (tags) => new Set(tags).size === tags.length,
+    { message: "coordination note tags must be unique" },
+  )
+  .default([])
+const coordinationPageFields = {
+  afterMessageId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional caller-held nextAfterMessageId cursor"),
+  channelId: positiveSnowflakeSchema
+    .describe("Exact readable Discord channel or thread ID"),
+  scanLimit: z.number().int().min(1).max(DISCORD_LIMITS.channelMessages)
+    .default(CONNECTOR_LIMITS.messagePageDefault)
+    .describe("Maximum channel messages to scan exactly once"),
+}
+const createCoordinationAddressInputSchema = z.strictObject({})
+const listCoordinationAddressesInputSchema = z.strictObject(coordinationPageFields)
+const listCoordinationNotesInputSchema = z.strictObject({
+  ...coordinationPageFields,
+  fromAddress: coordinationAddressSchema
+    .optional()
+    .describe("Optional exact untrusted sender-label filter"),
+  includeBroadcasts: z.boolean()
+    .default(true)
+    .describe("Include canonical broadcast notes alongside direct notes"),
+  recipientAddress: coordinationAddressSchema
+    .describe("Exact caller-retained recipient routing label"),
+  tag: coordinationTagSchema
+    .optional()
+    .describe("Optional exact canonical tag filter"),
+  unresolvedOnly: z.boolean()
+    .default(false)
+    .describe("Omit notes with aggregate done or declined conventions"),
+})
 const communityActivityChannelInputSchema = z.strictObject({
   beforeMessageId: positiveSnowflakeSchema
     .optional()
@@ -1561,6 +1610,32 @@ const sendMessageInputSchema = z.strictObject({
     path: ["notifyReplyAuthor"],
   },
 )
+const sendCoordinationNoteInputSchema = z.strictObject({
+  body: z.string()
+    .min(1)
+    .max(COORDINATION_NOTE_BODY_CHARACTERS)
+    .refine((value) => value.trim().length > 0, {
+      message: "coordination note body must not be blank",
+    }),
+  channelId: positiveSnowflakeSchema,
+  fromAddress: coordinationAddressSchema,
+  idempotencyKey: z.string()
+    .min(CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters)
+    .max(CONNECTOR_LIMITS.idempotencyKeyCharacters)
+    .regex(IDEMPOTENCY_KEY_PATTERN),
+  notifyUserId: positiveSnowflakeSchema
+    .optional()
+    .describe("Optional exact separately allowlisted Discord user to visibly mention"),
+  replyToMessageId: positiveSnowflakeSchema.optional(),
+  tags: coordinationTagsSchema,
+  to: z.discriminatedUnion("kind", [
+    z.strictObject({
+      address: coordinationAddressSchema,
+      kind: z.literal("address"),
+    }),
+    z.strictObject({ kind: z.literal("broadcast") }),
+  ]),
+})
 const signalCommandProcessingInputSchema = z.strictObject({
   channelId: positiveSnowflakeSchema.describe(
     "Exact configured Discord channel or active thread ID",
@@ -10390,6 +10465,7 @@ export interface DiscordToolService {
   getApplicationEntitlement: ConnectorService["getApplicationEntitlement"]
   auditGuildWebhooks: ConnectorService["auditGuildWebhooks"]
   captureGuildBlueprint: ConnectorService["captureGuildBlueprint"]
+  createCoordinationAddress: ConnectorService["createCoordinationAddress"]
   getApplicationPosture: ConnectorService["getApplicationPosture"]
   getCurrentBotProfile: ConnectorService["getCurrentBotProfile"]
   auditChannelDeletion: ConnectorService["auditChannelDeletion"]
@@ -10512,6 +10588,8 @@ export interface DiscordToolService {
   listChannels: ConnectorService["listChannels"]
   listDirectMessages: ConnectorService["listDirectMessages"]
   listChannelPermissionOverwrites: ConnectorService["listChannelPermissionOverwrites"]
+  listCoordinationAddresses: ConnectorService["listCoordinationAddresses"]
+  listCoordinationNotes: ConnectorService["listCoordinationNotes"]
   listGuilds: ConnectorService["listGuilds"]
   listGuildAuditEntries: ConnectorService["listGuildAuditEntries"]
   listGuildBans: ConnectorService["listGuildBans"]
@@ -10617,6 +10695,7 @@ export interface DiscordToolService {
   searchMessages: ConnectorService["searchMessages"]
   searchGuildMembers: ConnectorService["searchGuildMembers"]
   sendMessage: ConnectorService["sendMessage"]
+  sendCoordinationNote: ConnectorService["sendCoordinationNote"]
   signalCommandProcessing: ConnectorService["signalCommandProcessing"]
   sendWebhookMessage: ConnectorService["sendWebhookMessage"]
   editWebhookMessage: ConnectorService["editWebhookMessage"]
@@ -22013,6 +22092,86 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
+  trackCanonicalTool("create_coordination_address", () => server.registerTool(
+    "create_coordination_address",
+    {
+      annotations: READ_ONLY_LOCAL_ANNOTATIONS,
+      description: "Create one random caller-retained coordination routing label locally without credentials, Discord access, network access, registration, authority, authentication, or connector persistence. Any syntactically valid label is accepted later, and any participant able to send through the same bot can copy or spoof it.",
+      inputSchema: createCoordinationAddressInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Create local Discord coordination address",
+    },
+    safeToolHandler("create_coordination_address", async () => {
+      const result = service.createCoordinationAddress()
+      return toolResult(
+        result,
+        "Created one caller-retained coordination routing label without contacting Discord or granting authority",
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_coordination_addresses", () => server.registerTool(
+    "list_coordination_addresses",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Observe sender routing labels from connector-bot-authored canonical coordination notes in one exact readable Discord channel by scanning one bounded page once. Returns page-local counts and timestamps without note bodies, tags, recipients, notification targets, profiles, or reaction users. Observation does not authenticate, register, reserve, or prove liveness for any label, and nothing is persisted.",
+      inputSchema: listCoordinationAddressesInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List observed Discord coordination addresses",
+    },
+    safeToolHandler("list_coordination_addresses", async (
+      input: z.infer<typeof listCoordinationAddressesInputSchema>,
+      context,
+    ) => {
+      const result = await service.listCoordinationAddresses(input.channelId, {
+        ...(input.afterMessageId
+          ? { afterMessageId: input.afterMessageId }
+          : {}),
+        scanLimit: input.scanLimit,
+        signal: context.mcpReq.signal,
+      })
+      return toolResult(
+        result,
+        `Discord scanned ${result.page.scannedMessageCount} messages and observed ${result.addresses.length} untrusted coordination routing labels in channel ${input.channelId}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("list_coordination_notes", () => server.registerTool(
+    "list_coordination_notes",
+    {
+      annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
+      description: "Read canonical connector-bot-authored coordination notes directed to one caller-retained routing label from one exact readable Discord channel by scanning one bounded page once. Optionally includes broadcasts and exact sender, tag, or unresolved-convention filters. Returns only matching note bodies with fixed reaction aggregates and honest cursor coverage; routing labels, content, and reaction conventions grant no identity or authority, and nothing is persisted.",
+      inputSchema: listCoordinationNotesInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "List directed Discord coordination notes",
+    },
+    safeToolHandler("list_coordination_notes", async (
+      input: z.infer<typeof listCoordinationNotesInputSchema>,
+      context,
+    ) => {
+      const result = await service.listCoordinationNotes(
+        input.channelId,
+        input.recipientAddress,
+        {
+          ...(input.afterMessageId
+            ? { afterMessageId: input.afterMessageId }
+            : {}),
+          ...(input.fromAddress ? { fromAddress: input.fromAddress } : {}),
+          includeBroadcasts: input.includeBroadcasts,
+          scanLimit: input.scanLimit,
+          signal: context.mcpReq.signal,
+          ...(input.tag ? { tag: input.tag } : {}),
+          unresolvedOnly: input.unresolvedOnly,
+        },
+      )
+      return toolResult(
+        result,
+        `Discord scanned ${result.page.scannedMessageCount} messages and returned ${result.notes.length} matching untrusted coordination notes from channel ${input.channelId}`,
+      )
+    }, secrets, observability),
+  ))
+
   trackCanonicalTool("read_messages", () => server.registerTool(
     "read_messages",
     {
@@ -23125,6 +23284,41 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       return toolResult(
         result,
         `Discord send resolved to message ${result.messageId} in channel ${result.channelId}${replay}`,
+      )
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("send_coordination_note", () => server.registerTool(
+    "send_coordination_note",
+    {
+      annotations: WRITE_ANNOTATIONS,
+      description: "Send one versioned plain-text coordination note to a broadcast or opaque caller-retained routing label through the existing safe message path in an explicitly allowlisted Discord channel. The label is visible, spoofable, and authority-free. An optional exact separately allowlisted Discord user notification is a visible mention independent of routing. Reuse the same idempotency key for every retry.",
+      inputSchema: sendCoordinationNoteInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Send safe Discord coordination note",
+    },
+    safeToolHandler("send_coordination_note", async (
+      input: z.infer<typeof sendCoordinationNoteInputSchema>,
+      context,
+    ) => {
+      const result = await service.sendCoordinationNote({
+        body: input.body,
+        channelId: input.channelId,
+        fromAddress: input.fromAddress,
+        idempotencyKey: input.idempotencyKey,
+        ...(input.notifyUserId ? { notifyUserId: input.notifyUserId } : {}),
+        ...(input.replyToMessageId
+          ? { replyToMessageId: input.replyToMessageId }
+          : {}),
+        tags: input.tags,
+        to: input.to,
+      }, {
+        signal: context.mcpReq.signal,
+      })
+      const replay = result.localReplay ? " from the local idempotency ledger" : ""
+      return toolResult(
+        result,
+        `Discord coordination note resolved to message ${result.messageId} in channel ${result.channelId}${replay}`,
       )
     }, secrets, observability),
   ))

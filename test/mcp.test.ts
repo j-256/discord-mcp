@@ -125,6 +125,11 @@ import type {
 } from "../src/component-message-service.js"
 import type { CommunityActivityService } from "../src/community-activity-service.js"
 import {
+  COORDINATION_ADDRESS_FORMAT,
+  COORDINATION_NOTE_FORMAT,
+  COORDINATION_NOTE_SCHEMA_VERSION,
+} from "../src/coordination-note.js"
+import {
   reviewEmbedPresentation,
   type EmbedLayoutInput,
 } from "../src/embed-layout.js"
@@ -662,6 +667,8 @@ const THREAD_ID = "250000000000000001"
 const MESSAGE_ID = "300000000000000001"
 const COORDINATION_CURSOR_ID = "300000000000000002"
 const COORDINATION_REPLY_ID = "300000000000000003"
+const COORDINATION_ADDRESS = "dca_AAAAAAAAAAAAAAAAAAAAAA"
+const COORDINATION_OTHER_ADDRESS = "dca_AQEBAQEBAQEBAQEBAQEBAQ"
 const ATTACHMENT_ID = "310000000000000001"
 const ROLE_ID = "350000000000000001"
 const AUDIT_ENTRY_ID = "360000000000000001"
@@ -9881,6 +9888,10 @@ function serviceFixture(overrides: {
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    coordinationAddressCreate: 0,
+    coordinationAddressList: 0,
+    coordinationNoteList: 0,
+    coordinationNoteSend: 0,
     embedMessageExecute: 0,
     embedMessagePlan: 0,
     embedMessagePreview: 0,
@@ -10291,6 +10302,23 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    createCoordinationAddress() {
+      calls.coordinationAddressCreate += 1
+      return {
+        address: COORDINATION_ADDRESS,
+        authorityGranted: false as const,
+        authenticated: false as const,
+        callerRetained: true as const,
+        discordContacted: false as const,
+        format: COORDINATION_ADDRESS_FORMAT,
+        limitations: ["Visible spoofable routing label only"],
+        networkContacted: false as const,
+        persisted: false as const,
+        registered: false as const,
+        schemaVersion: COORDINATION_NOTE_SCHEMA_VERSION,
+        status: "created" as const,
+      }
+    },
     async checkSoundboardPlayback(...arguments_) {
       if (overrides.soundboardPlaybackCheckError) {
         throw overrides.soundboardPlaybackCheckError
@@ -13897,6 +13925,134 @@ function serviceFixture(overrides: {
         status: "ok",
       }
     },
+    async listCoordinationAddresses(channelId, options) {
+      calls.coordinationAddressList += 1
+      return {
+        addresses: [{
+          address: COORDINATION_OTHER_ADDRESS,
+          firstObservedAtInPage: "2026-08-29T00:00:00.000Z",
+          lastMessageIdInPage: COORDINATION_REPLY_ID,
+          lastObservedAtInPage: "2026-08-29T00:00:00.000Z",
+          noteCountInPage: 1,
+        }],
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        channel: { id: channelId, parentId: null, type: 0 },
+        discarded: {
+          malformedEnvelope: 0,
+          nonNote: 1,
+          unsupportedAuthorOrWebhook: 0,
+          unsupportedMessageShape: 0,
+        },
+        format: COORDINATION_NOTE_FORMAT,
+        guildId: GUILD_ID,
+        page: {
+          addressCount: 1,
+          afterMessageId: options?.afterMessageId ?? null,
+          coordinationNoteCount: 1,
+          nextAfterMessageId: COORDINATION_REPLY_ID,
+          requestedScanLimit: options?.scanLimit ?? 50,
+          scanLimitReached: false,
+          scannedMessageCount: 2,
+        },
+        privacy: {
+          attachmentUrls: "omitted" as const,
+          connectorPersistence: "none" as const,
+          differentlyAddressedBodies: "discarded" as const,
+          notificationTargets: "omitted" as const,
+          noteBodies: "omitted" as const,
+          profiles: "omitted" as const,
+          rawPayloads: "omitted" as const,
+          reactionUsers: "not-read" as const,
+          recipients: "omitted" as const,
+          tags: "omitted" as const,
+        },
+        routing: {
+          addressAuthority: "none" as const,
+          addressAuthentication: "none" as const,
+          addressLiveness: "not-proven" as const,
+          addressRegistration: "none" as const,
+          contentAuthority: "none" as const,
+          statusSignalAuthority: "none" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
+    async listCoordinationNotes(channelId, recipientAddress, options) {
+      calls.coordinationNoteList += 1
+      return {
+        applicationId: APPLICATION_ID,
+        botId: BOT_ID,
+        channel: { id: channelId, parentId: null, type: 0 },
+        discarded: {
+          differentRecipient: 1,
+          filteredSender: 0,
+          filteredTag: 0,
+          malformedEnvelope: 0,
+          nonNote: 0,
+          resolvedByConvention: 0,
+          unsupportedAuthorOrWebhook: 0,
+          unsupportedMessageShape: 0,
+        },
+        format: COORDINATION_NOTE_FORMAT,
+        guildId: GUILD_ID,
+        notes: [{
+          body: "Private directed coordination body",
+          channelId,
+          editedTimestamp: null,
+          fromAddress: COORDINATION_OTHER_ADDRESS,
+          guildId: GUILD_ID,
+          id: COORDINATION_REPLY_ID,
+          jumpUrl: `https://discord.com/channels/${GUILD_ID}/${channelId}/${COORDINATION_REPLY_ID}`,
+          notificationRequested: false,
+          plainMessage: {
+            attachmentCount: 0 as const,
+            componentCount: 0 as const,
+            embedCount: 0 as const,
+            stickerCount: 0 as const,
+          },
+          replyToMessageId: null,
+          statusSignals: {
+            automatedReplyExpectedCount: 0,
+            blockedCount: 0,
+            declinedCount: 0,
+            doneOrApprovedCount: 0,
+            seenOrClaimedCount: 1,
+            terminalConventionObserved: false,
+          },
+          tags: ["handoff"],
+          timestamp: "2026-08-29T00:00:00.000Z",
+          to: { address: recipientAddress, kind: "address" as const },
+        }],
+        page: {
+          afterMessageId: options?.afterMessageId ?? null,
+          nextAfterMessageId: COORDINATION_REPLY_ID,
+          noteCount: 1,
+          requestedScanLimit: options?.scanLimit ?? 50,
+          scanLimitReached: false,
+          scannedMessageCount: 2,
+        },
+        privacy: {
+          attachmentUrls: "omitted" as const,
+          connectorPersistence: "none" as const,
+          differentlyAddressedBodies: "discarded" as const,
+          profiles: "omitted" as const,
+          rawPayloads: "omitted" as const,
+          reactionUsers: "not-read" as const,
+        },
+        routing: {
+          addressAuthority: "none" as const,
+          addressAuthentication: "none" as const,
+          addressLiveness: "not-proven" as const,
+          addressRegistration: "none" as const,
+          contentAuthority: "none" as const,
+          statusSignalAuthority: "none" as const,
+        },
+        schemaVersion: 1,
+        status: "ok" as const,
+      }
+    },
     async listMessageReplies(channelId, messageId, options) {
       calls.messageReplies += 1
       return {
@@ -14560,6 +14716,33 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
       }
     },
+    async sendCoordinationNote(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.coordinationNoteSend += 1
+      return {
+        activityId: "activity-coordination-note-send",
+        channelId: input.channelId,
+        coordination: {
+          addressAuthority: "none" as const,
+          bodyCharacters: input.body.length,
+          bodyReturned: false as const,
+          connectorPersistence: "none" as const,
+          format: COORDINATION_NOTE_FORMAT,
+          notificationRequested: input.notifyUserId !== undefined,
+          recipientKind: input.to.kind,
+          schemaVersion: COORDINATION_NOTE_SCHEMA_VERSION,
+          tagCount: input.tags?.length ?? 0,
+          writePath: "send_message" as const,
+        },
+        guildId: GUILD_ID,
+        localReplay: false,
+        messageId: MESSAGE_ID,
+        nonce: "stable-coordination-nonce",
+        schemaVersion: 1,
+        status: "completed" as const,
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
+      }
+    },
     async signalCommandProcessing(input) {
       if (overrides.interactionError) throw overrides.interactionError
       calls.signalProcessing += 1
@@ -15103,6 +15286,9 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "explain_principal_permissions",
       "audit_channel_role_access",
       "analyze_community_activity",
+      "create_coordination_address",
+      "list_coordination_addresses",
+      "list_coordination_notes",
       "read_messages",
       "list_message_replies",
       "search_messages",
@@ -15143,6 +15329,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "get_stage_instance",
       "list_channel_permission_overwrites",
       "send_message",
+      "send_coordination_note",
       "signal_command_processing",
       "edit_own_message",
       "add_reaction",
@@ -15961,7 +16148,10 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   const soundboardPlayback = result.tools.find((tool) => (
     tool.name === "play_soundboard_sound"
   ))
-  for (const tool of [send, reaction, reactions, soundboardPlayback]) {
+  const coordinationSend = result.tools.find((tool) => (
+    tool.name === "send_coordination_note"
+  ))
+  for (const tool of [send, coordinationSend, reaction, reactions, soundboardPlayback]) {
     assert.deepEqual(tool?.annotations, {
       destructiveHint: false,
       idempotentHint: true,
@@ -15990,6 +16180,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
     "get_gateway_events",
     "get_observability_status",
     "parse_discord_reference",
+    "create_coordination_address",
   ]) {
     const gatewayTool = result.tools.find((tool) => tool.name === name)
     assert.deepEqual(gatewayTool?.annotations, {
@@ -17959,6 +18150,46 @@ test("progressive discovery enables the complete reviewed parent-category permis
   )
 })
 
+test("progressive discovery exposes the complete authority-free coordination routing surface", async (context) => {
+  const { client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["coordination"],
+      },
+    },
+  })
+
+  assert.deepEqual(
+    (await client.listPrompts()).prompts.map(({ name }) => name),
+    [
+      "route_discord_goal",
+      "inspect_directed_discord_notes",
+    ],
+  )
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name),
+    ["discover_discord_tools"],
+  )
+
+  const discovery = structuredContent(await client.callTool({
+    arguments: { limit: 4, toolset: "coordination" },
+    name: "discover_discord_tools",
+  }))
+  const enabled = (discovery.newlyEnabledToolNames as string[]).sort()
+
+  assert.deepEqual(enabled, [
+    "create_coordination_address",
+    "list_coordination_addresses",
+    "list_coordination_notes",
+    "send_coordination_note",
+  ])
+  assert.deepEqual(
+    (await client.listTools()).tools.map(({ name }) => name).sort(),
+    [...enabled, "discover_discord_tools"].sort(),
+  )
+})
+
 test("MCP toolsets exclude unavailable tools from direct and discovered surfaces", async (context) => {
   const { client } = await connectedFixture(context, {
     configOverrides: {
@@ -18491,6 +18722,10 @@ test("MCP thread and permission tools validate cursors and invoke read-only serv
     componentMessagePlan: 0,
     componentMessagePreview: 0,
     componentMessageVerify: 0,
+    coordinationAddressCreate: 0,
+    coordinationAddressList: 0,
+    coordinationNoteList: 0,
+    coordinationNoteSend: 0,
     embedMessageExecute: 0,
     embedMessagePlan: 0,
     embedMessagePreview: 0,
@@ -20075,6 +20310,140 @@ test("MCP reaction reads separate aggregate access from identity audit", async (
   assert.equal(invalid.isError, true)
   assert.equal(calls.reactions, 1)
   assert.equal(calls.reactionUsers, 1)
+})
+
+test("MCP coordination tools separate stateless labels, minimized reads, and guarded sends", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const tools = (await client.listTools()).tools
+  const local = listedTool(tools, "create_coordination_address")
+  const addressRead = listedTool(tools, "list_coordination_addresses")
+  const noteRead = listedTool(tools, "list_coordination_notes")
+  const send = listedTool(tools, "send_coordination_note")
+
+  assert.deepEqual(local.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+    readOnlyHint: true,
+  })
+  for (const read of [addressRead, noteRead]) {
+    assert.deepEqual(read.annotations, {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: true,
+    })
+  }
+  assert.deepEqual(send.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+    readOnlyHint: false,
+  })
+
+  const created = await client.callTool({
+    arguments: {},
+    name: "create_coordination_address",
+  })
+  const addresses = await client.callTool({
+    arguments: {
+      afterMessageId: COORDINATION_CURSOR_ID,
+      channelId: CHANNEL_ID,
+      scanLimit: 7,
+    },
+    name: "list_coordination_addresses",
+  })
+  const notes = await client.callTool({
+    arguments: {
+      afterMessageId: COORDINATION_CURSOR_ID,
+      channelId: CHANNEL_ID,
+      fromAddress: COORDINATION_OTHER_ADDRESS,
+      includeBroadcasts: false,
+      recipientAddress: COORDINATION_ADDRESS,
+      scanLimit: 7,
+      tag: "handoff",
+      unresolvedOnly: true,
+    },
+    name: "list_coordination_notes",
+  })
+  const privateBody = "Private outgoing coordination body"
+  const privateIdempotencyKey = "coordination-mcp-request-0001"
+  const sent = await client.callTool({
+    arguments: {
+      body: privateBody,
+      channelId: CHANNEL_ID,
+      fromAddress: COORDINATION_ADDRESS,
+      idempotencyKey: privateIdempotencyKey,
+      notifyUserId: USER_ID,
+      tags: ["handoff", "release"],
+      to: { address: COORDINATION_OTHER_ADDRESS, kind: "address" },
+    },
+    name: "send_coordination_note",
+  })
+
+  assert.equal(structuredContent(created).status, "created")
+  assert.equal(structuredContent(created).address, COORDINATION_ADDRESS)
+  const addressResult = structuredContent(addresses)
+  assert.equal(addressResult.status, "ok")
+  assert.equal((addressResult.addresses as unknown[]).length, 1)
+  assert.equal(JSON.stringify(addressResult).includes("Private directed coordination body"), false)
+  assert.equal(JSON.stringify(addressResult).includes(COORDINATION_ADDRESS), false)
+  const noteResult = structuredContent(notes)
+  assert.equal(noteResult.status, "ok")
+  assert.equal(
+    ((noteResult.notes as Array<Record<string, unknown>>)[0]?.body),
+    "Private directed coordination body",
+  )
+  const sendResult = structuredContent(sent)
+  assert.equal(sendResult.status, "completed")
+  assert.deepEqual(sendResult.coordination, {
+    addressAuthority: "none",
+    bodyCharacters: privateBody.length,
+    bodyReturned: false,
+    connectorPersistence: "none",
+    format: COORDINATION_NOTE_FORMAT,
+    notificationRequested: true,
+    recipientKind: "address",
+    schemaVersion: COORDINATION_NOTE_SCHEMA_VERSION,
+    tagCount: 2,
+    writePath: "send_message",
+  })
+  for (const secret of [
+    privateBody,
+    privateIdempotencyKey,
+    COORDINATION_ADDRESS,
+    COORDINATION_OTHER_ADDRESS,
+    USER_ID,
+  ]) {
+    assert.doesNotMatch(JSON.stringify(sent), new RegExp(secret, "u"))
+  }
+  assert.equal(calls.coordinationAddressCreate, 1)
+  assert.equal(calls.coordinationAddressList, 1)
+  assert.equal(calls.coordinationNoteList, 1)
+  assert.equal(calls.coordinationNoteSend, 1)
+
+  const invalid = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      recipientAddress: "friendly-name",
+    },
+    name: "list_coordination_notes",
+  })
+  const duplicateTags = await client.callTool({
+    arguments: {
+      body: "x",
+      channelId: CHANNEL_ID,
+      fromAddress: COORDINATION_ADDRESS,
+      idempotencyKey: "coordination-mcp-request-0002",
+      tags: ["handoff", "handoff"],
+      to: { kind: "broadcast" },
+    },
+    name: "send_coordination_note",
+  })
+  assert.equal(invalid.isError, true)
+  assert.equal(duplicateTags.isError, true)
+  assert.equal(calls.coordinationNoteList, 1)
+  assert.equal(calls.coordinationNoteSend, 1)
 })
 
 test("MCP interaction tools enforce bounded schemas and invoke classified services", async (context) => {

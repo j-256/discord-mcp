@@ -462,7 +462,7 @@ export function registerDiscordResources(
         cacheScope: "public",
         ttlMs: STATIC_RESOURCE_TTL_MS,
       },
-      description: "Model-neutral local playbook for exact-ID Discord task publication, status signals, replies, bounded inspection, reviewed threads, native polls, and explicit escalation without granting authority or persisting task content.",
+      description: "Model-neutral local playbook for caller-retained spoofable routing labels, strict directed notes, exact-ID task publication, status signals, replies, bounded inspection, reviewed threads, native polls, and explicit escalation without granting authority or persisting content.",
       mimeType: "application/json",
       title: "Discord coordination playbook",
     },

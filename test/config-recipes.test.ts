@@ -71,6 +71,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   assert.deepEqual(CONFIG_RECIPE_NAMES, [
     "guild-starter",
     "guild-builder",
+    "coordination-channel",
     "channel-publisher",
     "direct-messenger",
     "incident-response",
@@ -179,6 +180,40 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     true,
   )
 
+  const coordinationChannel = getConfigRecipe("coordination-channel")
+  assert.deepEqual(coordinationChannel.toolsets, ["coordination"])
+  assert.deepEqual(coordinationChannel.toolNames, [
+    "create_coordination_address",
+    "discover_discord_tools",
+    "list_coordination_addresses",
+    "list_coordination_notes",
+    "send_coordination_note",
+  ])
+  assert.deepEqual(coordinationChannel.capabilities, ["interactions"])
+  assert.deepEqual(coordinationChannel.requirements.scope.targets, [
+    "$.scopes.interactionChannelIds",
+  ])
+  assert.deepEqual(coordinationChannel.requirements.botPermissions, [
+    "VIEW_CHANNEL",
+    "SEND_MESSAGES",
+    "READ_MESSAGE_HISTORY",
+    "SEND_MESSAGES_IN_THREADS",
+  ])
+  assert.deepEqual(coordinationChannel.requirements.privilegedIntents, [])
+  assert.deepEqual(coordinationChannel.requirements.gateway, {
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: [],
+  })
+  assert.equal(
+    coordinationChannel.warnings.some((warning) => warning.includes("app-authored-message")),
+    true,
+  )
+  assert.equal(
+    coordinationChannel.warnings.some((warning) => warning.includes("alias registry")),
+    true,
+  )
+
   const channelPublisher = getConfigRecipe("channel-publisher")
   assert.deepEqual(channelPublisher.toolsets, [
     "embed-messages",
@@ -186,6 +221,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "messages",
   ])
   assert.equal(channelPublisher.toolNames.includes("send_message"), true)
+  assert.equal(channelPublisher.toolNames.includes("send_coordination_note"), false)
   assert.equal(channelPublisher.toolNames.includes("execute_component_message"), true)
   assert.equal(channelPublisher.toolNames.includes("execute_embed_message"), true)
   assert.deepEqual(channelPublisher.capabilities, ["embedMessages", "interactions"])
@@ -299,6 +335,16 @@ test("configuration recipe requests normalize exact bounded scope", () => {
     scope: {
       ids: [GUILD_ID],
       kind: "guild",
+    },
+  })
+  assert.deepEqual(normalizeConfigRecipeRequest({
+    channelIds: [CHANNEL_ID],
+    name: "coordination-channel",
+  }), {
+    name: "coordination-channel",
+    scope: {
+      ids: [CHANNEL_ID],
+      kind: "channel",
     },
   })
   assert.deepEqual(normalizeConfigRecipeRequest({
@@ -502,6 +548,40 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
     plan.warnings.some((warning) => warning.includes("offline planning cannot prove")),
     true,
   )
+})
+
+test("coordination-channel adds only exact-channel directed routing policy", async (context) => {
+  const file = await configFile(context)
+  const plan = planConfigRecipe({
+    channelIds: [CHANNEL_ID],
+    file,
+    name: "coordination-channel",
+  })
+
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.proposedDocument.tools.toolsets, [
+    "connector",
+    "coordination",
+  ])
+  assert.deepEqual(plan.proposedDocument.capabilities, { interactions: true })
+  assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.equal("embedMessageChannelIds" in plan.proposedDocument.scopes, false)
+  assert.equal(
+    plan.recipe.requirements.botPermissions.includes("ADD_REACTIONS"),
+    false,
+  )
+  assert.equal(
+    plan.recipe.requirements.botPermissions.includes("EMBED_LINKS"),
+    false,
+  )
+  assert.deepEqual(plan.recipe.requirements.privilegedIntents, [])
+
+  const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.equal(runtime.allowInteractions, true)
+  assert.equal(runtime.allowGateway, false)
+  assert.deepEqual([...runtime.interactionChannelIds], [CHANNEL_ID])
 })
 
 test("incident-response adds only exact-guild incident policy", async (context) => {
