@@ -15,7 +15,6 @@ import {
   type RegisteredTool,
 } from "@modelcontextprotocol/server"
 import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio"
-import { z } from "zod"
 
 import {
   normalizeAnnouncementCrosspostRequest,
@@ -503,6 +502,7 @@ import {
 } from "./message-attachment-read-service.js"
 import { encodeMessageAttachmentForMcp } from "./message-attachment-mcp.js"
 import { isMainModule } from "./entrypoint.js"
+import { z } from "./lazy-z.js"
 import {
   normalizeInviteCreationRequest,
   normalizeInviteDeletionRequest,
@@ -553,8 +553,8 @@ import {
   createDiscordToolDiscoveryCatalog,
   discoverDiscordTools,
   discoverDiscordToolsInputSchema,
-  MCP_TOOL_CATALOG,
   mcpToolSelected,
+  selectedCanonicalMcpToolNames,
   type CanonicalMcpToolName,
 } from "./mcp-tool-catalog.js"
 import { stableString } from "./normalize.js"
@@ -20633,16 +20633,18 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
   const canonicalTools = new Map<CanonicalMcpToolName, RegisteredTool>()
   const trackCanonicalTool = (
     name: CanonicalMcpToolName,
-    tool: RegisteredTool,
+    createTool: () => RegisteredTool,
   ): void => {
+    if (!mcpToolSelected(name, config.mcpToolsets)) return
     if (canonicalTools.has(name)) {
       throw new Error(`Duplicate canonical MCP tool ${name}`)
     }
+    const tool = createTool()
     attachPlanReviewApp(name, tool)
     canonicalTools.set(name, tool)
   }
 
-  trackCanonicalTool("audit_application_posture", server.registerTool(
+  trackCanonicalTool("audit_application_posture", () => server.registerTool(
     "audit_application_posture",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20665,7 +20667,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("inspect_application_activity_instance", server.registerTool(
+  trackCanonicalTool("inspect_application_activity_instance", () => server.registerTool(
     "inspect_application_activity_instance",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20690,7 +20692,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_current_bot_profile", server.registerTool(
+  trackCanonicalTool("get_current_bot_profile", () => server.registerTool(
     "get_current_bot_profile",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20713,7 +20715,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_application_commands", server.registerTool(
+  trackCanonicalTool("audit_application_commands", () => server.registerTool(
     "audit_application_commands",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20736,7 +20738,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_application_role_connection_metadata", server.registerTool(
+  trackCanonicalTool("audit_application_role_connection_metadata", () => server.registerTool(
     "audit_application_role_connection_metadata",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20759,7 +20761,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_application_skus", server.registerTool(
+  trackCanonicalTool("audit_application_skus", () => server.registerTool(
     "audit_application_skus",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20782,7 +20784,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_application_entitlements", server.registerTool(
+  trackCanonicalTool("audit_application_entitlements", () => server.registerTool(
     "audit_application_entitlements",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20813,7 +20815,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_application_subscriptions", server.registerTool(
+  trackCanonicalTool("audit_application_subscriptions", () => server.registerTool(
     "audit_application_subscriptions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20844,7 +20846,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_application_entitlement", server.registerTool(
+  trackCanonicalTool("get_application_entitlement", () => server.registerTool(
     "get_application_entitlement",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20874,7 +20876,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_connector_status", server.registerTool(
+  trackCanonicalTool("get_connector_status", () => server.registerTool(
     "get_connector_status",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20889,7 +20891,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_bot_installations", server.registerTool(
+  trackCanonicalTool("audit_bot_installations", () => server.registerTool(
     "audit_bot_installations",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -20914,7 +20916,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("parse_discord_reference", server.registerTool(
+  trackCanonicalTool("parse_discord_reference", () => server.registerTool(
     "parse_discord_reference",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -20934,7 +20936,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_observability_status", server.registerTool(
+  trackCanonicalTool("get_observability_status", () => server.registerTool(
     "get_observability_status",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -20952,7 +20954,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_gateway_status", server.registerTool(
+  trackCanonicalTool("get_gateway_status", () => server.registerTool(
     "get_gateway_status",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -20972,7 +20974,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_gateway_events", server.registerTool(
+  trackCanonicalTool("get_gateway_events", () => server.registerTool(
     "get_gateway_events",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -20995,7 +20997,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_pending_discord_interactions", server.registerTool(
+  trackCanonicalTool("list_pending_discord_interactions", () => server.registerTool(
     "list_pending_discord_interactions",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -21013,7 +21015,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_discord_interaction_continuations", server.registerTool(
+  trackCanonicalTool("list_discord_interaction_continuations", () => server.registerTool(
     "list_discord_interaction_continuations",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -21031,7 +21033,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("respond_to_discord_interaction", server.registerTool(
+  trackCanonicalTool("respond_to_discord_interaction", () => server.registerTool(
     "respond_to_discord_interaction",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -21059,7 +21061,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("send_discord_interaction_followup", server.registerTool(
+  trackCanonicalTool("send_discord_interaction_followup", () => server.registerTool(
     "send_discord_interaction_followup",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -21087,7 +21089,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guilds", server.registerTool(
+  trackCanonicalTool("list_guilds", () => server.registerTool(
     "list_guilds",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21107,7 +21109,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_channels", server.registerTool(
+  trackCanonicalTool("list_channels", () => server.registerTool(
     "list_channels",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21124,7 +21126,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_channel", server.registerTool(
+  trackCanonicalTool("get_channel", () => server.registerTool(
     "get_channel",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21147,7 +21149,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_voice_channel_status", server.registerTool(
+  trackCanonicalTool("get_voice_channel_status", () => server.registerTool(
     "get_voice_channel_status",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21170,7 +21172,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_voice_regions", server.registerTool(
+  trackCanonicalTool("list_voice_regions", () => server.registerTool(
     "list_voice_regions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21187,7 +21189,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_voice_regions", server.registerTool(
+  trackCanonicalTool("list_guild_voice_regions", () => server.registerTool(
     "list_guild_voice_regions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21210,7 +21212,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_forum_tags", server.registerTool(
+  trackCanonicalTool("audit_forum_tags", () => server.registerTool(
     "audit_forum_tags",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21233,7 +21235,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_roles", server.registerTool(
+  trackCanonicalTool("list_roles", () => server.registerTool(
     "list_roles",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21250,7 +21252,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_role_order", server.registerTool(
+  trackCanonicalTool("audit_role_order", () => server.registerTool(
     "audit_role_order",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21273,7 +21275,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_channel_order", server.registerTool(
+  trackCanonicalTool("audit_channel_order", () => server.registerTool(
     "audit_channel_order",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21300,7 +21302,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_role", server.registerTool(
+  trackCanonicalTool("get_role", () => server.registerTool(
     "get_role",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21320,7 +21322,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_member", server.registerTool(
+  trackCanonicalTool("get_guild_member", () => server.registerTool(
     "get_guild_member",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21343,7 +21345,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_member_voice_state", server.registerTool(
+  trackCanonicalTool("get_member_voice_state", () => server.registerTool(
     "get_member_voice_state",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21370,7 +21372,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_thread_state", server.registerTool(
+  trackCanonicalTool("get_thread_state", () => server.registerTool(
     "get_thread_state",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21395,7 +21397,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_thread_membership", server.registerTool(
+  trackCanonicalTool("get_thread_membership", () => server.registerTool(
     "get_thread_membership",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21421,7 +21423,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_members", server.registerTool(
+  trackCanonicalTool("list_guild_members", () => server.registerTool(
     "list_guild_members",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21446,7 +21448,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("search_guild_members", server.registerTool(
+  trackCanonicalTool("search_guild_members", () => server.registerTool(
     "search_guild_members",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21471,7 +21473,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_bans", server.registerTool(
+  trackCanonicalTool("list_guild_bans", () => server.registerTool(
     "list_guild_bans",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21497,7 +21499,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_ban", server.registerTool(
+  trackCanonicalTool("get_guild_ban", () => server.registerTool(
     "get_guild_ban",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21523,7 +21525,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_invites", server.registerTool(
+  trackCanonicalTool("list_guild_invites", () => server.registerTool(
     "list_guild_invites",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21548,7 +21550,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_invite", server.registerTool(
+  trackCanonicalTool("get_guild_invite", () => server.registerTool(
     "get_guild_invite",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21573,7 +21575,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_vanity_url", server.registerTool(
+  trackCanonicalTool("get_guild_vanity_url", () => server.registerTool(
     "get_guild_vanity_url",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21597,7 +21599,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_templates", server.registerTool(
+  trackCanonicalTool("list_guild_templates", () => server.registerTool(
     "list_guild_templates",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21620,7 +21622,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_onboarding", server.registerTool(
+  trackCanonicalTool("get_guild_onboarding", () => server.registerTool(
     "get_guild_onboarding",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21645,7 +21647,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_welcome_screen", server.registerTool(
+  trackCanonicalTool("get_guild_welcome_screen", () => server.registerTool(
     "get_guild_welcome_screen",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21670,7 +21672,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_widget_settings", server.registerTool(
+  trackCanonicalTool("get_guild_widget_settings", () => server.registerTool(
     "get_guild_widget_settings",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21694,7 +21696,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_settings", server.registerTool(
+  trackCanonicalTool("get_guild_settings", () => server.registerTool(
     "get_guild_settings",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21718,7 +21720,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_guild_community", server.registerTool(
+  trackCanonicalTool("audit_guild_community", () => server.registerTool(
     "audit_guild_community",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21742,7 +21744,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_incident_actions", server.registerTool(
+  trackCanonicalTool("get_guild_incident_actions", () => server.registerTool(
     "get_guild_incident_actions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21766,7 +21768,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_profile", server.registerTool(
+  trackCanonicalTool("get_guild_profile", () => server.registerTool(
     "get_guild_profile",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21790,7 +21792,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_audit_entries", server.registerTool(
+  trackCanonicalTool("list_guild_audit_entries", () => server.registerTool(
     "list_guild_audit_entries",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21818,7 +21820,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_audit_entry", server.registerTool(
+  trackCanonicalTool("get_guild_audit_entry", () => server.registerTool(
     "get_guild_audit_entry",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21844,7 +21846,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_active_threads", server.registerTool(
+  trackCanonicalTool("list_active_threads", () => server.registerTool(
     "list_active_threads",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21866,7 +21868,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_archived_threads", server.registerTool(
+  trackCanonicalTool("list_archived_threads", () => server.registerTool(
     "list_archived_threads",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21890,7 +21892,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("explain_channel_access", server.registerTool(
+  trackCanonicalTool("explain_channel_access", () => server.registerTool(
     "explain_channel_access",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21913,7 +21915,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("explain_principal_permissions", server.registerTool(
+  trackCanonicalTool("explain_principal_permissions", () => server.registerTool(
     "explain_principal_permissions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21951,7 +21953,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_channel_role_access", server.registerTool(
+  trackCanonicalTool("audit_channel_role_access", () => server.registerTool(
     "audit_channel_role_access",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -21979,7 +21981,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("analyze_community_activity", server.registerTool(
+  trackCanonicalTool("analyze_community_activity", () => server.registerTool(
     "analyze_community_activity",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22011,7 +22013,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("read_messages", server.registerTool(
+  trackCanonicalTool("read_messages", () => server.registerTool(
     "read_messages",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22032,7 +22034,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_message_replies", server.registerTool(
+  trackCanonicalTool("list_message_replies", () => server.registerTool(
     "list_message_replies",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22063,7 +22065,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("search_messages", server.registerTool(
+  trackCanonicalTool("search_messages", () => server.registerTool(
     "search_messages",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22118,7 +22120,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("recall_conversation", server.registerTool(
+  trackCanonicalTool("recall_conversation", () => server.registerTool(
     "recall_conversation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22151,7 +22153,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_message", server.registerTool(
+  trackCanonicalTool("get_message", () => server.registerTool(
     "get_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22170,7 +22172,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("read_message_attachment", server.registerTool(
+  trackCanonicalTool("read_message_attachment", () => server.registerTool(
     "read_message_attachment",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22198,7 +22200,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_direct_messages", server.registerTool(
+  trackCanonicalTool("list_direct_messages", () => server.registerTool(
     "list_direct_messages",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22230,7 +22232,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_direct_message", server.registerTool(
+  trackCanonicalTool("get_direct_message", () => server.registerTool(
     "get_direct_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22262,7 +22264,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_direct_message_change", server.registerTool(
+  trackCanonicalTool("plan_direct_message_change", () => server.registerTool(
     "plan_direct_message_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22286,7 +22288,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_direct_message_change", server.registerTool(
+  trackCanonicalTool("verify_direct_message_change", () => server.registerTool(
     "verify_direct_message_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22310,7 +22312,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_direct_message_change", server.registerTool(
+  trackCanonicalTool("execute_direct_message_change", () => server.registerTool(
     "execute_direct_message_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -22392,7 +22394,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_message_reactions", server.registerTool(
+  trackCanonicalTool("list_message_reactions", () => server.registerTool(
     "list_message_reactions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22417,7 +22419,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_reaction_users", server.registerTool(
+  trackCanonicalTool("list_reaction_users", () => server.registerTool(
     "list_reaction_users",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22448,7 +22450,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_poll", server.registerTool(
+  trackCanonicalTool("get_poll", () => server.registerTool(
     "get_poll",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22473,7 +22475,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_poll_answer_voters", server.registerTool(
+  trackCanonicalTool("list_poll_answer_voters", () => server.registerTool(
     "list_poll_answer_voters",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22503,7 +22505,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_message_pins", server.registerTool(
+  trackCanonicalTool("list_message_pins", () => server.registerTool(
     "list_message_pins",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22528,7 +22530,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_channel_webhooks", server.registerTool(
+  trackCanonicalTool("list_channel_webhooks", () => server.registerTool(
     "list_channel_webhooks",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22552,7 +22554,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_guild_webhooks", server.registerTool(
+  trackCanonicalTool("audit_guild_webhooks", () => server.registerTool(
     "audit_guild_webhooks",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22576,7 +22578,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_integrations", server.registerTool(
+  trackCanonicalTool("list_guild_integrations", () => server.registerTool(
     "list_guild_integrations",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22603,7 +22605,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_channel_webhook", server.registerTool(
+  trackCanonicalTool("get_channel_webhook", () => server.registerTool(
     "get_channel_webhook",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22628,7 +22630,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_emojis", server.registerTool(
+  trackCanonicalTool("list_guild_emojis", () => server.registerTool(
     "list_guild_emojis",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22653,7 +22655,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_application_emojis", server.registerTool(
+  trackCanonicalTool("list_application_emojis", () => server.registerTool(
     "list_application_emojis",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22676,7 +22678,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_application_emoji", server.registerTool(
+  trackCanonicalTool("get_application_emoji", () => server.registerTool(
     "get_application_emoji",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22700,7 +22702,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_emoji", server.registerTool(
+  trackCanonicalTool("get_guild_emoji", () => server.registerTool(
     "get_guild_emoji",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22726,7 +22728,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_stickers", server.registerTool(
+  trackCanonicalTool("list_guild_stickers", () => server.registerTool(
     "list_guild_stickers",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22751,7 +22753,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_sticker", server.registerTool(
+  trackCanonicalTool("get_guild_sticker", () => server.registerTool(
     "get_guild_sticker",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22777,7 +22779,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_default_soundboard_sounds", server.registerTool(
+  trackCanonicalTool("list_default_soundboard_sounds", () => server.registerTool(
     "list_default_soundboard_sounds",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22800,7 +22802,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_guild_soundboard_sounds", server.registerTool(
+  trackCanonicalTool("list_guild_soundboard_sounds", () => server.registerTool(
     "list_guild_soundboard_sounds",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22824,7 +22826,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_guild_soundboard_sound", server.registerTool(
+  trackCanonicalTool("get_guild_soundboard_sound", () => server.registerTool(
     "get_guild_soundboard_sound",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22849,7 +22851,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("check_soundboard_playback", server.registerTool(
+  trackCanonicalTool("check_soundboard_playback", () => server.registerTool(
     "check_soundboard_playback",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22873,7 +22875,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("play_soundboard_sound", server.registerTool(
+  trackCanonicalTool("play_soundboard_sound", () => server.registerTool(
     "play_soundboard_sound",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -22903,7 +22905,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_automod_rules", server.registerTool(
+  trackCanonicalTool("list_automod_rules", () => server.registerTool(
     "list_automod_rules",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22927,7 +22929,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_automod_rule", server.registerTool(
+  trackCanonicalTool("get_automod_rule", () => server.registerTool(
     "get_automod_rule",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22952,7 +22954,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_scheduled_events", server.registerTool(
+  trackCanonicalTool("list_scheduled_events", () => server.registerTool(
     "list_scheduled_events",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -22977,7 +22979,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_scheduled_event", server.registerTool(
+  trackCanonicalTool("get_scheduled_event", () => server.registerTool(
     "get_scheduled_event",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23003,7 +23005,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_scheduled_event_users", server.registerTool(
+  trackCanonicalTool("list_scheduled_event_users", () => server.registerTool(
     "list_scheduled_event_users",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23032,7 +23034,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_stage_instances", server.registerTool(
+  trackCanonicalTool("list_stage_instances", () => server.registerTool(
     "list_stage_instances",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23055,7 +23057,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_stage_instance", server.registerTool(
+  trackCanonicalTool("get_stage_instance", () => server.registerTool(
     "get_stage_instance",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23080,7 +23082,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_channel_permission_overwrites", server.registerTool(
+  trackCanonicalTool("list_channel_permission_overwrites", () => server.registerTool(
     "list_channel_permission_overwrites",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23108,7 +23110,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("send_message", server.registerTool(
+  trackCanonicalTool("send_message", () => server.registerTool(
     "send_message",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -23127,7 +23129,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("signal_command_processing", server.registerTool(
+  trackCanonicalTool("signal_command_processing", () => server.registerTool(
     "signal_command_processing",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -23152,7 +23154,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("edit_own_message", server.registerTool(
+  trackCanonicalTool("edit_own_message", () => server.registerTool(
     "edit_own_message",
     {
       annotations: EDIT_ANNOTATIONS,
@@ -23171,7 +23173,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("add_reaction", server.registerTool(
+  trackCanonicalTool("add_reaction", () => server.registerTool(
     "add_reaction",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -23190,7 +23192,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("add_reactions", server.registerTool(
+  trackCanonicalTool("add_reactions", () => server.registerTool(
     "add_reactions",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -23217,7 +23219,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("remove_own_reaction", server.registerTool(
+  trackCanonicalTool("remove_own_reaction", () => server.registerTool(
     "remove_own_reaction",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -23242,7 +23244,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_reaction_moderation", server.registerTool(
+  trackCanonicalTool("plan_reaction_moderation", () => server.registerTool(
     "plan_reaction_moderation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23266,7 +23268,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_reaction_moderation", server.registerTool(
+  trackCanonicalTool("execute_reaction_moderation", () => server.registerTool(
     "execute_reaction_moderation",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -23390,7 +23392,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_poll_creation", server.registerTool(
+  trackCanonicalTool("plan_poll_creation", () => server.registerTool(
     "plan_poll_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23414,7 +23416,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_poll_creation", server.registerTool(
+  trackCanonicalTool("execute_poll_creation", () => server.registerTool(
     "execute_poll_creation",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -23523,7 +23525,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_poll_end", server.registerTool(
+  trackCanonicalTool("plan_poll_end", () => server.registerTool(
     "plan_poll_end",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23547,7 +23549,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_poll_end", server.registerTool(
+  trackCanonicalTool("execute_poll_end", () => server.registerTool(
     "execute_poll_end",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -23670,7 +23672,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_message_deletion", server.registerTool(
+  trackCanonicalTool("plan_message_deletion", () => server.registerTool(
     "plan_message_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23689,7 +23691,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("delete_messages", server.registerTool(
+  trackCanonicalTool("delete_messages", () => server.registerTool(
     "delete_messages",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -23799,7 +23801,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_message_pin", server.registerTool(
+  trackCanonicalTool("plan_message_pin", () => server.registerTool(
     "plan_message_pin",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23823,7 +23825,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_message_pin", server.registerTool(
+  trackCanonicalTool("execute_message_pin", () => server.registerTool(
     "execute_message_pin",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -23949,7 +23951,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_announcement_crosspost", server.registerTool(
+  trackCanonicalTool("plan_announcement_crosspost", () => server.registerTool(
     "plan_announcement_crosspost",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -23973,7 +23975,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_announcement_crosspost", server.registerTool(
+  trackCanonicalTool("execute_announcement_crosspost", () => server.registerTool(
     "execute_announcement_crosspost",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24095,7 +24097,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_message_forward", server.registerTool(
+  trackCanonicalTool("plan_message_forward", () => server.registerTool(
     "plan_message_forward",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24119,7 +24121,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_message_forward", server.registerTool(
+  trackCanonicalTool("execute_message_forward", () => server.registerTool(
     "execute_message_forward",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24227,7 +24229,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_announcement_subscriptions", server.registerTool(
+  trackCanonicalTool("list_announcement_subscriptions", () => server.registerTool(
     "list_announcement_subscriptions",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24251,7 +24253,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_announcement_subscription", server.registerTool(
+  trackCanonicalTool("plan_announcement_subscription", () => server.registerTool(
     "plan_announcement_subscription",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24275,7 +24277,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_announcement_subscription", server.registerTool(
+  trackCanonicalTool("execute_announcement_subscription", () => server.registerTool(
     "execute_announcement_subscription",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24399,7 +24401,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_native_interaction_command", server.registerTool(
+  trackCanonicalTool("plan_native_interaction_command", () => server.registerTool(
     "plan_native_interaction_command",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24425,7 +24427,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_native_interaction_command", server.registerTool(
+  trackCanonicalTool("execute_native_interaction_command", () => server.registerTool(
     "execute_native_interaction_command",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24547,7 +24549,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_application_command_change", server.registerTool(
+  trackCanonicalTool("plan_guild_application_command_change", () => server.registerTool(
     "plan_guild_application_command_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24573,7 +24575,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_application_command_change", server.registerTool(
+  trackCanonicalTool("execute_guild_application_command_change", () => server.registerTool(
     "execute_guild_application_command_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24695,7 +24697,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_global_application_command_change", server.registerTool(
+  trackCanonicalTool("plan_global_application_command_change", () => server.registerTool(
     "plan_global_application_command_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24721,7 +24723,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_global_application_command_change", server.registerTool(
+  trackCanonicalTool("execute_global_application_command_change", () => server.registerTool(
     "execute_global_application_command_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24843,7 +24845,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_template_change", server.registerTool(
+  trackCanonicalTool("plan_guild_template_change", () => server.registerTool(
     "plan_guild_template_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -24869,7 +24871,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_template_change", server.registerTool(
+  trackCanonicalTool("execute_guild_template_change", () => server.registerTool(
     "execute_guild_template_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -24991,7 +24993,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("get_webhook_message", server.registerTool(
+  trackCanonicalTool("get_webhook_message", () => server.registerTool(
     "get_webhook_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25015,7 +25017,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("send_webhook_message", server.registerTool(
+  trackCanonicalTool("send_webhook_message", () => server.registerTool(
     "send_webhook_message",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -25040,7 +25042,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("edit_webhook_message", server.registerTool(
+  trackCanonicalTool("edit_webhook_message", () => server.registerTool(
     "edit_webhook_message",
     {
       annotations: EDIT_ANNOTATIONS,
@@ -25069,7 +25071,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_webhook_message_deletion", server.registerTool(
+  trackCanonicalTool("plan_webhook_message_deletion", () => server.registerTool(
     "plan_webhook_message_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25093,7 +25095,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_webhook_message_deletion", server.registerTool(
+  trackCanonicalTool("execute_webhook_message_deletion", () => server.registerTool(
     "execute_webhook_message_deletion",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -25207,7 +25209,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_webhook_creation", server.registerTool(
+  trackCanonicalTool("plan_webhook_creation", () => server.registerTool(
     "plan_webhook_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25231,7 +25233,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_webhook_creation", server.registerTool(
+  trackCanonicalTool("execute_webhook_creation", () => server.registerTool(
     "execute_webhook_creation",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -25344,7 +25346,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_webhook_change", server.registerTool(
+  trackCanonicalTool("plan_webhook_change", () => server.registerTool(
     "plan_webhook_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25370,7 +25372,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_webhook_change", server.registerTool(
+  trackCanonicalTool("execute_webhook_change", () => server.registerTool(
     "execute_webhook_change",
     {
       annotations: EDIT_ANNOTATIONS,
@@ -25496,7 +25498,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_webhook_deletion", server.registerTool(
+  trackCanonicalTool("plan_webhook_deletion", () => server.registerTool(
     "plan_webhook_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25520,7 +25522,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_webhook_deletion", server.registerTool(
+  trackCanonicalTool("execute_webhook_deletion", () => server.registerTool(
     "execute_webhook_deletion",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -25636,7 +25638,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_integration_deletion", server.registerTool(
+  trackCanonicalTool("plan_guild_integration_deletion", () => server.registerTool(
     "plan_guild_integration_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25660,7 +25662,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_integration_deletion", server.registerTool(
+  trackCanonicalTool("execute_guild_integration_deletion", () => server.registerTool(
     "execute_guild_integration_deletion",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -25771,7 +25773,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_departure", server.registerTool(
+  trackCanonicalTool("plan_guild_departure", () => server.registerTool(
     "plan_guild_departure",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25795,7 +25797,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_departure", server.registerTool(
+  trackCanonicalTool("execute_guild_departure", () => server.registerTool(
     "execute_guild_departure",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -25905,7 +25907,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_invite_creation", server.registerTool(
+  trackCanonicalTool("plan_invite_creation", () => server.registerTool(
     "plan_invite_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -25929,7 +25931,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_invite_creation", server.registerTool(
+  trackCanonicalTool("execute_invite_creation", () => server.registerTool(
     "execute_invite_creation",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -26057,7 +26059,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_invite_deletion", server.registerTool(
+  trackCanonicalTool("plan_invite_deletion", () => server.registerTool(
     "plan_invite_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26081,7 +26083,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_invite_deletion", server.registerTool(
+  trackCanonicalTool("execute_invite_deletion", () => server.registerTool(
     "execute_invite_deletion",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26195,7 +26197,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_onboarding_change", server.registerTool(
+  trackCanonicalTool("plan_onboarding_change", () => server.registerTool(
     "plan_onboarding_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26219,7 +26221,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_onboarding_change", server.registerTool(
+  trackCanonicalTool("execute_onboarding_change", () => server.registerTool(
     "execute_onboarding_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26299,7 +26301,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_welcome_screen_change", server.registerTool(
+  trackCanonicalTool("plan_guild_welcome_screen_change", () => server.registerTool(
     "plan_guild_welcome_screen_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26323,7 +26325,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_welcome_screen_change", server.registerTool(
+  trackCanonicalTool("execute_guild_welcome_screen_change", () => server.registerTool(
     "execute_guild_welcome_screen_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26403,7 +26405,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_widget_settings_change", server.registerTool(
+  trackCanonicalTool("plan_guild_widget_settings_change", () => server.registerTool(
     "plan_guild_widget_settings_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26427,7 +26429,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_widget_settings_change", server.registerTool(
+  trackCanonicalTool("execute_guild_widget_settings_change", () => server.registerTool(
     "execute_guild_widget_settings_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26508,7 +26510,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_settings_change", server.registerTool(
+  trackCanonicalTool("plan_guild_settings_change", () => server.registerTool(
     "plan_guild_settings_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26532,7 +26534,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_settings_change", server.registerTool(
+  trackCanonicalTool("execute_guild_settings_change", () => server.registerTool(
     "execute_guild_settings_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26613,7 +26615,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_community_change", server.registerTool(
+  trackCanonicalTool("plan_guild_community_change", () => server.registerTool(
     "plan_guild_community_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26637,7 +26639,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_community_change", server.registerTool(
+  trackCanonicalTool("execute_guild_community_change", () => server.registerTool(
     "execute_guild_community_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26716,7 +26718,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_incident_action_change", server.registerTool(
+  trackCanonicalTool("plan_guild_incident_action_change", () => server.registerTool(
     "plan_guild_incident_action_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26740,7 +26742,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_incident_action_change", server.registerTool(
+  trackCanonicalTool("execute_guild_incident_action_change", () => server.registerTool(
     "execute_guild_incident_action_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26821,7 +26823,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_profile_change", server.registerTool(
+  trackCanonicalTool("plan_guild_profile_change", () => server.registerTool(
     "plan_guild_profile_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26845,7 +26847,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_profile_change", server.registerTool(
+  trackCanonicalTool("execute_guild_profile_change", () => server.registerTool(
     "execute_guild_profile_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -26926,7 +26928,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_expression_change", server.registerTool(
+  trackCanonicalTool("plan_guild_expression_change", () => server.registerTool(
     "plan_guild_expression_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26950,7 +26952,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_application_emoji_change", server.registerTool(
+  trackCanonicalTool("plan_application_emoji_change", () => server.registerTool(
     "plan_application_emoji_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -26974,7 +26976,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_application_emoji_change", server.registerTool(
+  trackCanonicalTool("execute_application_emoji_change", () => server.registerTool(
     "execute_application_emoji_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27103,7 +27105,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_application_test_entitlement_change", server.registerTool(
+  trackCanonicalTool("plan_application_test_entitlement_change", () => server.registerTool(
     "plan_application_test_entitlement_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -27127,7 +27129,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_application_test_entitlement_change", server.registerTool(
+  trackCanonicalTool("execute_application_test_entitlement_change", () => server.registerTool(
     "execute_application_test_entitlement_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27256,7 +27258,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_application_entitlement_consumption", server.registerTool(
+  trackCanonicalTool("plan_application_entitlement_consumption", () => server.registerTool(
     "plan_application_entitlement_consumption",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -27280,7 +27282,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_application_entitlement_consumption", server.registerTool(
+  trackCanonicalTool("execute_application_entitlement_consumption", () => server.registerTool(
     "execute_application_entitlement_consumption",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27413,7 +27415,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_application_intent_enablement", server.registerTool(
+  trackCanonicalTool("plan_application_intent_enablement", () => server.registerTool(
     "plan_application_intent_enablement",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -27437,7 +27439,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_application_intent_enablement", server.registerTool(
+  trackCanonicalTool("execute_application_intent_enablement", () => server.registerTool(
     "execute_application_intent_enablement",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27566,7 +27568,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_bot_profile_change", server.registerTool(
+  trackCanonicalTool("plan_bot_profile_change", () => server.registerTool(
     "plan_bot_profile_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -27590,7 +27592,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_bot_profile_change", server.registerTool(
+  trackCanonicalTool("execute_bot_profile_change", () => server.registerTool(
     "execute_bot_profile_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27713,7 +27715,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_application_role_connection_metadata_change", server.registerTool(
+  trackCanonicalTool("plan_application_role_connection_metadata_change", () => server.registerTool(
     "plan_application_role_connection_metadata_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -27737,7 +27739,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_application_role_connection_metadata_change", server.registerTool(
+  trackCanonicalTool("execute_application_role_connection_metadata_change", () => server.registerTool(
     "execute_application_role_connection_metadata_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -27871,7 +27873,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_expression_change", server.registerTool(
+  trackCanonicalTool("execute_guild_expression_change", () => server.registerTool(
     "execute_guild_expression_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -28001,7 +28003,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_soundboard_change", server.registerTool(
+  trackCanonicalTool("plan_guild_soundboard_change", () => server.registerTool(
     "plan_guild_soundboard_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28025,7 +28027,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_soundboard_change", server.registerTool(
+  trackCanonicalTool("execute_guild_soundboard_change", () => server.registerTool(
     "execute_guild_soundboard_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -28154,7 +28156,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_automod_change", server.registerTool(
+  trackCanonicalTool("plan_automod_change", () => server.registerTool(
     "plan_automod_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28178,7 +28180,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_automod_change", server.registerTool(
+  trackCanonicalTool("verify_automod_change", () => server.registerTool(
     "verify_automod_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28202,7 +28204,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_automod_change", server.registerTool(
+  trackCanonicalTool("execute_automod_change", () => server.registerTool(
     "execute_automod_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -28334,7 +28336,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_scheduled_event_change", server.registerTool(
+  trackCanonicalTool("plan_scheduled_event_change", () => server.registerTool(
     "plan_scheduled_event_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28358,7 +28360,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_scheduled_event_change", server.registerTool(
+  trackCanonicalTool("execute_scheduled_event_change", () => server.registerTool(
     "execute_scheduled_event_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -28490,7 +28492,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_stage_instance_change", server.registerTool(
+  trackCanonicalTool("plan_stage_instance_change", () => server.registerTool(
     "plan_stage_instance_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28514,7 +28516,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_stage_instance_change", server.registerTool(
+  trackCanonicalTool("execute_stage_instance_change", () => server.registerTool(
     "execute_stage_instance_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -28643,7 +28645,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_metadata_change", server.registerTool(
+  trackCanonicalTool("plan_channel_metadata_change", () => server.registerTool(
     "plan_channel_metadata_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28667,7 +28669,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_metadata_change", server.registerTool(
+  trackCanonicalTool("execute_channel_metadata_change", () => server.registerTool(
     "execute_channel_metadata_change",
     {
       annotations: EDIT_ANNOTATIONS,
@@ -28793,7 +28795,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_voice_channel_status_change", server.registerTool(
+  trackCanonicalTool("plan_voice_channel_status_change", () => server.registerTool(
     "plan_voice_channel_status_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28817,7 +28819,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_voice_channel_status_change", server.registerTool(
+  trackCanonicalTool("execute_voice_channel_status_change", () => server.registerTool(
     "execute_voice_channel_status_change",
     {
       annotations: EDIT_ANNOTATIONS,
@@ -28942,7 +28944,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_forum_tag_change", server.registerTool(
+  trackCanonicalTool("plan_forum_tag_change", () => server.registerTool(
     "plan_forum_tag_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -28966,7 +28968,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_forum_tag_change", server.registerTool(
+  trackCanonicalTool("execute_forum_tag_change", () => server.registerTool(
     "execute_forum_tag_change",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -29088,7 +29090,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_permission_overwrite", server.registerTool(
+  trackCanonicalTool("plan_channel_permission_overwrite", () => server.registerTool(
     "plan_channel_permission_overwrite",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29112,7 +29114,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_permission_overwrite", server.registerTool(
+  trackCanonicalTool("execute_channel_permission_overwrite", () => server.registerTool(
     "execute_channel_permission_overwrite",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -29239,7 +29241,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_permission_sync", server.registerTool(
+  trackCanonicalTool("plan_channel_permission_sync", () => server.registerTool(
     "plan_channel_permission_sync",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29263,7 +29265,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_permission_sync", server.registerTool(
+  trackCanonicalTool("execute_channel_permission_sync", () => server.registerTool(
     "execute_channel_permission_sync",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -29388,7 +29390,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_creation", server.registerTool(
+  trackCanonicalTool("plan_channel_creation", () => server.registerTool(
     "plan_channel_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29412,7 +29414,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_creation", server.registerTool(
+  trackCanonicalTool("execute_channel_creation", () => server.registerTool(
     "execute_channel_creation",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -29537,7 +29539,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_forum_post", server.registerTool(
+  trackCanonicalTool("plan_forum_post", () => server.registerTool(
     "plan_forum_post",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29561,7 +29563,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_forum_post", server.registerTool(
+  trackCanonicalTool("execute_forum_post", () => server.registerTool(
     "execute_forum_post",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -29674,7 +29676,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_thread_creation", server.registerTool(
+  trackCanonicalTool("plan_thread_creation", () => server.registerTool(
     "plan_thread_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29701,7 +29703,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_thread_creation", server.registerTool(
+  trackCanonicalTool("execute_thread_creation", () => server.registerTool(
     "execute_thread_creation",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -29831,7 +29833,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("compile_component_template", server.registerTool(
+  trackCanonicalTool("compile_component_template", () => server.registerTool(
     "compile_component_template",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -29880,7 +29882,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("preview_component_layout", server.registerTool(
+  trackCanonicalTool("preview_component_layout", () => server.registerTool(
     "preview_component_layout",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -29908,7 +29910,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_component_message", server.registerTool(
+  trackCanonicalTool("plan_component_message", () => server.registerTool(
     "plan_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29932,7 +29934,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_component_message", server.registerTool(
+  trackCanonicalTool("verify_component_message", () => server.registerTool(
     "verify_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -29956,7 +29958,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_component_message", server.registerTool(
+  trackCanonicalTool("execute_component_message", () => server.registerTool(
     "execute_component_message",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -30079,7 +30081,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("preview_embed_message", server.registerTool(
+  trackCanonicalTool("preview_embed_message", () => server.registerTool(
     "preview_embed_message",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -30107,7 +30109,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_embed_message", server.registerTool(
+  trackCanonicalTool("plan_embed_message", () => server.registerTool(
     "plan_embed_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30131,7 +30133,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_embed_message", server.registerTool(
+  trackCanonicalTool("verify_embed_message", () => server.registerTool(
     "verify_embed_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30155,7 +30157,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_embed_message", server.registerTool(
+  trackCanonicalTool("execute_embed_message", () => server.registerTool(
     "execute_embed_message",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -30274,7 +30276,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_attachment_message", server.registerTool(
+  trackCanonicalTool("plan_attachment_message", () => server.registerTool(
     "plan_attachment_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30298,7 +30300,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_attachment_message", server.registerTool(
+  trackCanonicalTool("execute_attachment_message", () => server.registerTool(
     "execute_attachment_message",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -30408,7 +30410,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("compile_guild_blueprint_starter", server.registerTool(
+  trackCanonicalTool("compile_guild_blueprint_starter", () => server.registerTool(
     "compile_guild_blueprint_starter",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -30466,7 +30468,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("preview_guild_blueprint", server.registerTool(
+  trackCanonicalTool("preview_guild_blueprint", () => server.registerTool(
     "preview_guild_blueprint",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -30486,7 +30488,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("capture_guild_blueprint", server.registerTool(
+  trackCanonicalTool("capture_guild_blueprint", () => server.registerTool(
     "capture_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30514,7 +30516,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_blueprint", server.registerTool(
+  trackCanonicalTool("plan_guild_blueprint", () => server.registerTool(
     "plan_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30546,7 +30548,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_blueprint", server.registerTool(
+  trackCanonicalTool("execute_guild_blueprint", () => server.registerTool(
     "execute_guild_blueprint",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -30668,7 +30670,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_guild_blueprint", server.registerTool(
+  trackCanonicalTool("verify_guild_blueprint", () => server.registerTool(
     "verify_guild_blueprint",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30692,7 +30694,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_scaffold", server.registerTool(
+  trackCanonicalTool("plan_guild_scaffold", () => server.registerTool(
     "plan_guild_scaffold",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30716,7 +30718,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_scaffold", server.registerTool(
+  trackCanonicalTool("execute_guild_scaffold", () => server.registerTool(
     "execute_guild_scaffold",
     {
       annotations: WRITE_ANNOTATIONS,
@@ -30837,7 +30839,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("verify_guild_scaffold", server.registerTool(
+  trackCanonicalTool("verify_guild_scaffold", () => server.registerTool(
     "verify_guild_scaffold",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30861,7 +30863,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_member_nickname_change", server.registerTool(
+  trackCanonicalTool("plan_member_nickname_change", () => server.registerTool(
     "plan_member_nickname_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -30885,7 +30887,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_member_nickname_change", server.registerTool(
+  trackCanonicalTool("execute_member_nickname_change", () => server.registerTool(
     "execute_member_nickname_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31014,7 +31016,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_member_verification_change", server.registerTool(
+  trackCanonicalTool("plan_member_verification_change", () => server.registerTool(
     "plan_member_verification_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31038,7 +31040,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_member_verification_change", server.registerTool(
+  trackCanonicalTool("execute_member_verification_change", () => server.registerTool(
     "execute_member_verification_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31167,7 +31169,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_member_role_change", server.registerTool(
+  trackCanonicalTool("plan_member_role_change", () => server.registerTool(
     "plan_member_role_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31191,7 +31193,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_member_role_change", server.registerTool(
+  trackCanonicalTool("execute_member_role_change", () => server.registerTool(
     "execute_member_role_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31321,7 +31323,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_bulk_member_role_change", server.registerTool(
+  trackCanonicalTool("plan_bulk_member_role_change", () => server.registerTool(
     "plan_bulk_member_role_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31347,7 +31349,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_bulk_member_role_change", server.registerTool(
+  trackCanonicalTool("execute_bulk_member_role_change", () => server.registerTool(
     "execute_bulk_member_role_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31475,7 +31477,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_member_voice_change", server.registerTool(
+  trackCanonicalTool("plan_member_voice_change", () => server.registerTool(
     "plan_member_voice_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31501,7 +31503,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_member_voice_change", server.registerTool(
+  trackCanonicalTool("execute_member_voice_change", () => server.registerTool(
     "execute_member_voice_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31630,7 +31632,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_thread_change", server.registerTool(
+  trackCanonicalTool("plan_thread_change", () => server.registerTool(
     "plan_thread_change",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31656,7 +31658,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_thread_change", server.registerTool(
+  trackCanonicalTool("execute_thread_change", () => server.registerTool(
     "execute_thread_change",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -31786,7 +31788,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_role_creation", server.registerTool(
+  trackCanonicalTool("plan_role_creation", () => server.registerTool(
     "plan_role_creation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31810,7 +31812,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_role_creation", server.registerTool(
+  trackCanonicalTool("execute_role_creation", () => server.registerTool(
     "execute_role_creation",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -31934,7 +31936,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_role_configuration", server.registerTool(
+  trackCanonicalTool("plan_role_configuration", () => server.registerTool(
     "plan_role_configuration",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -31958,7 +31960,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_role_configuration", server.registerTool(
+  trackCanonicalTool("execute_role_configuration", () => server.registerTool(
     "execute_role_configuration",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -32084,7 +32086,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_role_order", server.registerTool(
+  trackCanonicalTool("plan_role_order", () => server.registerTool(
     "plan_role_order",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32108,7 +32110,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_role_order", server.registerTool(
+  trackCanonicalTool("execute_role_order", () => server.registerTool(
     "execute_role_order",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -32235,7 +32237,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_clone", server.registerTool(
+  trackCanonicalTool("plan_channel_clone", () => server.registerTool(
     "plan_channel_clone",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32259,7 +32261,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_clone", server.registerTool(
+  trackCanonicalTool("execute_channel_clone", () => server.registerTool(
     "execute_channel_clone",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -32371,7 +32373,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_order", server.registerTool(
+  trackCanonicalTool("plan_channel_order", () => server.registerTool(
     "plan_channel_order",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32395,7 +32397,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_order", server.registerTool(
+  trackCanonicalTool("execute_channel_order", () => server.registerTool(
     "execute_channel_order",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -32519,7 +32521,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_channel_deletion", server.registerTool(
+  trackCanonicalTool("plan_channel_deletion", () => server.registerTool(
     "plan_channel_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32543,7 +32545,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_channel_deletion", server.registerTool(
+  trackCanonicalTool("execute_channel_deletion", () => server.registerTool(
     "execute_channel_deletion",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -32622,7 +32624,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("audit_role_deletion", server.registerTool(
+  trackCanonicalTool("audit_role_deletion", () => server.registerTool(
     "audit_role_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32647,7 +32649,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_role_deletion", server.registerTool(
+  trackCanonicalTool("plan_role_deletion", () => server.registerTool(
     "plan_role_deletion",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32671,7 +32673,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_role_deletion", server.registerTool(
+  trackCanonicalTool("execute_role_deletion", () => server.registerTool(
     "execute_role_deletion",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
@@ -32750,7 +32752,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_member_moderation", server.registerTool(
+  trackCanonicalTool("plan_member_moderation", () => server.registerTool(
     "plan_member_moderation",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32774,7 +32776,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_member_moderation", server.registerTool(
+  trackCanonicalTool("execute_member_moderation", () => server.registerTool(
     "execute_member_moderation",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -32888,7 +32890,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_bulk_guild_ban", server.registerTool(
+  trackCanonicalTool("plan_bulk_guild_ban", () => server.registerTool(
     "plan_bulk_guild_ban",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -32912,7 +32914,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_bulk_guild_ban", server.registerTool(
+  trackCanonicalTool("execute_bulk_guild_ban", () => server.registerTool(
     "execute_bulk_guild_ban",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -33027,7 +33029,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("plan_guild_prune", server.registerTool(
+  trackCanonicalTool("plan_guild_prune", () => server.registerTool(
     "plan_guild_prune",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
@@ -33051,7 +33053,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("execute_guild_prune", server.registerTool(
+  trackCanonicalTool("execute_guild_prune", () => server.registerTool(
     "execute_guild_prune",
     {
       annotations: DESTRUCTIVE_ANNOTATIONS,
@@ -33173,7 +33175,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     }, secrets, observability),
   ))
 
-  trackCanonicalTool("list_activity", server.registerTool(
+  trackCanonicalTool("list_activity", () => server.registerTool(
     "list_activity",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
@@ -33194,15 +33196,9 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
   ))
 
   const registeredNames = [...canonicalTools.keys()].sort()
-  const catalogNames = (Object.keys(MCP_TOOL_CATALOG) as CanonicalMcpToolName[])
-    .sort()
+  const catalogNames = selectedCanonicalMcpToolNames(config.mcpToolsets).sort()
   if (JSON.stringify(registeredNames) !== JSON.stringify(catalogNames)) {
-    throw new Error("Canonical MCP tool registrations do not match the discovery catalog")
-  }
-  for (const [name, handle] of canonicalTools) {
-    if (mcpToolSelected(name, config.mcpToolsets)) continue
-    handle.remove()
-    canonicalTools.delete(name)
+    throw new Error("Selected MCP tool registrations do not match the discovery catalog")
   }
   const discoveryCatalog = createDiscordToolDiscoveryCatalog(
     [...canonicalTools].map(([name, handle]) => {
