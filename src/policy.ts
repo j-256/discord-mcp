@@ -1528,6 +1528,18 @@ export class ScopePolicy {
     channelId: string,
     userId: string,
   ): void {
+    this.assertNativeInteractionTargetAllowed(guildId, channelId)
+    if (!this.#nativeInteractionUserIds.has(userId)) {
+      throw new PolicyError(
+        `Discord user ${userId} is outside the native Interaction scope`,
+      )
+    }
+  }
+
+  assertNativeInteractionTargetAllowed(
+    guildId: string,
+    channelId: string,
+  ): string[] {
     this.assertGuildAllowed(guildId)
     if (!this.#allowNativeInteractions) {
       throw new PolicyError(
@@ -1544,11 +1556,12 @@ export class ScopePolicy {
         `Discord channel ${channelId} is outside the native Interaction scope`,
       )
     }
-    if (!this.#nativeInteractionUserIds.has(userId)) {
+    if (this.#nativeInteractionUserIds.size === 0) {
       throw new PolicyError(
-        `Discord user ${userId} is outside the native Interaction scope`,
+        "Discord native Interactions require an exact user allowlist",
       )
     }
+    return [...this.#nativeInteractionUserIds].sort()
   }
 
   assertMemberDirectoryAllowed(guildId: string): void {

@@ -261,6 +261,18 @@ The prompt derives a small set of literal variants and makes one bounded `recall
 
 Recall searches live Discord state, fuses duplicate candidates, and refetches current bounded context around each ranked target. It stores no search phrase, memory, or Discord content, but the MCP host and model provider still receive the tool input and returned context under their own retention policies. It is not semantic search, a complete archive, or a guarantee that every relevant message was indexed.
 
+### Optional: add one private Discord request Button
+
+Request Buttons deliberately use a two-stage setup so the native Interaction broker never starts against a missing or drifted command.
+
+1. Open the [offline configuration workbench](reference.md#offline-configuration-workbench). First enable `capabilities.interactions` and `capabilities.nativeCommandChanges`, add the target channel to `scopes.interactionChannelIds`, add the guild to `scopes.nativeInteractionGuildIds`, and include the `interactions` and `native-interactions` toolsets. Keep `capabilities.nativeInteractions` disabled. Apply the candidate only through `config plan` and `config apply`.
+2. Restart the MCP server and use `plan_native_interaction_command` followed by `execute_native_interaction_command` to install the exact managed guild command. Review and approve that separate write before continuing.
+3. Return to the workbench. Enable `capabilities.nativeInteractions`, add the same exact guild and channel to `scopes.nativeInteractionGuildIds` and `scopes.nativeInteractionChannelIds`, and add only the intended people to `scopes.nativeInteractionUserIds`. Leave the application's outgoing Interaction endpoint unset because Discord cannot deliver the same Interaction through both Gateway and HTTP. Apply, restart, and require `discord://interactions/status` to report ready.
+4. Use `preview_component_layout` with a `request-row`, then pass its exact normalized layout through `plan_component_message` and `execute_component_message`. The plan must show verified Gateway delivery, the exact ready guild, authorized user IDs, freshly verified command ID and version, and request-button count before approval.
+5. Click the published Button from one allowlisted account. Read `discord://interactions/pending`, respond through its opaque reference, and confirm that the response remains ephemeral. The button label is the transient request; the connector never runs another Discord action automatically.
+
+The target channel must already be inside read scope, Message Content must be enabled, and the bot needs the same view, history, and send permissions required for every reviewed Components V2 publication. The slash command remains Administrator-only by default; a request-button click does not require Administrator because it creates only a private bounded request. Rotating the bot token intentionally invalidates existing request-button routes. Old clicks then fail closed, so publish fresh replacement messages after a rotation rather than attempting to edit a row whose former authentication can no longer be proven. See [Managed request Buttons](reference.md#managed-request-buttons) for the complete identity, replay, privacy, and failure boundary.
+
 ## Recovery ladder
 
 Run the narrowest relevant layer first and continue only after it passes:

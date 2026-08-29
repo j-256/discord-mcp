@@ -18,6 +18,7 @@ import {
   SCHEMA_VERSION,
 } from "./constants.js"
 import type { DiscordClient } from "./discord-client.js"
+import { parseDiscordManagedComponentLayout } from "./component-layout.js"
 import {
   DiscordApiError,
   NativeInteractionResponseError,
@@ -29,10 +30,16 @@ import {
   type NativeInteractionCommandContract,
 } from "./native-interaction-command-service.js"
 import type { ScopePolicy } from "./policy.js"
+import {
+  isManagedRequestButtonCustomId,
+  type RequestButtonStyle,
+} from "./request-button.js"
 import type {
+  DiscordApplication,
   DiscordApplicationCommand,
   DiscordChannel,
   DiscordMessage,
+  DiscordUser,
   RequestOptions,
 } from "./types.js"
 
@@ -64,23 +71,30 @@ export type NativeInteractionErrorCategory =
   | "identity-mismatch"
   | "payload-invalid"
   | "reference-unavailable"
+  | "request-button-evidence-invalid"
   | "response-evidence-invalid"
   | "response-rejected"
   | "response-uncertain"
   | "scope-rejected"
   | "validation-evidence-unavailable"
 
+export type NativeInteractionSourceKind = "command" | "request-button"
+
 export interface PendingNativeInteraction {
   channelId: string
-  commandId: string
-  commandVersion: string
+  commandId: string | null
+  commandVersion: string | null
   createdAt: string
   expiresAt: string
   guildId: string
   interactionId: string
   reference: string
   request: string
+  requestButtonIndex: number | null
+  requestButtonStyle: RequestButtonStyle | null
   schemaVersion: number
+  source: NativeInteractionSourceKind
+  sourceMessageId: string | null
   userId: string
 }
 
@@ -96,8 +110,8 @@ export interface PendingNativeInteractionList {
 
 export interface NativeInteractionContinuation {
   channelId: string
-  commandId: string
-  commandVersion: string
+  commandId: string | null
+  commandVersion: string | null
   createdAt: string
   expiresAt: string
   followupsCompleted: number
@@ -106,7 +120,11 @@ export interface NativeInteractionContinuation {
   interactionId: string
   openedAt: string
   reference: string
+  requestButtonIndex: number | null
+  requestButtonStyle: RequestButtonStyle | null
   schemaVersion: number
+  source: NativeInteractionSourceKind
+  sourceMessageId: string | null
   userId: string
 }
 
@@ -165,6 +183,16 @@ export interface NativeInteractionBrokerStatus {
   }
 }
 
+export interface NativeInteractionRequestButtonReadiness {
+  commandId: string | null
+  commandVersion: string | null
+  gatewayDelivery: "verified" | null
+  guildId: string
+  phase: NativeInteractionBrokerPhase
+  ready: boolean
+  schemaVersion: number
+}
+
 export interface NativeInteractionResponseResult {
   channelId: string
   guildId: string
@@ -195,6 +223,9 @@ export interface NativeInteractionResponseOptions extends RequestOptions {
 
 export interface NativeInteractionSource {
   readonly enabled: boolean
+  getRequestButtonReadiness(
+    guildId: string,
+  ): Promise<NativeInteractionRequestButtonReadiness>
   getStatus(): NativeInteractionBrokerStatus
   listContinuations(): Promise<NativeInteractionContinuationList>
   listPending(): Promise<PendingNativeInteractionList>
@@ -226,6 +257,7 @@ export interface NativeInteractionBrokerClient extends Pick<
   | "getChannel"
   | "getCurrentApplication"
   | "getCurrentUser"
+  | "getMessage"
   | "getInteractionFollowup"
   | "listGuildApplicationCommands"
 > {}
@@ -253,16 +285,22 @@ export interface NativeInteractionBrokerOptions {
   randomId?: () => string
   randomContinuationReference?: () => string
   randomReference?: () => string
+  requestButtonKey: Uint8Array
   scheduler?: NativeInteractionScheduler
 }
 
 interface ParsedInteraction {
   channelId: string
-  commandId: string
-  commandVersion: string
+  commandId: string | null
+  commandVersion: string | null
   guildId: string
   interactionId: string
   request: string
+  requestButtonCustomId: string | null
+  requestButtonIndex: number | null
+  requestButtonStyle: RequestButtonStyle | null
+  source: NativeInteractionSourceKind
+  sourceMessageId: string | null
   token: string
   userId: string
 }
@@ -277,6 +315,7 @@ interface ParsedInteractionResult {
 
 interface StoredInteraction extends PendingNativeInteraction {
   ready: boolean
+  requestButtonCustomId: string | null
   timer: unknown
   token: string
 }
@@ -288,6 +327,8 @@ interface StoredContinuation extends NativeInteractionContinuation {
 }
 
 const INTERACTION_TYPE_APPLICATION_COMMAND = 2
+const INTERACTION_TYPE_MESSAGE_COMPONENT = 3
+const COMPONENT_TYPE_BUTTON = 2
 const APPLICATION_COMMAND_TYPE_CHAT_INPUT = 1
 const APPLICATION_COMMAND_OPTION_TYPE_STRING = 3
 const INTERACTION_CONTEXT_GUILD = 0
@@ -307,6 +348,7 @@ const STATIC_BUSY_RESPONSE = "This private request could not be accepted because
 const STATIC_EXPIRED_RESPONSE = "This private request expired before it could be completed."
 const STATIC_REJECTED_RESPONSE = "This private request is not authorized for this server, channel, or user."
 const STATIC_VALIDATION_RESPONSE = "This private request could not be validated against the managed command configuration."
+const STATIC_REQUEST_BUTTON_VALIDATION_RESPONSE = "This private request could not be validated against the managed source message."
 const SUPPORTED_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.text,
@@ -427,6 +469,24 @@ function validatedCommandInventory(
   return value as DiscordApplicationCommand[]
 }
 
+function ingressIdentityError(
+  application: DiscordApplication | undefined,
+  bot: DiscordUser | undefined,
+  applicationId: string,
+  botId: string,
+): "application-endpoint-conflict" | "identity-mismatch" | undefined {
+  if (
+    !application
+    || application.id !== applicationId
+    || !bot
+    || bot.id !== botId
+    || bot.bot !== true
+  ) return "identity-mismatch"
+  return application.interactions_endpoint_url === null
+    ? undefined
+    : "application-endpoint-conflict"
+}
+
 function exactResponseMessage(
   message: DiscordMessage,
   applicationId: string,
@@ -459,12 +519,25 @@ function exactResponseMessage(
     && message.tts === false
     && message.poll === undefined
     && message.flags === DISCORD_MESSAGE_FLAGS.ephemeral
-    && message.type === MESSAGE_TYPE_CHAT_INPUT_COMMAND
+    && (entry.source === "command"
+      ? message.type === MESSAGE_TYPE_CHAT_INPUT_COMMAND
+      : message.type === MESSAGE_TYPE_DEFAULT)
     && message.webhook_id === applicationId
     && message.interaction_metadata?.id === entry.interactionId
-    && message.interaction_metadata.type === INTERACTION_TYPE_APPLICATION_COMMAND
+    && message.interaction_metadata.type === (entry.source === "command"
+      ? INTERACTION_TYPE_APPLICATION_COMMAND
+      : INTERACTION_TYPE_MESSAGE_COMPONENT)
     && message.interaction_metadata.user?.id === entry.userId
     && message.interaction_metadata.authorizing_integration_owners?.["0"] === entry.guildId
+    && (entry.source === "command"
+      ? message.interaction_metadata.interacted_message_id === undefined
+        && message.message_reference === undefined
+      : message.interaction_metadata.interacted_message_id === entry.sourceMessageId
+        && message.message_reference?.message_id === entry.sourceMessageId
+        && message.message_reference.channel_id === entry.channelId
+        && message.message_reference.guild_id === entry.guildId
+        && (message.message_reference.type === undefined
+          || message.message_reference.type === 0))
   )
 }
 
@@ -475,9 +548,14 @@ function exactFollowupInteractionMetadata(
   const metadata = message.interaction_metadata
   return metadata === undefined || Boolean(
     metadata.id === entry.interactionId
-    && metadata.type === INTERACTION_TYPE_APPLICATION_COMMAND
+    && metadata.type === (entry.source === "command"
+      ? INTERACTION_TYPE_APPLICATION_COMMAND
+      : INTERACTION_TYPE_MESSAGE_COMPONENT)
     && metadata.user?.id === entry.userId
     && metadata.authorizing_integration_owners?.["0"] === entry.guildId
+    && (entry.source === "command"
+      ? metadata.interacted_message_id === undefined
+      : metadata.interacted_message_id === entry.sourceMessageId)
   )
 }
 
@@ -521,13 +599,86 @@ function exactFollowupMessage(
   )
 }
 
+interface ParsedRequestButtonSource {
+  index: number
+  label: string
+  messageId: string
+  style: RequestButtonStyle
+}
+
+function parseRequestButtonSourceMessage(
+  input: unknown,
+  applicationId: string,
+  botId: string,
+  guildId: string,
+  channelId: string,
+  customId: string,
+  key: Uint8Array,
+): ParsedRequestButtonSource | undefined {
+  const message = recordValue(input)
+  const author = recordValue(message?.author)
+  const messageId = snowflake(message?.id)
+  if (
+    !message
+    || !messageId
+    || message.channel_id !== channelId
+    || (message.guild_id !== undefined && message.guild_id !== guildId)
+    || author?.id !== botId
+    || author.bot !== true
+    || (message.application_id !== undefined
+      && message.application_id !== applicationId)
+    || message.webhook_id !== undefined
+    || message.content !== ""
+    || !Array.isArray(message.attachments)
+    || message.attachments.length !== 0
+    || !Array.isArray(message.embeds)
+    || message.embeds.length !== 0
+    || !Array.isArray(message.components)
+    || !Number.isSafeInteger(message.flags)
+    || ((message.flags as number) & DISCORD_MESSAGE_FLAGS.isComponentsV2) === 0
+    || ![MESSAGE_TYPE_DEFAULT, 19].includes(message.type as number)
+    || message.poll !== undefined
+    || message.tts !== false
+  ) return undefined
+  try {
+    const parsed = parseDiscordManagedComponentLayout(message.components, {
+      key,
+      scope: {
+        applicationId,
+        botId,
+        channelId,
+        guildId,
+      },
+    })
+    const button = parsed.requestButtons.find((entry) => entry.customId === customId)
+    return button
+      ? {
+          index: button.index,
+          label: button.label,
+          messageId,
+          style: button.style,
+        }
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function parseInteraction(
   payload: unknown,
   applicationId: string,
+  botId: string,
+  requestButtonKey: Uint8Array,
   commandByGuild: ReadonlyMap<string, DiscordApplicationCommand | undefined>,
   contract: NativeInteractionCommandContract,
 ): ParsedInteractionResult | undefined {
   const interaction = recordValue(payload)
+  const data = recordValue(interaction?.data)
+  const interactionType = interaction?.type
+  if (
+    interactionType === INTERACTION_TYPE_MESSAGE_COMPONENT
+    && !isManagedRequestButtonCustomId(data?.custom_id)
+  ) return undefined
   const interactionId = snowflake(interaction?.id)
   const guildId = snowflake(interaction?.guild_id)
   const channelId = snowflake(interaction?.channel_id)
@@ -535,37 +686,78 @@ function parseInteraction(
   const member = recordValue(interaction?.member)
   const user = recordValue(member?.user)
   const userId = snowflake(user?.id)
-  const memberPermissions = permissionBits(member?.permissions)
-  const data = recordValue(interaction?.data)
-  const commandId = snowflake(data?.id)
-  const options = data?.options
-  const option = Array.isArray(options) && options.length === 1
-    ? recordValue(options[0])
-    : undefined
   const owners = recordValue(interaction?.authorizing_integration_owners)
-  const managed = guildId ? commandByGuild.get(guildId) : undefined
-  const request = option?.value
   if (
     !interactionId
     || interaction?.application_id !== applicationId
-    || interaction?.type !== INTERACTION_TYPE_APPLICATION_COMMAND
+    || ![
+      INTERACTION_TYPE_APPLICATION_COMMAND,
+      INTERACTION_TYPE_MESSAGE_COMPONENT,
+    ].includes(interactionType as number)
     || interaction?.version !== 1
     || interaction?.context !== INTERACTION_CONTEXT_GUILD
     || !guildId
     || !channelId
     || !userId
-    || !commandId
+    || (user?.bot !== undefined && user.bot !== false)
     || typeof token !== "string"
     || !INTERACTION_TOKEN_PATTERN.test(token)
     || owners?.["0"] !== guildId
+  ) return undefined
+  const managed = commandByGuild.get(guildId)
+  if (interactionType === INTERACTION_TYPE_MESSAGE_COMPONENT) {
+    const customId = typeof data?.custom_id === "string" ? data.custom_id : ""
+    const source = data?.component_type === COMPONENT_TYPE_BUTTON
+      ? parseRequestButtonSourceMessage(
+          interaction?.message,
+          applicationId,
+          botId,
+          guildId,
+          channelId,
+          customId,
+          requestButtonKey,
+        )
+      : undefined
+    const parsed: ParsedInteraction = {
+      channelId,
+      commandId: null,
+      commandVersion: null,
+      guildId,
+      interactionId,
+      request: source?.label ?? "",
+      requestButtonCustomId: customId,
+      requestButtonIndex: source?.index ?? null,
+      requestButtonStyle: source?.style ?? null,
+      source: "request-button",
+      sourceMessageId: source?.messageId ?? null,
+      token,
+      userId,
+    }
+    return source
+      ? { interaction: parsed, rejection: null }
+      : {
+          interaction: parsed,
+          rejection: {
+            category: "payload-invalid",
+            content: STATIC_REQUEST_BUTTON_VALIDATION_RESPONSE,
+          },
+        }
+  }
+
+  const commandId = snowflake(data?.id)
+  const options = data?.options
+  const option = Array.isArray(options) && options.length === 1
+    ? recordValue(options[0])
+    : undefined
+  const request = option?.value
+  if (
+    !commandId
     || !managed
     || managed.id !== commandId
     || data?.type !== APPLICATION_COMMAND_TYPE_CHAT_INPUT
     || data?.name !== contract.name
     || (data.guild_id !== undefined && data.guild_id !== guildId)
-  ) {
-    return undefined
-  }
+  ) return undefined
   const parsed: ParsedInteraction = {
     channelId,
     commandId,
@@ -573,9 +765,15 @@ function parseInteraction(
     guildId,
     interactionId,
     request: typeof request === "string" ? request : "",
+    requestButtonCustomId: null,
+    requestButtonIndex: null,
+    requestButtonStyle: null,
+    source: "command",
+    sourceMessageId: null,
     token,
     userId,
   }
+  const memberPermissions = permissionBits(member?.permissions)
   if (memberPermissions === undefined) {
     return {
       interaction: parsed,
@@ -620,7 +818,15 @@ function activityEntry(options: {
   activityId: string
   entry: Pick<
     StoredInteraction,
-    "channelId" | "guildId" | "interactionId" | "reference" | "userId"
+    | "channelId"
+    | "guildId"
+    | "interactionId"
+    | "reference"
+    | "requestButtonIndex"
+    | "requestButtonStyle"
+    | "source"
+    | "sourceMessageId"
+    | "userId"
   >
   error?: string | null
   responseStage?: NativeInteractionActivity["responseStage"]
@@ -636,12 +842,36 @@ function activityEntry(options: {
     interactionId: options.entry.interactionId,
     kind: "native-interaction",
     referenceHash: referenceHash(options.entry.reference),
+    requestButtonIndex: options.entry.requestButtonIndex,
+    requestButtonStyle: options.entry.requestButtonStyle,
     responseStage: options.responseStage ?? "initial",
     schemaVersion: SCHEMA_VERSION,
     sequence: options.sequence ?? 0,
     status: options.status,
+    source: options.entry.source,
+    sourceMessageId: options.entry.sourceMessageId,
     timestamp: options.timestamp,
     userId: options.entry.userId,
+  }
+}
+
+function pendingInteraction(entry: StoredInteraction): PendingNativeInteraction {
+  return {
+    channelId: entry.channelId,
+    commandId: entry.commandId,
+    commandVersion: entry.commandVersion,
+    createdAt: entry.createdAt,
+    expiresAt: entry.expiresAt,
+    guildId: entry.guildId,
+    interactionId: entry.interactionId,
+    reference: entry.reference,
+    request: entry.request,
+    requestButtonIndex: entry.requestButtonIndex,
+    requestButtonStyle: entry.requestButtonStyle,
+    schemaVersion: entry.schemaVersion,
+    source: entry.source,
+    sourceMessageId: entry.sourceMessageId,
+    userId: entry.userId,
   }
 }
 
@@ -676,6 +906,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
   readonly #randomId: () => string
   readonly #randomContinuationReference: () => string
   readonly #randomReference: () => string
+  readonly #requestButtonKey: Uint8Array
   #rejected = 0
   #responded = 0
   readonly #scheduler: NativeInteractionScheduler
@@ -687,6 +918,10 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
   constructor(options: NativeInteractionBrokerOptions) {
     assertSnowflake(options.applicationId, "Discord native Interaction application ID")
     assertSnowflake(options.botId, "Discord native Interaction bot ID")
+    if (!(options.requestButtonKey instanceof Uint8Array)
+      || options.requestButtonKey.byteLength < 16) {
+      throw new RangeError("Discord native Interaction request-button key is invalid")
+    }
     this.#activityStore = options.activityStore
     this.#applicationId = options.applicationId
     this.#botId = options.botId
@@ -706,6 +941,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       || (() => `icref_${randomBytes(16).toString("hex")}`)
     this.#randomReference = options.randomReference
       || (() => `iref_${randomBytes(16).toString("hex")}`)
+    this.#requestButtonKey = new Uint8Array(options.requestButtonKey)
     this.#scheduler = options.scheduler || defaultScheduler()
     this.#ttlMs = options.config.nativeInteractionTtlSeconds * 1_000
     for (const guildId of options.config.nativeInteractionGuildIds) {
@@ -854,6 +1090,104 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     }
   }
 
+  async getRequestButtonReadiness(
+    guildId: string,
+  ): Promise<NativeInteractionRequestButtonReadiness> {
+    assertSnowflake(guildId, "Discord request-button readiness guild ID")
+    let command = this.#commandByGuild.get(guildId)
+    let gatewayDeliveryVerified = false
+    if (
+      this.#phase === "ready"
+      && !this.#closed
+      && this.#commandByGuild.has(guildId)
+    ) {
+      let evidenceUnavailable = false
+      let application: DiscordApplication | undefined
+      let bot: DiscordUser | undefined
+      let rawInventory: unknown
+      try {
+        ;[application, bot, rawInventory] = await Promise.all([
+          this.#client.getCurrentApplication({
+            signal: this.#lifecycleAbortController.signal,
+          }),
+          this.#client.getCurrentUser({
+            signal: this.#lifecycleAbortController.signal,
+          }),
+          this.#client.listGuildApplicationCommands(
+            this.#applicationId,
+            guildId,
+            { signal: this.#lifecycleAbortController.signal },
+          ),
+        ])
+      } catch {
+        evidenceUnavailable = true
+      }
+      if (this.#phase !== "ready" || this.#closed) {
+        command = undefined
+      } else if (evidenceUnavailable) {
+        command = undefined
+        this.#setError("validation-evidence-unavailable")
+      } else {
+        const identityError = ingressIdentityError(
+          application,
+          bot,
+          this.#applicationId,
+          this.#botId,
+        )
+        if (identityError) {
+          command = undefined
+          this.#setError(identityError)
+        } else {
+          gatewayDeliveryVerified = true
+        }
+        const inventory = validatedCommandInventory(
+          rawInventory,
+          this.#applicationId,
+          guildId,
+        )
+        if (!identityError && !inventory) {
+          command = undefined
+          this.#commandByGuild.set(guildId, undefined)
+          this.#setError("command-inventory-invalid")
+        }
+        if (!identityError && inventory) {
+          const matches = inventory.filter((candidate) => (
+            candidate.type === APPLICATION_COMMAND_TYPE_CHAT_INPUT
+            && candidate.name === this.#commandName
+          ))
+          const exact = matches.length === 1
+            ? exactNativeInteractionCommand(
+                matches[0],
+                this.#applicationId,
+                guildId,
+                this.#contract,
+              )
+            : undefined
+          if (exact) {
+            command = exact
+            this.#commandByGuild.set(guildId, exact)
+          } else {
+            command = undefined
+            this.#commandByGuild.set(guildId, undefined)
+            this.#setError("command-contract-mismatch")
+          }
+        }
+      }
+    }
+    const ready = this.#phase === "ready"
+      && gatewayDeliveryVerified
+      && command !== undefined
+    return {
+      commandId: command?.id ?? null,
+      commandVersion: command?.version ?? null,
+      gatewayDelivery: ready ? "verified" : null,
+      guildId,
+      phase: this.#phase,
+      ready,
+      schemaVersion: SCHEMA_VERSION,
+    }
+  }
+
   subscribe(listener: NativeInteractionChangeListener): () => void {
     this.#listeners.add(listener)
     return () => {
@@ -888,7 +1222,15 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
   async #appendActivity(
     entry: Pick<
       StoredInteraction,
-      "channelId" | "guildId" | "interactionId" | "reference" | "userId"
+      | "channelId"
+      | "guildId"
+      | "interactionId"
+      | "reference"
+      | "requestButtonIndex"
+      | "requestButtonStyle"
+      | "source"
+      | "sourceMessageId"
+      | "userId"
     >,
     status: NativeInteractionActivityStatus,
     error: string | null = null,
@@ -970,6 +1312,8 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     const parsed = parseInteraction(
       payload,
       this.#applicationId,
+      this.#botId,
+      this.#requestButtonKey,
       this.#commandByGuild,
       this.#contract,
     )
@@ -1054,10 +1398,19 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     if (this.#closed || this.#pending.get(reference) !== entry) return
 
     let category: NativeInteractionErrorCategory | undefined
+    let application: DiscordApplication | undefined
+    let bot: DiscordUser | undefined
     let channel: DiscordChannel | undefined
     let inventory: DiscordApplicationCommand[] | undefined
+    let sourceMessage: DiscordMessage | undefined
     try {
-      ;[channel, inventory] = await Promise.all([
+      ;[application, bot, channel, inventory, sourceMessage] = await Promise.all([
+        this.#client.getCurrentApplication({
+          signal: this.#lifecycleAbortController.signal,
+        }),
+        this.#client.getCurrentUser({
+          signal: this.#lifecycleAbortController.signal,
+        }),
         this.#client.getChannel(interaction.channelId, {
           signal: this.#lifecycleAbortController.signal,
         }),
@@ -1066,11 +1419,27 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
           interaction.guildId,
           { signal: this.#lifecycleAbortController.signal },
         ),
+        interaction.source === "request-button"
+          && interaction.sourceMessageId !== null
+          ? this.#client.getMessage(
+              interaction.channelId,
+              interaction.sourceMessageId,
+              { signal: this.#lifecycleAbortController.signal },
+            )
+          : Promise.resolve(undefined),
       ])
     } catch {
       category = "validation-evidence-unavailable"
     }
     if (this.#closed || this.#pending.get(reference) !== entry) return
+    if (!category) {
+      category = ingressIdentityError(
+        application,
+        bot,
+        this.#applicationId,
+        this.#botId,
+      )
+    }
     if (!category) {
       if (!exactChannel(channel!, interaction.guildId, interaction.channelId)) {
         category = "channel-evidence-invalid"
@@ -1095,12 +1464,38 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
           : undefined
         if (
           !exact
-          || exact.id !== interaction.commandId
+          || (
+            interaction.source === "command"
+            && exact.id !== interaction.commandId
+          )
         ) {
           category = "command-contract-mismatch"
         } else {
-          entry.commandVersion = exact.version
+          this.#commandByGuild.set(interaction.guildId, exact)
+          if (interaction.source === "command") entry.commandVersion = exact.version
         }
+      }
+    }
+    if (!category && interaction.source === "request-button") {
+      const source = interaction.requestButtonCustomId === null
+        ? undefined
+        : parseRequestButtonSourceMessage(
+            sourceMessage,
+            this.#applicationId,
+            this.#botId,
+            interaction.guildId,
+            interaction.channelId,
+            interaction.requestButtonCustomId,
+            this.#requestButtonKey,
+          )
+      if (
+        !source
+        || source.messageId !== interaction.sourceMessageId
+        || source.index !== interaction.requestButtonIndex
+        || source.style !== interaction.requestButtonStyle
+        || source.label !== interaction.request
+      ) {
+        category = "request-button-evidence-invalid"
       }
     }
     if (!category) {
@@ -1125,7 +1520,9 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         await this.#client.editOriginalInteractionResponse(
           this.#applicationId,
           interaction.token,
-          STATIC_VALIDATION_RESPONSE,
+          interaction.source === "request-button"
+            ? STATIC_REQUEST_BUTTON_VALIDATION_RESPONSE
+            : STATIC_VALIDATION_RESPONSE,
           { signal: this.#lifecycleAbortController.signal },
         )
       } catch (error) {
@@ -1203,9 +1600,7 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
     const interactions = [...this.#pending.values()]
       .filter(({ ready }) => ready)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .map(({ ready: _ready, timer: _timer, token: _token, ...entry }) => ({
-        ...entry,
-      }))
+      .map(pendingInteraction)
     return {
       interactions,
       page: {
@@ -1288,7 +1683,11 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
       openedAt: this.#now().toISOString(),
       ready: false,
       reference,
+      requestButtonIndex: source.requestButtonIndex,
+      requestButtonStyle: source.requestButtonStyle,
       schemaVersion: SCHEMA_VERSION,
+      source: source.source,
+      sourceMessageId: source.sourceMessageId,
       timer: undefined,
       token: source.token,
       userId: source.userId,
@@ -1356,7 +1755,11 @@ export class NativeInteractionBroker implements NativeInteractionRuntime {
         interactionId: entry.interactionId,
         openedAt: entry.openedAt,
         reference: entry.reference,
+        requestButtonIndex: entry.requestButtonIndex,
+        requestButtonStyle: entry.requestButtonStyle,
         schemaVersion: entry.schemaVersion,
+        source: entry.source,
+        sourceMessageId: entry.sourceMessageId,
         userId: entry.userId,
       }))
     return {
@@ -1938,6 +2341,18 @@ export function createDisabledNativeInteractionSource(config: Pick<
   }
   return {
     enabled: false,
+    getRequestButtonReadiness: async (guildId) => {
+      assertSnowflake(guildId, "Discord request-button readiness guild ID")
+      return {
+        commandId: null,
+        commandVersion: null,
+        gatewayDelivery: null,
+        guildId,
+        phase: "disabled",
+        ready: false,
+        schemaVersion: SCHEMA_VERSION,
+      }
+    },
     getStatus: () => ({ ...status }),
     listContinuations: async () => ({
       continuations: [],

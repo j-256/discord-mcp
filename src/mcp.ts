@@ -90,6 +90,11 @@ import {
   normalizeComponentLinkUrl,
 } from "./component-link.js"
 import {
+  REQUEST_BUTTON_LIMITS,
+  REQUEST_BUTTON_STYLES,
+  requestButtonVerificationKey,
+} from "./request-button.js"
+import {
   COMPONENT_ANNOUNCEMENT_PRIORITIES,
   COMPONENT_INCIDENT_STATUSES,
   COMPONENT_TEMPLATE_LIMITS,
@@ -1638,8 +1643,42 @@ const componentLinkRowSchema = z.strictObject({
     .max(COMPONENT_LINK_LIMITS.buttonsPerRow),
   kind: z.literal("link-row"),
 })
+const componentRequestLabelSchema = z.string()
+  .refine((value) => value.trim().length > 0, {
+    message: "request button label must not be blank",
+  })
+  .refine((value) => [...value].length <= REQUEST_BUTTON_LIMITS.labelCharacters, {
+    message: `request button label must not exceed ${REQUEST_BUTTON_LIMITS.labelCharacters} Unicode characters`,
+  })
+  .refine((value) => !/[\u0000-\u001F\u007F\u2028\u2029]/u.test(value), {
+    message: "request button label must be single-line text without control characters",
+  })
+  .refine((value) => {
+    try {
+      encodeURIComponent(value)
+      return true
+    } catch {
+      return false
+    }
+  }, { message: "request button label must contain valid Unicode" })
+const componentRequestButtonSchema = z.strictObject({
+  label: componentRequestLabelSchema,
+  style: z.enum(REQUEST_BUTTON_STYLES).default("secondary"),
+})
+const componentRequestRowSchema = z.strictObject({
+  buttons: z.array(componentRequestButtonSchema)
+    .min(1)
+    .max(REQUEST_BUTTON_LIMITS.buttonsPerRow),
+  kind: z.literal("request-row"),
+})
+const componentStaticContainerChildSchema = z.union([
+  componentLinkRowSchema,
+  componentTextSchema,
+  componentSeparatorSchema,
+])
 const componentContainerChildSchema = z.union([
   componentLinkRowSchema,
+  componentRequestRowSchema,
   componentTextSchema,
   componentSeparatorSchema,
 ])
@@ -1651,8 +1690,35 @@ const componentContainerSchema = z.strictObject({
   kind: z.literal("container"),
   spoiler: z.boolean().default(false),
 })
+const componentStaticContainerSchema = z.strictObject({
+  accentColor: z.number().int().min(0).max(0xFF_FF_FF).optional(),
+  components: z.array(componentStaticContainerChildSchema)
+    .min(1)
+    .max(COMPONENT_LAYOUT_LIMITS.components),
+  kind: z.literal("container"),
+  spoiler: z.boolean().default(false),
+})
 const componentLayoutSchema = z.array(z.union([
   componentContainerSchema,
+  componentLinkRowSchema,
+  componentRequestRowSchema,
+  componentSeparatorSchema,
+  componentTextSchema,
+]))
+  .min(1)
+  .max(COMPONENT_LAYOUT_LIMITS.components)
+  .superRefine((components, context) => {
+    try {
+      normalizeComponentLayout(components)
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: errorMessage(error),
+      })
+    }
+  })
+const staticComponentLayoutSchema = z.array(z.union([
+  componentStaticContainerSchema,
   componentLinkRowSchema,
   componentSeparatorSchema,
   componentTextSchema,
@@ -4192,7 +4258,7 @@ const directMessageEditableBodySchema = z.discriminatedUnion("kind", [
     kind: z.literal("text"),
   }),
   z.strictObject({
-    components: componentLayoutSchema,
+    components: staticComponentLayoutSchema,
     kind: z.literal("components-v2"),
   }),
 ])
@@ -9364,10 +9430,21 @@ const normalizedComponentLinkRowSchema = z.strictObject({
     .max(COMPONENT_LINK_LIMITS.buttonsPerRow),
   kind: z.literal("link-row"),
 })
+const normalizedComponentRequestButtonSchema = z.strictObject({
+  label: componentRequestLabelSchema,
+  style: z.enum(REQUEST_BUTTON_STYLES),
+})
+const normalizedComponentRequestRowSchema = z.strictObject({
+  buttons: z.array(normalizedComponentRequestButtonSchema)
+    .min(1)
+    .max(REQUEST_BUTTON_LIMITS.buttonsPerRow),
+  kind: z.literal("request-row"),
+})
 const normalizedComponentContainerSchema = z.strictObject({
   accentColor: z.number().int().min(0).max(0xFF_FF_FF).nullable(),
   components: z.array(z.union([
     normalizedComponentLinkRowSchema,
+    normalizedComponentRequestRowSchema,
     normalizedComponentSeparatorSchema,
     normalizedComponentTextSchema,
   ])).min(1).max(COMPONENT_LAYOUT_LIMITS.components),
@@ -9377,6 +9454,7 @@ const normalizedComponentContainerSchema = z.strictObject({
 const normalizedComponentLayoutSchema = z.array(z.union([
   normalizedComponentContainerSchema,
   normalizedComponentLinkRowSchema,
+  normalizedComponentRequestRowSchema,
   normalizedComponentSeparatorSchema,
   normalizedComponentTextSchema,
 ]))
@@ -9386,15 +9464,23 @@ const normalizedComponentLayoutSchema = z.array(z.union([
     const total = components.reduce((count, component) => (
       count + 1 + (component.kind === "container"
         ? component.components.reduce((childCount, child) => (
-            childCount + 1 + (child.kind === "link-row" ? child.buttons.length : 0)
+            childCount + 1 + (
+              child.kind === "link-row" || child.kind === "request-row"
+                ? child.buttons.length
+                : 0
+            )
           ), 0)
-        : component.kind === "link-row"
+        : component.kind === "link-row" || component.kind === "request-row"
           ? component.buttons.length
           : 0)
     ), 0)
     const textCharacters = components.reduce((count, component) => {
       if (component.kind === "text") return count + [...component.content].length
-      if (component.kind === "separator" || component.kind === "link-row") return count
+      if (
+        component.kind === "separator"
+        || component.kind === "link-row"
+        || component.kind === "request-row"
+      ) return count
       return count + component.components.reduce((childCount, child) => (
         childCount + (child.kind === "text" ? [...child.content].length : 0)
       ), 0)
@@ -19689,9 +19775,10 @@ function componentMessageConfirmationMessage(
     `Notify reply author: ${plan.notifyReplyAuthor}`,
     `Notification user IDs: ${plan.notificationUserIds.join(", ") || "none"}`,
     `Suppressed visible user mention IDs: ${plan.target.suppressedUserMentionIds.join(", ") || "none"}`,
-    `Components: ${plan.target.counts.total} total, ${plan.target.counts.textDisplays} text, ${plan.target.counts.separators} separators, ${plan.target.counts.containers} containers`,
+    `Components: ${plan.target.counts.total} total, ${plan.target.counts.textDisplays} text, ${plan.target.counts.separators} separators, ${plan.target.counts.containers} containers, ${plan.target.counts.linkButtons} link Buttons, ${plan.target.counts.requestButtons} request Buttons`,
+    `Request-button ingress: ${reviewLiteral(plan.requestButtons.ingress)}`,
     `Aggregate text characters: ${plan.target.textCharacters}`,
-    "Target static layout:",
+    "Target layout:",
     plan.target.preview,
     ...(plan.current === null
       ? []
@@ -19699,7 +19786,8 @@ function componentMessageConfirmationMessage(
           `Current message flags: ${plan.current.flags}`,
           `Current parsed user mention IDs: ${plan.current.parsedUserMentionIds.join(", ") || "none"}`,
           `Current message pinned: ${plan.current.pinned}`,
-          "Current static layout:",
+          `Current request-button route hash: ${plan.current.requestButtonRouteHash ?? "none"}`,
+          "Current layout:",
           plan.current.preview,
         ]),
     `Message Content intent: ${plan.messageContentIntent}`,
@@ -20317,13 +20405,14 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     assertSoundboardPlaybackGateway(config, gateway)
     assertVoiceChannelStatusGateway(config, gateway)
   }
+  const nativeInteractions = options.nativeInteractions
+    || createDisabledNativeInteractionSource(config)
   const service = options.service || new ConnectorService({
     clientOptions: { observer: observability },
     config,
     gateway,
+    nativeInteractions,
   })
-  const nativeInteractions = options.nativeInteractions
-    || createDisabledNativeInteractionSource(config)
   const requestStateCodec = createRequestStateCodec({
     bind: (context) => context.mcpReq.method,
     key: options.requestStateKey || randomBytes(32),
@@ -20872,7 +20961,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "list_pending_discord_interactions",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Read the bounded process-local queue of private Discord native Interaction requests. Request text is transient untrusted data; tokens, profiles, and raw payloads are never exposed or persisted.",
+      description: "Read the bounded process-local queue of private Discord native Interaction requests from the managed slash command or authenticated request Buttons. Slash-command text and request-button labels are transient untrusted data. Button entries identify only the exact source message, bounded index, and style; custom IDs, routes, tokens, profiles, component trees, and raw payloads are never exposed or persisted.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
       title: "List pending Discord native Interactions",
@@ -20890,7 +20979,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "list_discord_interaction_continuations",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Read bounded content-free process-local native Interaction continuation capabilities. Returns rotating opaque references, exact verified identities, expiry, and fixed remaining allowance without request text, response text, profiles, raw payloads, or Discord Interaction tokens.",
+      description: "Read bounded content-free process-local native Interaction continuation capabilities. Returns rotating opaque references, source kind, exact verified identities, request-button source metadata when applicable, expiry, and fixed remaining allowance without request text, button labels, custom IDs, routes, response text, profiles, raw payloads, or Discord Interaction tokens.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
       title: "List Discord native Interaction continuations",
@@ -20908,7 +20997,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "respond_to_discord_interaction",
     {
       annotations: NON_IDEMPOTENT_WRITE_ANNOTATIONS,
-      description: "Consume one opaque pending Interaction reference and send one bounded ephemeral plain-text response. The Interaction token remains private, mentions and rich content are disabled, pending activity is recorded first, and the non-retried response is consumed even after uncertainty. Set keepOpen only to retain a fixed-count process-local follow-up capability after exact response evidence and durable completion recording.",
+      description: "Consume one opaque pending slash-command or request-button Interaction reference and send one bounded ephemeral plain-text response. The Interaction token remains private, mentions and rich content are disabled, pending activity is recorded first, and the non-retried response is consumed even after uncertainty. Response evidence must match the exact source kind and, for a request Button, Discord's component metadata and source-message reference. Set keepOpen only to retain a fixed-count process-local follow-up capability after exact response evidence and durable completion recording.",
       inputSchema: nativeInteractionResponseInputSchema,
       outputSchema: toolOutputSchema,
       title: "Respond to pending Discord native Interaction",
@@ -29699,10 +29788,10 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "preview_component_layout",
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Validate and normalize one bounded static Components V2 layout locally. Returns a deterministic outline, recursive counts, aggregate Unicode text length, exact normalized HTTPS link destinations and origins, explicit defaults, mention notification projection, and safety warnings without contacting Discord or persisting content. Supports Text Display, Separator, Container, and callback-free link-row nodes only; local preview grants no origin authority.",
+      description: "Validate and normalize one bounded Components V2 layout locally. Returns a deterministic outline, recursive counts, aggregate Unicode text length, exact normalized HTTPS link destinations and origins, explicit defaults, mention notification projection, and safety warnings without contacting Discord or persisting content. Supports Text Display, Separator, Container, callback-free link-row nodes, and managed request-row Buttons. A request Button creates only a private bounded broker request after publication and click-time scope checks; local preview grants no origin, ingress, write, or administration authority.",
       inputSchema: componentLayoutPreviewInputSchema,
       outputSchema: toolOutputSchema,
-      title: "Preview static Discord component layout",
+      title: "Preview Discord component layout",
     },
     safeToolHandler("preview_component_layout", async (
       input: z.infer<typeof componentLayoutPreviewInputSchema>,
@@ -29718,7 +29807,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       }
       return toolResult(
         result,
-        `Static component layout is valid with ${review.counts.total} total nodes and ${review.textCharacters} text characters`,
+        `Component layout is valid with ${review.counts.total} total nodes, ${review.counts.requestButtons} request Buttons, and ${review.textCharacters} text characters`,
       )
     }, secrets, observability),
   ))
@@ -29727,7 +29816,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "plan_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Prepare a process-bound keyed plan to create or edit one static Components V2 message in an exact allowlisted interaction channel. Requires confirmed Message Content intent and every link button's exact canonical HTTPS origin in scopes.componentLinkOrigins, then verifies exact application, bot, guild, active thread parent, private-thread membership, complete permissions, reply and notification policy, and an already-V2 bot-owned edit target without writing or persisting layout content. The plan shows exact normalized URLs; the connector never fetches them or verifies redirects.",
+      description: "Prepare a process-bound keyed plan to create or edit one Components V2 message in an exact allowlisted interaction channel. Supports callback-free links and managed request Buttons. Request Buttons additionally require the exact native Interaction guild and channel scope plus a paired ready broker with a verified managed command; each click can create only a private bounded request for an exact allowlisted user. Requires confirmed Message Content intent and every link button's exact canonical HTTPS origin in scopes.componentLinkOrigins, then verifies exact application, bot, guild, active thread parent, private-thread membership, complete permissions, reply and notification policy, and an already-V2 bot-owned edit target without writing or persisting layout content. The plan binds ingress command identity and version, shows exact normalized URLs, and never fetches a destination or grants request Buttons mutation authority.",
       inputSchema: componentMessagePlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Plan reviewed Discord component message",
@@ -29751,7 +29840,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "verify_component_message",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "Verify one exact caller-retained static Components V2 create or edit request against its content-free keyed operation receipt and the receipt-bound exact Discord message. Re-enforces every link button's exact configured origin before Discord access and returns only operation status, exact IDs, hashes, timestamps, and fresh match state. It does not fetch a link, write, reserve an operation, append activity, consume the write limiter, persist or return component content, scan message history, or trust a caller-supplied message ID for create recovery.",
+      description: "Verify one exact caller-retained Components V2 create or edit request against its content-free keyed operation receipt and the receipt-bound exact Discord message. Re-enforces every link button's exact configured origin and cryptographically validates every managed request Button against the application, bot, guild, channel, layout, and reviewed operation. Returns only operation status, exact IDs, hashes, timestamps, and fresh match state. It does not fetch a link, write, reserve an operation, append activity, consume the write limiter, persist or return component content, scan message history, or trust a caller-supplied message ID for create recovery.",
       inputSchema: componentMessagePlanInputSchema,
       outputSchema: toolOutputSchema,
       title: "Verify Discord component message operation",
@@ -29775,7 +29864,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "execute_component_message",
     {
       annotations: NON_IDEMPOTENT_DESTRUCTIVE_ANNOTATIONS,
-      description: "Create or edit one reviewed static Components V2 message after a fresh matching plan, exact link-origin enforcement, and signed interactive approval. Uses shared anti-spam limits, exact-target write coordination, a durable one-shot receipt, pending content-free audit record, one non-retried POST or PATCH, strict response validation, and exact GET readback. An exact notification-free edit no-op writes nothing and needs no approval.",
+      description: "Create or edit one reviewed Components V2 message after a fresh matching plan, exact link-origin and request-button ingress enforcement, and signed interactive approval. Managed request Buttons carry only bounded authenticated routing data; they expose no interaction token, raw callback, write authority, or administration path. Uses shared anti-spam limits, exact-target write coordination, a durable one-shot receipt, pending content-free audit record, one non-retried POST or PATCH, strict response validation, and exact GET readback. An exact notification-free edit no-op writes nothing and needs no approval.",
       inputSchema: componentMessageExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord component message",
@@ -29796,7 +29885,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
             request,
             input.planDigest,
             "confirmation-invalid",
-            "Signed confirmation state does not match the exact action, channel, message, normalized static layout, reply, notifications, one-shot operation key, or plan digest",
+            "Signed confirmation state does not match the exact action, channel, message, normalized layout, reply, notifications, one-shot operation key, or plan digest",
           )
           return toolResult(result, result.reason, { isError: true })
         }
@@ -33126,6 +33215,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
       client: sharedClient,
       config,
       policy: sharedPolicy,
+      requestButtonKey: requestButtonVerificationKey(config.token),
     })
   }
   const nativeInteractions = nativeInteractionRuntime
@@ -33186,6 +33276,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
       : { clientOptions: { observer: observability } }),
     config,
     gateway,
+    nativeInteractions,
     ...(sharedPolicy ? { policy: sharedPolicy } : {}),
   })
   const stdin = options.stdin || process.stdin

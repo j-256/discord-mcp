@@ -6134,6 +6134,8 @@ function componentMessagePlan(
           preview: writeRequired
             ? "[1] Text Display: \"Before\""
             : review.preview,
+          requestButtonCount: 0,
+          requestButtonRouteHash: null,
           timestamp: "2026-08-22T00:00:00.000Z",
         }
       : null,
@@ -6180,6 +6182,8 @@ function componentMessagePlan(
         "parsedUserMentionIds",
         "rawOperationKey",
         "rawPayloads",
+        "requestButtonCustomIds",
+        "requestButtonRoutes",
         "replyAuthorId",
       ],
       planPersistence: "none",
@@ -6188,6 +6192,10 @@ function componentMessagePlan(
     reply: request.replyToMessageId
       ? { authorId: USER_ID, messageId: request.replyToMessageId, type: 0 }
       : null,
+    requestButtons: {
+      count: review.counts.requestButtons,
+      ingress: null,
+    },
     schemaVersion: 1,
     status: writeRequired ? "planned" : "already-current",
     target: {
@@ -19454,7 +19462,11 @@ test("MCP native Interaction resources and tools keep tokens private and request
     interactionId: "700000000000000003",
     reference,
     request: "Summarize the private release discussion",
+    requestButtonIndex: null,
+    requestButtonStyle: null,
     schemaVersion: 1,
+    source: "command" as const,
+    sourceMessageId: null,
     userId: USER_ID,
   }
   const continuation = {
@@ -19469,7 +19481,11 @@ test("MCP native Interaction resources and tools keep tokens private and request
     interactionId: pending.interactionId,
     openedAt: "2026-08-22T00:01:00.000Z",
     reference: continuationReference,
+    requestButtonIndex: null,
+    requestButtonStyle: null,
     schemaVersion: 1,
+    source: "command" as const,
+    sourceMessageId: null,
     userId: USER_ID,
   }
   let listCalls = 0
@@ -19486,6 +19502,17 @@ test("MCP native Interaction resources and tools keep tokens private and request
   }> = []
   const nativeInteractions: NativeInteractionSource = {
     enabled: true,
+    async getRequestButtonReadiness(guildId) {
+      return {
+        commandId: pending.commandId,
+        commandVersion: pending.commandVersion,
+        gatewayDelivery: "verified",
+        guildId,
+        phase: "ready",
+        ready: true,
+        schemaVersion: 1,
+      }
+    },
     getStatus() {
       return {
         command: {
@@ -20164,7 +20191,24 @@ test("MCP private-message Components V2 binds static layout approval and signed 
     },
     name: "plan_direct_message_change",
   })
+  const interactiveLayout = await connected.client.callTool({
+    arguments: {
+      ...directMessageComponentSendToolInput(),
+      message: {
+        components: [
+          { content: "Private request", kind: "text" },
+          {
+            buttons: [{ label: "Run request" }],
+            kind: "request-row",
+          },
+        ],
+        kind: "components-v2",
+      },
+    },
+    name: "plan_direct_message_change",
+  })
   assert.equal(invalidLayout.isError, true)
+  assert.equal(interactiveLayout.isError, true)
 
   const stdio = await connectedModernStdioFixture(context)
   const request = directMessageComponentSendToolInput(DIGEST)
@@ -21079,6 +21123,18 @@ test("MCP component layout preview is local, strict, and recursively bounded", a
     },
     name: "preview_component_layout",
   })
+  const requestButtons = await client.callTool({
+    arguments: {
+      components: [
+        { content: "Choose a private request", kind: "text" },
+        {
+          buttons: [{ label: "Summarize release" }],
+          kind: "request-row",
+        },
+      ],
+    },
+    name: "preview_component_layout",
+  })
   const rawDiscord = await client.callTool({
     arguments: {
       components: [{ content: "Raw", type: 10 }],
@@ -21105,7 +21161,13 @@ test("MCP component layout preview is local, strict, and recursively bounded", a
   )
   assert.equal(rawDiscord.isError, true)
   assert.equal(nested.isError, true)
-  assert.equal(calls.componentMessagePreview, 1)
+  assert.equal(structuredContent(requestButtons).status, "ok")
+  assert.equal(
+    (structuredContent(requestButtons).counts as Record<string, unknown>).requestButtons,
+    1,
+  )
+  assert.match(JSON.stringify(structuredContent(requestButtons)), /secondary/)
+  assert.equal(calls.componentMessagePreview, 2)
 })
 
 test("MCP component-message planning enforces exact create and edit shapes", async (context) => {
@@ -21126,6 +21188,21 @@ test("MCP component-message planning enforces exact create and edit shapes", asy
       channelId: CHANNEL_ID,
       components: COMPONENT_LAYOUT,
       messageId: MESSAGE_ID,
+      operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
+    },
+    name: "plan_component_message",
+  })
+  const requestButtonPlan = await client.callTool({
+    arguments: {
+      action: "create",
+      channelId: CHANNEL_ID,
+      components: [
+        { content: "Choose a private request", kind: "text" },
+        {
+          buttons: [{ label: "Summarize release", style: "success" }],
+          kind: "request-row",
+        },
+      ],
       operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
     },
     name: "plan_component_message",
@@ -21155,9 +21232,15 @@ test("MCP component-message planning enforces exact create and edit shapes", asy
 
   assert.equal(structuredContent(create).status, "planned")
   assert.equal(structuredContent(edit).status, "planned")
+  assert.equal(structuredContent(requestButtonPlan).status, "planned")
+  assert.equal(
+    ((structuredContent(requestButtonPlan).target as Record<string, unknown>)
+      .counts as Record<string, unknown>).requestButtons,
+    1,
+  )
   assert.equal(mixedCreate.isError, true)
   assert.equal(mixedEdit.isError, true)
-  assert.equal(calls.componentMessagePlan, 2)
+  assert.equal(calls.componentMessagePlan, 3)
 })
 
 test("MCP component-message verification is read-only and uses the exact request shape", async (context) => {
@@ -21209,6 +21292,13 @@ test("MCP component-message verification is read-only and uses the exact request
 test("MCP component messages bind signed approval to the exact normalized layout", async (context) => {
   let confirmationMessage = ""
   const serverMessages: unknown[] = []
+  const interactiveComponents: ComponentLayoutInput[] = [
+    ...COMPONENT_LAYOUT,
+    {
+      buttons: [{ label: "Summarize release", style: "primary" }],
+      kind: "request-row",
+    },
+  ]
   const { calls, client } = await connectedFixture(context, {
     elicitationHandler: async (request) => {
       confirmationMessage = request.params.message
@@ -21221,7 +21311,7 @@ test("MCP component messages bind signed approval to the exact normalized layout
     arguments: {
       action: "create",
       channelId: CHANNEL_ID,
-      components: COMPONENT_LAYOUT,
+      components: interactiveComponents,
       notifyReplyAuthor: true,
       notifyUserIds: [USER_ID],
       operationKey: COMPONENT_MESSAGE_OPERATION_KEY,
@@ -21240,6 +21330,8 @@ test("MCP component messages bind signed approval to the exact normalized layout
   assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
   assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
   assert.match(confirmationMessage, /Reviewed component/)
+  assert.match(confirmationMessage, /Summarize release/)
+  assert.match(confirmationMessage, /1 request Buttons/)
   assert.match(confirmationMessage, /SEND_MESSAGES/)
   assert.match(confirmationMessage, new RegExp(OPERATION_KEY_HASH))
   assert.match(confirmationMessage, new RegExp(DIGEST))
@@ -40398,6 +40490,17 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
   })
   const nativeInteractionRuntime: NativeInteractionRuntime = {
     enabled: true,
+    async getRequestButtonReadiness(guildId) {
+      return {
+        commandId: "700000000000000001",
+        commandVersion: "700000000000000002",
+        gatewayDelivery: "verified",
+        guildId,
+        phase: "ready",
+        ready: true,
+        schemaVersion: 1,
+      }
+    },
     getStatus() {
       return {
         command: {

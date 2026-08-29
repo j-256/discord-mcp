@@ -1016,6 +1016,10 @@ test("configuration and policy isolate native Interaction ingress and command ch
   assert.equal(config.nativeInteractionTtlSeconds, 300)
   enabled.assertNativeCommandChangeAllowed(GUILD_ID)
   enabled.assertNativeInteractionAllowed(GUILD_ID, CHANNEL_ID, USER_ID)
+  assert.deepEqual(
+    enabled.assertNativeInteractionTargetAllowed(GUILD_ID, CHANNEL_ID),
+    [USER_ID],
+  )
   assert.throws(
     () => enabled.assertNativeCommandChangeAllowed(OTHER_GUILD_ID),
     /configured read scope/,
@@ -1026,6 +1030,10 @@ test("configuration and policy isolate native Interaction ingress and command ch
   )
   assert.throws(
     () => enabled.assertNativeInteractionAllowed(GUILD_ID, CHANNEL_ID, "400000000000000002"),
+    /outside the native Interaction scope/,
+  )
+  assert.throws(
+    () => enabled.assertNativeInteractionTargetAllowed(GUILD_ID, OTHER_CHANNEL_ID),
     /outside the native Interaction scope/,
   )
   assert.deepEqual(enabled.describe().nativeInteractionGuildIds, [GUILD_ID])

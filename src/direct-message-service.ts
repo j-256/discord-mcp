@@ -19,6 +19,7 @@ import {
 } from "./attachment-file.js"
 import {
   compileComponentLayout,
+  componentLayoutHasRequestButtons,
   componentLayoutsEqual,
   parseDiscordComponentLayout,
   reviewComponentLayout,
@@ -612,8 +613,14 @@ function normalizeDirectMessageBody(
         "Discord direct-message Components V2 body requires exact kind and components",
       )
     }
+    const layout = reviewComponentLayout(record.components, []).layout
+    if (componentLayoutHasRequestButtons(layout)) {
+      throw new RangeError(
+        "Discord direct-message Components V2 cannot contain request buttons",
+      )
+    }
     return {
-      components: reviewComponentLayout(record.components, []).layout,
+      components: layout,
       kind: "components-v2",
     }
   }

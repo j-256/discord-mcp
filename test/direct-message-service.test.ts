@@ -576,7 +576,23 @@ test("direct-message requests are closed and require action-specific acknowledge
         kind: "components-v2",
       },
     } as unknown as DirectMessageChangeRequest),
-    /kind must be container, link-row, separator, or text/,
+    /kind must be container, link-row, request-row, separator, or text/,
+  )
+  assert.throws(
+    () => normalizeDirectMessageChangeRequest({
+      ...sendRequest(),
+      message: {
+        components: [
+          { content: "Private request", kind: "text" },
+          {
+            buttons: [{ label: "Open", style: "primary" }],
+            kind: "request-row",
+          },
+        ],
+        kind: "components-v2",
+      },
+    } as unknown as DirectMessageChangeRequest),
+    /cannot contain request buttons/,
   )
   assert.throws(
     () => normalizeDirectMessageChangeRequest({
