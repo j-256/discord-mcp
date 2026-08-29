@@ -47,6 +47,7 @@ export const CONFIG_RECIPE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 const CONFIG_RECIPE_PLAN_FORMAT = "discord-mcp.config-recipe-plan.v1"
 
 export const CONFIG_RECIPE_NAMES = Object.freeze([
+  "guild-starter",
   "guild-builder",
   "channel-publisher",
   "direct-messenger",
@@ -188,6 +189,48 @@ export interface ConfigRecipeApplyReport extends Omit<
 }
 
 const CONFIG_RECIPE_SOURCES = Object.freeze([
+  {
+    botPermissions: [
+      "MANAGE_CHANNELS",
+      "MANAGE_GUILD",
+      "VIEW_CHANNEL",
+    ],
+    capabilities: [
+      "guildScaffolds",
+      "guildSettingsAudit",
+      "guildSettingsChanges",
+    ],
+    description: "Add the minimum connector policy for deterministic public-only guild blueprint starters: additive structure and conservative named settings through the ordinary reviewed blueprint lifecycle while preserving the live guild name.",
+    gateway: {
+      evidenceConnection: "guild-layout",
+      eventFeedPolicy: "unchanged",
+      intents: ["GUILDS"],
+    },
+    name: "guild-starter",
+    privilegedIntents: [],
+    risks: [
+      "Blueprint execution can create public categories, text channels, and forum channels in each exact selected guild",
+      "Starter settings change default notifications, explicit content filtering, and the system channel",
+    ],
+    scope: {
+      kind: "guild",
+      names: [
+        "guildScaffoldGuildIds",
+        "guildSettingsGuildIds",
+      ],
+    },
+    toolsets: ["guild-blueprints"],
+    warnings: [
+      "Every execution still requires pinned identity, exact scope, complete permissions, a fresh plan, signed approval, pending content-free evidence, one non-retried mutation, and exact readback",
+      "The recipe does not request Manage Roles or Administrator, while the starter compiler creates no role and assigns no member",
+      "Supplying guildName additionally requires separately reviewed guild-profile audit and change capabilities plus exact guild scope; this recipe deliberately omits that optional replacement authority",
+      "Guild scaffolds are shared with custom blueprints; an existing Manage Roles grant can still satisfy a separately authored role-creation frontier, so retain the compiled request and least-privilege bot permissions",
+      "Information channels remain ordinary public text channels until their proven exact IDs receive separately configured and reviewed permission overwrites",
+      "Final visual ordering remains a separately configured exact-ID workflow after created channel IDs are proven",
+      "Guild-settings evidence activates a privacy-minimized GUILDS-only layout connection while the configured event-feed policy remains unchanged",
+      "Community, Welcome Screen, onboarding, AutoMod, publications, and existing-role or channel convergence remain disabled",
+    ],
+  },
   {
     botPermissions: [
       "MANAGE_CHANNELS",

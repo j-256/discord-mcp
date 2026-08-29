@@ -594,26 +594,27 @@ async function checkDocumentation(packageJson) {
     "--inspect-host-file",
     "incident-response",
     "recipe list",
-    "recipe plan guild-builder",
-    "recipe apply guild-builder",
+    "recipe plan guild-starter",
+    "recipe apply guild-starter",
     "smoke --config ./discord-mcp.json",
   ]) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
   invariant(reference.includes("preset install server-observer"), "complete reference lacks preset-derived bot installation")
   invariant(reference.includes("guided product tour and searchable standalone explorer"), "complete reference lacks the guided catalog tour")
-  invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks additive recipe inspection")
+  invariant(reference.includes("recipe show guild-starter --json"), "complete reference lacks starter recipe inspection")
+  invariant(reference.includes("recipe show guild-builder --json"), "complete reference lacks broad blueprint recipe inspection")
   invariant(reference.includes("## Complete bot-installation drift audit"), "complete reference lacks bot-installation drift guidance")
   invariant(reference.includes("`discord://connector/installations`"), "complete reference lacks the bot-installation resource")
   invariant(reference.includes("`audit_bot_installations`"), "complete reference lacks the bot-installation tool and prompt")
   invariant(security.includes("## Bot installation drift"), "security policy lacks bot-installation drift requirements")
   invariant(security.includes("require one commit-pinned GitHub tree URL"), "security policy lacks pinned migration evidence")
-  invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-builder"), "complete reference lacks reviewed recipe application")
+  invariant(reference.includes("--plan-digest PLAN_DIGEST --confirm guild-starter"), "complete reference lacks reviewed starter recipe application")
   invariant(reference.includes("No recipe removes or disables existing policy"), "complete reference lacks additive-only recipe policy")
   invariant(reference.includes("## Privacy-minimized guild incident actions and reviewed lockdown changes"), "complete reference lacks reviewed guild incident actions")
   invariant(reference.includes("does not document `X-Audit-Log-Reason`"), "complete reference lacks the guild incident audit-header boundary")
   invariant(security.includes("## Guild incident actions"), "security policy lacks reviewed guild incident actions")
-  invariant(readme.includes("nonprivileged `GUILDS`-only layout-evidence connection"), "README lacks guild-builder Gateway evidence disclosure")
+  invariant(readme.includes("reviewed public layouts with nonprivileged `GUILDS` evidence"), "README lacks guild-starter Gateway evidence disclosure")
   invariant(reference.includes("privacy-minimized `GUILDS`-only layout connection"), "complete reference lacks guild-builder Gateway evidence disclosure")
   invariant(security.includes("Gateway evidence requirement"), "security policy lacks recipe Gateway disclosure")
   invariant(readme.includes("there is no alternate environment-policy or automatic import mode"), "README lacks clean-break configuration policy")

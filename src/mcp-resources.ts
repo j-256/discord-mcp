@@ -21,6 +21,12 @@ import {
 } from "./component-templates.js"
 import { COMPONENT_LINK_LIMITS } from "./component-link.js"
 import {
+  GUILD_BLUEPRINT_STARTER_CATALOG,
+  GUILD_BLUEPRINT_STARTER_OMISSIONS,
+  GUILD_BLUEPRINT_STARTER_PRINCIPLES,
+  GUILD_BLUEPRINT_STARTER_VERSION,
+} from "./guild-blueprint-starters.js"
+import {
   AttachmentReadTooLargeError,
   errorMessage,
   PolicyError,
@@ -440,6 +446,62 @@ export function registerDiscordResources(
           "Compilation grants no Discord authority and never sends a message",
           "The connector never fetches links or verifies redirects or final destinations",
           "Use the returned exact components in the reviewed component-message lifecycle",
+        ],
+      }),
+      0,
+    ),
+  )
+
+  server.registerResource(
+    MCP_RESOURCE_NAMES.guildBlueprintStarters,
+    MCP_RESOURCE_URIS.guildBlueprintStarters,
+    {
+      annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
+      cacheHint: {
+        cacheScope: "public",
+        ttlMs: STATIC_RESOURCE_TTL_MS,
+      },
+      description: "Versioned local catalog of deterministic public-only guild blueprint starters, their authority-free compile lifecycle, and explicit post-build hardening boundary.",
+      mimeType: "application/json",
+      title: "Discord guild blueprint starter catalog",
+    },
+    async (uri) => jsonResource(
+      uri,
+      "local-contract",
+      "trusted-local-metadata",
+      [],
+      () => ({
+        authorityGranted: false,
+        compilerTool: "compile_guild_blueprint_starter",
+        designPrinciples: GUILD_BLUEPRINT_STARTER_PRINCIPLES,
+        discordContacted: false,
+        lifecycle: {
+          compile: "compile_guild_blueprint_starter",
+          execute: "execute_guild_blueprint",
+          plan: "plan_guild_blueprint",
+          verify: "verify_guild_blueprint",
+        },
+        omittedCapabilities: GUILD_BLUEPRINT_STARTER_OMISSIONS,
+        persistence: "none",
+        setupRecipe: "guild-starter",
+        setupRecipeCoverage: "structure-and-settings-only",
+        starterDiscriminator: "starter",
+        starterVersion: GUILD_BLUEPRINT_STARTER_VERSION,
+        starters: GUILD_BLUEPRINT_STARTER_CATALOG,
+        supportedInputs: [
+          "auditReason",
+          "guildId",
+          "guildName",
+          "operationKey",
+          "starter",
+        ],
+        warnings: [
+          "Starters contain only bundled local public categories, text channels, forums, named guild settings, and an optional sparse guild name",
+          "Information and announcement-style channels are not read-only until separately reviewed exact permission overwrites are applied",
+          "Private staff areas, role authority, Community, onboarding, AutoMod, publications, and live-resource convergence are deliberately omitted",
+          "The guild-starter recipe preserves the live guild name; optional guildName input needs separately reviewed guild-profile policy",
+          "Compilation grants no Discord authority and never plans or executes a write",
+          "Customize and retain the returned exact request, then use the ordinary reviewed one-frontier blueprint lifecycle",
         ],
       }),
       0,

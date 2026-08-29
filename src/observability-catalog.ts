@@ -17,6 +17,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   audit_forum_tags: "discord-read",
   capture_guild_blueprint: "discord-read",
   compile_component_template: "local-read",
+  compile_guild_blueprint_starter: "local-read",
   execute_application_emoji_change: "destructive-write",
   execute_application_entitlement_consumption: "destructive-write",
   execute_application_intent_enablement: "destructive-write",

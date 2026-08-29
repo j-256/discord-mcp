@@ -75,6 +75,7 @@ export interface McpToolStaticRequirements {
       | "channel-publisher"
       | "direct-messenger"
       | "guild-builder"
+      | "guild-starter"
       | "incident-response"
     )[]
     presetNames: readonly ("channel-reader" | "server-observer")[]
@@ -719,6 +720,7 @@ const MCP_TOOLSET_REQUIREMENTS = Object.freeze({
 const LOCAL_TOOL_NAMES: ReadonlySet<McpToolName> = new Set([
   MCP_DISCOVERY_TOOL_NAME,
   "compile_component_template",
+  "compile_guild_blueprint_starter",
   "get_gateway_events",
   "get_gateway_status",
   "get_observability_status",
@@ -1009,7 +1011,7 @@ function canonicalIntents(
   ))
 }
 
-function curatedSetup(toolset: McpToolsetName) {
+function curatedSetup(toolset: McpToolsetName, toolName: McpToolName) {
   const serverObserverToolsets: readonly McpToolsetName[] = [
     "activity",
     "connector",
@@ -1037,14 +1039,21 @@ function curatedSetup(toolset: McpToolsetName) {
   if (serverObserverToolsets.includes(toolset)) presetNames.push("server-observer")
   if (channelReaderToolsets.includes(toolset)) presetNames.push("channel-reader")
   const recipe = recipeByToolset[toolset as keyof typeof recipeByToolset]
+  const recipeNames = toolset === "guild-blueprints"
+    && toolName !== "capture_guild_blueprint"
+    ? ["guild-starter", "guild-builder"] as const
+    : recipe
+      ? [recipe]
+      : []
   return {
     presetNames,
-    recipeNames: recipe ? [recipe] : [],
+    recipeNames,
   }
 }
 
 function normalizeSource(
   source: RequirementSource,
+  toolName: McpToolName,
   toolset: McpToolsetName,
   origin: McpToolStaticRequirements["source"],
 ): McpToolStaticRequirements {
@@ -1073,7 +1082,7 @@ function normalizeSource(
     throw new Error("Conditional MCP readiness must name at least one permission case")
   }
   const authentication = source.authentication ?? "bot"
-  const setup = curatedSetup(toolset)
+  const setup = curatedSetup(toolset, toolName)
   return Object.freeze({
     authentication,
     configuration: Object.freeze({
@@ -1104,6 +1113,7 @@ export function mcpToolStaticRequirements(
   const exact = exactRequirement(name, toolset)
   return normalizeSource(
     exact ?? MCP_TOOLSET_REQUIREMENTS[toolset],
+    name,
     toolset,
     exact ? "exact-tool" : "toolset",
   )

@@ -137,6 +137,7 @@ import {
   type ChannelPermissionSyncRequest,
 } from "./channel-permission-overwrite-service.js"
 import { catalogOnlyResult } from "./catalog-contract.js"
+import { MCP_RESOURCE_URIS } from "./mcp-guidance-catalog.js"
 import { MCP_OPERATIONAL_INSTRUCTION_PREAMBLE } from "./mcp-instructions.js"
 import { installMcpRequestCancellation } from "./mcp-request-cancellation.js"
 import {
@@ -174,6 +175,10 @@ import {
   type GuildBlueprintRequest,
   type GuildBlueprintRoleConfigurationInput,
 } from "./guild-blueprint-service.js"
+import {
+  GUILD_BLUEPRINT_STARTER_NAMES,
+  compileGuildBlueprintStarter,
+} from "./guild-blueprint-starters.js"
 import { guildChannelLayoutGuildIds } from "./guild-channel-evidence.js"
 import {
   voiceChannelStatusChannelIds,
@@ -6137,6 +6142,18 @@ const guildBlueprintFields = {
   settings: guildBlueprintSettingsSchema.optional(),
   welcomeScreen: guildBlueprintWelcomeScreenSchema.optional(),
 }
+const guildBlueprintStarterInputSchema = z.strictObject({
+  auditReason: auditReasonSchema,
+  guildId: positiveSnowflakeSchema.describe(
+    "Exact guild ID to place in the caller-retained compiled request",
+  ),
+  guildName: guildProfileNameSchema
+    .optional()
+    .describe("Optional complete desired guild name; omit to preserve the live name"),
+  operationKey: guildBlueprintFields.operationKey,
+  starter: z.enum(GUILD_BLUEPRINT_STARTER_NAMES)
+    .describe("Bundled deterministic public-only guild layout starter"),
+})
 const guildBlueprintCaptureInputSchema = z.strictObject({
   auditReason: auditReasonSchema,
   guildId: positiveSnowflakeSchema.describe("Exact guild blueprint capture source guild ID"),
@@ -20181,6 +20198,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       "Member moderation accepts exact guild and user IDs only. Choose a unique one-shot operation key, call plan_member_moderation, and review the pinned application and bot identities, target, action, parameters, audit reason, complete permission and hierarchy evidence, privacy boundary, risks, warnings, operation-key hash, readback boundary, and keyed digest. Then call execute_member_moderation with identical inputs and the digest. Execution requires signed interactive approval, durable exact-member coordination, one-shot receipt reservation, pending content-free activity, one non-retried mutation, and exact fresh readback. Never retry after reservation or an uncertain outcome.",
       "Bulk guild bans require a separate exact guild scope and capability. Choose a unique one-shot operation key, call plan_bulk_guild_ban with two through the Discord endpoint maximum of unique exact user IDs, and review every pinned identity, transient target profile, membership and ban state, complete BAN_MEMBERS plus MANAGE_GUILD permission and hierarchy evidence, batch-wide message deletion window, audit reason, request estimates, privacy boundary, partial-success risk, warnings, operation-key hash, target-set digest, readback boundary, and keyed plan digest. Then call execute_bulk_guild_ban with identical inputs and the digest. Execution requires signed interactive approval, durable coordination across the complete exact target set, pending content-free activity, one non-retried batch request, and fresh exact ban readback for every target. Successful bans are never rolled back, failed subsets are never retried automatically, and any later action requires a new plan and key.",
       "Guild pruning requires separate non-exact audit and execution capabilities, an exact guild allowlist, an independent toolset, an operator policy ceiling, and exact allowlisting for every role used to widen the cohort. Call plan_guild_prune with literal acknowledgement that Discord never reveals candidate or removed member IDs, review the fresh estimated count, request and policy pre-dispatch ceilings, inactivity window, role semantics, connector permissions, protected-identity shields, risks, warnings, operation-key hash, and keyed digest, then call execute_guild_prune with identical inputs and the digest. Execution requires signed interactive approval, guild-wide member and exact-role coordination, pending content-free activity, and one non-retried request with count computation. Discord does not enforce either ceiling during mutation; response-count drift is explicit and an ambiguous outcome quarantines the member collection for operator review.",
+      "For a deterministic common public layout, read discord://connector/guild-blueprint-starters and call compile_guild_blueprint_starter with one exact guild ID, stable operation key, and community, creator, project, or support. Review and retain the returned strict request, make only intended presentation changes, then pass that exact resulting request to plan_guild_blueprint. The compiler is local, grants no authority, contacts no Discord endpoint, accepts no remote template or arbitrary variables, creates no roles, and makes no private or read-only access claim; use the exact-ID hardening planners named in its review where those policies are required.",
       "Never bypass a disabled policy, protected target, changed plan, interaction guard, or interactive confirmation.",
     ]
   const server = new McpServer(
@@ -29983,6 +30001,63 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
         },
         requestState: signedState,
       })
+    }, secrets, observability),
+  ))
+
+  trackCanonicalTool("compile_guild_blueprint_starter", server.registerTool(
+    "compile_guild_blueprint_starter",
+    {
+      annotations: READ_ONLY_LOCAL_ANNOTATIONS,
+      description: "Compile one bundled community, creator, project, or support starter into a strict caller-retained plan_guild_blueprint request. The deterministic public-only layouts contain compact categories, text channels, forums, conservative named guild settings, and an optional sparse guild name. They create no role or private area, grant no permission, never request Administrator, and make no read-only claim; the result identifies exact permission-overwrite and ordering hardening that remains separate. Compilation validates through the production blueprint contract without contacting Discord, reading a token, granting policy, reserving an operation key, planning or executing a write, importing a remote source, accepting arbitrary variables, or persisting content.",
+      inputSchema: guildBlueprintStarterInputSchema,
+      outputSchema: toolOutputSchema,
+      title: "Compile safe Discord guild blueprint starter",
+    },
+    safeToolHandler("compile_guild_blueprint_starter", async (
+      input: z.infer<typeof guildBlueprintStarterInputSchema>,
+    ) => {
+      const compilation = compileGuildBlueprintStarter({
+        auditReason: input.auditReason,
+        guildId: input.guildId,
+        ...(input.guildName === undefined ? {} : { guildName: input.guildName }),
+        operationKey: input.operationKey,
+        starter: input.starter,
+      })
+      const result = {
+        authority: {
+          discordContacted: false,
+          policyGranted: false,
+          writeAuthorityGranted: false,
+        },
+        next: {
+          executeTool: "execute_guild_blueprint",
+          instruction: "Retain and inspect request, customize only intended fields, satisfy every listed policy requirement, then copy the exact request into plan_guild_blueprint. Execute at most its fresh reviewed frontier, replan after every frontier, and verify only after every phase is current.",
+          planTool: "plan_guild_blueprint",
+          resource: MCP_RESOURCE_URIS.guildBlueprintStarters,
+          setupRecipe: "guild-starter",
+          setupRecipeCoverage: input.guildName === undefined
+            ? "complete-for-structure-and-settings"
+            : "requires-separate-guild-profile-policy",
+          verifyTool: "verify_guild_blueprint",
+        },
+        privacy: {
+          compiledContent: "transient-untrusted",
+          persistence: "none",
+          starterSource: "bundled-local",
+        },
+        request: compilation.request,
+        review: compilation.review,
+        schemaVersion: SCHEMA_VERSION,
+        starter: {
+          name: compilation.starter,
+          version: compilation.starterVersion,
+        },
+        status: "compiled",
+      }
+      return toolResult(
+        result,
+        `Compiled bundled ${compilation.starter} Discord guild blueprint starter with ${compilation.review.resourceCount} additive resources; no Discord request or write authority was used`,
+      )
     }, secrets, observability),
   ))
 
