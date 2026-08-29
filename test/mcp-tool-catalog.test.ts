@@ -209,6 +209,29 @@ test("tool discovery distinguishes one reaction from an additive reaction set", 
   assert.equal(result.matches[0]?.name, "add_reactions")
 })
 
+test("tool discovery routes Discord task handoffs to bounded direct replies", () => {
+  const catalog = createDiscordToolDiscoveryCatalog([
+    trackedTool({
+      description: "Inspect one bounded page of direct replies to an exact task message",
+      name: "list_message_replies",
+      title: "List exact Discord message replies",
+    }),
+    trackedTool({
+      description: "List aggregate emoji reactions on one message",
+      name: "list_message_reactions",
+      title: "List message reactions",
+    }),
+  ], "full")
+
+  const result = discoverDiscordTools({
+    detail: "compact",
+    limit: 1,
+    query: "inspect replies to a coordination task handoff",
+  }, catalog)
+
+  assert.equal(result.matches[0]?.name, "list_message_replies")
+})
+
 test("tool discovery promotes reviewed planners without crossing exact risk filters", () => {
   const catalog = createDiscordToolDiscoveryCatalog([
     trackedTool({
@@ -475,6 +498,25 @@ test("tool readiness distinguishes static setup, credentials, and live proof", (
   assert.deepEqual(
     byName.get("read_messages")?.requirements.configuration.presetNames,
     ["channel-reader"],
+  )
+  assert.deepEqual(
+    byName.get("list_message_replies")?.requirements.configuration.presetNames,
+    ["channel-reader"],
+  )
+  assert.deepEqual(
+    byName.get("list_message_replies")?.requirements.discord,
+    {
+      conditions: [],
+      hierarchy: "not-applicable",
+      intents: [{
+        name: "MESSAGE_CONTENT",
+        privileged: true,
+        status: "recommended",
+      }],
+      permissionMode: "all-listed",
+      permissions: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
+      verification: "operation-runtime",
+    },
   )
   assert.deepEqual(
     byName.get("plan_guild_blueprint")?.requirements.configuration.recipeNames,

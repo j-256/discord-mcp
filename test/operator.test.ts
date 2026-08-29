@@ -496,6 +496,7 @@ function toolService(
     checkSoundboardPlayback: unexpected,
     analyzeCommunityActivity: unexpected,
     playSoundboardSound: unexpected,
+    listMessageReplies: unexpected,
     auditApplicationCommands: unexpected,
     auditBotInstallations: unexpected,
     auditApplicationEntitlements: unexpected,
@@ -6187,6 +6188,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "audit_bot_installations",
     "author_guild_blueprint",
     "find_guild_members",
+    "inspect_discord_coordination_task",
     "inspect_discord_poll",
     "inspect_guild_ban",
     "prepare_guild_recovery",
@@ -6273,6 +6275,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://application/skus",
     "discord://connector/activity",
     "discord://connector/component-templates",
+    "discord://connector/coordination",
     "discord://connector/guild-blueprint-starters",
     "discord://connector/installations",
     "discord://connector/observability",
@@ -6575,9 +6578,10 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 8)
+  assert.equal(report.toolCount, 9)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.promptNames, [
+    "inspect_discord_coordination_task",
     "recall_discord_conversation",
     "route_discord_goal",
     "search_guild_messages",
@@ -6588,6 +6592,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "discover_discord_tools",
     "get_message",
     "list_activity",
+    "list_message_replies",
     "read_message_attachment",
     "read_messages",
     "recall_conversation",

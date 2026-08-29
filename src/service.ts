@@ -624,6 +624,11 @@ import {
   normalizeGuild,
   normalizeMessage,
 } from "./normalize.js"
+import type { MessageReplyPageOptions } from "./message-reply-service.js"
+import {
+  assertMessageReplyRequest,
+  MessageReplyService,
+} from "./message-reply-service.js"
 import type { ConversationRecallRequest } from "./message-search-service.js"
 import { MessageSearchService } from "./message-search-service.js"
 import { evaluateBotChannelPermissions } from "./permissions.js"
@@ -1601,6 +1606,7 @@ export class ConnectorService {
   readonly #onboardingService: OnboardingService
   readonly #messagePinService: MessagePinService
   readonly #messageForwardingService: MessageForwardingService
+  readonly #messageReplyService: MessageReplyService
   readonly #messageSearchService: MessageSearchService
   readonly #memberDirectoryService: MemberDirectoryService
   readonly #memberNicknameService: MemberNicknameService
@@ -1734,6 +1740,10 @@ export class ConnectorService {
       policy: this.#policy,
     })
     this.#messageSearchService = new MessageSearchService({
+      client: this.#client,
+      policy: this.#policy,
+    })
+    this.#messageReplyService = new MessageReplyService({
       client: this.#client,
       policy: this.#policy,
     })
@@ -3079,6 +3089,16 @@ export class ConnectorService {
       schemaVersion: SCHEMA_VERSION,
       status: "ok",
     }
+  }
+
+  async listMessageReplies(
+    channelId: string,
+    messageId: string,
+    options: MessageReplyPageOptions = {},
+  ) {
+    assertMessageReplyRequest(channelId, messageId, options)
+    await this.#verifyIdentity(options)
+    return this.#messageReplyService.list(channelId, messageId, options)
   }
 
   async analyzeCommunityActivity(

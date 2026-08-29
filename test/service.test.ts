@@ -108,6 +108,7 @@ const OTHER_CHANNEL_ID = "400000000000000002"
 const THREAD_ID = "400000000000000003"
 const SECOND_THREAD_ID = "400000000000000004"
 const MESSAGE_ID = "500000000000000001"
+const REPLY_MESSAGE_ID = "500000000000000002"
 const ATTACHMENT_ID = "510000000000000001"
 const CREATED_CHANNEL_ID = "400000000000000005"
 const CREATED_ROLE_ID = "700000000000000001"
@@ -11051,6 +11052,69 @@ test("service normalizes channel messages after enforcing guild scope", async ()
   )
   assert.equal("url" in (result.messages[0]?.attachments[0] || {}), false)
   assert.equal("proxyUrl" in (result.messages[0]?.attachments[0] || {}), false)
+})
+
+test("service validates reply input locally and pins identity before one bounded scan", async () => {
+  const invalid = serviceFixture()
+  await assert.rejects(
+    () => invalid.service.listMessageReplies(CHANNEL_ID, MESSAGE_ID, {
+      scanLimit: 101,
+    }),
+    /scan limit must be between 1 and 100/u,
+  )
+  assert.equal(invalid.calls.application, 0)
+  assert.equal(invalid.calls.user, 0)
+  assert.equal(invalid.calls.listMessages, 0)
+
+  const mismatched = serviceFixture({
+    application: { ...application(), id: OTHER_GUILD_ID },
+  })
+
+  await assert.rejects(
+    () => mismatched.service.listMessageReplies(CHANNEL_ID, MESSAGE_ID),
+    /token belongs to application/u,
+  )
+  assert.equal(mismatched.calls.application, 1)
+  assert.equal(mismatched.calls.user, 1)
+  assert.equal(mismatched.calls.listMessages, 0)
+
+  let scanCalls = 0
+  const signal = new AbortController().signal
+  const { calls, service } = serviceFixture({
+    client: {
+      async listMessages(channelId, options) {
+        scanCalls += 1
+        assert.equal(channelId, CHANNEL_ID)
+        assert.deepEqual(options, {
+          after: MESSAGE_ID,
+          limit: 7,
+          signal,
+        })
+        return [message({
+          id: REPLY_MESSAGE_ID,
+          message_reference: {
+            channel_id: CHANNEL_ID,
+            guild_id: GUILD_ID,
+            message_id: MESSAGE_ID,
+            type: 0,
+          },
+          type: 19,
+        })]
+      },
+    },
+  })
+
+  const result = await service.listMessageReplies(CHANNEL_ID, MESSAGE_ID, {
+    scanLimit: 7,
+    signal,
+  })
+
+  assert.equal(result.source.id, MESSAGE_ID)
+  assert.deepEqual(result.replies.map(({ id }) => id), [REPLY_MESSAGE_ID])
+  assert.equal(result.page.nextAfterMessageId, REPLY_MESSAGE_ID)
+  assert.equal(calls.application, 1)
+  assert.equal(calls.user, 1)
+  assert.equal(scanCalls, 1)
 })
 
 test("service pins identity through one exact transient attachment read", async () => {
