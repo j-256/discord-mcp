@@ -85,8 +85,8 @@ Every plan emits a source-specific version of this sequence:
 2. Run the emitted `setup --preset ...` command from a canonical private directory after replacing placeholder Discord IDs. This creates a new strict schema-v2 policy and references the token without embedding its value.
 3. For each needed recipe, run the emitted `recipe plan`, review the complete proposed configuration and risks, then use its fresh digest in the emitted `recipe apply` command. Skip recipes for outcomes you do not need.
 4. Use `config workbench` for an exact capability not represented by a named recipe. Download and validate a candidate, then use the separate config plan and confirmed apply workflow. Do not edit broad authority into the source plan.
-5. Run `host --config ... --html ...` to generate the selected MCP host projection without changing the host.
-6. Run offline doctor, online doctor, and smoke in that order. A clean smoke result proves a real stdio negotiation and read-only connector path, not every future Discord operation.
+5. Run `host --config ... --html ...` to generate the selected MCP host projection without changing the host. For a supported static JSON destination, use `host plan` and its exact confirmed `host apply` to preserve unrelated state with a recoverable backup, then run read-only host inspection. Otherwise merge only the owned projection manually.
+6. Run offline doctor, online doctor, and smoke in that order, then reload the host and complete one read-only request. A clean smoke result proves a real stdio negotiation and read-only connector path, not correct third-party host translation or every future Discord operation.
 7. Check each required source outcome against the complete mapping before disabling the old server. Revoke any obsolete source credential separately; this planner never changes Discord Developer Portal state.
 
 Placeholder values such as `GUILD_ID`, `CHANNEL_ID`, `USER_ID`, and `PLAN_DIGEST` are intentionally invalid until replaced with reviewed operator input. Commands never contain inferred IDs or a token value.

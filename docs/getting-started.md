@@ -210,16 +210,42 @@ For a terminal-only handoff, append one adapter ID to human output:
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter vscode
 ```
 
-`--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify all four adapter digests against the same activation digest. The command never writes or discovers a host configuration. Merge only the generated server and input records into the documented destination and preserve unrelated entries. A file-backed credential policy causes every adapter to omit environment, input, and extension-setting secret fields because the exact policy already names the protected file.
+`--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify every adapter digest against the same activation digest. Generation never writes or discovers a host configuration. A file-backed credential policy causes every adapter to omit environment, input, and extension-setting secret fields because the exact policy already names the protected file.
 
-After merging the selected projection, inspect the destination directly. Replace the adapter ID and path with the host file you used; on POSIX systems make that file owner-private first:
+You may manually merge only the generated server and input records, or use the reviewed installer for a static JSON destination. Choose the adapter and exact host path yourself; the connector never searches for one. The parent directory must already exist as a canonical process-owned directory that is not writable by a group or the world. An existing file must be strict bounded JSON with private ownership and mode on POSIX:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 host plan \
+  --npx \
+  --config ./discord-mcp.json \
+  --adapter vscode \
+  --host-file /absolute/path/to/mcp.json
+```
+
+The path-free plan reports only the exact activation and adapter digests, absent-or-present state, create, update, or no-op decision, owned server and sensitive-input changes, unrelated-state behavior, canonical rewrite, backup requirement, plan digest, and required confirmation value. It may read credential material already present in the selected file, but it returns no observed value, raw JSON, unrelated entry, selected path, or stable hash of private bytes. Its freshness binding uses the target path internally plus stable filesystem identity and nanosecond metadata, so any ordinary edit, replacement, relink, permission change, creation, removal, or target switch requires a new plan. A party with complete candidate activation, adapter, path, and metadata can test already-suspected private references against the digests; the digests are not anonymity mechanisms.
+
+After reviewing that report, repeat the identical activation, adapter, and target with the emitted digest and confirmation:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 host apply \
+  --npx \
+  --config ./discord-mcp.json \
+  --adapter vscode \
+  --host-file /absolute/path/to/mcp.json \
+  --plan-digest PLAN_DIGEST \
+  --confirm HOST_SERVER_NAME
+```
+
+Shared MCP JSON, Cursor, and VS Code files preserve every unrelated top-level value and server entry; VS Code also preserves unrelated inputs and refuses duplicate generated input IDs. A Gemini extension is a dedicated manifest, so its plan states that the complete document will be replaced. A changed existing file receives an owner-mode sibling backup before atomic publication. Apply rereads the exact output and adapter projection, restores the original on failed verification only while the published binding and bytes remain exact, and returns the backup path for recovery. If another writer changes the destination during verification, apply preserves that newer state and reports uncertainty instead of overwriting it. An already exact destination performs no write and creates no backup. External writers that ignore the sibling lock can still race the final publication window, so stop the host's configuration editor while applying. Portable owner modes and directory synchronization are platform-dependent. If interruption leaves a lock, first establish that no apply is running, preserve every backup, move only that target's exact stale lock or temporary artifact through a recoverable file workflow, and create a new plan.
+
+After manual merge or reviewed apply, inspect the destination directly. Replace the adapter ID and path with the host file you used; on POSIX systems make that file owner-private first:
 
 ```sh
 chmod 600 /absolute/path/to/mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter vscode --inspect-host-file /absolute/path/to/mcp.json
 ```
 
-Status 0 means the selected adapter's owned projection exactly matches the installed release and policy. Status 1 means drift; regenerate the same adapter, merge only its owned server and sensitive-input records, reload the host, and inspect again. The report uses fixed difference categories and never returns the selected path, observed values, raw host content, or unrelated entries. The inspector may encounter credential material already present in that explicit file, so do not point it at an untrusted document. It enforces a bounded canonical stable regular-file read, rejects symbolic and extra hard links, and verifies private ownership and mode where the platform exposes them; other platforms report those checks as unverified. It never discovers or edits a host, contacts a network or Discord endpoint, resolves the connector credential, starts a process, or creates activity state.
+Status 0 means the selected adapter's owned projection exactly matches the installed release and policy. Status 1 means drift; rerun `host plan`, review and apply or manually merge the owned records, reload the host, and inspect again. The report uses fixed difference categories and never returns the selected path, observed values, raw host content, or unrelated entries. The inspector may encounter credential material already present in that explicit file, so do not point it at an untrusted document. It enforces a bounded canonical stable regular-file read, rejects symbolic and extra hard links, and verifies a safe parent plus private file ownership and mode where the platform exposes them; other platforms report file checks as unverified. It never discovers or edits a host, contacts a network or Discord endpoint, resolves the connector credential, starts a process, or creates activity state.
 
 Open the guide locally, choose the host projection, and preserve its exact command and ordered arguments. Never replace an environment or secure-input reference with the token inside a static file. Preserve required-server behavior, approval for writes, elicitation for reviewed writes, and the recommended timeouts when the host exposes those controls. The adapters retain those requirements as explicit guidance when a host schema cannot encode them.
 
@@ -283,6 +309,8 @@ npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
 npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+npx --yes @j-256/discord-mcp@0.1.2 host plan --npx --config ./discord-mcp.json --adapter ADAPTER_ID --host-file HOST_JSON_FILE
+npx --yes @j-256/discord-mcp@0.1.2 host apply --npx --config ./discord-mcp.json --adapter ADAPTER_ID --host-file HOST_JSON_FILE --plan-digest PLAN_DIGEST --confirm HOST_SERVER_NAME
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --adapter ADAPTER_ID --inspect-host-file HOST_JSON_FILE
 ```
 

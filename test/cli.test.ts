@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -55,6 +55,10 @@ import {
   HOST_INSPECTION_SCHEMA_VERSION,
   type HostInspectionReport,
 } from "../src/host-inspection.js"
+import {
+  applyHostAdapterFile,
+  planHostAdapterFile,
+} from "../src/host-installation.js"
 import {
   MIGRATION_HTML_FORMAT,
   type DiscordMigrationHtmlExportReport,
@@ -633,6 +637,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
         profile,
       }
     },
+    applyHostFile: applyHostAdapterFile,
     applyConfigChange,
     applyRecipe: applyConfigRecipe,
     catalog() {},
@@ -710,6 +715,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
       return setupReport()
     },
     planConfigChange,
+    planHostFile: planHostAdapterFile,
     planRecipe: planConfigRecipe,
     async reviewActivity() {
       return activityReviewReport()
@@ -1013,6 +1019,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "./host-activation.html",
     "--json",
   ]), {
+    action: "generate",
     adapterId: "vscode",
     command: "host",
     configFile: "/configuration/discord.json",
@@ -1028,11 +1035,59 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "support-bot",
     "--npx",
   ]), {
+    action: "generate",
     command: "host",
     json: false,
     launcherCommand: undefined,
     packageLaunch: true,
     profileName: "support-bot",
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments([
+    "host",
+    "plan",
+    "--profile",
+    "support-bot",
+    "--adapter",
+    "cursor",
+    "--host-file",
+    "./mcp.json",
+    "--npx",
+    "--json",
+  ]), {
+    action: "plan",
+    adapterId: "cursor",
+    command: "host",
+    hostFile: "./mcp.json",
+    json: true,
+    launcherCommand: undefined,
+    packageLaunch: true,
+    profileName: "support-bot",
+    serverName: undefined,
+  })
+  assert.deepEqual(parseCliArguments([
+    "host",
+    "apply",
+    "--config",
+    "/configuration/discord.json",
+    "--adapter",
+    "mcp-json",
+    "--host-file",
+    "./mcp.json",
+    "--plan-digest",
+    `sha256:${"a".repeat(64)}`,
+    "--confirm",
+    "discord",
+  ]), {
+    action: "apply",
+    adapterId: "mcp-json",
+    command: "host",
+    configFile: "/configuration/discord.json",
+    confirmation: "discord",
+    hostFile: "./mcp.json",
+    json: false,
+    launcherCommand: undefined,
+    planDigest: `sha256:${"a".repeat(64)}`,
     serverName: undefined,
   })
   assert.deepEqual(parseCliArguments([
@@ -1320,6 +1375,81 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "./mcp.json",
     ]),
     /--inspect-host-file requires --adapter/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "plan",
+      "--profile",
+      "support-bot",
+      "--host-file",
+      "./mcp.json",
+    ]),
+    /Host plan requires --adapter/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "plan",
+      "--profile",
+      "support-bot",
+      "--adapter",
+      "cursor",
+    ]),
+    /Host plan requires --host-file/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "apply",
+      "--profile",
+      "support-bot",
+      "--adapter",
+      "cursor",
+      "--host-file",
+      "./mcp.json",
+    ]),
+    /Host apply requires --plan-digest/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "apply",
+      "--profile",
+      "support-bot",
+      "--adapter",
+      "cursor",
+      "--host-file",
+      "./mcp.json",
+      "--plan-digest",
+      `sha256:${"a".repeat(64)}`,
+    ]),
+    /Host apply requires --confirm/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "plan",
+      "--profile",
+      "support-bot",
+      "--adapter",
+      "cursor",
+      "--host-file",
+      "./mcp.json",
+      "--html",
+      "guide.html",
+    ]),
+    /Host plan does not accept --html/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "host",
+      "--profile",
+      "support-bot",
+      "--host-file",
+      "./mcp.json",
+    ]),
+    /Host generation does not accept --host-file/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2477,6 +2607,124 @@ test("CLI renders fixed host drift evidence and returns warning status", async (
   assert.match(stdout.value(), /then run smoke/)
   assert.doesNotMatch(stdout.value(), /\/private\/stale\.json/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI plans and applies one exact host projection without returning private content", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-cli-host-apply-"))
+  context.after(() => rm(directory, { force: true, recursive: true }))
+  const root = await realpath(directory)
+  const hostFile = join(root, "mcp.json")
+  const privateHostValue = "private-host-value-that-must-not-escape"
+  await writeFile(hostFile, `${JSON.stringify({
+    mcpServers: {
+      unrelated: {
+        command: "private",
+        env: { PRIVATE_HOST_VALUE: privateHostValue },
+      },
+    },
+  }, null, 2)}\n`, { mode: 0o600 })
+
+  const planOutput = outputStream()
+  const planExit = await runCli({
+    args: [
+      "host",
+      "plan",
+      "--profile",
+      "support-bot",
+      "--npx",
+      "--adapter",
+      "cursor",
+      "--host-file",
+      hostFile,
+      "--json",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: planOutput.stream,
+  })
+
+  assert.equal(planExit, 0)
+  const plan = JSON.parse(planOutput.value()) as {
+    adapter: { hostServerName: string }
+    change: { operation: string; unrelatedState: string }
+    planDigest: string
+    privacy: { hostPathReturned: boolean; privateHostBytesHashed: boolean }
+  }
+  assert.equal(plan.change.operation, "update")
+  assert.equal(plan.change.unrelatedState, "preserved")
+  assert.equal(plan.privacy.hostPathReturned, false)
+  assert.equal(plan.privacy.privateHostBytesHashed, false)
+  assert.equal(planOutput.value().includes(hostFile), false)
+  assert.doesNotMatch(planOutput.value(), new RegExp(privateHostValue, "u"))
+  assert.doesNotMatch(planOutput.value(), new RegExp(TOKEN, "u"))
+
+  const applyOutput = outputStream()
+  const applyExit = await runCli({
+    args: [
+      "host",
+      "apply",
+      "--profile",
+      "support-bot",
+      "--npx",
+      "--adapter",
+      "cursor",
+      "--host-file",
+      hostFile,
+      "--plan-digest",
+      plan.planDigest,
+      "--confirm",
+      plan.adapter.hostServerName,
+      "--json",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: applyOutput.stream,
+  })
+
+  assert.equal(applyExit, 0)
+  const applied = JSON.parse(applyOutput.value()) as {
+    backup: { created: boolean; file?: string }
+    inspection: { status: string }
+    privacy: { credentialValuesReturned: boolean; hostPathReturned: boolean }
+    status: string
+  }
+  assert.equal(applied.status, "applied")
+  assert.equal(applied.backup.created, true)
+  assert.ok(applied.backup.file)
+  assert.equal(applied.inspection.status, "match")
+  assert.equal(applied.privacy.credentialValuesReturned, false)
+  assert.equal(applied.privacy.hostPathReturned, true)
+  assert.doesNotMatch(applyOutput.value(), new RegExp(privateHostValue, "u"))
+  assert.doesNotMatch(applyOutput.value(), new RegExp(TOKEN, "u"))
+  const installed = JSON.parse(await readFile(hostFile, "utf8")) as {
+    mcpServers: Record<string, unknown>
+  }
+  assert.ok(installed.mcpServers.unrelated)
+  assert.ok(installed.mcpServers[plan.adapter.hostServerName])
+
+  const absentFile = join(root, "absent.json")
+  const absentOutput = outputStream()
+  const absentExit = await runCli({
+    args: [
+      "host",
+      "plan",
+      "--profile",
+      "support-bot",
+      "--npx",
+      "--adapter",
+      "mcp-json",
+      "--host-file",
+      absentFile,
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stdout: absentOutput.stream,
+  })
+
+  assert.equal(absentExit, 0)
+  assert.match(absentOutput.value(), /selected target was absent/u)
+  assert.doesNotMatch(absentOutput.value(), /Possible credential material was read/u)
+  assert.equal(absentOutput.value().includes(absentFile), false)
 })
 
 test("CLI reports host parse failures without enumerating ambient credentials", async () => {
@@ -3738,16 +3986,20 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /plan NAME FILE/)
   assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
-  assert.match(hostHelpOutput.value(), /host \(--config FILE \| --profile NAME\)/)
+  assert.match(hostHelpOutput.value(), /host \[generate\] \(--config FILE \| --profile NAME\)/)
+  assert.match(hostHelpOutput.value(), /host plan \(--config FILE \| --profile NAME\) --adapter ID --host-file FILE/)
+  assert.match(hostHelpOutput.value(), /host apply .*--plan-digest DIGEST --confirm SERVER_NAME/)
   assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(hostHelpOutput.value(), /--adapter ID/)
   assert.match(hostHelpOutput.value(), /--inspect-host-file FILE/)
   assert.match(hostHelpOutput.value(), /mcp-json, cursor, vscode, gemini-extension/)
   assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
-  assert.match(hostHelpOutput.value(), /private owner and mode checks where the platform exposes them/)
-  assert.match(hostHelpOutput.value(), /never returns it/)
+  assert.match(hostHelpOutput.value(), /bounded private JSON file/)
+  assert.match(hostHelpOutput.value(), /without returning its path, values, unrelated state, or a stable hash/)
+  assert.match(hostHelpOutput.value(), /keeps an owner-mode recovery backup/)
+  assert.match(hostHelpOutput.value(), /rolls back on failed verification/)
   assert.match(hostHelpOutput.value(), /never edits the file/)
-  assert.match(hostHelpOutput.value(), /discovers no host/)
+  assert.match(hostHelpOutput.value(), /discover no host/)
   assert.match(migrateHelpOutput.value(), /migrate <action>/)
   assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
   assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)

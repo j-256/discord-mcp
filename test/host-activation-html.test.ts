@@ -103,6 +103,8 @@ test("host activation HTML renders an exact private host-neutral handoff", () =>
   assert.match(html, /Visual Studio Code/)
   assert.match(html, /Gemini CLI extension/)
   assert.match(html, /Merge, do not overwrite/)
+  assert.match(html, /host plan/)
+  assert.match(html, /recoverable backup, atomic publication, exact reread, and rollback/)
   assert.match(html, /Official schema source/)
   assert.match(html, /MCP install URI flow/)
   assert.match(html, /Private install URI/)

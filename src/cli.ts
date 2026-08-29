@@ -60,6 +60,13 @@ import {
   type HostInspectionReport,
 } from "./host-inspection.js"
 import {
+  applyHostAdapterFile,
+  planHostAdapterFile,
+  type ApplyHostChangeOptions,
+  type HostChangeApplyReport,
+  type HostChangePlanReport,
+} from "./host-installation.js"
+import {
   CONNECTOR_NAME,
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
@@ -279,6 +286,7 @@ export type ParsedCliArguments =
   | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
   | { command: "help"; topic: CliCommand | undefined }
   | {
+    action: "generate"
     adapterId?: HostAdapterId
     command: "host"
     configFile?: string
@@ -287,6 +295,32 @@ export type ParsedCliArguments =
     json: boolean
     launcherCommand: string | undefined
     packageLaunch?: true
+    profileName?: string
+    serverName: string | undefined
+  }
+  | {
+    action: "plan"
+    adapterId: HostAdapterId
+    command: "host"
+    configFile?: string
+    hostFile: string
+    json: boolean
+    launcherCommand: string | undefined
+    packageLaunch?: true
+    profileName?: string
+    serverName: string | undefined
+  }
+  | {
+    action: "apply"
+    adapterId: HostAdapterId
+    command: "host"
+    configFile?: string
+    confirmation: string
+    hostFile: string
+    json: boolean
+    launcherCommand: string | undefined
+    packageLaunch?: true
+    planDigest: string
     profileName?: string
     serverName: string | undefined
   }
@@ -395,6 +429,12 @@ export interface CliDependencies {
     name: string,
     options: ProfileLocationOptions,
   ): Promise<ActivatedProfile>
+  applyHostFile(
+    plan: HostActivationPlan,
+    adapterId: HostAdapterId,
+    file: string,
+    options: ApplyHostChangeOptions,
+  ): HostChangeApplyReport
   applyConfigChange(options: ConfigChangeApplyOptions): Promise<ConfigChangeApplyReport>
   catalog(options: {
     stderr: Pick<NodeJS.WriteStream, "write">
@@ -444,6 +484,11 @@ export interface CliDependencies {
   applyRecipe(options: ConfigRecipeApplyOptions): Promise<ConfigRecipeApplyReport>
   planRecipe(options: ConfigRecipePlanOptions): ConfigRecipePlanReport
   planConfigChange(options: ConfigChangePlanOptions): ConfigChangePlanReport
+  planHostFile(
+    plan: HostActivationPlan,
+    adapterId: HostAdapterId,
+    file: string,
+  ): HostChangePlanReport
   resolveCoordination(
     activityFile: string,
     claimId: string,
@@ -486,6 +531,7 @@ export interface CliErrorReport {
 const DEFAULT_DEPENDENCIES: CliDependencies = {
   activateProfile,
   applyConfigChange,
+  applyHostFile: applyHostAdapterFile,
   applyRecipe: applyConfigRecipe,
   catalog: runDiscordMcpCatalog,
   checkCatalog: checkDiscordCatalog,
@@ -513,6 +559,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   migrationPlan: createMigrationPlan,
   prepareSetup,
   planConfigChange,
+  planHostFile: planHostAdapterFile,
   planRecipe: planConfigRecipe,
   reviewActivity: reviewDiscordActivity,
   resolveCoordination: async (auditFile, claimId, confirmation) => {
@@ -673,18 +720,26 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
 }
 
 function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, { command: "host" }> {
+  const explicitAction = args[0]
+  const action = explicitAction === "generate" || explicitAction === "plan" || explicitAction === "apply"
+    ? explicitAction
+    : "generate"
+  const options = action === explicitAction ? args.slice(1) : args
   let adapterId: HostAdapterId | undefined
   let configFile: string | undefined
+  let confirmation: string | undefined
   let htmlFile: string | undefined
+  let hostFile: string | undefined
   let inspectHostFile: string | undefined
   let json = false
   let launcherCommand: string | undefined
   let packageLaunch = false
+  let planDigest: string | undefined
   let profileName: string | undefined
   let serverName: string | undefined
   const seen = new Set<string>()
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index]
+  for (let index = 0; index < options.length; index += 1) {
+    const argument = options[index]
     if (!argument?.startsWith("--")) {
       throw new ConfigurationError(`Unexpected host argument ${argument || ""}`)
     }
@@ -704,14 +759,17 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
       "--adapter",
       "--command",
       "--config",
+      "--confirm",
       "--html",
+      "--host-file",
       "--inspect-host-file",
       "--name",
+      "--plan-digest",
       "--profile",
     ].includes(argument)) {
       throw new ConfigurationError(`Unknown option ${argument}`)
     }
-    const value = args[index + 1]
+    const value = options[index + 1]
     if (!value || value.startsWith("--")) {
       throw new ConfigurationError(`Option ${argument} requires a value`)
     }
@@ -724,9 +782,12 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
     }
     if (argument === "--command") launcherCommand = value
     if (argument === "--config") configFile = value
+    if (argument === "--confirm") confirmation = value
     if (argument === "--html") htmlFile = value
+    if (argument === "--host-file") hostFile = value
     if (argument === "--inspect-host-file") inspectHostFile = value
     if (argument === "--name") serverName = value
+    if (argument === "--plan-digest") planDigest = value
     if (argument === "--profile") profileName = value
   }
   if (configFile && profileName) {
@@ -741,15 +802,71 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
   if (inspectHostFile && !adapterId) {
     throw new ConfigurationError("Option --inspect-host-file requires --adapter")
   }
+  if (action === "generate") {
+    if (hostFile || confirmation || planDigest) {
+      throw new ConfigurationError(
+        "Host generation does not accept --host-file, --confirm, or --plan-digest",
+      )
+    }
+    return {
+      action,
+      ...(adapterId ? { adapterId } : {}),
+      command: "host",
+      ...(configFile ? { configFile } : {}),
+      ...(htmlFile ? { htmlFile } : {}),
+      ...(inspectHostFile ? { inspectHostFile } : {}),
+      json,
+      launcherCommand,
+      ...(packageLaunch ? { packageLaunch: true as const } : {}),
+      ...(profileName ? { profileName } : {}),
+      serverName,
+    }
+  }
+  if (htmlFile || inspectHostFile) {
+    throw new ConfigurationError(
+      `Host ${action} does not accept --html or --inspect-host-file`,
+    )
+  }
+  if (!adapterId) {
+    throw new ConfigurationError(`Host ${action} requires --adapter`)
+  }
+  if (!hostFile) {
+    throw new ConfigurationError(`Host ${action} requires --host-file`)
+  }
+  if (action === "plan") {
+    if (confirmation || planDigest) {
+      throw new ConfigurationError("Host plan does not accept --confirm or --plan-digest")
+    }
+    return {
+      action,
+      adapterId,
+      command: "host",
+      ...(configFile ? { configFile } : {}),
+      hostFile,
+      json,
+      launcherCommand,
+      ...(packageLaunch ? { packageLaunch: true as const } : {}),
+      ...(profileName ? { profileName } : {}),
+      serverName,
+    }
+  }
+  if (!planDigest) {
+    throw new ConfigurationError("Host apply requires --plan-digest")
+  }
+  if (!confirmation) {
+    throw new ConfigurationError("Host apply requires --confirm")
+  }
   return {
-    ...(adapterId ? { adapterId } : {}),
+    action,
+    adapterId,
     command: "host",
     ...(configFile ? { configFile } : {}),
-    ...(htmlFile ? { htmlFile } : {}),
-    ...(inspectHostFile ? { inspectHostFile } : {}),
+    confirmation,
+    hostFile,
     json,
     launcherCommand,
     ...(packageLaunch ? { packageLaunch: true as const } : {}),
+    planDigest,
     ...(profileName ? { profileName } : {}),
     serverName,
   }
@@ -1549,7 +1666,19 @@ function helpText(topic: CliCommand | undefined): string {
     return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "host") {
-    return `Usage: discord-mcp host (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]\n\nGenerate one exact credential-free local stdio activation plan plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launch uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog. --inspect-host-file safely reads one explicitly selected bounded JSON file with private owner and mode checks where the platform exposes them, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. It may encounter credential material but never returns it. Optional HTML exclusively creates a mode-0600 interactive guide with every adapter, copy controls, host requirements, a read-only verification request, and visible limitations. The guide contains private Discord identifiers and may contain local paths, so do not share or commit it. The command contacts no network or Discord endpoint, starts no process, discovers no host, and changes no policy or host configuration. Exit status is 0 on exact match or generation, 1 on drift, and 2 on command failure.`
+    return [
+      "Usage: discord-mcp host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
+      "       discord-mcp host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]",
+      "       discord-mcp host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]",
+      "",
+      `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog.`,
+      "",
+      "--inspect-host-file safely reads one explicitly selected bounded private JSON file, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. Optional HTML exclusively creates a mode-0600 interactive guide. Generation and inspection contact no network or Discord endpoint, start no process, discover no host, and change no policy or host configuration.",
+      "",
+      "host plan reads only the explicit static JSON target and returns a metadata-fresh plan without returning its path, values, unrelated state, or a stable hash of private bytes. host apply requires the same activation and adapter, exact plan digest, and exact server-name confirmation. It preserves unrelated shared JSON records, rejects ambiguous structures, keeps an owner-mode recovery backup for replacements, publishes atomically, rereads exactly, and rolls back on failed verification. It does not discover paths, create directories, resolve credentials, contact Discord or another network endpoint, start a process, or change connector policy. A successful file change still does not prove the host loaded the file or can start the connector.",
+      "",
+      "Exit status is 0 on generation, exact inspection, a ready plan, or successful apply; 1 on inspection drift; and 2 on command failure.",
+    ].join("\n")
   }
   if (topic === "migrate") {
     return [
@@ -2004,6 +2133,51 @@ function renderHostInspection(report: HostInspectionReport): string {
     ...(report.status === "drift"
       ? ["Next: Regenerate this exact adapter, merge only its owned projection, restart or reload the host, rerun inspection, then run smoke."]
       : ["Next: Restart or reload the host if needed, then run smoke to verify real MCP startup and read-only Discord access."]),
+    "Limits:",
+    ...report.limitations.map((limitation) => `- ${limitation}`),
+  ].join("\n")
+}
+
+function renderHostChangePlan(report: HostChangePlanReport): string {
+  const inputs = report.change.sensitiveInputs
+  return [
+    "Discord MCP host configuration plan: ready",
+    `Plan digest: ${report.planDigest}`,
+    `Adapter: ${report.adapter.title} (${report.adapter.id})`,
+    `Adapter digest: ${report.adapter.adapterDigest}`,
+    `Activation digest: ${report.adapter.activationDigest}`,
+    `Host server name: ${report.adapter.hostServerName}`,
+    `Target state: ${report.fileReview.state}`,
+    `Operation: ${report.change.operation}`,
+    `Strategy: ${report.change.strategy}`,
+    `Server entry: ${report.change.serverEntry}`,
+    `Sensitive inputs: add=${inputs.added}, replace=${inputs.replaced}, unchanged=${inputs.unchanged}`,
+    `Unrelated state: ${report.change.unrelatedState}`,
+    `Canonical JSON rewrite: ${report.change.canonicalJsonRewrite ? "required" : "not required"}`,
+    `Recovery backup: ${report.change.backupRequired ? "required" : "not required"}`,
+    `Confirmation value: ${report.confirmation.requiredValue}`,
+    report.privacy.possibleCredentialMaterialRead
+      ? "Possible credential material was read only from the explicit existing file. No value, raw host content, host path, unrelated state, stable private-byte hash, or activity record was returned or persisted."
+      : "The selected target was absent, so no host configuration or possible credential material was read. No host path or activity record was returned or persisted.",
+    "Next: review this fixed summary, then rerun the same activation selector, adapter, and host file with host apply, this plan digest, and the exact confirmation value.",
+    "Limits:",
+    ...report.limitations.map((limitation) => `- ${limitation}`),
+  ].join("\n")
+}
+
+function renderHostChangeApply(report: HostChangeApplyReport): string {
+  return [
+    `Discord MCP host configuration apply: ${report.status}`,
+    `Plan digest: ${report.planDigest}`,
+    `Adapter: ${report.adapter.title} (${report.adapter.id})`,
+    `Adapter digest: ${report.adapter.adapterDigest}`,
+    `Activation digest: ${report.adapter.activationDigest}`,
+    `Host server name: ${report.adapter.hostServerName}`,
+    `Operation: ${report.change.operation}`,
+    `Backup: ${report.backup.file ?? "not created"}`,
+    `Exact inspection: ${report.inspection.status} (${report.inspection.inspectionDigest})`,
+    "No credential value, raw host content, unrelated state, or activity record was returned. A backup path is returned only when a recoverable copy was created.",
+    "Next: restart or reload the host, rerun static inspection if desired, then run smoke and one read-only host request.",
     "Limits:",
     ...report.limitations.map((limitation) => `- ${limitation}`),
   ].join("\n")
@@ -2933,6 +3107,36 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           })
         }
         const adapterCatalog = createHostAdapterCatalog(plan)
+        if (parsed.action === "plan") {
+          const report = dependencies.planHostFile(
+            plan,
+            parsed.adapterId,
+            parsed.hostFile,
+          )
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderHostChangePlan(report),
+            {},
+          )
+          return CLI_EXIT_CODES.success
+        }
+        if (parsed.action === "apply") {
+          const report = dependencies.applyHostFile(
+            plan,
+            parsed.adapterId,
+            parsed.hostFile,
+            {
+              confirmation: parsed.confirmation,
+              planDigest: parsed.planDigest,
+            },
+          )
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderHostChangeApply(report),
+            {},
+          )
+          return CLI_EXIT_CODES.success
+        }
         const inspection = parsed.inspectHostFile && parsed.adapterId
           ? dependencies.inspectHostFile(plan, parsed.adapterId, parsed.inspectHostFile)
           : undefined
