@@ -813,6 +813,7 @@ export class RoleOrderingService {
     botId: string,
     request: NormalizedRoleOrderingRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltRoleOrderingPlan> {
     assertSnowflake(applicationId, "Discord connector application ID")
     assertSnowflake(botId, "Discord connector bot ID")
@@ -821,7 +822,16 @@ export class RoleOrderingService {
       "role-ordering",
       request.operationKeyHash,
     )
-    if (existingReceipt) {
+    if (
+      existingReceipt
+      && !(
+        allowCompletedReceipt
+        && existingReceipt.status === "completed"
+        && existingReceipt.verification === "match"
+        && existingReceipt.guildId === request.guildId
+        && existingReceipt.resourceId === request.roleId
+      )
+    ) {
       throw new RoleOrderingOperationConflictError(receiptView(existingReceipt))
     }
     const state = await this.#state(botId, request.guildId, options)
@@ -968,6 +978,9 @@ export class RoleOrderingService {
       warnings,
       writeRequired,
     }
+    if (existingReceipt && plan.writeRequired) {
+      throw new RoleOrderingOperationConflictError(receiptView(existingReceipt))
+    }
     return {
       currentOrderIds,
       desiredOrderIds,
@@ -989,6 +1002,21 @@ export class RoleOrderingService {
       botId,
       normalizeRoleOrderingRequest(request),
       options,
+    ).then(({ plan }) => plan)
+  }
+
+  reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: RoleOrderingRequest,
+    options: RequestOptions = {},
+  ): Promise<RoleOrderingPlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeRoleOrderingRequest(request),
+      options,
+      true,
     ).then(({ plan }) => plan)
   }
 

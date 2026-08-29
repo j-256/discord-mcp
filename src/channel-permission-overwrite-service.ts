@@ -389,6 +389,7 @@ interface ChannelPermissionOverwriteStateEvidence {
   guildId: string
   overwrites: CanonicalOverwrite[]
   parent: DiscordChannel | undefined
+  priorReceipt: OperationReceipt | null
   roles: DiscordRole[]
   targetAccessAfter: PrincipalPermissionResult & { confidence: "complete" }
   targetAccessBefore: PrincipalPermissionResult & { confidence: "complete" }
@@ -1370,6 +1371,7 @@ export class ChannelPermissionOverwriteService {
     botId: string,
     request: NormalizedChannelPermissionOverwriteRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<ChannelPermissionOverwriteStateEvidence & {
     action: ChannelPermissionOverwritePlan["action"]
     evaluatedPermissions: DiscordChannelPermissionName[]
@@ -1385,7 +1387,16 @@ export class ChannelPermissionOverwriteService {
       "channel-permission-overwrite",
       request.operationKeyHash,
     )
-    if (existingReceipt) {
+    if (
+      existingReceipt
+      && !(
+        allowCompletedReceipt
+        && existingReceipt.status === "completed"
+        && existingReceipt.verification === "match"
+        && existingReceipt.guildId === guildId
+        && existingReceipt.resourceId === request.targetId
+      )
+    ) {
       throw new ChannelPermissionOverwriteOperationConflictError(
         receiptView(existingReceipt),
       )
@@ -1628,6 +1639,7 @@ export class ChannelPermissionOverwriteService {
       parent,
       parentSyncAfter,
       parentSyncBefore,
+      priorReceipt: existingReceipt ?? null,
       roles,
       targetAccessAfter: completeTargetAfter,
       targetAccessBefore: completeTargetBefore,
@@ -1641,10 +1653,16 @@ export class ChannelPermissionOverwriteService {
     botId: string,
     request: NormalizedChannelPermissionOverwriteRequest,
     options: RequestOptions,
+    allowCompletedReceipt = false,
   ): Promise<BuiltChannelPermissionOverwritePlan> {
     assertSnowflake(applicationId, "Discord connector application ID")
     assertSnowflake(botId, "Discord connector bot ID")
-    const state = await this.#state(botId, request, options)
+    const state = await this.#state(
+      botId,
+      request,
+      options,
+      allowCompletedReceipt,
+    )
     const impacts = state.evaluatedPermissions.map((permission) => ({
       after: permissionDecision(state.targetAccessAfter, permission),
       before: permissionDecision(state.targetAccessBefore, permission),
@@ -1771,6 +1789,11 @@ export class ChannelPermissionOverwriteService {
       },
       warnings,
     }
+    if (state.priorReceipt && plan.action !== "none") {
+      throw new ChannelPermissionOverwriteOperationConflictError(
+        receiptView(state.priorReceipt),
+      )
+    }
     return { plan, state }
   }
 
@@ -1795,6 +1818,21 @@ export class ChannelPermissionOverwriteService {
       normalizeChannelPermissionOverwriteRequest(request),
       options,
     )
+  }
+
+  reconcilePlan(
+    applicationId: string,
+    botId: string,
+    request: ChannelPermissionOverwriteRequest,
+    options: RequestOptions = {},
+  ): Promise<ChannelPermissionOverwritePlan> {
+    return this.#buildPlan(
+      applicationId,
+      botId,
+      normalizeChannelPermissionOverwriteRequest(request),
+      options,
+      true,
+    ).then(({ plan }) => plan)
   }
 
   execute(
