@@ -289,7 +289,7 @@ Release automation verifies reproducible npm and MCPB artifacts, a hardened mult
 
 ## Architecture
 
-The stdio transport, Discord REST client, scope policy, domain services, reviewed planning, durable coordination, activity log, observability, Gateway, and MCP adapter remain separate. Production uses native `fetch`, TypeScript ESM, and a small exactly pinned dependency set.
+The stdio transport, Discord REST client, scope policy, domain services, reviewed planning, durable coordination, activity log, observability, Gateway, and MCP adapter remain separate. Production uses native `fetch`, TypeScript ESM, exact dependencies, and lazy schemas that skip registration cost for excluded tools.
 
 This keeps transport, permission evidence, local authority, reviewed writes, persistence, and MCP presentation independently testable. New capabilities must fit those boundaries rather than add a generic Discord dispatcher.
 
