@@ -1649,6 +1649,15 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
   const restMethods = Object.entries(report.restMethodCounts)
     .map(([method, count]) => `${method}=${count}`)
     .join(", ")
+  const authenticationClasses = Object.entries(
+    report.toolAccessManifest.requirementCoverage.authenticationCounts,
+  ).map(([name, count]) => `${name}=${count}`).join(", ")
+  const permissionModes = Object.entries(
+    report.toolAccessManifest.requirementCoverage.permissionModeCounts,
+  ).map(([name, count]) => `${name}=${count}`).join(", ")
+  const targetScopes = Object.entries(
+    report.toolAccessManifest.requirementCoverage.targetScopeCounts,
+  ).map(([name, count]) => `${name}=${count}`).join(", ")
   return [
     "Discord MCP catalog: ok",
     `Server: ${report.serverName}@${report.serverVersion}`,
@@ -1663,6 +1672,10 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
     `Tools: ${report.toolCount}`,
     `Toolsets: ${report.toolsetNames.length}`,
     `Access stages: ${accessStages}`,
+    `Static requirement coverage: complete=${report.toolAccessManifest.requirementCoverage.complete}, unknown=${report.toolAccessManifest.requirementCoverage.unknownEntries}, target-access-proven=${report.toolAccessManifest.requirementCoverage.targetAccessProven}`,
+    `Authentication classes: ${authenticationClasses}`,
+    `Permission modes: ${permissionModes}`,
+    `Target scopes: ${targetScopes}`,
     `Risk classes: ${riskClasses}`,
     `Prompts: ${report.promptCount}`,
     `Resources: ${report.resourceCount}`,

@@ -31,6 +31,7 @@ import {
   CATALOG_HTML_FORMAT,
   type DiscordCatalogHtmlExportReport,
 } from "../src/catalog-html.js"
+import { createMcpToolAccessManifest } from "../src/mcp-tool-catalog.js"
 import {
   ONBOARDING_HTML_FORMAT,
   ONBOARDING_HTML_SCHEMA_VERSION,
@@ -265,11 +266,11 @@ function catalogReport(): DiscordCatalogCheckReport {
       policyFields: ["allowedChannelIds"],
       reference: "discord://channels/{channelId}",
     }],
-    completionCatalogValuesExposed: false,
+    policyCompletionValuesExposed: false,
     contractDigest: `sha256:${"a".repeat(64)}`,
     credentialsRequired: false,
     discordExecution: "disabled",
-    evidenceFormat: "discord-mcp.catalog-evidence.v2",
+    evidenceFormat: "discord-mcp.catalog-evidence.v3",
     executionGuard: "CATALOG_ONLY",
     gateway: "disabled",
     observabilityExport: "disabled",
@@ -313,6 +314,9 @@ function catalogReport(): DiscordCatalogCheckReport {
     serverVersion: "0.1.2",
     status: "ok",
     toolCount: 3,
+    toolAccessManifest: createMcpToolAccessManifest(
+      new Set(["deletion", "messages"]),
+    ),
     toolAccessResourceDigest: `sha256:${"e".repeat(64)}`,
     toolNames: ["delete_messages", "discover_discord_tools", "read_messages"],
     toolsetNames: ["deletion", "messages"],
@@ -1758,6 +1762,10 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   assert.match(textOutput.value(), /Contract digest: sha256:[a-f0-9]{64}/)
   assert.match(textOutput.value(), /Tool access resource digest: sha256:[a-f0-9]{64}/)
   assert.match(textOutput.value(), /Access stages: guarded-write=0/)
+  assert.match(textOutput.value(), /Static requirement coverage: complete=true, unknown=0, target-access-proven=false/)
+  assert.match(textOutput.value(), /Authentication classes: bot=/)
+  assert.match(textOutput.value(), /Permission modes: all-listed=/)
+  assert.match(textOutput.value(), /Target scopes: application=/)
   assert.match(textOutput.value(), /Risk classes: administrative-write=0/)
   assert.match(textOutput.value(), /Discord REST operations: 6/)
   assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)

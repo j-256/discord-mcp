@@ -289,7 +289,7 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 
 ## Continue deliberately
 
-- Take the release-exact credential-free guided tour and inspect the complete contract with `catalog --html FILE`, or verify only its deterministic evidence with `catalog --check`
+- Take the release-exact credential-free guided tour and inspect every tool's authentication, policy paths, Discord permissions, intents, hierarchy, curated setup, access lifecycle, and live-verification boundary with `catalog --html FILE`, or verify only its deterministic evidence with `catalog --check`
 - Switch to `channel-reader` only when exact-channel message access is required
 - Use `read_message_attachment` only after retaining the exact channel, message, and attachment IDs from a current permitted read
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`

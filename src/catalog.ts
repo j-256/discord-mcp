@@ -46,6 +46,7 @@ import {
   selectedMcpPromptNames,
 } from "./mcp-guidance.js"
 import {
+  MCP_COMPLETION_VALUE_LIMIT,
   MCP_POLICY_COMPLETION_BINDINGS,
   type McpPolicyCompletionBinding,
 } from "./mcp-completions.js"
@@ -68,7 +69,10 @@ import {
   isPlanReviewToolName,
 } from "./mcp-plan-review-app.js"
 import {
+  createMcpToolAccessDocument,
+  createMcpToolAccessIndex,
   createMcpToolAccessManifest,
+  type McpToolAccessManifest,
   type McpToolAccessStage,
   selectedCanonicalMcpToolNames,
 } from "./mcp-tool-catalog.js"
@@ -83,7 +87,7 @@ import {
 import type { OperationalObserver } from "./observability.js"
 import { ScopePolicy } from "./policy.js"
 
-export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v2"
+export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v3"
 
 const CATALOG_HOME_DIRECTORY = "/discord-mcp-catalog"
 const CATALOG_TOKEN_PLACEHOLDER = "catalog-only-placeholder"
@@ -138,7 +142,7 @@ export interface DiscordCatalogCheckReport {
   activityRecordsCreated: false
   completionBindingCount: number
   completionBindings: McpPolicyCompletionBinding[]
-  completionCatalogValuesExposed: false
+  policyCompletionValuesExposed: false
   contractDigest: string
   credentialsRequired: false
   discordExecution: "disabled"
@@ -174,6 +178,7 @@ export interface DiscordCatalogCheckReport {
   serverVersion: string
   status: "ok"
   toolCount: number
+  toolAccessManifest: McpToolAccessManifest
   toolAccessResourceDigest: string
   toolNames: string[]
   toolsetNames: string[]
@@ -601,13 +606,61 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
     }
     const toolAccessEnvelope = objectValue(toolAccessValue)
     const expectedToolAccess = createMcpToolAccessManifest()
+    const expectedToolAccessIndex = createMcpToolAccessIndex(
+      MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+    )
     catalogInvariant(
-      stableString(toolAccessEnvelope?.data) === stableString(expectedToolAccess),
-      "tool access resource does not match the canonical manifest",
+      stableString(toolAccessEnvelope?.data) === stableString(expectedToolAccessIndex),
+      "tool access resource does not match the canonical index",
     )
     catalogInvariant(
       !toolAccessContent.text.includes(CATALOG_TOKEN_PLACEHOLDER),
       "tool access resource exposed the catalog credential placeholder",
+    )
+    const toolAccessNameCompletion = await client.complete({
+      argument: { name: "toolName", value: "" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+      },
+    })
+    catalogInvariant(
+      stableString(toolAccessNameCompletion.completion.values)
+        === stableString(EXPECTED_TOOL_NAMES.slice(0, MCP_COMPLETION_VALUE_LIMIT))
+      && toolAccessNameCompletion.completion.total === EXPECTED_TOOL_NAMES.length
+      && toolAccessNameCompletion.completion.hasMore
+        === (EXPECTED_TOOL_NAMES.length > MCP_COMPLETION_VALUE_LIMIT),
+      "tool access completion does not match the canonical tool inventory",
+    )
+    const toolAccessProbeName = "get_connector_status"
+    const toolAccessDetailResource = await client.readResource({
+      uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+        "{toolName}",
+        toolAccessProbeName,
+      ),
+    })
+    const toolAccessDetailContent = toolAccessDetailResource.contents[0]
+    catalogInvariant(
+      toolAccessDetailResource.contents.length === 1
+      && toolAccessDetailContent
+      && "text" in toolAccessDetailContent
+      && toolAccessDetailContent.mimeType === "application/json",
+      "exact tool access resource identity changed",
+    )
+    let toolAccessDetailValue: unknown
+    try {
+      toolAccessDetailValue = JSON.parse(toolAccessDetailContent.text)
+    } catch {
+      throw new Error("Discord catalog invariant failed: exact tool access resource is not JSON")
+    }
+    catalogInvariant(
+      stableString(objectValue(toolAccessDetailValue)?.data)
+        === stableString(createMcpToolAccessDocument(toolAccessProbeName)),
+      "exact tool access resource does not match the canonical contract",
+    )
+    catalogInvariant(
+      !toolAccessDetailContent.text.includes(CATALOG_TOKEN_PLACEHOLDER),
+      "exact tool access resource exposed the catalog credential placeholder",
     )
     const planReviewAppResource = await client.readResource({
       uri: MCP_PLAN_REVIEW_APP_URI,
@@ -680,6 +733,9 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       planReviewAppResource,
       safetyResource: safety,
       serverCapabilities,
+      toolAccessDetailResource,
+      toolAccessManifest: expectedToolAccess,
+      toolAccessNameCompletion,
       toolAccessResource,
       tools,
     }
@@ -689,7 +745,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       activityRecordsCreated: false,
       completionBindingCount: completionBindings.length,
       completionBindings,
-      completionCatalogValuesExposed: false,
+      policyCompletionValuesExposed: false,
       contractDigest: sha256Digest(protocolContract, "protocol contract"),
       credentialsRequired: false,
       discordExecution: "disabled",
@@ -725,6 +781,7 @@ export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
       serverVersion: CONNECTOR_VERSION,
       status: "ok",
       toolCount: toolsResult.tools.length,
+      toolAccessManifest: expectedToolAccess,
       toolAccessResourceDigest: sha256Digest(
         toolAccessResource,
         "tool access resource",

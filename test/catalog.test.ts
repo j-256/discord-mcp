@@ -26,7 +26,10 @@ import {
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
-import { MCP_POLICY_COMPLETION_BINDINGS } from "../src/mcp-completions.js"
+import {
+  MCP_COMPLETION_VALUE_LIMIT,
+  MCP_POLICY_COMPLETION_BINDINGS,
+} from "../src/mcp-completions.js"
 import {
   MCP_PROMPT_NAMES,
   MCP_RESOURCE_URIS,
@@ -45,6 +48,8 @@ import {
 } from "../src/mcp-plan-review-app.js"
 import { DISCORD_MCP_RECEIPT_PREFIX } from "../src/mcp-output.js"
 import {
+  createMcpToolAccessDocument,
+  createMcpToolAccessIndex,
   createMcpToolAccessManifest,
   selectedCanonicalMcpToolNames,
 } from "../src/mcp-tool-catalog.js"
@@ -241,18 +246,32 @@ test("catalog serves local guidance while live resources remain isolated", async
     const toolAccess = await client.readResource({
       uri: MCP_RESOURCE_URIS.toolAccess,
     })
+    const exactToolAccessUri = MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+      "{toolName}",
+      "execute_channel_order",
+    )
+    const exactToolAccess = await client.readResource({
+      uri: exactToolAccessUri,
+    })
     const planReviewApp = await client.readResource({ uri: MCP_PLAN_REVIEW_APP_URI })
     const policy = await client.readResource({ uri: MCP_RESOURCE_URIS.policy })
     const prompt = await client.getPrompt({
       arguments: { channelId: CHANNEL_ID },
       name: MCP_PROMPT_NAMES.summarizeChannel,
     })
-    const [resourceCompletion, promptCompletion] = await Promise.all([
+    const [resourceCompletion, toolCompletion, promptCompletion] = await Promise.all([
       client.complete({
         argument: { name: "guildId", value: "" },
         ref: {
           type: "ref/resource",
           uri: MCP_RESOURCE_TEMPLATE_URIS.guildChannels,
+        },
+      }),
+      client.complete({
+        argument: { name: "toolName", value: "get_gateway_" },
+        ref: {
+          type: "ref/resource",
+          uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
         },
       }),
       client.complete({
@@ -281,7 +300,16 @@ test("catalog serves local guidance while live resources remain isolated", async
     }
     assert.deepEqual(
       (JSON.parse(toolAccessContent.text) as Record<string, unknown>).data,
-      createMcpToolAccessManifest(),
+      createMcpToolAccessIndex(MCP_RESOURCE_TEMPLATE_URIS.toolAccess),
+    )
+    const exactToolAccessContent = exactToolAccess.contents[0]
+    assert.ok(exactToolAccessContent && "text" in exactToolAccessContent)
+    if (!exactToolAccessContent || !("text" in exactToolAccessContent)) {
+      throw new Error("Expected exact tool access resource text")
+    }
+    assert.deepEqual(
+      (JSON.parse(exactToolAccessContent.text) as Record<string, unknown>).data,
+      createMcpToolAccessDocument("execute_channel_order"),
     )
     assert.deepEqual(planReviewApp.contents, [{
       _meta: MCP_PLAN_REVIEW_APP_RESOURCE_META,
@@ -294,6 +322,20 @@ test("catalog serves local guidance while live resources remain isolated", async
     assert.ok(prompt.messages.length > 0)
     assert.deepEqual(resourceCompletion.completion.values, [])
     assert.deepEqual(promptCompletion.completion.values, [])
+    assert.deepEqual(toolCompletion.completion.values, [
+      "get_gateway_events",
+      "get_gateway_status",
+    ])
+    const allToolCompletion = await client.complete({
+      argument: { name: "toolName", value: "" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+      },
+    })
+    assert.equal(allToolCompletion.completion.values.length, MCP_COMPLETION_VALUE_LIMIT)
+    assert.equal(allToolCompletion.completion.total, EXPECTED_TOOL_NAMES.length)
+    assert.equal(allToolCompletion.completion.hasMore, true)
     await assert.rejects(
       client.readResource({ uri: MCP_RESOURCE_URIS.guilds }),
       /CATALOG_ONLY/,
@@ -332,6 +374,19 @@ test("catalog evidence digest binds the normalized advertised contract and safet
     const toolAccessResource = await client.readResource({
       uri: MCP_RESOURCE_URIS.toolAccess,
     })
+    const toolAccessDetailResource = await client.readResource({
+      uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+        "{toolName}",
+        "get_connector_status",
+      ),
+    })
+    const toolAccessNameCompletion = await client.complete({
+      argument: { name: "toolName", value: "" },
+      ref: {
+        type: "ref/resource",
+        uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+      },
+    })
     const planReviewAppResource = await client.readResource({
       uri: MCP_PLAN_REVIEW_APP_URI,
     })
@@ -352,6 +407,9 @@ test("catalog evidence digest binds the normalized advertised contract and safet
       planReviewAppResource,
       safetyResource: safety,
       serverCapabilities: client.getServerCapabilities(),
+      toolAccessDetailResource,
+      toolAccessManifest: createMcpToolAccessManifest(),
+      toolAccessNameCompletion,
       toolAccessResource,
       tools: sortedByIdentity(tools.tools, (tool) => tool.name),
     })
@@ -418,7 +476,7 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
     })
     assert.equal(report.activityRecordsCreated, false)
     assert.equal(report.completionBindingCount, MCP_POLICY_COMPLETION_BINDINGS.length)
-    assert.equal(report.completionCatalogValuesExposed, false)
+    assert.equal(report.policyCompletionValuesExposed, false)
     assert.deepEqual(report.completionBindings, MCP_POLICY_COMPLETION_BINDINGS)
     assert.equal(report.toolCount, EXPECTED_TOOL_NAMES.length)
     assert.deepEqual(report.toolNames, EXPECTED_TOOL_NAMES)
@@ -437,6 +495,16 @@ test("catalog self-check ignores hostile ambient credentials and unrelated setti
     assert.deepEqual(
       report.accessStageCounts,
       createMcpToolAccessManifest().stageCounts,
+    )
+    assert.deepEqual(
+      report.toolAccessManifest,
+      createMcpToolAccessManifest(),
+    )
+    assert.equal(report.toolAccessManifest.requirementCoverage.complete, true)
+    assert.equal(report.toolAccessManifest.requirementCoverage.unknownEntries, 0)
+    assert.equal(
+      report.toolAccessManifest.requirementCoverage.targetAccessProven,
+      false,
     )
     assert.equal(
       Object.values(report.accessStageCounts).reduce((total, count) => total + count, 0),

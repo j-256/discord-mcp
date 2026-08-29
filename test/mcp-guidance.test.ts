@@ -3389,6 +3389,10 @@ test("MCP guidance advertises a content-free resource and prompt catalog", async
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactRole,
       },
       {
+        name: MCP_RESOURCE_TEMPLATE_NAMES.toolAccess,
+        uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+      },
+      {
         name: MCP_RESOURCE_TEMPLATE_NAMES.exactGuildSoundboardSound,
         uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.exactGuildSoundboardSound,
       },
@@ -4091,11 +4095,28 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   const accessEntries = toolAccessData.entries as Array<Record<string, unknown>>
   assert.equal(
     toolAccessData.format,
-    "discord-mcp.tool-access-manifest.v1",
+    "discord-mcp.tool-access-index.v2",
   )
   assert.equal(toolAccessData.authorityGranted, false)
   assert.equal(toolAccessData.discordContacted, false)
   assert.equal(toolAccessData.readiness, "target-specific")
+  const requirementCoverage = toolAccessData.requirementCoverage as Record<
+    string,
+    unknown
+  >
+  assert.equal(requirementCoverage.complete, true)
+  assert.equal(requirementCoverage.targetAccessProven, false)
+  assert.equal(requirementCoverage.unknownEntries, 0)
+  assert.equal(
+    Number(requirementCoverage.exactToolEntries)
+      + Number(requirementCoverage.toolsetEntries),
+    accessEntries.length,
+  )
+  assert.equal(accessEntries.every((entry) => !("requirements" in entry)), true)
+  assert.deepEqual(toolAccessData.requirementsResource, {
+    uriTemplate: MCP_RESOURCE_TEMPLATE_URIS.toolAccess,
+    variable: "toolName",
+  })
   assert.equal(
     accessEntries.some((entry) => (
       entry.name === "execute_channel_order"
@@ -4119,6 +4140,32 @@ test("MCP local resources expose safety, policy, and content-free activity witho
     "execute_channel_order",
   ])
   assert.doesNotMatch(toolAccess.text, new RegExp(TOKEN))
+
+  const exactToolAccessUri = MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+    "{toolName}",
+    "execute_channel_order",
+  )
+  const exactToolAccess = await readJsonResource(client, exactToolAccessUri)
+  const exactToolAccessData = exactToolAccess.value.data as Record<string, unknown>
+  assert.equal(
+    exactToolAccessData.format,
+    "discord-mcp.tool-access-document.v1",
+  )
+  const exactAccessEntry = exactToolAccessData.entry as Record<string, unknown>
+  assert.equal(exactAccessEntry.name, "execute_channel_order")
+  const exactRequirements = exactAccessEntry.requirements as Record<string, unknown>
+  assert.equal(exactRequirements.authentication, "bot")
+  assert.equal(exactRequirements.source, "toolset")
+  assert.doesNotMatch(exactToolAccess.text, new RegExp(TOKEN))
+  await assert.rejects(
+    client.readResource({
+      uri: MCP_RESOURCE_TEMPLATE_URIS.toolAccess.replace(
+        "{toolName}",
+        "unknown_discord_tool",
+      ),
+    }),
+    /toolName must be one exact canonical Discord MCP tool name/,
+  )
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
   assert.deepEqual(

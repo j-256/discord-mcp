@@ -6294,6 +6294,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://channels/{channelId}/messages/{messageId}/reactions",
     "discord://channels/{channelId}/permission-overwrites",
     "discord://channels/{channelId}/webhooks",
+    "discord://connector/tool-access/{toolName}",
     "discord://guilds/{guildId}/automod-rules",
     "discord://guilds/{guildId}/bans/{userId}",
     "discord://guilds/{guildId}/channel-order",

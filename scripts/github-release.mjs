@@ -208,7 +208,7 @@ export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociD
   invariant(bundleBytes.length >= 4 && bundleBytes.readUInt32LE(0) === 0x04034b50, "GitHub Release MCPB is not a ZIP archive")
 
   const catalogDocument = await readJson(catalogPath)
-  invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v2", "GitHub Release catalog evidence format is invalid")
+  invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v3", "GitHub Release catalog evidence format is invalid")
   invariant(catalogDocument.schemaVersion === 1, "GitHub Release catalog evidence schema is invalid")
   invariant(catalogDocument.serverVersion === version, "GitHub Release catalog evidence version is invalid")
   invariant(catalogDocument.status === "ok", "GitHub Release catalog evidence status is invalid")
@@ -217,6 +217,14 @@ export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociD
   invariant(catalogDocument.gateway === "disabled", "GitHub Release catalog evidence enabled Gateway access")
   invariant(catalogDocument.observabilityExport === "disabled", "GitHub Release catalog evidence exported telemetry")
   invariant(catalogDocument.activityRecordsCreated === false, "GitHub Release catalog evidence persisted activity")
+  invariant(
+    catalogDocument.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+      && catalogDocument.toolAccessManifest.entries?.length === catalogDocument.toolCount
+      && catalogDocument.toolAccessManifest.requirementCoverage?.complete === true
+      && catalogDocument.toolAccessManifest.requirementCoverage?.unknownEntries === 0
+      && catalogDocument.toolAccessManifest.requirementCoverage?.targetAccessProven === false,
+    "GitHub Release catalog static requirement coverage is invalid",
+  )
 
   const sbomDocument = await readJson(sbomPath)
   invariant(sbomDocument.spdxVersion === "SPDX-2.3", "GitHub Release SBOM version is invalid")
