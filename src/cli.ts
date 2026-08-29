@@ -324,7 +324,14 @@ export type ParsedCliArguments =
     json: boolean
     profileName?: string
   }
-  | { command: "doctor"; configFile?: string; json: boolean; online: boolean; profileName?: string }
+  | {
+    command: "doctor"
+    configFile?: string
+    json: boolean
+    online: boolean
+    profileName?: string
+    verbose: boolean
+  }
   | {
     action?: CliCommandAction
     command: "help"
@@ -1654,13 +1661,20 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
     }
   }
   if (command === "doctor") {
-    const options = parseRuntimeSelectionOptions(rest, new Set(["--json", "--online"]))
+    const normalized = rest.map((argument) => (
+      argument === "-v" ? "--verbose" : argument
+    ))
+    const options = parseRuntimeSelectionOptions(
+      normalized,
+      new Set(["--json", "--online", "--verbose"]),
+    )
     return {
       command,
       ...(options.configFile ? { configFile: options.configFile } : {}),
       json: options.present.has("--json"),
       online: options.present.has("--online"),
       ...(options.profileName ? { profileName: options.profileName } : {}),
+      verbose: options.present.has("--verbose"),
     }
   }
   if (command === "activity") return parseActivityCommand(rest)
@@ -1893,7 +1907,7 @@ function helpText(
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [-v | --verbose] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Default human output shows totals plus only actionable warnings and failures; -v or --verbose shows every check, while --json always emits the complete report. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "host") {
     return [
@@ -1933,7 +1947,7 @@ function helpText(
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory."
+    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory. Completed setup exits 0 even when it reports non-blocking warnings; a command, policy, credential, identity, installation, or Discord verification failure exits 2."
   }
   if (topic === "smoke") {
     return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
@@ -2142,12 +2156,40 @@ function renderActivityHtmlExport(
   ].join("\n")
 }
 
-function renderDoctor(report: DoctorReport): string {
-  const lines = [`Discord MCP doctor: ${report.status}`]
-  for (const entry of report.checks) {
+function doctorCountLabel(
+  count: number,
+  singular: string,
+  plural: string,
+): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function renderDoctor(report: DoctorReport, verbose = false): string {
+  const counts = {
+    fail: report.checks.filter(({ status }) => status === "fail").length,
+    pass: report.checks.filter(({ status }) => status === "pass").length,
+    warn: report.checks.filter(({ status }) => status === "warn").length,
+  }
+  const outcome = report.status === "ok"
+    ? "ready"
+    : report.status === "warning"
+      ? "ready with warnings"
+      : "not ready"
+  const lines = [
+    `Discord MCP doctor: ${outcome}`,
+    `Checks: ${doctorCountLabel(counts.pass, "pass", "passes")}, ${doctorCountLabel(counts.warn, "warning", "warnings")}, ${doctorCountLabel(counts.fail, "failure", "failures")}`,
+  ]
+  const visible = verbose
+    ? report.checks
+    : report.checks.filter(({ status }) => status !== "pass")
+  if (visible.length === 0) lines.push("No warnings or failures")
+  for (const entry of visible) {
     lines.push(`${entry.status.toUpperCase()} ${entry.id}: ${entry.summary}`)
     if (entry.action) lines.push(`  Next: ${entry.action}`)
     if (entry.reference) lines.push(`  See: ${entry.reference}`)
+  }
+  if (!verbose) {
+    lines.push("Full evidence: rerun with --verbose or --json")
   }
   return lines.join("\n")
 }
@@ -2224,19 +2266,14 @@ function renderCoordinationResolution(report: WriteCoordinationResolution): stri
 
 function renderSetup(report: SetupReport): string {
   const lines = [
-    `Discord MCP setup verified application ${report.applicationId} and bot ${report.botId}`,
-    `Configured guild installations: ${report.configuredGuildCount}`,
-    `Installed guilds: ${report.installedGuildCount}`,
-    `Installed in-scope guilds: ${report.installedInScopeGuildCount}`,
-    `Unexpected guild installations: ${report.unexpectedGuildCount}`,
-    `Tool surface: ${report.toolSurface}`,
-    `Toolsets: ${report.toolsets.join(", ")}`,
+    "Discord MCP setup: ready",
+    `Verified application ${report.applicationId} and bot ${report.botId}`,
+    `Guild installations: ${report.configuredGuildCount} configured, ${report.installedGuildCount} installed, ${report.installedInScopeGuildCount} in scope, ${report.unexpectedGuildCount} unexpected`,
+    `Tools: ${report.toolSurface} surface; ${report.toolsets.join(", ")}`,
   ]
   if (report.preset) {
     lines.push(
-      `Preset: ${report.preset.name}`,
-      `Preset tools: ${report.preset.toolNames.length} read-only`,
-      "Preset Gateway: disabled",
+      `Preset: ${report.preset.name} (${report.preset.toolNames.length} read-only tools; Gateway disabled)`,
     )
   }
   if (report.profile) {
@@ -2253,8 +2290,20 @@ function renderSetup(report: SetupReport): string {
       ? `Credential environment variable: ${report.credential.variable}`
       : `Credential file: ${report.credential.path}`)
   }
-  for (const warning of report.warnings) lines.push(`WARNING: ${warning}`)
+  if (report.warnings.length > 0) {
+    lines.push(
+      "",
+      `Warnings (${report.warnings.length}):`,
+      ...report.warnings.map((warning) => `- ${warning}`),
+    )
+  }
   lines.push(
+    "",
+    "Next:",
+    "1. Add the launch descriptor below to the MCP host.",
+    "2. Restart or reload the host, then confirm the Discord server is connected.",
+    "3. Ask the host to list channels in the configured server for the first verified read.",
+    "Optional assurance: run doctor --online or smoke with the same policy selection.",
     "",
     "Portable stdio launch descriptor:",
     "",
@@ -3165,7 +3214,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         })
         safeWrite(
           stdout,
-          parsed.json ? jsonReport(report) : renderDoctor(report),
+          parsed.json ? jsonReport(report) : renderDoctor(report, parsed.verbose),
           diagnostic.environment,
         )
         if (report.status === "error") return CLI_EXIT_CODES.failure
@@ -3609,9 +3658,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           ...(parsed.serverName ? { serverName: parsed.serverName } : {}),
         })
         safeWrite(stdout, parsed.json ? jsonReport(report) : renderSetup(report), environment)
-        return report.warnings.length > 0
-          ? CLI_EXIT_CODES.warning
-          : CLI_EXIT_CODES.success
+        return CLI_EXIT_CODES.success
       }
       case "smoke": {
         const runtime = await runtimeSelection(

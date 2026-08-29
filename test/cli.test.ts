@@ -825,12 +825,20 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "doctor",
     json: true,
     online: true,
+    verbose: false,
   })
   assert.deepEqual(parseCliArguments(["doctor", "--profile", "support-bot"]), {
     command: "doctor",
     json: false,
     online: false,
     profileName: "support-bot",
+    verbose: false,
+  })
+  assert.deepEqual(parseCliArguments(["doctor", "-v"]), {
+    command: "doctor",
+    json: false,
+    online: false,
+    verbose: true,
   })
   assert.deepEqual(parseCliArguments(["serve", "--profile", "support-bot"]), {
     command: "serve",
@@ -1306,6 +1314,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.throws(() => parseCliArguments(["unknown"]), /Unknown command/)
   assert.throws(() => parseCliArguments(["doctor", "--online", "--online"]), /only once/)
+  assert.throws(() => parseCliArguments(["doctor", "-v", "--verbose"]), /only once/)
   assert.throws(
     () => parseCliArguments([
       "setup",
@@ -2312,9 +2321,49 @@ test("CLI distinguishes doctor warnings and renders their recovery guidance", as
   })
 
   assert.equal(exitCode, 1)
+  assert.match(stdout.value(), /Discord MCP doctor: ready with warnings/)
+  assert.match(stdout.value(), /Checks: 0 passes, 1 warning, 0 failures/)
   assert.match(stdout.value(), /WARN configuration: Configuration needs review/)
   assert.match(stdout.value(), /Next: Correct the diagnostic boundary/)
   assert.match(stdout.value(), /See: docs\/reference\.md#verification/)
+  assert.match(stdout.value(), /rerun with --verbose or --json/)
+})
+
+test("CLI doctor keeps passing checks concise unless verbose or JSON evidence is requested", async () => {
+  const compact = outputStream()
+  const verbose = outputStream()
+  const json = outputStream()
+  const available = dependencies({
+    async diagnose() {
+      return doctorReport()
+    },
+  })
+  const environment = { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE }
+
+  assert.equal(await runCli({
+    args: ["doctor"],
+    dependencies: available,
+    environment,
+    stdout: compact.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["doctor", "--verbose"],
+    dependencies: available,
+    environment,
+    stdout: verbose.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["doctor", "-v", "--json"],
+    dependencies: available,
+    environment,
+    stdout: json.stream,
+  }), 0)
+
+  assert.match(compact.value(), /Discord MCP doctor: ready/)
+  assert.match(compact.value(), /No warnings or failures/)
+  assert.doesNotMatch(compact.value(), /PASS configuration/)
+  assert.match(verbose.value(), /PASS configuration: Configuration is valid/)
+  assert.equal(JSON.parse(json.value()).checks.length, 1)
 })
 
 test("CLI emits a redacted structured failure when JSON was requested", async () => {
@@ -2849,7 +2898,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
     stdout: stdout.stream,
   })
 
-  assert.equal(exitCode, 1)
+  assert.equal(exitCode, 0)
   assert.deepEqual(received, {
     args: ["serve"],
     command: "/bin/discord-mcp",
@@ -2888,6 +2937,8 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
     overwriteConfig: false,
   })
   assert.match(stdout.value(), /Portable stdio launch descriptor/)
+  assert.match(stdout.value(), /Discord MCP setup: ready/)
+  assert.match(stdout.value(), /Ask the host to list channels/)
   assert.match(stdout.value(), /required-server, write-approval, elicitation, and timeout settings/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
@@ -2964,7 +3015,7 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
     stdout: stdout.stream,
   })
 
-  assert.equal(exitCode, 1)
+  assert.equal(exitCode, 0)
   assert.deepEqual(received, {
     args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
     command: "/usr/bin/node",
@@ -3163,9 +3214,10 @@ test("CLI forwards exact preset setup intent and renders its read-only boundary"
     },
     profileName: "reader",
   })
-  assert.match(stdout.value(), /Preset: channel-reader/)
-  assert.match(stdout.value(), /Preset tools: [0-9]+ read-only/)
-  assert.match(stdout.value(), /Preset Gateway: disabled/)
+  assert.match(
+    stdout.value(),
+    /Preset: channel-reader \([0-9]+ read-only tools; Gateway disabled\)/,
+  )
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
@@ -4130,7 +4182,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.2/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
-  assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\)/)
+  assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\).*--verbose/)
   assert.match(activityHelpOutput.value(), /activity \[--config FILE \| --profile NAME\]/)
   assert.match(activityHelpOutput.value(), /changes no activity or coordination state/)
   assert.match(activityHelpOutput.value(), /Exit status is 0 when clear, 1 when evidence needs attention/)
