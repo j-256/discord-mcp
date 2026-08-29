@@ -6187,6 +6187,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "author_guild_blueprint",
     "find_guild_members",
     "inspect_guild_ban",
+    "prepare_guild_recovery",
     "recall_discord_conversation",
     "review_announcement_crosspost",
     "review_announcement_subscription",

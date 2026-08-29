@@ -38,6 +38,20 @@ import {
   GuildChannelEvidenceError,
   type GuildChannelHttpEvidenceMode,
 } from "./guild-channel-evidence.js"
+import {
+  guildBlueprintRoleRecoveryStateDigest,
+} from "./guild-blueprint-capture-service.js"
+import {
+  createGuildRecoveryAttestationKey,
+  guildDeletionRecoveryWarnings,
+  guildDeletionRecoveryRequestDigestView,
+  noGuildRecoveryArtifactEvidence,
+  normalizeGuildDeletionRecoveryRequest,
+  verifyGuildRecoveryAttestation,
+  type GuildDeletionRecoveryEvidence,
+  type GuildDeletionRecoveryRequest,
+  type NormalizedGuildDeletionRecoveryRequest,
+} from "./guild-recovery-attestation.js"
 import { stableString } from "./normalize.js"
 import {
   type OperationReceipt,
@@ -97,11 +111,14 @@ export interface RoleDeletionRequest {
   auditReason: string
   guildId: string
   operationKey: string
+  recovery: GuildDeletionRecoveryRequest
   roleId: string
 }
 
-export interface NormalizedRoleDeletionRequest extends RoleDeletionRequest {
+export interface NormalizedRoleDeletionRequest
+  extends Omit<RoleDeletionRequest, "recovery"> {
   operationKeyHash: string
+  recovery: NormalizedGuildDeletionRecoveryRequest
 }
 
 export interface RoleDeletionBlocker {
@@ -175,6 +192,7 @@ export interface RoleDeletionPlan extends Omit<
   createdAt: string
   digest: string
   operationKeyHash: string
+  recovery: GuildDeletionRecoveryEvidence
   status: "blocked" | "planned"
   writeRequired: boolean
 }
@@ -237,6 +255,7 @@ export interface RoleDeletionServiceOptions {
     "assertRoleDeletionAllowed" | "assertRoleDeletionAuditable"
   >
   randomId?: () => string
+  recoveryAttestationKey?: Uint8Array
 }
 
 interface ValidatedGuild {
@@ -330,6 +349,7 @@ export function normalizeRoleDeletionRequest(
       "auditReason",
       "guildId",
       "operationKey",
+      "recovery",
       "roleId",
     ])
     || request.acknowledgeIrreversibleRoleLoss !== true
@@ -342,6 +362,7 @@ export function normalizeRoleDeletionRequest(
   return {
     ...request,
     operationKeyHash: operationKeyHash(request.operationKey),
+    recovery: normalizeGuildDeletionRecoveryRequest(request.recovery),
   }
 }
 
@@ -1006,6 +1027,7 @@ export class RoleDeletionService {
   readonly #planKey: Uint8Array
   readonly #policy: RoleDeletionServiceOptions["policy"]
   readonly #randomId: () => string
+  readonly #recoveryAttestationKey: Uint8Array
 
   constructor(options: RoleDeletionServiceOptions) {
     this.#activityStore = options.activityStore
@@ -1016,6 +1038,9 @@ export class RoleDeletionService {
     this.#planKey = options.planKey ?? createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId ?? randomUUID
+    this.#recoveryAttestationKey = new Uint8Array(
+      options.recoveryAttestationKey ?? createGuildRecoveryAttestationKey(),
+    )
   }
 
   async #state(
@@ -1180,6 +1205,7 @@ export class RoleDeletionService {
         ? ["Discord connector has ADMINISTRATOR; replace it with narrowly scoped MANAGE_ROLES and MANAGE_GUILD"]
         : []),
       "Discord exposes no conditional role deletion, so external same-guild administration can race the reviewed write",
+      "Deletion planning requires either a fresh exact target-bound caller-retained blueprint attestation or explicit acknowledgement that no recovery artifact is retained",
     ]
     const risks = [
       "Guild role deletion is irreversible and removes the role identity from Discord",
@@ -1270,11 +1296,30 @@ export class RoleDeletionService {
       options,
     )
     const readiness = this.#readiness(applicationId, botId, state)
+    const recovery = request.recovery.mode === "none"
+      ? noGuildRecoveryArtifactEvidence()
+      : verifyGuildRecoveryAttestation(
+          this.#recoveryAttestationKey,
+          request.recovery.attestation,
+          {
+            applicationId,
+            botId,
+            guildId: request.guildId,
+            resourceId: request.roleId,
+            resourceType: "role",
+            targetStateDigest: guildBlueprintRoleRecoveryStateDigest(
+              readiness.target,
+            ),
+          },
+          this.#clock(),
+        )
     const digest = reviewedPlanDigest(this.#planKey, {
       acknowledgeIrreversibleRoleLoss: request.acknowledgeIrreversibleRoleLoss,
       auditReason: request.auditReason,
       evidenceDigest: readiness.evidenceDigest,
       operationKeyHash: request.operationKeyHash,
+      recovery: guildDeletionRecoveryRequestDigestView(request.recovery),
+      recoveryEvidence: recovery,
     })
     const {
       evidenceDigest: _evidenceDigest,
@@ -1289,7 +1334,9 @@ export class RoleDeletionService {
       createdAt: this.#clock().toISOString(),
       digest,
       operationKeyHash: request.operationKeyHash,
+      recovery,
       status: readiness.ready ? "planned" : "blocked",
+      warnings: [...shared.warnings, ...guildDeletionRecoveryWarnings(recovery)],
       writeRequired: readiness.ready,
     }
     return { plan, request, state }

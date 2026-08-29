@@ -51,6 +51,13 @@ import {
   type GuildBlueprintWelcomeScreenInput,
   normalizeGuildBlueprintRequest,
 } from "./guild-blueprint-service.js"
+import {
+  createGuildRecoveryAttestation,
+  createGuildRecoveryAttestationKey,
+  guildRecoveryTargetStateDigest,
+  type GuildRecoveryAttestedBinding,
+  type GuildRecoveryResourceType,
+} from "./guild-recovery-attestation.js"
 import type {
   GuildCommunityAuditResult,
   GuildCommunityChannelReferenceView,
@@ -230,6 +237,7 @@ export interface GuildBlueprintCapturePrivacy {
   memberProfiles: "connector-bot-identity-only"
   messageContent: "not-read"
   rawPayloads: "omitted"
+  recoveryAttestations: "transient-process-bound"
   returnedText: "transient-caller-retained"
   serverPersistence: "none"
   webhooks: "not-read"
@@ -269,6 +277,7 @@ export interface GuildBlueprintCaptureChangedResult
   captureDigest: null
   coverage: null
   omissions: readonly []
+  recoveryBindings: GuildRecoveryAttestedBinding[]
   nextAction: "retry-capture"
   plannerReady: false
   status: "changed-during-capture"
@@ -281,6 +290,7 @@ export interface GuildBlueprintCaptureBlockedResult
   captureDigest: null
   coverage: GuildBlueprintCaptureCoverage
   omissions: GuildBlueprintCaptureFinding[]
+  recoveryBindings: GuildRecoveryAttestedBinding[]
   nextAction: "resolve-blockers-and-recapture"
   plannerReady: false
   status: "blocked"
@@ -293,6 +303,7 @@ export interface GuildBlueprintCaptureReadyResult
   captureDigest: string
   coverage: GuildBlueprintCaptureCoverage
   omissions: GuildBlueprintCaptureFinding[]
+  recoveryBindings: GuildRecoveryAttestedBinding[]
   nextAction: "retain-blueprint-and-plan" | "review-or-edit-omissions-before-plan"
   plannerReady: true
   status: "ready" | "review-required"
@@ -338,11 +349,20 @@ interface ValidatedGuildSettings {
 }
 
 interface ProjectedCapturePass {
+  bindings: GuildBlueprintCaptureBindingSource[]
   blockers: GuildBlueprintCaptureFinding[]
   blueprint: GuildBlueprintRequest | null
   coverage: GuildBlueprintCaptureCoverage
   omissions: GuildBlueprintCaptureFinding[]
   source: unknown
+}
+
+interface GuildBlueprintCaptureBindingSource {
+  blueprintKey: string
+  omissionCodes: string[]
+  resourceId: string
+  resourceType: GuildRecoveryResourceType
+  targetStateDigest: string
 }
 
 export interface GuildBlueprintCaptureServiceOptions {
@@ -365,6 +385,7 @@ export interface GuildBlueprintCaptureServiceOptions {
     ): Promise<GuildCommunityAuditResult>
   }
   policy: ScopePolicy
+  recoveryAttestationKey?: Uint8Array
 }
 
 function exactObject(
@@ -612,6 +633,12 @@ function sourceChannelProjection(channel: DiscordChannel): unknown {
   }
 }
 
+export function guildBlueprintChannelRecoveryStateDigest(
+  channel: DiscordChannel,
+): string {
+  return guildRecoveryTargetStateDigest(sourceChannelProjection(channel))
+}
+
 function referenceForChannel(
   channelId: string,
   capturedKeys: ReadonlyMap<string, string>,
@@ -760,6 +787,12 @@ function canonicalRoleProjection(role: NormalizedDiscordRole): unknown {
     unknownFieldCount: role.unknownFieldCount,
     unknownPermissionBits: role.unknownPermissionBits,
   }
+}
+
+export function guildBlueprintRoleRecoveryStateDigest(
+  role: NormalizedDiscordRole,
+): string {
+  return guildRecoveryTargetStateDigest(canonicalRoleProjection(role))
 }
 
 function communityChannelSourceProjection(
@@ -1054,6 +1087,7 @@ function projectPass(
     omissions.push(finding(
       "ROLE_ORDER_OMITTED",
       "Guild blueprints do not preserve role ordering",
+      "role",
     ))
   }
   for (const role of selectedRoles) {
@@ -1208,6 +1242,7 @@ function projectPass(
     omissions.push(finding(
       "CHANNEL_ORDER_OMITTED",
       "Guild blueprints do not preserve channel ordering",
+      "channel",
     ))
   }
   for (const channel of selectedChannels) {
@@ -1550,7 +1585,37 @@ function projectPass(
     }
   }
 
+  const bindingOmissionCodes = (
+    resourceType: GuildRecoveryResourceType,
+    resourceId: string,
+  ): string[] => [...new Set(omissions
+    .filter((omission) => (
+      omission.resourceType === resourceType
+      && (omission.resourceId === null || omission.resourceId === resourceId)
+    ))
+    .map((omission) => omission.code))].sort()
+  const bindings: GuildBlueprintCaptureBindingSource[] = [
+    ...selectedRoles.map((role) => ({
+      blueprintKey: selectedRoleKeys.get(role.id) as string,
+      omissionCodes: bindingOmissionCodes("role", role.id),
+      resourceId: role.id,
+      resourceType: "role" as const,
+      targetStateDigest: guildBlueprintRoleRecoveryStateDigest(role),
+    })),
+    ...selectedChannels.map((channel) => ({
+      blueprintKey: selectedChannelKeys.get(channel.id) as string,
+      omissionCodes: bindingOmissionCodes("channel", channel.id),
+      resourceId: channel.id,
+      resourceType: "channel" as const,
+      targetStateDigest: guildBlueprintChannelRecoveryStateDigest(channel),
+    })),
+  ].sort((left, right) => (
+    left.resourceType.localeCompare(right.resourceType)
+    || left.resourceId.localeCompare(right.resourceId)
+  ))
+
   return {
+    bindings,
     blockers,
     blueprint,
     coverage,
@@ -1598,6 +1663,7 @@ const PRIVACY: GuildBlueprintCapturePrivacy = Object.freeze({
   memberProfiles: "connector-bot-identity-only",
   messageContent: "not-read",
   rawPayloads: "omitted",
+  recoveryAttestations: "transient-process-bound",
   returnedText: "transient-caller-retained",
   serverPersistence: "none",
   webhooks: "not-read",
@@ -1616,12 +1682,16 @@ export class GuildBlueprintCaptureService {
   readonly #clock: () => Date
   readonly #community: GuildBlueprintCaptureServiceOptions["community"]
   readonly #policy: ScopePolicy
+  readonly #recoveryAttestationKey: Uint8Array
 
   constructor(options: GuildBlueprintCaptureServiceOptions) {
     this.#client = options.client
     this.#clock = options.clock || (() => new Date())
     this.#community = options.community
     this.#policy = options.policy
+    this.#recoveryAttestationKey = new Uint8Array(
+      options.recoveryAttestationKey ?? createGuildRecoveryAttestationKey(),
+    )
   }
 
   assertCaptureAllowed(request: GuildBlueprintCaptureRequest): void {
@@ -1734,6 +1804,7 @@ export class GuildBlueprintCaptureService {
         nextAction: "retry-capture",
         omissions: [],
         plannerReady: false,
+        recoveryBindings: [],
         status: "changed-during-capture",
       }
     }
@@ -1747,20 +1818,37 @@ export class GuildBlueprintCaptureService {
         nextAction: "resolve-blockers-and-recapture",
         omissions: second.omissions,
         plannerReady: false,
+        recoveryBindings: [],
         status: "blocked",
       }
     }
+    const digest = captureDigest(second, normalized.operationKeyHash)
+    const recoveryBindings = second.bindings.map((binding) => (
+      createGuildRecoveryAttestation(this.#recoveryAttestationKey, {
+        applicationId,
+        blueprintKey: binding.blueprintKey,
+        botId,
+        captureDigest: digest,
+        capturedAt: completedAt,
+        guildId: normalized.guildId,
+        omissionCodes: binding.omissionCodes,
+        resourceId: binding.resourceId,
+        resourceType: binding.resourceType,
+        targetStateDigest: binding.targetStateDigest,
+      })
+    ))
     return {
       ...base,
       blockers: [],
       blueprint: second.blueprint,
-      captureDigest: captureDigest(second, normalized.operationKeyHash),
+      captureDigest: digest,
       coverage: second.coverage,
       nextAction: second.omissions.length === 0
         ? "retain-blueprint-and-plan"
         : "review-or-edit-omissions-before-plan",
       omissions: second.omissions,
       plannerReady: true,
+      recoveryBindings,
       status: second.omissions.length === 0 ? "ready" : "review-required",
     }
   }

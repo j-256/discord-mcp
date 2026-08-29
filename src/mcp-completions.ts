@@ -174,6 +174,17 @@ export const MCP_POLICY_COMPLETION_BINDINGS: readonly McpPolicyCompletionBinding
   promptBinding(MCP_PROMPT_NAMES.reviewChannelCreation, "guildId", "channelCreationGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewForumPost, "channelId", "forumPostChannelIds"),
   promptBinding(MCP_PROMPT_NAMES.authorGuildBlueprint, "guildId", "allowedGuildIds"),
+  promptBinding(MCP_PROMPT_NAMES.prepareGuildRecovery, "guildId", "allowedGuildIds"),
+  promptBinding(
+    MCP_PROMPT_NAMES.prepareGuildRecovery,
+    "channelId",
+    "channelDeletionIds",
+  ),
+  promptBinding(
+    MCP_PROMPT_NAMES.prepareGuildRecovery,
+    "roleId",
+    "roleDeletionIds",
+  ),
   promptBinding(MCP_PROMPT_NAMES.reviewGuildScaffold, "guildId", "guildScaffoldGuildIds"),
   promptBinding(MCP_PROMPT_NAMES.reviewMemberNicknameChange, "guildId", "nicknameGuildIds"),
   promptBinding(
