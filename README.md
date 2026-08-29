@@ -94,9 +94,6 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
   --config ./discord-mcp.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.2 config validate ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
-npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
 npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
 ```
 
@@ -119,7 +116,7 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
   --token-file /run/secrets/discord_bot_token
 ```
 
-The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup stores public IDs and a credential reference, never the token. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation.
+The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup is the first-run readiness gate: it validates the strict policy, verifies the application and bot, audits the exact guild installation, stores public IDs and a credential reference but never the token, and prints the launch descriptor. A ready setup exits successfully even when it reports non-blocking warnings for deliberate review. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation; it creates bookkeeping keys itself instead of asking the operator to invent them.
 
 The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
 
@@ -127,11 +124,23 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 ### Connect with the one-click bundle or a generated adapter
 
-After `smoke` succeeds, compatible MCPB hosts can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
+After setup reports `ready`, compatible MCPB hosts can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
 
 For a file-backed token or another host, `host` emits deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; `--inspect-host-file` reports exact drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
 
-Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. It reports credential availability as a separate failure and continues validating the strict policy, identity pins, scope, tool surface, effective read-response budget, and safety gates. `doctor --online` contacts Discord only when the real selected credential is available.
+Once the host is connected, the first useful request can stay natural and narrow:
+
+```text
+Show me the channels in Discord server YOUR_GUILD_ID using Discord MCP. Do not make changes.
+```
+
+`config validate`, `doctor`, and `smoke` are optional assurance and recovery tools rather than mandatory repetitions after successful setup. Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. Its default human output shows totals plus actionable warnings and failures; add `--verbose` for every check or `--json` for complete machine-readable evidence. `doctor --online` contacts Discord only when the real selected credential is available, while `smoke` launches a child server and verifies the MCP handshake. Doctor exits 1 when warnings need review even though it describes that state as `ready with warnings`.
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 config validate ./discord-mcp.json
+npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
+npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
+```
 
 ### Review any policy replacement
 

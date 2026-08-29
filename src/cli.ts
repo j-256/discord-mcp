@@ -2597,7 +2597,7 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
     : report.privilegedIntents
       .map((intent) => `${intent.name} (${intent.status})`)
       .join(", ")
-  const [setup, validate, doctor, smoke] = report.postInstall.commands
+  const [setup, validate, doctor, smoke, hostActivation] = report.postInstall.commands
   return [
     `Discord MCP bot install plan: ${report.preset.name}`,
     `Application: ${report.applicationId}`,
@@ -2614,15 +2614,17 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
     `4. Make the bot token available to setup as ${report.postInstall.credentialVariable} through a protected environment or secret launcher. Later configure the MCP host to supply the same reference. Never put its value in the config file or command line.`,
     `5. From a canonical process-owned private directory, ${report.preset.name === "channel-reader" ? "replace CHANNEL_ID, then run" : "run"} verified setup to create the strict non-secret policy file:`,
     `   ${setup}`,
-    "6. Validate the file, verify Discord identity and access, then exercise the read-only MCP path:",
+    "6. Add the portable launch descriptor printed by setup to the MCP host, or generate a private host activation guide:",
+    `   ${hostActivation}`,
+    "7. Reload the host, then complete this first read-only outcome:",
+    `   ${report.postInstall.firstRead.prompt}`,
+    `   Required tools: ${report.postInstall.firstRead.toolNames.join(", ")}. Discord writes: disabled.`,
+    "8. Optional assurance or troubleshooting only:",
     `   ${validate}`,
     `   ${doctor}`,
     `   ${smoke}`,
-    "7. Add the portable launch descriptor printed by setup to the MCP host, then complete this first read-only outcome:",
-    `   ${report.postInstall.firstRead.prompt}`,
-    `   Required tools: ${report.postInstall.firstRead.toolNames.join(", ")}. Discord writes: disabled.`,
     "",
-    "Discord was not contacted and no browser was opened. Guild roles and channel overrides determine effective access; online doctor is the post-install authority.",
+    "Discord was not contacted and no browser was opened. Guild roles and channel overrides determine effective access; verified setup is the post-install readiness gate, while doctor and smoke provide deeper independent evidence when needed.",
   ].join("\n")
 }
 
