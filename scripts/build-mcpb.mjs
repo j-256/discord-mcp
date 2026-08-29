@@ -1,9 +1,11 @@
 import { resolve } from "node:path"
 
 import { buildAndVerifyMcpb } from "./mcpb-artifact.mjs"
-import { invariant, readJson, REPOSITORY_ROOT } from "./release-lib.mjs"
+import { invariant, readJson, REPOSITORY_ROOT, run } from "./release-lib.mjs"
 
 const ALLOW_REGISTRY_MISMATCH_OPTION = "--allow-registry-mismatch"
+const TYPESCRIPT_COMPILER = resolve(REPOSITORY_ROOT, "node_modules", "typescript", "lib", "tsc.js")
+const TYPESCRIPT_PROJECT = resolve(REPOSITORY_ROOT, "tsconfig.build.json")
 
 function parseArguments(args) {
   const options = {
@@ -29,6 +31,7 @@ function parseArguments(args) {
 }
 
 const options = parseArguments(process.argv.slice(2))
+await run(process.execPath, [TYPESCRIPT_COMPILER, "-p", TYPESCRIPT_PROJECT])
 const report = await buildAndVerifyMcpb(options)
 if (!options.allowRegistryMismatch) {
   const server = await readJson(`${REPOSITORY_ROOT}/server.json`)

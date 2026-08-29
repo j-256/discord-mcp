@@ -323,7 +323,7 @@ async function checkPackageAndLock() {
     "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
     mcp: "node dist/cli.js serve",
     "metadata:check": "node scripts/check-release-metadata.mjs",
-    "mcpb:verify": "npm run build && node scripts/build-mcpb.mjs",
+    "mcpb:verify": "node scripts/build-mcpb.mjs",
     "pack:verify": "node scripts/pack-and-verify.mjs",
     prepack: "npm run config:schema:check && npm run metadata:check && npm run build",
     "probe:live": "node dist/cli.js doctor --online --json",
@@ -1232,6 +1232,12 @@ async function checkAutomation() {
   invariant(!githubReleaseHelper.includes("/immutable-releases"), "GitHub Release automation must not require unavailable repository administration authority")
   invariant(mcpbBuilder.includes("MCPB artifact digest differs from server.json"), "MCPB builder must bind output to Registry metadata")
   invariant(mcpbBuilder.includes("--allow-registry-mismatch"), "MCPB builder lacks the explicit release-preparation escape hatch")
+  const mcpbCompileStep = mcpbBuilder.indexOf("await run(process.execPath, [TYPESCRIPT_COMPILER")
+  const mcpbArtifactStep = mcpbBuilder.indexOf("await buildAndVerifyMcpb(options)")
+  invariant(
+    mcpbCompileStep >= 0 && mcpbCompileStep < mcpbArtifactStep,
+    "MCPB builder must compile the current source before producing evidence",
+  )
   for (const workflowName of ["ci.yml", "release.yml"]) {
     const workflow = await readFile(join(workflowsDirectory, workflowName), "utf8")
     invariant(workflow.includes("NPM_CONFIG_REGISTRY: https://registry.npmjs.org"), `${workflowName} must pin the npm registry`)
