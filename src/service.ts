@@ -2243,11 +2243,13 @@ export class ConnectorService {
       domains: {
         automod: this.#automodService,
         channelMetadata: this.#channelMetadataService,
+        channelPermissionOverwrite: this.#permissionOverwriteService,
         component: this.#componentMessageService,
         community: this.#guildCommunityService,
         onboarding: this.#onboardingService,
         profile: this.#guildProfileService,
         roleConfiguration: this.#roleConfigurationService,
+        roleOrdering: this.#roleOrderingService,
         scaffold: this.#guildScaffoldService,
         settings: this.#guildSettingsService,
         welcomeScreen: this.#welcomeScreenService,
@@ -5519,6 +5521,17 @@ export class ConnectorService {
             nestedOptions,
           )
         ),
+        executeChannelPermissionOverwrite: (
+          nestedRequest,
+          nestedDigest,
+          nestedOptions,
+        ) => (
+          this.executeChannelPermissionOverwrite(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
         executeComponent: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeComponentMessage(
             nestedRequest,
@@ -5549,6 +5562,13 @@ export class ConnectorService {
         ),
         executeRoleConfiguration: (nestedRequest, nestedDigest, nestedOptions) => (
           this.executeRoleConfiguration(
+            nestedRequest,
+            nestedDigest,
+            nestedOptions,
+          )
+        ),
+        executeRoleOrdering: (nestedRequest, nestedDigest, nestedOptions) => (
+          this.executeRoleOrder(
             nestedRequest,
             nestedDigest,
             nestedOptions,

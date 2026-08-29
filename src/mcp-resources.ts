@@ -498,7 +498,7 @@ export function registerDiscordResources(
         ],
         warnings: [
           "Starters contain only bundled local public categories, text channels, forums, named guild settings, and an optional sparse guild name",
-          "Information and announcement-style channels are not read-only until separately reviewed exact permission overwrites are applied",
+          "Information and announcement-style channels are not read-only until exact IDs are proven and a reviewed overwrite is added to the retained manifest or run standalone",
           "Private staff areas, role authority, Community, onboarding, AutoMod, publications, and live-resource convergence are deliberately omitted",
           "The guild-starter recipe preserves the live guild name; optional guildName input needs separately reviewed guild-profile policy",
           "Compilation grants no Discord authority and never plans or executes a write",

@@ -112,8 +112,17 @@ interface EntrySource {
   kind: GuildBlueprintPhase
   manifestIndex?: number
   manifestPath: string
+  references?: GuildBlueprintPreviewReference[]
   value: unknown
 }
+
+const ROLE_REFERENCE_FIELDS: ReadonlySet<string> = new Set([
+  "anchor",
+  "exemptRoles",
+  "role",
+  "roleOrder",
+  "roles",
+])
 
 function referenceResource(field: string): GuildBlueprintPreviewReferenceResource | null {
   if (field === "ruleId") return "auto-moderation-rule"
@@ -170,7 +179,7 @@ function collectReferences(
   if (value === null || typeof value !== "object") return
   const record = value as Record<string, unknown>
   if (record.kind === "scaffold" && typeof record.key === "string") {
-    const resource = field === "roles" || field === "exemptRoles"
+    const resource = ROLE_REFERENCE_FIELDS.has(field)
       ? "role"
       : "channel"
     pushReference(references, {
@@ -266,6 +275,35 @@ function entrySources(request: NormalizedGuildBlueprintRequest): EntrySource[] {
       value,
     })
   })
+  if (request.roleOrder !== undefined) {
+    for (let manifestIndex = request.roleOrder.length - 2;
+      manifestIndex >= 0;
+      manifestIndex -= 1) {
+      const references: GuildBlueprintPreviewReference[] = []
+      collectReferences(
+        request.roleOrder[manifestIndex],
+        `$.roleOrder[${manifestIndex}]`,
+        references,
+        "roleOrder",
+      )
+      collectReferences(
+        request.roleOrder[manifestIndex + 1],
+        `$.roleOrder[${manifestIndex + 1}]`,
+        references,
+        "roleOrder",
+      )
+      sources.push({
+        kind: "role-ordering",
+        manifestIndex,
+        manifestPath: `$.roleOrder[${manifestIndex}:${manifestIndex + 2}]`,
+        references,
+        value: {
+          anchor: request.roleOrder[manifestIndex + 1],
+          role: request.roleOrder[manifestIndex],
+        },
+      })
+    }
+  }
   request.channelMetadata?.forEach((value, manifestIndex) => {
     sources.push({
       kind: "channel-metadata",
@@ -274,9 +312,23 @@ function entrySources(request: NormalizedGuildBlueprintRequest): EntrySource[] {
       value,
     })
   })
+  request.channelPermissionOverwrites?.forEach((value, manifestIndex) => {
+    sources.push({
+      kind: "channel-permission-overwrite",
+      manifestIndex,
+      manifestPath: `$.channelPermissionOverwrites[${manifestIndex}]`,
+      value,
+    })
+  })
   const singletonSources: Array<{
     kind: Exclude<GuildBlueprintPhase,
-      "auto-moderation" | "channel-metadata" | "publication" | "role-configuration" | "structure">
+      | "auto-moderation"
+      | "channel-metadata"
+      | "channel-permission-overwrite"
+      | "publication"
+      | "role-configuration"
+      | "role-ordering"
+      | "structure">
     value: unknown
   }> = [
     { kind: "profile", value: request.profile },
@@ -324,7 +376,11 @@ function entryId(source: EntrySource): string {
 function potentialWriteStages(source: EntrySource): string[] {
   if (source.kind === "structure") return ["create-additive-resource"]
   if (source.kind === "role-configuration") return ["configure-exact-role"]
+  if (source.kind === "role-ordering") return ["order-resolved-role-adjacency"]
   if (source.kind === "channel-metadata") return ["configure-exact-channel"]
+  if (source.kind === "channel-permission-overwrite") {
+    return ["converge-exact-channel-target-overwrite"]
+  }
   if (source.kind === "profile") return ["configure-guild-profile"]
   if (source.kind === "settings") return ["configure-guild-settings"]
   if (source.kind === "community") {
@@ -347,10 +403,12 @@ function manifestSequence(
 ): GuildBlueprintManifestPreviewEntry[] {
   const sources = entrySources(request)
   return sources.map((source, sequenceIndex) => {
-    const references = source.kind === "structure"
-      ? structureReferences(request)
-      : []
-    if (source.kind !== "structure") {
+    const references = source.references === undefined
+      ? source.kind === "structure"
+        ? structureReferences(request)
+        : []
+      : [...source.references]
+    if (source.kind !== "structure" && source.references === undefined) {
       collectReferences(source.value, source.manifestPath, references)
     }
     return {
@@ -421,8 +479,10 @@ export function projectGuildBlueprintManifestPreview(
 function stepId(step: GuildBlueprintPlanStep): string {
   return step.kind === "auto-moderation"
     || step.kind === "channel-metadata"
+    || step.kind === "channel-permission-overwrite"
     || step.kind === "publication"
     || step.kind === "role-configuration"
+    || step.kind === "role-ordering"
     ? `${step.kind}:${step.index}`
     : step.kind
 }
@@ -431,8 +491,10 @@ function frontierId(frontier: GuildBlueprintFrontier | null): string | null {
   if (frontier === null) return null
   return frontier.kind === "auto-moderation"
     || frontier.kind === "channel-metadata"
+    || frontier.kind === "channel-permission-overwrite"
     || frontier.kind === "publication"
     || frontier.kind === "role-configuration"
+    || frontier.kind === "role-ordering"
     ? `${frontier.kind}:${frontier.index}`
     : frontier.kind
 }

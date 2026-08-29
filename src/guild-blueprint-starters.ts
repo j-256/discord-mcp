@@ -19,7 +19,7 @@ export const GUILD_BLUEPRINT_STARTER_VERSION = 1
 
 export const GUILD_BLUEPRINT_STARTER_PRINCIPLES = Object.freeze([
   "Keep the initial public layout compact and add channels only when activity justifies them",
-  "Create no private or read-only area until exact permission overwrites are separately reviewed",
+  "Create no private or read-only area until exact channel IDs are proven and permission overwrites are reviewed",
   "Create no Administrator role and assign no role through a starter",
   "Use symbolic keys only for requested additive resources; fresh scaffold planning may accept one exact-state logical-name match but blocks ambiguity or drift",
   "Treat every compiled name and topic as editable presentation data, not authority",
@@ -477,7 +477,7 @@ export function compileGuildBlueprintStarter(
       },
       postCompileHardening: [
         {
-          instruction: "After structure completion resolves exact channel IDs, separately review deny-SEND_MESSAGES overwrites before treating these ordinary text channels as read-only",
+          instruction: "After structure completion resolves exact channel IDs, add reviewed deny-SEND_MESSAGES entries to channelPermissionOverwrites and preview the retained manifest again, or use the standalone planner",
           symbolicChannelKeys: [...definition.informationChannelKeys],
           tool: "plan_channel_permission_overwrite",
         },
@@ -492,7 +492,7 @@ export function compileGuildBlueprintStarter(
       systemChannelKey: definition.systemChannelKey,
       textChannelCount: channelCounts.textChannelCount,
       warnings: [
-        "Information and announcement-style entries are ordinary public text channels until exact permission overwrites are separately reviewed",
+        "Information and announcement-style entries are ordinary public text channels until their exact IDs are proven and permission overwrites are reviewed",
         "Private staff areas are deliberately omitted so the starter cannot accidentally create a public staff channel",
         "The starter creates no role, grants no role permission, assigns no member, and never requests Administrator",
         "Fresh scaffold planning may accept one exact-state logical-name match as already current; ambiguous, mismatched, or drifting candidates block",
@@ -501,7 +501,7 @@ export function compileGuildBlueprintStarter(
         ...(input.guildName === undefined
           ? []
           : ["The optional guild name is a complete reviewed replacement of the live guild name"]),
-        "Community, Welcome Screen, onboarding, AutoMod, publications, and existing-role or channel convergence require separately authored reviewed intent",
+        "Role order, permission overwrites, Community, Welcome Screen, onboarding, AutoMod, publications, and existing-resource convergence require separately authored reviewed intent",
       ],
     },
     starter: record.starter,

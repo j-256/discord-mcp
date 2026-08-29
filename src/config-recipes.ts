@@ -253,7 +253,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "welcomeScreenAudit",
       "welcomeScreenChanges",
     ],
-    description: "Add exact-guild caller-retained blueprints for additive structure, guild profile, named settings, monotonic Community enablement and routing, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call.",
+    description: "Add exact-guild caller-retained blueprints for additive structure, guild profile, named settings, monotonic Community enablement and routing, complete Welcome Screen, complete onboarding, and receipt-bound staged AutoMod policy through one reviewed frontier per call. Role-order and permission-overwrite phases remain available only after their narrower standalone gates and exact scopes are added separately.",
     gateway: {
       evidenceConnection: "guild-layout",
       eventFeedPolicy: "unchanged",
@@ -286,6 +286,8 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "AutoMod timeout actions additionally require MODERATE_MEMBERS; the recipe does not grant that conditional permission to builders that do not use timeouts",
       "New AutoMod rules are created disabled, exact existing rules never use name-based adoption, and each disable, configure, or enable stage requires a separate fresh review",
       "AutoMod alert destinations remain unavailable until their exact Discord channel IDs are separately added to scopes.automodAlertChannelIds; the recipe never infers or broadens that content-bearing scope",
+      "Role-order convergence remains unavailable until roleOrderingAudit and roleOrderingChanges are enabled for the exact guild; this recipe never infers hierarchy authority from Manage Roles",
+      "Permission-overwrite convergence remains unavailable until permissionOverwrites is enabled and every exact channel is added to permissionOverwriteChannelIds; the recipe cannot infer future scaffold channel IDs",
       "Guild-settings, Community, and onboarding evidence activate a privacy-minimized GUILDS-only Gateway layout connection while the configured event-feed policy remains unchanged",
       "Static Components V2 and rich-embed publications remain unavailable until exact channels are added through the channel-publisher recipe",
     ],
