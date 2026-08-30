@@ -246,11 +246,12 @@ function smokeReport(): SmokeReport {
     serverName: "discord-mcp",
     serverVersion: "0.1.2",
     status: "ok",
-    toolCount: 12,
+    toolCount: 3,
     toolsets: ["connector", "messages"],
     toolSurface: "full",
     transport: "stdio",
     unexpectedGuildCount: 0,
+    writeCapableTools: ["delete_messages", "send_message"],
   }
 }
 
@@ -4201,6 +4202,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
   assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.2/)
+  assert.match(smokeOutput.value(), /Write-capable tools: delete_messages, send_message/)
+  assert.match(smokeOutput.value(), /Destructive subset: delete_messages/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\).*--verbose/)

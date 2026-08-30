@@ -397,6 +397,7 @@ export interface SmokeReport extends IdentitySummary {
   toolsets: McpToolsetName[]
   toolSurface: McpToolSurface
   transport: "in-memory" | "stdio"
+  writeCapableTools: string[]
 }
 
 type ConnectorStatus = Awaited<ReturnType<ConnectorService["getStatus"]>>
@@ -4574,6 +4575,12 @@ async function inspectSmokeClient(
   ))) {
     throw new Error("MCP smoke check found a tool without complete risk annotations")
   }
+  if (listed.tools.some((tool) => (
+    tool.annotations?.destructiveHint === true
+    && tool.annotations.readOnlyHint === true
+  ))) {
+    throw new Error("MCP smoke check found contradictory tool risk annotations")
+  }
   for (const name of [
     "delete_messages",
     "execute_bulk_guild_ban",
@@ -4868,6 +4875,10 @@ async function inspectSmokeClient(
     toolSurface: config.mcpToolSurface,
     transport,
     unexpectedGuildCount: unexpectedGuildIds.length,
+    writeCapableTools: listed.tools
+      .filter((tool) => tool.annotations?.readOnlyHint === false)
+      .map((tool) => tool.name)
+      .sort(),
   }
 }
 
