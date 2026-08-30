@@ -836,7 +836,7 @@ export function registerDiscordResources(
     {
       annotations: ASSISTANT_RESOURCE_ANNOTATIONS,
       cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
-      description: "Normalized channel metadata bounded by configured policy and Discord HTTP visibility for one exact guild ID, with an explicit inventory-completeness marker.",
+      description: "Full unpaginated normalized channel metadata bounded by configured policy and Discord HTTP visibility for one exact guild ID, with an explicit inventory-completeness marker.",
       mimeType: "application/json",
       title: "Discord guild channels",
     },

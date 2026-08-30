@@ -129,6 +129,7 @@ import {
   normalizeChannelCreationRequest,
   type ChannelCreationRequest,
 } from "./channel-administration-service.js"
+import { CHANNEL_INVENTORY_DETAILS } from "./channel-inventory-service.js"
 import {
   CHANNEL_METADATA_VIDEO_QUALITY_MODES,
   normalizeChannelMetadataChangeRequest,
@@ -222,6 +223,8 @@ import {
   APPLICATION_ACTIVITY_INSTANCE_LIMITS,
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
+  CHANNEL_INVENTORY_CURSOR_PATTERN,
+  CHANNEL_INVENTORY_LIMITS,
   CHANNEL_CREATION_KINDS,
   CHANNEL_DEFAULT_AUTO_ARCHIVE_DURATIONS,
   CONNECTOR_DESCRIPTION,
@@ -966,6 +969,19 @@ const guildPageInputSchema = z.strictObject({
 )
 const guildInputSchema = z.strictObject({
   guildId: snowflakeSchema,
+})
+const channelInventoryInputSchema = z.strictObject({
+  cursor: z.string()
+    .max(CHANNEL_INVENTORY_LIMITS.cursorCharacters)
+    .regex(CHANNEL_INVENTORY_CURSOR_PATTERN)
+    .optional()
+    .describe("Optional process-local nextCursor from the preceding page; omit detail to retain its projection"),
+  detail: z.enum(CHANNEL_INVENTORY_DETAILS)
+    .optional()
+    .describe("Projection for a first page; defaults to compact, while full returns every normalized field"),
+  guildId: snowflakeSchema,
+  limit: z.number().int().min(1).max(CHANNEL_INVENTORY_LIMITS.page)
+    .default(CHANNEL_INVENTORY_LIMITS.pageDefault),
 })
 const roleInputSchema = z.strictObject({
   guildId: snowflakeSchema,
@@ -21235,16 +21251,25 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     "list_channels",
     {
       annotations: READ_ONLY_EXTERNAL_ANNOTATIONS,
-      description: "List channels visible through configured policy and Discord's HTTP visibility for one permitted guild without reading message content. The result includes an explicit visibility-bounded inventory marker and never claims hidden-channel completeness.",
-      inputSchema: guildInputSchema,
+      description: "List one bounded page of channels visible through configured policy and Discord's HTTP visibility for one permitted guild without reading message content. The first page defaults to a compact directory projection; use nextCursor for the same fresh ordered inventory and get_channel for exact metadata. The result explicitly remains visibility-bounded and never claims hidden-channel completeness.",
+      inputSchema: channelInventoryInputSchema,
       outputSchema: toolOutputSchema,
       title: "List Discord channels",
     },
-    safeToolHandler("list_channels", async ({ guildId }: z.infer<typeof guildInputSchema>, context) => {
-      const result = await service.listChannels(guildId, {
+    safeToolHandler("list_channels", async (input: z.infer<typeof channelInventoryInputSchema>, context) => {
+      const result = await service.listChannels(input.guildId, {
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        ...(input.detail ? { detail: input.detail } : {}),
+        limit: input.limit,
         signal: context.mcpReq.signal,
       })
-      return toolResult(result, `Discord guild ${guildId} has ${result.channels.length} in-scope channels`)
+      const totalVisible = "page" in result
+        ? result.page.totalVisible
+        : result.channels.length
+      return toolResult(
+        result,
+        `Discord returned ${result.channels.length} of ${totalVisible} visible channels in guild ${input.guildId}`,
+      )
     }, secrets, observability),
   ))
 

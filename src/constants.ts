@@ -414,6 +414,14 @@ export const APPLICATION_ACTIVITY_INSTANCE_LIMITS = Object.freeze({
   responseFields: 16,
 })
 
+export const CHANNEL_INVENTORY_LIMITS = Object.freeze({
+  cursorCharacters: 512,
+  page: 100,
+  pageDefault: 50,
+})
+
+export const CHANNEL_INVENTORY_CURSOR_PATTERN = /^ccur_hmac_sha256_[A-Za-z0-9_-]+\.[a-f0-9]{64}$/
+
 export const PERMISSION_LIMITS = Object.freeze({
   auditActions: 5,
   auditRolePage: 100,
