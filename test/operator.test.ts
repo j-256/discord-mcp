@@ -6194,6 +6194,17 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolCount, Object.keys(MCP_TOOL_CATALOG).length + 1)
+  assert.equal(
+    report.readOnlyTools.length + report.writeCapableTools.length,
+    report.toolCount,
+  )
+  assert.equal(
+    report.destructiveTools.every((name) => report.writeCapableTools.includes(name)),
+    true,
+  )
+  assert.equal(report.writeCapableTools.includes("send_message"), true)
+  assert.equal(report.writeCapableTools.includes("signal_command_processing"), true)
+  assert.equal(report.writeCapableTools.includes("execute_channel_creation"), true)
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.promptNames, [
@@ -6594,6 +6605,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.deepEqual(report.toolsets, ["activity", "messages"])
   assert.equal(report.toolCount, 10)
   assert.deepEqual(report.destructiveTools, [])
+  assert.deepEqual(report.writeCapableTools, [])
   assert.deepEqual(report.promptNames, [
     "catch_up_discord_channels",
     "inspect_discord_coordination_task",
