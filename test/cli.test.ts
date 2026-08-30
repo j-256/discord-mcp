@@ -3284,6 +3284,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
   assert.match(textOutput.value(), /guild-starter/)
   assert.match(textOutput.value(), /guild-builder/)
   assert.match(textOutput.value(), /coordination-channel/)
+  assert.match(textOutput.value(), /message-channel/)
   assert.match(textOutput.value(), /channel-publisher/)
   assert.match(textOutput.value(), /direct-messenger/)
   assert.match(textOutput.value(), /incident-response/)

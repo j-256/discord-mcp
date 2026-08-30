@@ -50,6 +50,7 @@ export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-starter",
   "guild-builder",
   "coordination-channel",
+  "message-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
@@ -338,6 +339,40 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
   },
   {
     botPermissions: [
+      "VIEW_CHANNEL",
+      "SEND_MESSAGES",
+      "READ_MESSAGE_HISTORY",
+      "SEND_MESSAGES_IN_THREADS",
+    ],
+    capabilities: ["interactions"],
+    description: "Add safe plain-text sends, replies, connector-owned edits, and bounded long-operation acknowledgement for exact channels or their documented active-thread scope without enabling message-history, reaction, component, embed, or coordination tools.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "message-channel",
+    privilegedIntents: [],
+    risks: [
+      "Message sends and replies make visible Discord changes",
+      "Message edits replace exact connector-authored plain text and can remove omitted content",
+      "Typing acknowledgement briefly exposes that the connector is processing a command",
+    ],
+    scope: {
+      kind: "channel",
+      names: ["interactionChannelIds"],
+    },
+    toolsets: ["message-writes"],
+    warnings: [
+      "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the message",
+      "Discord exempts app-authored messages from Message Content restrictions, so exact connector-message readback needs no privileged intent",
+      "Sends and edits retain nonce-based duplicate prevention, shared anti-spam limits, exact authorship checks, and fresh readback",
+      "Typing acknowledgement is intended only for commands whose processing is expected to take several seconds and is never retried",
+      "A newly scaffolded message channel must be added after its exact Discord ID is known",
+    ],
+  },
+  {
+    botPermissions: [
       "ADD_REACTIONS",
       "VIEW_CHANNEL",
       "SEND_MESSAGES",
@@ -365,7 +400,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       kind: "channel",
       names: ["embedMessageChannelIds", "interactionChannelIds"],
     },
-    toolsets: ["embed-messages", "interactions", "messages"],
+    toolsets: ["embed-messages", "interactions", "message-writes", "messages"],
     warnings: [
       "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the reviewed message",
       "Outbound link buttons remain disabled until their exact canonical HTTPS origins are separately added to scopes.componentLinkOrigins; the recipe never infers or broadens destination trust",

@@ -267,6 +267,27 @@ The host should satisfy this request with the read-only `list_channels` tool; yo
 
 After the host is working, remove a temporary terminal secret with `unset DISCORD_BOT_TOKEN` in Bash or `Remove-Item Env:DISCORD_BOT_TOKEN` in PowerShell. Keep the secret in the host's protected facility or external launcher for later starts.
 
+### Optional: enable the first safe write
+
+Use the narrow `message-channel` recipe when the bot should only send plain text, reply, edit its own plain-text messages, or briefly acknowledge a long-running command in one exact channel. The recipe does not enable message-history reads, reactions, Components V2, embeds, coordination, a Gateway connection, or a privileged intent:
+
+```sh
+npx --yes @j-256/discord-mcp@0.1.2 recipe plan message-channel ./discord-mcp.json \
+  --channel-id YOUR_CHANNEL_ID
+npx --yes @j-256/discord-mcp@0.1.2 recipe apply message-channel ./discord-mcp.json \
+  --channel-id YOUR_CHANNEL_ID \
+  --plan-digest SHA256_FROM_THE_PLAN \
+  --confirm message-channel
+```
+
+The plan and confirmation review one durable policy expansion and never contact Discord. After applying, reload the MCP server and ask the host naturally:
+
+```text
+Send this exact plain-text message to Discord channel YOUR_CHANNEL_ID: Deployment finished successfully. Do not mention anyone.
+```
+
+The host can discover and call `send_message` with a fresh idempotency key. The tool requires normal MCP host approval for a visible write, then enforces the exact channel allowlist, suppresses mentions unless separately configured, uses Discord nonce enforcement plus a local replay ledger, and verifies the returned message. It does not require a per-message plan or signed interactive confirmation. `edit_own_message` has the same approval class and additionally proves exact connector authorship. Destructive deletion and administrative changes retain their separate plan, signed confirmation, freshness, and recovery gates.
+
 ### Optional: catch up across selected channels
 
 The `channel-reader` preset exposes `catch_up_messages` through the `messages` toolset. Enable the Message Content intent identified by the preset, retain `View Channel` and `Read Message History` only for the intended exact channels, then select the `catch_up_discord_channels` prompt in a compatible host with one strict request object:
@@ -350,6 +371,7 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 - Switch to `channel-reader` only when exact-channel message access is required
 - Use `read_message_attachment` only after retaining the exact channel, message, and attachment IDs from a current permitted read
 - Inspect additive workflow recipes with `recipe list` and `recipe show NAME --json`
+- Prefer `message-channel` for a first plain-text write; use `channel-publisher` only for its broader message-read, reaction, component, or embed surface
 - Prefer `guild-starter` for a bundled public layout; use `guild-builder` only when its broader Community, onboarding, Welcome Screen, AutoMod, and requested `Manage Roles` authority is intended
 - Preview the complete retained guild-blueprint manifest locally before live planning, including bottom-up role- and channel-order adjacencies and exact-channel permission-overwrite targets, then distinguish freshly assessed entries from deferred intent and execute only the one named frontier
 - Plan and review a recipe before applying it to the active policy

@@ -43,12 +43,18 @@ const EXPECTED_CONFIG_RECIPES = [
   "guild-starter",
   "guild-builder",
   "coordination-channel",
+  "message-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
 ]
 const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
   "coordination-channel": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "message-channel": Object.freeze({
     evidenceConnection: "none",
     eventFeedPolicy: "unchanged",
     intents: Object.freeze([]),
@@ -396,6 +402,7 @@ assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
   "guild-starter",
   "guild-builder",
   "coordination-channel",
+  "message-channel",
   "channel-publisher",
   "direct-messenger",
   "incident-response",
@@ -403,6 +410,7 @@ assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
 assert.equal(connector.getConfigRecipe("guild-starter").writeCapable, true)
 assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
 assert.equal(connector.getConfigRecipe("coordination-channel").writeCapable, true)
+assert.equal(connector.getConfigRecipe("message-channel").writeCapable, true)
 assert.equal(connector.getConfigRecipe("direct-messenger").writeCapable, true)
 assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
 assert.equal(typeof connector.planConfigRecipe, "function")

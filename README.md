@@ -187,7 +187,7 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
 
 ### Expand the policy through review
 
-Keep first setup read-only, then plan one additive recipe. `guild-starter` adds reviewed public layouts with nonprivileged `GUILDS` evidence; `guild-builder` adds the broader blueprint lifecycle. `coordination-channel` adds authority-free directed notes in exact channels without a privileged intent or unrelated message, reaction, component, or embed tools. `channel-publisher` adds ordinary text, reactions, Components V2, and remote-free embeds; authenticated request Buttons additionally require the exact native Interaction policy and managed command. `incident-response` adds reviewed time-bounded lockdown. [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds exact-user reads and reviewed delivery, editing, and deletion. Each recipe reports permissions, intents, scopes, risks, and exclusions before changing policy.
+Keep first setup read-only, then plan one additive recipe. `message-channel` is the narrowest first write: plain sends, replies, connector-owned edits, and typing acknowledgement in exact channels, with no privileged intent or message-history, reaction, component, or embed tools. Actual messages need ordinary host write approval, not a plan and signed confirmation. `coordination-channel` adds directed notes, `channel-publisher` adds the broader read, reaction, Components V2, and remote-free embed surface, `guild-starter` adds reviewed public layouts with nonprivileged `GUILDS` evidence, and `guild-builder` adds the broader blueprint lifecycle. `incident-response` adds reviewed lockdown, while [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds reviewed exact-user private messaging. Every recipe reports permissions, intents, scopes, risks, and exclusions before policy changes.
 
 ```sh
 npx --yes @j-256/discord-mcp@0.1.2 recipe list
@@ -197,12 +197,12 @@ npx --yes @j-256/discord-mcp@0.1.2 recipe apply guild-starter ./discord-mcp.json
   --guild-id YOUR_GUILD_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm guild-starter
-npx --yes @j-256/discord-mcp@0.1.2 recipe plan coordination-channel ./discord-mcp.json \
-  --channel-id YOUR_COORDINATION_CHANNEL_ID
-npx --yes @j-256/discord-mcp@0.1.2 recipe apply coordination-channel ./discord-mcp.json \
-  --channel-id YOUR_COORDINATION_CHANNEL_ID \
+npx --yes @j-256/discord-mcp@0.1.2 recipe plan message-channel ./discord-mcp.json \
+  --channel-id YOUR_MESSAGE_CHANNEL_ID
+npx --yes @j-256/discord-mcp@0.1.2 recipe apply message-channel ./discord-mcp.json \
+  --channel-id YOUR_MESSAGE_CHANNEL_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
-  --confirm coordination-channel
+  --confirm message-channel
 npx --yes @j-256/discord-mcp@0.1.2 recipe plan direct-messenger ./discord-mcp.json \
   --user-id EXPECTED_RECIPIENT_USER_ID
 npx --yes @j-256/discord-mcp@0.1.2 recipe apply direct-messenger ./discord-mcp.json \

@@ -118,6 +118,7 @@ export const MCP_TOOLSET_NAMES = [
   "member-verification",
   "members",
   "message-forwarding",
+  "message-writes",
   "messages",
   "moderation",
   "native-interactions",

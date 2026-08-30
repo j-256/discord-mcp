@@ -72,6 +72,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "guild-starter",
     "guild-builder",
     "coordination-channel",
+    "message-channel",
     "channel-publisher",
     "direct-messenger",
     "incident-response",
@@ -214,10 +215,44 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     true,
   )
 
+  const messageChannel = getConfigRecipe("message-channel")
+  assert.deepEqual(messageChannel.toolsets, ["message-writes"])
+  assert.deepEqual(messageChannel.toolNames, [
+    "discover_discord_tools",
+    "edit_own_message",
+    "send_message",
+    "signal_command_processing",
+  ])
+  assert.deepEqual(messageChannel.capabilities, ["interactions"])
+  assert.deepEqual(messageChannel.requirements.scope.targets, [
+    "$.scopes.interactionChannelIds",
+  ])
+  assert.deepEqual(messageChannel.requirements.botPermissions, [
+    "VIEW_CHANNEL",
+    "SEND_MESSAGES",
+    "READ_MESSAGE_HISTORY",
+    "SEND_MESSAGES_IN_THREADS",
+  ])
+  assert.deepEqual(messageChannel.requirements.privilegedIntents, [])
+  assert.deepEqual(messageChannel.requirements.gateway, {
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: [],
+  })
+  assert.equal(messageChannel.toolNames.includes("add_reaction"), false)
+  assert.equal(messageChannel.toolNames.includes("get_message"), false)
+  assert.equal(messageChannel.toolNames.includes("execute_component_message"), false)
+  assert.equal(messageChannel.toolNames.includes("execute_embed_message"), false)
+  assert.equal(
+    messageChannel.warnings.some((warning) => warning.includes("app-authored messages")),
+    true,
+  )
+
   const channelPublisher = getConfigRecipe("channel-publisher")
   assert.deepEqual(channelPublisher.toolsets, [
     "embed-messages",
     "interactions",
+    "message-writes",
     "messages",
   ])
   assert.equal(channelPublisher.toolNames.includes("send_message"), true)
@@ -342,6 +377,16 @@ test("configuration recipe requests normalize exact bounded scope", () => {
     name: "coordination-channel",
   }), {
     name: "coordination-channel",
+    scope: {
+      ids: [CHANNEL_ID],
+      kind: "channel",
+    },
+  })
+  assert.deepEqual(normalizeConfigRecipeRequest({
+    channelIds: [CHANNEL_ID],
+    name: "message-channel",
+  }), {
+    name: "message-channel",
     scope: {
       ids: [CHANNEL_ID],
       kind: "channel",
@@ -537,6 +582,7 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
     "connector",
     "embed-messages",
     "interactions",
+    "message-writes",
     "messages",
   ])
   const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
@@ -548,6 +594,40 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
     plan.warnings.some((warning) => warning.includes("offline planning cannot prove")),
     true,
   )
+})
+
+test("message-channel adds only exact-channel plain-message writes", async (context) => {
+  const file = await configFile(context)
+  const plan = planConfigRecipe({
+    channelIds: [CHANNEL_ID],
+    file,
+    name: "message-channel",
+  })
+
+  assert.equal(plan.status, "planned")
+  assert.deepEqual(plan.proposedDocument.tools.toolsets, [
+    "connector",
+    "message-writes",
+  ])
+  assert.deepEqual(plan.proposedDocument.capabilities, { interactions: true })
+  assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.equal("embedMessageChannelIds" in plan.proposedDocument.scopes, false)
+  assert.equal(
+    plan.recipe.requirements.botPermissions.includes("ADD_REACTIONS"),
+    false,
+  )
+  assert.equal(
+    plan.recipe.requirements.botPermissions.includes("EMBED_LINKS"),
+    false,
+  )
+  assert.deepEqual(plan.recipe.requirements.privilegedIntents, [])
+
+  const runtime = loadConnectorConfigDocument(plan.proposedDocument, {
+    [TOKEN_ALIAS]: TOKEN,
+  })
+  assert.equal(runtime.allowInteractions, true)
+  assert.equal(runtime.allowGateway, false)
+  assert.deepEqual([...runtime.interactionChannelIds], [CHANNEL_ID])
 })
 
 test("coordination-channel adds only exact-channel directed routing policy", async (context) => {
