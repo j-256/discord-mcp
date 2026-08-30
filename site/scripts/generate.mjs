@@ -315,6 +315,11 @@ const FULL_DOCUMENTS = Object.freeze([
     source: "docs/releasing.md",
   },
   {
+    description: "Provision, deploy, rotate, cut over, and recover the verified documentation Worker",
+    route: "contribute/documentation-portal",
+    source: "docs/documentation-portal.md",
+  },
+  {
     description: "Development setup, capability design expectations, verification, and pull requests",
     route: "contribute/contributing",
     source: "CONTRIBUTING.md",
@@ -821,6 +826,7 @@ async function main() {
     "docs/reference.md",
     "SECURITY.md",
     "SUPPORT.md",
+    "docs/documentation-portal.md",
     "docs/releasing.md",
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md",

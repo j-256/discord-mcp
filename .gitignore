@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 site/.astro/
+site/.wrangler/
 site/dist/
 site/public/generated/
 site/public/llms-full.txt
@@ -19,6 +20,7 @@ site/src/content/docs/security/details/
 site/src/content/docs/security/index.md
 site/src/content/docs/contribute/code-of-conduct.md
 site/src/content/docs/contribute/contributing.md
+site/src/content/docs/contribute/documentation-portal.md
 .env
 .env.*
 *.log
