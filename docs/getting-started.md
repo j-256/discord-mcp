@@ -274,13 +274,9 @@ Use the narrow `message-channel` recipe when the bot should only send plain text
 ```sh
 npx --yes @j-256/discord-mcp@0.1.2 recipe plan message-channel ./discord-mcp.json \
   --channel-id YOUR_CHANNEL_ID
-npx --yes @j-256/discord-mcp@0.1.2 recipe apply message-channel ./discord-mcp.json \
-  --channel-id YOUR_CHANNEL_ID \
-  --plan-digest SHA256_FROM_THE_PLAN \
-  --confirm message-channel
 ```
 
-The plan and confirmation review one durable policy expansion and never contact Discord. After applying, reload the MCP server and ask the host naturally:
+The plan prints one `Exact reviewed apply command` as a structured `command` and `args` array. Execute that exact argv with the installed `discord-mcp` binary, or append its args to the same exact-version `npx` launcher above. It already carries the canonical path, normalized scope, fresh digest, and confirmation, so no approval field needs to be copied or reconstructed separately. The plan and application review one durable policy expansion and never contact Discord. After applying, reload the MCP server and ask the host naturally:
 
 ```text
 Send this exact plain-text message to Discord channel YOUR_CHANNEL_ID: Deployment finished successfully. Do not mention anyone.

@@ -3337,6 +3337,23 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
   assert.equal(plan.execution.secretValuesRead, false)
   assert.equal(plan.execution.discordContacted, false)
   assert.match(textOutput.value(), /Complete proposed non-secret configuration/)
+  assert.match(textOutput.value(), /Exact reviewed apply command:/)
+  assert.match(textOutput.value(), new RegExp(plan.planDigest))
+  assert.deepEqual(plan.applyCommand, {
+    args: [
+      "recipe",
+      "apply",
+      "channel-publisher",
+      file,
+      "--channel-id",
+      CHANNEL_ID,
+      "--plan-digest",
+      plan.planDigest,
+      "--confirm",
+      "channel-publisher",
+    ],
+    command: "discord-mcp",
+  })
   assert.match(textOutput.value(), /Configuration written: no/)
   assert.match(textOutput.value(), /No secret value was read and Discord was not contacted/)
   assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))

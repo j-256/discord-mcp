@@ -2721,6 +2721,15 @@ function renderRecipePlan(
     `  ${JSON.stringify({ args: next.args, command: next.command })}`
   ))
   const applied = report.action === "apply" ? report : undefined
+  const applyHandoff = report.action === "plan"
+    ? [
+        "Exact reviewed apply command:",
+        `  ${JSON.stringify({
+          args: report.applyCommand.args,
+          command: report.applyCommand.command,
+        })}`,
+      ]
+    : []
   return [
     `Discord MCP configuration recipe ${report.action}: ${report.recipe.name} (${report.status})`,
     `File: ${report.file}`,
@@ -2730,6 +2739,7 @@ function renderRecipePlan(
     `Recipe contract digest: ${report.recipeContractDigest}`,
     `Plan digest: ${report.planDigest}`,
     `Required confirmation: ${report.confirmation.requiredValue}`,
+    ...applyHandoff,
     `Configuration written: ${report.execution.configurationWritten ? "yes" : "no"}`,
     ...(applied?.backupFile
       ? [`Recoverable prior version: ${applied.backupFile}`]
