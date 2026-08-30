@@ -73,6 +73,7 @@ export interface McpToolStaticRequirements {
     policyPaths: readonly string[]
     recipeNames: readonly (
       | "coordination-channel"
+      | "message-channel"
       | "channel-publisher"
       | "direct-messenger"
       | "guild-builder"
@@ -509,6 +510,17 @@ const MCP_TOOLSET_REQUIREMENTS = Object.freeze({
     "$.scopes.messageForwardTargetChannelIds",
   ], ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY", "SEND_MESSAGES"], {
     intents: [intent("MESSAGE_CONTENT", "required")],
+  }),
+  "message-writes": channel([
+    "$.capabilities.interactions",
+    "$.scopes.interactionChannelIds",
+    "$.scopes.mentionUserIds",
+  ], ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"], {
+    conditions: [
+      condition("direct-channel", ["SEND_MESSAGES"]),
+      condition("thread-channel", ["SEND_MESSAGES_IN_THREADS"]),
+    ],
+    permissionMode: "conditional",
   }),
   messages: channel([
     CHANNEL_READ_SCOPE,
@@ -969,7 +981,6 @@ function exactRequirement(
         condition("thread-channel", ["SEND_MESSAGES_IN_THREADS"]),
         condition("edit-readback", ["READ_MESSAGE_HISTORY"]),
       ],
-      intents: [intent("MESSAGE_CONTENT", "conditional")],
       permissionMode: "conditional",
     })
   }
@@ -1055,6 +1066,7 @@ function curatedSetup(toolset: McpToolsetName, toolName: McpToolName) {
     "guild-blueprints": "guild-builder",
     "guild-incidents": "incident-response",
     interactions: "channel-publisher",
+    "message-writes": "message-channel",
     messages: "channel-publisher",
   } as const satisfies Partial<Record<
     McpToolsetName,

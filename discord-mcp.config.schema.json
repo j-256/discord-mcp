@@ -1829,7 +1829,7 @@
         },
         "toolsets": {
           "minItems": 1,
-          "maxItems": 71,
+          "maxItems": 72,
           "type": "array",
           "items": {
             "type": "string",
@@ -1881,6 +1881,7 @@
               "member-verification",
               "members",
               "message-forwarding",
+              "message-writes",
               "messages",
               "moderation",
               "native-interactions",

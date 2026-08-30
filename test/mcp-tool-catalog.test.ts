@@ -455,7 +455,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     companions: { execute: [], plan: [], verify: [] },
     discordRequest: "write",
     readiness: "target-specific",
-    requirements: mcpToolStaticRequirements("send_message", "interactions"),
+    requirements: mcpToolStaticRequirements("send_message", "message-writes"),
     stage: "guarded-write",
   })
 })
@@ -463,6 +463,12 @@ test("tool access manifest classifies every tool and binds reviewed companions",
 test("tool readiness distinguishes static setup, credentials, and live proof", () => {
   const manifest = createMcpToolAccessManifest()
   const byName = new Map(manifest.entries.map((entry) => [entry.name, entry]))
+
+  assert.deepEqual(
+    byName.get("send_message")?.requirements.configuration.recipeNames,
+    ["message-channel"],
+  )
+  assert.deepEqual(byName.get("send_message")?.requirements.discord.intents, [])
 
   assert.deepEqual(byName.get("get_gateway_status")?.requirements.discord, {
     conditions: [],

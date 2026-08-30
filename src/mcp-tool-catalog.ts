@@ -370,7 +370,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   },
   edit_own_message: {
     keywords: ["edit", "message", "own", "update"],
-    toolset: "interactions",
+    toolset: "message-writes",
   },
   edit_webhook_message: {
     keywords: ["credential", "edit", "incoming", "message", "update", "webhook"],
@@ -1427,7 +1427,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   },
   send_message: {
     keywords: ["create", "message", "reply", "send", "write"],
-    toolset: "interactions",
+    toolset: "message-writes",
   },
   send_coordination_note: {
     keywords: ["address", "agent", "coordination", "directed", "handoff", "note", "route", "send", "task"],
@@ -1435,7 +1435,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
   },
   signal_command_processing: {
     keywords: ["command", "indicator", "processing", "response", "signal", "typing", "working"],
-    toolset: "interactions",
+    toolset: "message-writes",
   },
   send_webhook_message: {
     keywords: ["credential", "incoming", "message", "send", "webhook", "write"],

@@ -16902,6 +16902,47 @@ test("progressive coordination discovery reveals only its exact read contracts",
   assert.equal(Object.values(calls).every((count) => count === 0), true)
 })
 
+test("progressive plain-message discovery excludes broader interaction workflows", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    configOverrides: {
+      tools: {
+        surface: "progressive",
+        toolsets: ["message-writes"],
+      },
+    },
+  })
+
+  const send = structuredContent(await client.callTool({
+    arguments: { detail: "full", limit: 1, query: "send one plain text message" },
+    name: "discover_discord_tools",
+  }))
+  assert.equal((send.matches as Array<{ name: string }>)[0]?.name, "send_message")
+  assert.deepEqual(send.newlyEnabledToolNames, ["send_message"])
+
+  const edit = structuredContent(await client.callTool({
+    arguments: { detail: "full", limit: 1, query: "edit one exact bot owned message" },
+    name: "discover_discord_tools",
+  }))
+  assert.equal((edit.matches as Array<{ name: string }>)[0]?.name, "edit_own_message")
+  assert.deepEqual(edit.newlyEnabledToolNames, ["edit_own_message"])
+
+  for (const query of ["execute_component_message", "add_reaction", "get_message"]) {
+    const unavailable = structuredContent(await client.callTool({
+      arguments: { detail: "full", limit: 5, query },
+      name: "discover_discord_tools",
+    }))
+    assert.equal(
+      (unavailable.matches as Array<{ name: string }>).some(({ name }) => name === query),
+      false,
+    )
+  }
+  assert.deepEqual(
+    new Set((await client.listTools()).tools.map(({ name }) => name)),
+    new Set(["discover_discord_tools", "edit_own_message", "send_message"]),
+  )
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
 test("progressive discovery reveals the complete token-private Interaction response lifecycle", async (context) => {
   const { calls, client } = await connectedFixture(context, {
     configOverrides: PROGRESSIVE_TOOL_SURFACE_CONFIG,
