@@ -455,11 +455,6 @@ const DOCTOR_IDENTITY_CHECK_IDS = new Set<string>([
   DOCTOR_CHECK_IDS.botIdentity,
 ])
 
-const DOCTOR_SCOPE_CHECK_IDS = new Set<string>([
-  DOCTOR_CHECK_IDS.channelScope,
-  DOCTOR_CHECK_IDS.guildScope,
-])
-
 const DOCTOR_INTENT_CHECK_IDS = new Set<string>([
   DOCTOR_CHECK_IDS.guildMembersIntent,
   DOCTOR_CHECK_IDS.messageContentIntent,
@@ -501,9 +496,15 @@ function doctorGuidance(
       reference: DOCTOR_REFERENCES.operatorCli,
     }
   }
-  if (DOCTOR_SCOPE_CHECK_IDS.has(id)) {
+  if (id === DOCTOR_CHECK_IDS.guildScope) {
     return {
-      action: "Create a least-privilege profile with an exact guild and, when message access is needed, channel scope.",
+      action: "Set an exact nonempty readScope.guildIds boundary in the selected policy, then rerun doctor.",
+      reference: DOCTOR_REFERENCES.operatorCli,
+    }
+  }
+  if (id === DOCTOR_CHECK_IDS.channelScope) {
+    return {
+      action: "Add exact IDs to readScope.channelIds when access should be narrower, or retain an empty list only when every Discord-visible channel inside the configured guild boundary is intended.",
       reference: DOCTOR_REFERENCES.operatorCli,
     }
   }
