@@ -4,7 +4,7 @@
   "description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
   "license": "AGPL-3.0-only",
   "author": "j-256",
-  "homepage": "https://j-256.github.io/guildcontrol",
+  "homepage": "https://guildcontrol.lasers.app",
   "bugs": {
     "url": "https://github.com/j-256/guildcontrol/issues"
   },

@@ -4,9 +4,7 @@ import { defineConfig } from "astro/config"
 
 import accessibleTables from "./plugins/accessible-tables.mjs"
 
-const SITE_ORIGIN = "https://j-256.github.io"
-const SITE_BASE = "/guildcontrol"
-const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`
+const SITE_ORIGIN = "https://guildcontrol.lasers.app"
 const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 
 const referenceGroups = [
@@ -20,7 +18,6 @@ const referenceGroups = [
 ]
 
 export default defineConfig({
-  base: SITE_BASE,
   markdown: {
     processor: unified({ rehypePlugins: [accessibleTables], smartypants: false }),
   },
@@ -111,7 +108,7 @@ export default defineConfig({
             {
               attrs: { rel: "noopener noreferrer", target: "_blank" },
               label: "Exact contract explorer",
-              link: `${SITE_URL}/generated/contract-explorer.html`,
+              link: `${SITE_ORIGIN}/generated/contract-explorer.html`,
             },
             "security",
           ],

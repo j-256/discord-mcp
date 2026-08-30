@@ -9,7 +9,7 @@ import {
   sha256,
 } from "./release-lib.mjs"
 
-export const DOCUMENTATION_URL = "https://j-256.github.io/guildcontrol"
+export const DOCUMENTATION_URL = "https://guildcontrol.lasers.app"
 export const DOCUMENTATION_MANIFEST_FORMAT = "guildcontrol.docs-manifest.v1"
 export const DOCUMENTATION_MANIFEST_PATH = "generated/docs-manifest.json"
 export const DOCUMENTATION_CONTENT_PATHS = Object.freeze([

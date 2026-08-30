@@ -6,7 +6,7 @@ GuildControl MCP is a local stdio Model Context Protocol server for safe Discord
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://j-256.github.io/guildcontrol/) | [Verified product tour](https://j-256.github.io/guildcontrol/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
+[Documentation portal](https://guildcontrol.lasers.app/) | [Verified product tour](https://guildcontrol.lasers.app/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
 
 GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
 
@@ -314,7 +314,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 ## Documentation
 
-- [Verified documentation portal](https://j-256.github.io/guildcontrol/)
+- [Verified documentation portal](https://guildcontrol.lasers.app/)
 - [First verified read and initialization recovery](docs/getting-started.md)
 - [Release-exact migration from another Discord MCP](docs/migration.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)

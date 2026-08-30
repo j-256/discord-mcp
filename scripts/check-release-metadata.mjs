@@ -490,8 +490,8 @@ async function checkDocumentationPortal() {
     invariant(documentationSources.includes(required), `documentation source frontier lacks ${required}`)
   }
   invariant(DOCUMENTATION_MANIFEST_FORMAT === "guildcontrol.docs-manifest.v1", "documentation manifest format changed")
-  invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://j-256.github.io"'), "documentation origin is invalid")
-  invariant(astroConfiguration.includes('const SITE_BASE = "/guildcontrol"'), "documentation base path is invalid")
+  invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://guildcontrol.lasers.app"'), "documentation origin is invalid")
+  invariant(!astroConfiguration.includes("\n  base:"), "documentation must publish at the canonical origin root")
   for (const binding of [
     "DOCUMENTATION_MANIFEST_FORMAT",
     "documentationSourcePaths",
@@ -606,7 +606,7 @@ async function checkDocumentation(packageJson) {
   }
   for (const required of [
     "[Complete reference](docs/reference.md)",
-    "[Verified product tour](https://j-256.github.io/guildcontrol/generated/contract-explorer.html#tour)",
+    `[Verified product tour](${DOCUMENTATION_URL}/generated/contract-explorer.html#tour)`,
     "--preset server-observer",
     "preset install server-observer",
     "--config ./guildcontrol.json",
@@ -1418,7 +1418,7 @@ async function checkAutomation() {
     "uses: actions/deploy-pages@",
     "artifact_name: github-pages",
     "name: Verify exact public documentation",
-    'test "${DEPLOYED_PAGE_URL%/}" = "https://j-256.github.io/guildcontrol"',
+    'test "${DEPLOYED_PAGE_URL%/}" = "https://guildcontrol.lasers.app"',
     "--manifest documentation/generated/docs-manifest.json",
     "--attempts 6",
     "--delay-ms 10000",
