@@ -12,9 +12,8 @@ const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const SITE_DIRECTORY = resolve(TEST_DIRECTORY, "..")
 const REPOSITORY_ROOT = resolve(SITE_DIRECTORY, "..")
 const DIST_DIRECTORY = join(SITE_DIRECTORY, "dist")
-const SITE_ORIGIN = "https://j-256.github.io"
-const SITE_BASE = "/guildcontrol"
-const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`
+const SITE_ORIGIN = "https://guildcontrol.lasers.app"
+const SITE_URL = SITE_ORIGIN
 const REQUIRED_CSP = "default-src 'none'"
 const STABLE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u
 const SAFE_LINK_PROTOCOLS = new Set(["data:", "http:", "https:", "mailto:"])
@@ -66,8 +65,8 @@ function htmlAttributes(markup) {
 
 function localFileFor(url) {
   const decodedPath = decodeURIComponent(url.pathname)
-  assert.ok(decodedPath === SITE_BASE || decodedPath.startsWith(`${SITE_BASE}/`), `Local URL escapes site base: ${url.href}`)
-  const path = decodedPath.slice(SITE_BASE.length).replace(/^\//u, "")
+  assert.equal(url.origin, SITE_ORIGIN, `Local URL escapes site origin: ${url.href}`)
+  const path = decodedPath.replace(/^\//u, "")
   if (path === "") return join(DIST_DIRECTORY, "index.html")
   if (path.endsWith("/")) return join(DIST_DIRECTORY, path, "index.html")
   if (extname(path) === "") return join(DIST_DIRECTORY, path, "index.html")

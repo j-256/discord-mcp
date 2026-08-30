@@ -9,7 +9,7 @@
     "id": "1334461127"
   },
   "version": "0.1.2",
-  "websiteUrl": "https://j-256.github.io/guildcontrol",
+  "websiteUrl": "https://guildcontrol.lasers.app",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/j-256/guildcontrol/v0.1.2/assets/guildcontrol-icon.png",
@@ -124,7 +124,7 @@
     {
       "registryType": "mcpb",
       "identifier": "https://github.com/j-256/guildcontrol/releases/download/v0.1.2/guildcontrol-0.1.2.mcpb",
-      "fileSha256": "42d594c75fe35cfc716740bb0d4221cf7ef41b460e0bf7bcfb925e7037eb323a",
+      "fileSha256": "9e619fdd71ebe5a73f341f7234458bef0fb3a7f2a8b0c37ab017f81832ffe7ab",
       "transport": {
         "type": "stdio"
       }
