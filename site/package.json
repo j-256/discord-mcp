@@ -13,7 +13,9 @@
     "browser:install:ci": "playwright install --with-deps chromium",
     "build": "npm run generate && astro build",
     "check": "npm run generate && astro check",
-    "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 esbuild@0.28.1 workerd@1.20260825.1 --ignore-scripts=false",
     "dev": "npm run generate && astro dev",
     "generate": "node scripts/generate.mjs",
     "preview": "astro preview",
@@ -30,11 +32,14 @@
     "@axe-core/playwright": "4.13.0",
     "astro": "7.2.9",
     "playwright": "1.62.1",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "wrangler": "4.126.0"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
     "fsevents@2.3.2": false,
-    "fsevents@2.3.3": false
+    "fsevents@2.3.3": false,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260825.1": true
   }
 }

@@ -118,11 +118,16 @@ test("documentation dependencies and install scripts are exact", async () => {
     "esbuild@0.28.2",
     "fsevents@2.3.2",
     "vite/node_modules/fsevents@2.3.3",
+    "workerd@1.20260825.1",
+    "wrangler/node_modules/esbuild@0.28.1",
+    "wrangler/node_modules/fsevents@2.3.3",
   ])
   assert.deepEqual(packageJson.allowScripts, {
     "esbuild@0.28.2": true,
     "fsevents@2.3.2": false,
     "fsevents@2.3.3": false,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260825.1": true,
   })
   const rootPackage = JSON.parse(await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"))
   assert.ok(!rootPackage.files.includes("site"))
@@ -138,6 +143,7 @@ test("built documentation has complete local navigation and no remote runtime as
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "contract-explorer.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "contract-evidence.json")))
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "guildcontrol.config.schema.json")))
+  assert.ok(await exists(join(DIST_DIRECTORY, "contribute", "documentation-portal", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "start", "migration", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms.txt")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms-full.txt")))

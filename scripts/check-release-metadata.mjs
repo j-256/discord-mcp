@@ -108,13 +108,16 @@ const EXPECTED_SITE_DEV_DEPENDENCIES = {
   astro: "7.2.9",
   playwright: "1.62.1",
   typescript: "6.0.3",
+  wrangler: "4.126.0",
 }
 const EXPECTED_SITE_SCRIPTS = {
   "browser:install": "playwright install chromium",
   "browser:install:ci": "playwright install --with-deps chromium",
   build: "npm run generate && astro build",
   check: "npm run generate && astro check",
-  "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 --ignore-scripts=false",
+  deploy: "wrangler deploy",
+  "deploy:dry-run": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+  "deps:locked": "npm ci --ignore-scripts && npm rebuild esbuild@0.28.2 esbuild@0.28.1 workerd@1.20260825.1 --ignore-scripts=false",
   dev: "npm run generate && astro dev",
   generate: "node scripts/generate.mjs",
   preview: "astro preview",
@@ -126,6 +129,9 @@ const EXPECTED_SITE_SCRIPTS = {
 }
 const EXPECTED_SITE_PRERELEASE_DEPENDENCIES = {
   "node_modules/get-tsconfig": "5.0.0-beta.4",
+  "node_modules/miniflare": "5.20260825.0-alpha",
+  "node_modules/unenv": "2.0.0-rc.24",
+  "node_modules/youch": "4.1.0-beta.10",
 }
 const LEGACY_IDENTITY_EXCEPTIONS = new Set([
   "docs/comparison.md",
@@ -261,12 +267,9 @@ const OCI_RUNTIME_ARGUMENTS = Object.freeze([
 const EXPECTED_ACTION_PINS = new Map([
   ["actions/attest", "1e69f48acb82d1966a394da916b4c1698aa569d6"],
   ["actions/checkout", "3d3c42e5aac5ba805825da76410c181273ba90b1"],
-  ["actions/configure-pages", "45bfe0192ca1faeb007ade9deae92b16b8254a0d"],
-  ["actions/deploy-pages", "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"],
   ["actions/download-artifact", "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"],
   ["actions/setup-node", "820762786026740c76f36085b0efc47a31fe5020"],
   ["actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"],
-  ["actions/upload-pages-artifact", "fc324d3547104276b827a68afc52ff2a11cc49c9"],
   ["docker/build-push-action", "53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"],
   ["docker/login-action", "dbcb813823bdd20940b903addbd779551569679f"],
   ["docker/setup-buildx-action", "37fe631027851001ddb9b187196cc803df7f5f0e"],
@@ -380,6 +383,7 @@ async function checkDocumentationPortal() {
   const packageJson = await readJson(join(REPOSITORY_ROOT, "site/package.json"))
   const lock = await readJson(join(REPOSITORY_ROOT, "site/package-lock.json"))
   const astroConfiguration = await readFile(join(REPOSITORY_ROOT, "site/astro.config.mjs"), "utf8")
+  const wranglerConfiguration = await readJson(join(REPOSITORY_ROOT, "site/wrangler.jsonc"))
   const generator = await readFile(join(REPOSITORY_ROOT, "site/scripts/generate.mjs"), "utf8")
   const publicVerifier = await readFile(
     join(REPOSITORY_ROOT, "scripts/check-public-documentation.mjs"),
@@ -398,6 +402,8 @@ async function checkDocumentationPortal() {
     "esbuild@0.28.2": true,
     "fsevents@2.3.2": false,
     "fsevents@2.3.3": false,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260825.1": true,
   }, "documentation install-script allowlist changed")
   assertPinnedDependencies(packageJson)
 
@@ -417,7 +423,14 @@ async function checkDocumentationPortal() {
     .sort()
   assertEqual(
     installScripts,
-    ["esbuild@0.28.2", "fsevents@2.3.2", "vite/node_modules/fsevents@2.3.3"],
+    [
+      "esbuild@0.28.2",
+      "fsevents@2.3.2",
+      "vite/node_modules/fsevents@2.3.3",
+      "workerd@1.20260825.1",
+      "wrangler/node_modules/esbuild@0.28.1",
+      "wrangler/node_modules/fsevents@2.3.3",
+    ],
     "documentation lockfile install-script packages changed",
   )
   const prereleaseDependencies = Object.fromEntries(
@@ -445,6 +458,7 @@ async function checkDocumentationPortal() {
     "PRIVACY.md",
     "docs/comparison.md",
     "SUPPORT.md",
+    "docs/documentation-portal.md",
     "docs/releasing.md",
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md",
@@ -466,6 +480,7 @@ async function checkDocumentationPortal() {
     "scripts/documentation-manifest.mjs",
     "scripts/neutrality.mjs",
     "scripts/release-lib.mjs",
+    "docs/documentation-portal.md",
     "site/astro.config.mjs",
     "site/package-lock.json",
     "site/package.json",
@@ -481,6 +496,7 @@ async function checkDocumentationPortal() {
     "site/test/comparison-registry.test.mjs",
     "site/test/site.test.mjs",
     "site/tsconfig.json",
+    "site/wrangler.jsonc",
     "src/catalog.ts",
     "src/constants.ts",
     "test/public-documentation.test.ts",
@@ -492,6 +508,19 @@ async function checkDocumentationPortal() {
   invariant(DOCUMENTATION_MANIFEST_FORMAT === "guildcontrol.docs-manifest.v1", "documentation manifest format changed")
   invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://guildcontrol.lasers.app"'), "documentation origin is invalid")
   invariant(!astroConfiguration.includes("\n  base:"), "documentation must publish at the canonical origin root")
+  assertEqual(wranglerConfiguration, {
+    $schema: "./node_modules/wrangler/config-schema.json",
+    name: "guildcontrol",
+    compatibility_date: "2026-08-30",
+    send_metrics: false,
+    workers_dev: true,
+    preview_urls: false,
+    assets: {
+      directory: "./dist",
+      html_handling: "auto-trailing-slash",
+      not_found_handling: "404-page",
+    },
+  }, "documentation Worker configuration changed")
   for (const binding of [
     "DOCUMENTATION_MANIFEST_FORMAT",
     "documentationSourcePaths",
@@ -580,6 +609,10 @@ async function checkDocumentation(packageJson) {
     "utf8",
   )
   const comparison = await readFile(join(REPOSITORY_ROOT, "docs/comparison.md"), "utf8")
+  const documentationPortal = await readFile(
+    join(REPOSITORY_ROOT, "docs/documentation-portal.md"),
+    "utf8",
+  )
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
@@ -594,8 +627,11 @@ async function checkDocumentation(packageJson) {
   invariant(readme.includes(`[Documentation portal](${DOCUMENTATION_URL}/)`), "README lacks the public documentation portal")
   invariant(readme.includes(TRADEMARK_DISCLAIMER), "README lacks the independent-project trademark disclaimer")
   invariant(releaseFooter.includes(TRADEMARK_DISCLAIMER), "documentation portal lacks the independent-project trademark disclaimer")
-  invariant(releasing.includes(`set the repository homepage to \`${DOCUMENTATION_URL}\``), "release runbook lacks the documentation homepage")
-  invariant(releasing.includes("node scripts/check-public-documentation.mjs"), "release runbook lacks public documentation verification")
+  invariant(releasing.includes("[documentation portal operations guide](documentation-portal.md)"), "release runbook lacks the documentation operations boundary")
+  invariant(releasing.includes("node scripts/check-public-documentation.mjs"), "release runbook lacks the documentation release precondition")
+  invariant(documentationPortal.includes(`Set the GitHub repository homepage to \`${DOCUMENTATION_URL}\``), "documentation operations guide lacks the canonical homepage")
+  invariant(documentationPortal.includes("node scripts/check-public-documentation.mjs"), "documentation operations guide lacks public verification")
+  invariant(documentationPortal.includes("CLOUDFLARE_WORKERS_DEPLOY_TOKEN"), "documentation operations guide lacks the purpose-specific deployment secret")
   invariant(Buffer.byteLength(readme) <= README_MAX_BYTES, "README must remain a concise landing page")
   invariant((readme.match(/^# /gm) || []).length === 1, "README must contain one top-level heading")
   let previousHeading = -1
@@ -1373,72 +1409,87 @@ async function checkAutomation() {
   ]) {
     invariant(ci.includes(required), `CI documentation verification is missing ${required}`)
   }
+  invariant(ci.includes("- verify\n          - deploy-documentation"), "CI documentation dispatch operations changed")
   invariant(
-    /if:\s*\$\{\{\s*github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'\s*\}\}\s*\n\s*run:\s*npm run test:evidence-links/u.test(ci),
+    ci.includes("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'verify')"),
     "external documentation evidence checks must remain scheduled or explicitly dispatched",
   )
   const documentationJobStart = ci.indexOf("\n  documentation:")
   const gateJobStart = ci.indexOf("\n  gate:", documentationJobStart)
-  const pagesJobStart = ci.indexOf("\n  pages:", gateJobStart)
+  const workersJobStart = ci.indexOf("\n  workers:", gateJobStart)
   invariant(
-    documentationJobStart > 0 && gateJobStart > documentationJobStart && pagesJobStart > gateJobStart,
+    documentationJobStart > 0 && gateJobStart > documentationJobStart && workersJobStart > gateJobStart,
     "documentation publication job boundaries are invalid",
   )
   const documentationJob = ci.slice(documentationJobStart, gateJobStart)
-  const gateJob = ci.slice(gateJobStart, pagesJobStart)
-  const pagesJob = ci.slice(pagesJobStart)
+  const gateJob = ci.slice(gateJobStart, workersJobStart)
+  const workersJob = ci.slice(workersJobStart)
   for (const required of [
-    "name: Upload verified Pages artifact",
-    "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
-    "uses: actions/upload-pages-artifact@",
-    "name: github-pages",
+    "npm run deploy:dry-run",
+    "uses: actions/upload-artifact@",
+    "name: documentation-portal",
     "path: site/dist",
-    "retention-days: 1",
+    "retention-days: 7",
   ]) {
-    invariant(documentationJob.includes(required), `documentation artifact publication is missing ${required}`)
+    invariant(documentationJob.includes(required), `documentation artifact verification is missing ${required}`)
+  }
+  for (const forbidden of [
+    "CLOUDFLARE_",
+    "secrets.",
+    "npm run deploy --",
+  ]) {
+    invariant(!documentationJob.includes(forbidden), `documentation verification contains forbidden deployment authority ${forbidden}`)
   }
   invariant(gateJob.includes("DOCUMENTATION_RESULT"), "CI gate does not require documentation verification")
   for (const required of [
     "name: Publish documentation portal",
+    "(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy-documentation'))",
+    "github.ref == 'refs/heads/main'",
     "needs.gate.result == 'success'",
     "needs: gate",
-    "name: github-pages",
-    "url: ${{ steps.deployment.outputs.page_url }}",
+    "name: documentation",
+    "url: https://guildcontrol.lasers.app",
     "actions: read",
     "contents: read",
-    "id-token: write",
-    "pages: write",
     "node-version: \"24.19.0\"",
-    "package-manager-cache: false",
-    "uses: actions/configure-pages@",
+    "cache: npm",
+    "cache-dependency-path: site/package-lock.json",
+    "npm run deps:locked",
     "name: documentation-portal",
-    "path: documentation",
-    "name: Deploy exact verified Pages artifact",
-    "id: deployment",
-    "uses: actions/deploy-pages@",
-    "artifact_name: github-pages",
+    "path: site/dist",
+    "name: Deploy exact verified documentation artifact",
+    'run: npm run deploy -- --message "GitHub Actions ${GITHUB_SHA}"',
+    "working-directory: site",
+    "CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}",
+    "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_DEPLOY_TOKEN }}",
     "name: Verify exact public documentation",
-    'test "${DEPLOYED_PAGE_URL%/}" = "https://guildcontrol.lasers.app"',
-    "--manifest documentation/generated/docs-manifest.json",
+    "--manifest site/dist/generated/docs-manifest.json",
     "--attempts 6",
     "--delay-ms 10000",
   ]) {
-    invariant(pagesJob.includes(required), `documentation deployment is missing ${required}`)
+    invariant(workersJob.includes(required), `documentation deployment is missing ${required}`)
   }
   for (const forbidden of [
     "contents: write",
+    "id-token: write",
+    "pages: write",
     "packages: write",
-    "secrets.",
     "npm publish",
     "docker/login-action",
+    "secrets.CLOUDFLARE_API_TOKEN",
   ]) {
-    invariant(!pagesJob.includes(forbidden), `documentation deployment contains forbidden authority ${forbidden}`)
+    invariant(!workersJob.includes(forbidden), `documentation deployment contains forbidden authority ${forbidden}`)
   }
-  invariant((ci.match(/pages: write/g) || []).length === 1, "only the documentation deployment may write Pages")
-  invariant((ci.match(/id-token: write/g) || []).length === 1, "only the documentation deployment may use OIDC")
-  invariant((ci.match(/uses: actions\/upload-pages-artifact@/g) || []).length === 1, "CI must upload one Pages artifact")
-  invariant((ci.match(/uses: actions\/configure-pages@/g) || []).length === 1, "CI must configure Pages once")
-  invariant((ci.match(/uses: actions\/deploy-pages@/g) || []).length === 1, "CI must deploy Pages once")
+  invariant((ci.match(/npm run deploy:dry-run/g) || []).length === 1, "CI must dry-run one documentation deployment")
+  invariant((ci.match(/npm run deploy -- --message/g) || []).length === 1, "CI must deploy one verified documentation artifact")
+  invariant((ci.match(/secrets\.CLOUDFLARE_WORKERS_DEPLOY_TOKEN/g) || []).length === 1, "CI must use one purpose-specific Workers token")
+  invariant((ci.match(/vars\.CLOUDFLARE_ACCOUNT_ID/g) || []).length === 1, "CI must use one non-secret Cloudflare account identifier")
+  invariant((ci.match(/CLOUDFLARE_API_TOKEN:/g) || []).length === 1, "only the documentation deployment may receive a Cloudflare token")
+  invariant(!ci.includes("pages: write"), "CI must not retain GitHub Pages write authority")
+  invariant(!ci.includes("id-token: write"), "CI documentation publication must not require OIDC")
+  invariant(!ci.includes("actions/upload-pages-artifact"), "CI must not retain the GitHub Pages artifact wrapper")
+  invariant(!ci.includes("actions/configure-pages"), "CI must not configure GitHub Pages")
+  invariant(!ci.includes("actions/deploy-pages"), "CI must not deploy GitHub Pages")
   const codeowners = await readFile(join(REPOSITORY_ROOT, ".github/CODEOWNERS"), "utf8")
   for (const path of [
     "/.github/",
