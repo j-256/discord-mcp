@@ -11,7 +11,7 @@ type ProcessReplacement = (
   args?: readonly string[],
 ) => never
 
-export interface DiscordMcpBinOptions {
+export interface GuildControlBinOptions {
   readonly argv?: readonly string[]
   readonly cliEntrypoint?: string
   readonly execArgv?: readonly string[]
@@ -21,8 +21,8 @@ export interface DiscordMcpBinOptions {
   readonly runCli?: (args: readonly string[]) => Promise<number>
 }
 
-export async function runDiscordMcpBin(
-  options: DiscordMcpBinOptions = {},
+export async function runGuildControlBin(
+  options: GuildControlBinOptions = {},
 ): Promise<number> {
   const execve = options.execve === undefined
     ? process.execve
@@ -47,5 +47,5 @@ export async function runDiscordMcpBin(
 }
 
 if (isMainModule(import.meta.url)) {
-  process.exitCode = await runDiscordMcpBin()
+  process.exitCode = await runGuildControlBin()
 }

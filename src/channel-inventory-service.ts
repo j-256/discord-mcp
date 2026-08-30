@@ -28,8 +28,8 @@ import type {
 } from "./types.js"
 
 const CHANNEL_INVENTORY_CURSOR_PREFIX = "ccur_hmac_sha256_"
-const CHANNEL_INVENTORY_CURSOR_DOMAIN = "discord-mcp-channel-inventory-cursor.v1"
-const CHANNEL_INVENTORY_DIGEST_DOMAIN = "discord-mcp-channel-inventory.v1"
+const CHANNEL_INVENTORY_CURSOR_DOMAIN = "guildcontrol-channel-inventory-cursor.v1"
+const CHANNEL_INVENTORY_DIGEST_DOMAIN = "guildcontrol-channel-inventory.v1"
 
 export const CHANNEL_INVENTORY_DETAILS = ["compact", "full"] as const
 

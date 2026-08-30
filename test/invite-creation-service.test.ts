@@ -201,7 +201,7 @@ async function fixture(
   overrides: Partial<FixtureState> = {},
 ) {
   const parent = await realpath(
-    await mkdtemp(join(tmpdir(), "discord-mcp-invite-creation-")),
+    await mkdtemp(join(tmpdir(), "guildcontrol-invite-creation-")),
   )
   const root = join(parent, "capabilities")
   await mkdir(root, { mode: 0o700 })

@@ -18,8 +18,8 @@ export const BOT_INSTALL_REPORT_SCHEMA_VERSION = 4
 
 const BOT_AUTHORIZATION_PATH = "/oauth2/authorize"
 const BOT_OAUTH_SCOPE = "bot"
-const DEFAULT_CONFIG_FILE = "./discord-mcp.json"
-const DEFAULT_HOST_ACTIVATION_FILE = "./discord-mcp-host-activation.html"
+const DEFAULT_CONFIG_FILE = "./guildcontrol.json"
+const DEFAULT_HOST_ACTIVATION_FILE = "./guildcontrol-host-activation.html"
 const CHANNEL_ID_PLACEHOLDER = "CHANNEL_ID"
 const FIRST_READ_TOOL_NAMES = Object.freeze([
   "list_channels",
@@ -128,7 +128,7 @@ function setupCommand(
 }
 
 function firstReadPrompt(guildId: string): string {
-  return `Show me the channels in Discord server ${guildId} using Discord MCP. Do not make changes.`
+  return `Show me the channels in Discord server ${guildId} using GuildControl MCP. Do not make changes.`
 }
 
 export function createBotInstallPlan(

@@ -14,7 +14,7 @@ import {
   type MigrationPlanStep,
 } from "./migration-planner.js"
 
-export const MIGRATION_HTML_FORMAT = "discord-mcp.migration-html.v1"
+export const MIGRATION_HTML_FORMAT = "guildcontrol.migration-html.v1"
 
 export interface DiscordMigrationHtmlExportOptions {
   fileSystem?: ExclusivePrivateFileSystem
@@ -141,7 +141,7 @@ export function renderDiscordMigrationHtml(plan: MigrationPlanReport): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="discord-mcp-format" content="${MIGRATION_HTML_FORMAT}">
+  <meta name="guildcontrol-format" content="${MIGRATION_HTML_FORMAT}">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>${escapeHtml(plan.source.product)} ${escapeHtml(plan.source.version)} migration plan</title>
   <style>
@@ -215,7 +215,7 @@ export function renderDiscordMigrationHtml(plan: MigrationPlanReport): string {
 <body>
   <header class="shell">
     <p class="kicker">Release-exact migration plan</p>
-    <h1>${escapeHtml(plan.source.product)} <span>${escapeHtml(plan.source.version)}</span> to Discord MCP</h1>
+    <h1>${escapeHtml(plan.source.product)} <span>${escapeHtml(plan.source.version)}</span> to GuildControl MCP</h1>
     <p class="lede">A complete outcome-level switching plan bound to an audited source inventory and the exact negotiated target catalog. It is guidance, not an automatic importer.</p>
     <div class="evidence"><a href="${escapeHtml(evidenceUrl)}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Inspect source evidence</a><a href="${escapeHtml(registryUrl)}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Inspect Registry release</a></div>
     <div class="proof-grid">

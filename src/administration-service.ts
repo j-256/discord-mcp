@@ -813,7 +813,7 @@ export class AdministrationService {
       botPermissions: state.botPermissions.effectivePermissions,
       deleteMessageSeconds: request.deleteMessageSeconds,
       durationMinutes: request.durationMinutes,
-      domain: "discord-mcp-member-moderation-plan.v2",
+      domain: "guildcontrol-member-moderation-plan.v2",
       guildId: request.guildId,
       guildOwnerId: state.guild.owner_id,
       operationKeyHash: request.operationKeyHash,

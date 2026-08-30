@@ -10764,7 +10764,7 @@ export interface DiscordToolService {
   verifyDirectMessageChange: ConnectorService["verifyDirectMessageChange"]
 }
 
-export interface DiscordMcpOptions {
+export interface GuildControlOptions {
   catalogOnly?: boolean
   config?: ConnectorConfig
   environment?: NodeJS.ProcessEnv
@@ -10777,8 +10777,8 @@ export interface DiscordMcpOptions {
   stderr?: Pick<NodeJS.WriteStream, "write">
 }
 
-export interface DiscordMcpRunOptions
-  extends Omit<DiscordMcpOptions, "nativeInteractions"> {
+export interface GuildControlRunOptions
+  extends Omit<GuildControlOptions, "nativeInteractions"> {
   gatewayRuntime?: GatewayRuntime
   nativeInteractionRuntime?: NativeInteractionRuntime
   observabilityRuntime?: ObservabilityRuntime
@@ -20554,7 +20554,7 @@ function assertSoundboardPlaybackGateway(
   }
 }
 
-export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServer {
+export function createGuildControlServer(options: GuildControlOptions = {}): McpServer {
   const environment = options.environment || process.env
   const config = options.config || loadConnectorConfig(environment)
   const safeToolHandler = createSafeToolHandler(config.mcpReadResponseMaxBytes)
@@ -20600,7 +20600,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     : "Canonical tools are advertised directly. discover_discord_tools provides bounded local capability search and never expands the configured toolsets."
   const instructions = options.catalogOnly
     ? [
-      "This credential-free catalog advertises the exact production Discord MCP contract for inspection.",
+      "This credential-free catalog advertises the exact production GuildControl MCP contract for inspection.",
       "Tool execution is disabled: every tools/call request returns the fixed CATALOG_ONLY result without validating tool arguments or contacting Discord.",
       "Policy-completion routes remain registered for exact contract inspection but return no identifiers in this catalog.",
       "Static local guidance remains readable, prompts remain locally renderable, and live resources cannot access Discord or local activity.",
@@ -21021,7 +21021,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       description: "Verify the configured Discord application and bot identity, count the first guild page, and report effective connector scope plus the durable reviewed-write coordination boundary without reading messages.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
-      title: "Get Discord connector status",
+      title: "Get GuildControl status",
     },
     safeToolHandler("get_connector_status", async (_input: z.infer<typeof emptyInputSchema>, context) => {
       const result = await service.getStatus({ signal: context.mcpReq.signal })
@@ -21081,7 +21081,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
       description: "Read process-local aggregate MCP tool and Discord REST health, bounded connector-observed pressure toward Discord's IP-wide invalid-request limit, OTLP exporter health, and explicit telemetry privacy guarantees without contacting Discord.",
       inputSchema: emptyInputSchema,
       outputSchema: toolOutputSchema,
-      title: "Get Discord connector observability",
+      title: "Get GuildControl observability",
     },
     safeToolHandler("get_observability_status", async () => {
       const result = observability.getObservabilityStatus()
@@ -33514,7 +33514,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
     MCP_DISCOVERY_TOOL_NAME,
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Search the configured Discord MCP tool catalog by capability, toolset, or exact risk. In progressive mode, matching canonical tools become visible through a standard tools/list_changed notification with their original schemas and annotations. Discovery never contacts Discord or expands configured toolsets.",
+      description: "Search the configured GuildControl MCP tool catalog by capability, toolset, or exact risk. In progressive mode, matching canonical tools become visible through a standard tools/list_changed notification with their original schemas and annotations. Discovery never contacts Discord or expands configured toolsets.",
       inputSchema: discoverDiscordToolsInputSchema,
       outputSchema: toolOutputSchema,
       title: "Discover Discord tools",
@@ -33545,7 +33545,7 @@ export function createDiscordMcpServer(options: DiscordMcpOptions = {}): McpServ
   return server
 }
 
-export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
+export function runGuildControlServer(options: GuildControlRunOptions = {}) {
   const environment = options.environment || process.env
   const stderr = options.stderr || process.stderr
   const config = options.config || loadConnectorConfig(environment)
@@ -33675,7 +33675,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
   const handle = (() => {
     try {
       observabilityRuntime?.start()
-      return serveStdio(() => createDiscordMcpServer({
+      return serveStdio(() => createGuildControlServer({
         config,
         environment,
         gateway,
@@ -33774,7 +33774,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
       )
     })
   }
-  stderr.write("[mcp] Discord connector stdio server ready\n")
+  stderr.write("[mcp] GuildControl MCP stdio server ready\n")
   return {
     close,
   }
@@ -33782,7 +33782,7 @@ export function runDiscordMcpServer(options: DiscordMcpRunOptions = {}) {
 
 if (isMainModule(import.meta.url)) {
   try {
-    runDiscordMcpServer()
+    runGuildControlServer()
   } catch (error) {
     const secrets = Object.entries(process.env)
       .filter(([name]) => DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name))

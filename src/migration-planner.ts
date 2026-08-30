@@ -34,13 +34,13 @@ import {
   type SetupPresetName,
 } from "./setup-presets.js"
 
-export const MIGRATION_CATALOG_FORMAT = "discord-mcp.migration-catalog.v1"
-export const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
+export const MIGRATION_CATALOG_FORMAT = "guildcontrol.migration-catalog.v1"
+export const MIGRATION_PLAN_FORMAT = "guildcontrol.migration-plan.v1"
 export const MIGRATION_REPORT_SCHEMA_VERSION = 1
 export const MIGRATION_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const TARGET_CONFIG_FILE = "./discord-mcp.json"
-const TARGET_HOST_GUIDE_FILE = "./discord-mcp-host.html"
+const TARGET_CONFIG_FILE = "./guildcontrol.json"
+const TARGET_HOST_GUIDE_FILE = "./guildcontrol-host.html"
 const TARGET_CREDENTIAL_VARIABLE = "DISCORD_BOT_TOKEN"
 const PLACEHOLDER_GUILD_ID = "GUILD_ID"
 const PLACEHOLDER_CHANNEL_ID = "CHANNEL_ID"
@@ -421,8 +421,8 @@ function recipeSteps(recipes: readonly ConfigRecipeName[]): MigrationPlanStep[] 
     const option = `${requirement.option} ${placeholder}`
     return [{
       commands: [
-        `discord-mcp recipe plan ${recipe} ${TARGET_CONFIG_FILE} ${option}`,
-        `discord-mcp recipe apply ${recipe} ${TARGET_CONFIG_FILE} ${option} --plan-digest ${PLACEHOLDER_PLAN_DIGEST} --confirm ${recipe}`,
+        `guildcontrol recipe plan ${recipe} ${TARGET_CONFIG_FILE} ${option}`,
+        `guildcontrol recipe apply ${recipe} ${TARGET_CONFIG_FILE} ${option} --plan-digest ${PLACEHOLDER_PLAN_DIGEST} --confirm ${recipe}`,
       ],
       completion: `The ${recipe} plan was reviewed, its fresh digest was used once, and only the intended exact scope was added.`,
       id: `recipe-${recipe}`,
@@ -440,13 +440,13 @@ function planSteps(
     : `--guild-id ${PLACEHOLDER_GUILD_ID}`
   return Object.freeze([
     {
-      commands: ["discord-mcp catalog --check"],
+      commands: ["guildcontrol catalog --check"],
       completion: "The installed target contract and digest were inspected without credentials or execution.",
       id: "inspect-target",
       title: "Inspect the target contract",
     },
     {
-      commands: [`discord-mcp setup --config ${TARGET_CONFIG_FILE} --preset ${preset} ${scopeArguments} --token-env ${TARGET_CREDENTIAL_VARIABLE}`],
+      commands: [`guildcontrol setup --config ${TARGET_CONFIG_FILE} --preset ${preset} ${scopeArguments} --token-env ${TARGET_CREDENTIAL_VARIABLE}`],
       completion: "A new strict schema-v2 policy contains only the selected exact read scope and a non-secret credential reference.",
       id: "create-baseline",
       title: "Create a least-privilege baseline",
@@ -454,23 +454,23 @@ function planSteps(
     ...recipeSteps(recipes),
     {
       commands: [
-        `discord-mcp config workbench ${TARGET_CONFIG_FILE} --html ./discord-mcp-policy-workbench.html`,
+        `guildcontrol config workbench ${TARGET_CONFIG_FILE} --html ./guildcontrol-policy-workbench.html`,
       ],
       completion: "Any outcome not covered by a named recipe was reviewed in the offline workbench and added with its exact capability and scope only.",
       id: "review-additional-authority",
       title: "Review any additional authority",
     },
     {
-      commands: [`discord-mcp host --config ${TARGET_CONFIG_FILE} --html ${TARGET_HOST_GUIDE_FILE}`],
+      commands: [`guildcontrol host --config ${TARGET_CONFIG_FILE} --html ${TARGET_HOST_GUIDE_FILE}`],
       completion: "The selected MCP host adapter, launch descriptor, and first read request were reviewed without changing host settings.",
       id: "plan-host-activation",
       title: "Generate host activation guidance",
     },
     {
       commands: [
-        `discord-mcp doctor --config ${TARGET_CONFIG_FILE}`,
-        `discord-mcp doctor --config ${TARGET_CONFIG_FILE} --online`,
-        `discord-mcp smoke --config ${TARGET_CONFIG_FILE}`,
+        `guildcontrol doctor --config ${TARGET_CONFIG_FILE}`,
+        `guildcontrol doctor --config ${TARGET_CONFIG_FILE} --online`,
+        `guildcontrol smoke --config ${TARGET_CONFIG_FILE}`,
       ],
       completion: "Offline policy checks, live identity and scope checks, and a real stdio MCP handshake all succeeded.",
       id: "verify-target",

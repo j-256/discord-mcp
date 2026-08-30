@@ -205,7 +205,7 @@ export async function readRoleIconFileSnapshot(
   try {
     snapshot = await readOwnedLocalFileSnapshot({
       description: "Discord role icon",
-      digestDomain: "discord-mcp-role-icon.v1",
+      digestDomain: "guildcontrol-role-icon.v1",
       filePath: options.filePath,
       maxBytes: DISCORD_LIMITS.roleIconBytes,
       planKey: options.planKey,

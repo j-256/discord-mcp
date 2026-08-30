@@ -775,7 +775,7 @@ export class MemberVerificationService {
       botMember: memberSnapshot(state.botMember),
       botPermissions: permissionSnapshot(state.botPermissions),
       desiredFlags: nextFlags,
-      domain: "discord-mcp-member-verification-change-plan.v1",
+      domain: "guildcontrol-member-verification-change-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

@@ -230,7 +230,7 @@ function compareSnowflakes(left: string, right: string): number {
 
 function exactTargetSetDigest(userIds: readonly string[]): string {
   const hash = createHash("sha256")
-  hash.update("discord-mcp-bulk-guild-ban-targets.v1\0")
+  hash.update("guildcontrol-bulk-guild-ban-targets.v1\0")
   for (const userId of userIds) hash.update(userId).update("\0")
   return `sha256:${hash.digest("hex")}`
 }
@@ -871,7 +871,7 @@ export class BulkGuildBanService {
       botId,
       botMember: memberSnapshot(state.botMember),
       deleteMessageSeconds: request.deleteMessageSeconds,
-      domain: "discord-mcp-bulk-guild-ban-plan.v1",
+      domain: "guildcontrol-bulk-guild-ban-plan.v1",
       guildId: request.guildId,
       guildOwnerId: state.guild.owner_id,
       operationKeyHash: request.operationKeyHash,

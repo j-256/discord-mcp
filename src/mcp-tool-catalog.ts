@@ -145,13 +145,13 @@ export const MCP_TOOL_ACCESS_STAGES = Object.freeze([
 export type McpToolAccessStage = typeof MCP_TOOL_ACCESS_STAGES[number]
 
 export const MCP_TOOL_ACCESS_MANIFEST_FORMAT =
-  "discord-mcp.tool-access-manifest.v2"
+  "guildcontrol.tool-access-manifest.v2"
 
 export const MCP_TOOL_ACCESS_INDEX_FORMAT =
-  "discord-mcp.tool-access-index.v2"
+  "guildcontrol.tool-access-index.v2"
 
 export const MCP_TOOL_ACCESS_DOCUMENT_FORMAT =
-  "discord-mcp.tool-access-document.v1"
+  "guildcontrol.tool-access-document.v1"
 
 export interface McpToolAccessContract {
   approval:

@@ -467,7 +467,7 @@ export function componentMessageNonce(
   operationKey: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-component-message.v1\0")
+    .update("guildcontrol-component-message.v1\0")
     .update(channelId)
     .update("\0")
     .update(operationKey)
@@ -480,7 +480,7 @@ export function componentMessageVerificationKey(token: string): Uint8Array {
     throw new RangeError("Discord component-message verification requires a non-empty secret")
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-component-message-verification-key.v1\0")
+    .update("guildcontrol-component-message-verification-key.v1\0")
     .digest()
 }
 
@@ -495,7 +495,7 @@ export function componentMessageRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-component-message-request.v1",
+    domain: "guildcontrol-component-message-request.v1",
     request: {
       action: request.action,
       channelId: request.channelId,
@@ -1555,7 +1555,7 @@ export class ComponentMessageService {
       botMemberRoleIds: [...state.botMember.roles].sort(),
       channel: channelSnapshot(state.channel),
       current: currentSnapshot,
-      domain: "discord-mcp-component-message-plan.v1",
+      domain: "guildcontrol-component-message-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

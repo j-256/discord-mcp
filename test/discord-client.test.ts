@@ -2368,7 +2368,7 @@ test("Discord client sends exact managed-command and unauthenticated Interaction
     description: "Send a private request to the configured MCP workflow",
     guild_id: "200",
     id: "300",
-    name: "discord-mcp",
+    name: "guildcontrol",
     nsfw: false,
     options: [{
       description: "The private request to process",

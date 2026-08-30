@@ -53,7 +53,7 @@ function document(
 }
 
 async function operatorRoot(context: test.TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-config-operator-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-config-operator-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return realpath(root)
 }
@@ -94,7 +94,7 @@ test("configuration policy validation is offline, secret-free, and cross-field c
 
 test("configuration files create privately, validate canonically, and preserve backups", async (context) => {
   const root = await operatorRoot(context)
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   const original = document()
   const created = await writeConnectorConfigDocumentFile(file, original)
   assert.equal(created.created, true)
@@ -147,14 +147,14 @@ test("configuration files create privately, validate canonically, and preserve b
 
 test("configuration publication respects directory safety and another writer's lock", async (context) => {
   const root = await operatorRoot(context)
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   await assert.rejects(
     () => writeConnectorConfigDocumentFile(`${file}\nspoofed`, document()),
     /control characters/,
   )
   await assert.rejects(
     () => writeConnectorConfigDocumentFile(
-      join(root, "missing", "discord-mcp.json"),
+      join(root, "missing", "guildcontrol.json"),
       document(),
     ),
     /directory was not found; create a canonical process-owned private directory/,
@@ -163,12 +163,12 @@ test("configuration publication respects directory safety and another writer's l
   await writeFile(notDirectory, "not a directory\n", { mode: 0o600 })
   await assert.rejects(
     () => writeConnectorConfigDocumentFile(
-      join(notDirectory, "discord-mcp.json"),
+      join(notDirectory, "guildcontrol.json"),
       document(),
     ),
     /parent must be a directory/,
   )
-  const lock = join(root, ".discord-mcp.json.lock")
+  const lock = join(root, ".guildcontrol.json.lock")
   await writeFile(lock, "active\n", { mode: 0o600 })
   await assert.rejects(
     () => writeConnectorConfigDocumentFile(file, document()),
@@ -182,7 +182,7 @@ test("configuration publication respects directory safety and another writer's l
     await symlink(root, linkedDirectory)
     await assert.rejects(
       () => writeConnectorConfigDocumentFile(
-        join(linkedDirectory, "discord-mcp.json"),
+        join(linkedDirectory, "guildcontrol.json"),
         document(),
       ),
       /directory must not be a symbolic link/,
@@ -198,7 +198,7 @@ test("configuration publication respects directory safety and another writer's l
 
 test("configuration replacement rejects changed or removed reviewed source", async (context) => {
   const root = await operatorRoot(context)
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   const original = document()
   const changed = document({
     limits: { interactionMaxWritesPerMinute: 9 },

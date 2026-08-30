@@ -763,7 +763,7 @@ export class MemberNicknameService {
       botId,
       botMember: memberSnapshot(state.botMember),
       botPermissions: permissionSnapshot(state.botPermissions),
-      domain: "discord-mcp-member-nickname-change-plan.v1",
+      domain: "guildcontrol-member-nickname-change-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

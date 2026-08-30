@@ -260,7 +260,7 @@ function fixture(options: {
 }
 
 async function fileFixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-bot-profile-service-"))
   const root = await realpath(temporary)
   const avatarPath = join(root, "avatar.png")
   await writeFile(avatarPath, png(128, 128), { mode: 0o600 })

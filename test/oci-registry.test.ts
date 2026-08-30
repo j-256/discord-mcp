@@ -90,8 +90,8 @@ function validIndex(): object {
   const arm64 = imageDescriptor("arm64", "b")
   return {
     annotations: {
-      "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
-      "org.opencontainers.image.source": "https://github.com/j-256/discord-mcp",
+      "org.opencontainers.image.description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
+      "org.opencontainers.image.source": "https://github.com/j-256/guildcontrol",
     },
     manifests: [
       amd64,
@@ -123,14 +123,14 @@ function validConfig(): object {
         "NODE_ENV=production",
       ],
       Labels: {
-        "io.modelcontextprotocol.server.name": "io.github.j-256/discord-mcp",
-        "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
-        "org.opencontainers.image.documentation": `https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md`,
+        "io.modelcontextprotocol.server.name": "io.github.j-256/guildcontrol",
+        "org.opencontainers.image.description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
+        "org.opencontainers.image.documentation": `https://github.com/j-256/guildcontrol/blob/v${VERSION}/README.md`,
         "org.opencontainers.image.licenses": "AGPL-3.0-only",
         "org.opencontainers.image.revision": REVISION,
-        "org.opencontainers.image.source": "https://github.com/j-256/discord-mcp",
-        "org.opencontainers.image.title": "Discord MCP",
-        "org.opencontainers.image.url": "https://j-256.github.io/discord-mcp",
+        "org.opencontainers.image.source": "https://github.com/j-256/guildcontrol",
+        "org.opencontainers.image.title": "GuildControl MCP",
+        "org.opencontainers.image.url": "https://j-256.github.io/guildcontrol",
         "org.opencontainers.image.version": VERSION,
       },
       User: "node",
@@ -276,13 +276,13 @@ function validSpdxStatement(): object {
 }
 
 test("parses only the exact project image with a stable version tag", () => {
-  assert.deepEqual(oci.parseOciReference("ghcr.io/j-256/discord-mcp:0.1.2"), {
-    name: "ghcr.io/j-256/discord-mcp",
-    repository: "j-256/discord-mcp",
+  assert.deepEqual(oci.parseOciReference("ghcr.io/j-256/guildcontrol:0.1.2"), {
+    name: "ghcr.io/j-256/guildcontrol",
+    repository: "j-256/guildcontrol",
     tag: "0.1.2",
   })
-  assert.throws(() => oci.parseOciReference("ghcr.io/j-256/discord-mcp:latest"))
-  assert.throws(() => oci.parseOciReference("docker.io/j-256/discord-mcp:0.1.2"))
+  assert.throws(() => oci.parseOciReference("ghcr.io/j-256/guildcontrol:latest"))
+  assert.throws(() => oci.parseOciReference("docker.io/j-256/guildcontrol:0.1.2"))
 })
 
 test("inspects an exact private tag through scoped registry authentication", async () => {
@@ -296,14 +296,14 @@ test("inspects an exact private tag through scoped registry authentication", asy
     requests.push({ authorization, url })
     if (url.startsWith("https://ghcr.io/token")) {
       const parsed = new URL(url)
-      assert.equal(parsed.searchParams.get("scope"), "repository:j-256/discord-mcp:pull,push")
+      assert.equal(parsed.searchParams.get("scope"), "repository:j-256/guildcontrol:pull,push")
       assert.equal(authorization, `Basic ${Buffer.from("release-actor:credential-value").toString("base64")}`)
       return Response.json({ token: "registry-bearer" })
     }
     if (!authorization) {
       return new Response(null, {
         headers: {
-          "www-authenticate": "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:j-256/discord-mcp:pull\"",
+          "www-authenticate": "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:j-256/guildcontrol:pull\"",
         },
         status: 401,
       })
@@ -315,7 +315,7 @@ test("inspects an exact private tag through scoped registry authentication", asy
   }) as typeof fetch
   try {
     assert.deepEqual(await oci.inspectAuthenticatedOciTag({
-      reference: "ghcr.io/j-256/discord-mcp:0.1.2",
+      reference: "ghcr.io/j-256/guildcontrol:0.1.2",
       token: "credential-value",
       username: "release-actor",
     }), {
@@ -337,7 +337,7 @@ test("rejects an oversized registry token response while streaming", async () =>
     }
     return new Response(null, {
       headers: {
-        "www-authenticate": "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:j-256/discord-mcp:pull\"",
+        "www-authenticate": "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:j-256/guildcontrol:pull\"",
       },
       status: 401,
     })
@@ -345,7 +345,7 @@ test("rejects an oversized registry token response while streaming", async () =>
   try {
     await assert.rejects(
       oci.inspectAuthenticatedOciTag({
-        reference: "ghcr.io/j-256/discord-mcp:0.1.2",
+        reference: "ghcr.io/j-256/guildcontrol:0.1.2",
         token: "credential-value",
         username: "release-actor",
       }),
@@ -358,7 +358,7 @@ test("rejects an oversized registry token response while streaming", async () =>
 
 test("requests a GHCR blob with manual redirect handling and strips registry credentials from the CDN hop", async () => {
   const expectedDigest = digest("e")
-  const registryUrl = `https://ghcr.io/v2/j-256/discord-mcp/blobs/${expectedDigest}`
+  const registryUrl = `https://ghcr.io/v2/j-256/guildcontrol/blobs/${expectedDigest}`
   const redirectUrl = `${GHCR_BLOB_CDN_ORIGIN}/ghcr1/blobs/${expectedDigest}?signature=opaque`
   const originalFetch = globalThis.fetch
   let requestCount = 0
@@ -384,7 +384,7 @@ test("requests a GHCR blob with manual redirect handling and strips registry cre
     const result = await oci.requestGitHubOciBlob({
       accept: IMAGE_CONFIG_MEDIA_TYPE,
       expectedDigest,
-      repository: "j-256/discord-mcp",
+      repository: "j-256/guildcontrol",
       token: "registry-bearer",
       url: registryUrl,
     })
@@ -492,7 +492,7 @@ test("requires the exact non-root catalog-first image configuration", () => {
     revision: REVISION,
     version: VERSION,
   })
-  assert.equal(labels["io.modelcontextprotocol.server.name"], "io.github.j-256/discord-mcp")
+  assert.equal(labels["io.modelcontextprotocol.server.name"], "io.github.j-256/guildcontrol")
 
   const root = validConfig() as { config: { User: string } }
   root.config.User = "root"
@@ -606,7 +606,7 @@ test("requires ordinary image layers and both BuildKit evidence predicates", () 
 
   const publishedSubject = [{
     digest: { sha256: "d".repeat(64) },
-    name: `pkg:docker/ghcr.io/j-256/discord-mcp@${VERSION}?platform=linux%2Famd64`,
+    name: `pkg:docker/ghcr.io/j-256/guildcontrol@${VERSION}?platform=linux%2Famd64`,
   }]
   const boundStatement = validProvenanceStatement() as { subject: unknown[] }
   boundStatement.subject = structuredClone(publishedSubject)

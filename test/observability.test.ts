@@ -92,7 +92,7 @@ test("observability export applies secure OTLP HTTP defaults and signal override
       headers: { provider: "environment", variable: METRIC_HEADERS },
       timeoutMs: 2_500,
     },
-    serviceName: "discord-mcp.production",
+    serviceName: "guildcontrol.production",
     traceSampleRatio: 0.25,
     traceSampler: "parentbased_traceidratio",
     traces: { compression: "none" },
@@ -116,7 +116,7 @@ test("observability export applies secure OTLP HTTP defaults and signal override
   assert.equal(config.export?.metrics.compression, "gzip")
   assert.equal(config.export?.traces.timeoutMs, 10_000)
   assert.equal(config.export?.metrics.timeoutMs, 2_500)
-  assert.equal(config.export?.serviceName, "discord-mcp.production")
+  assert.equal(config.export?.serviceName, "guildcontrol.production")
   assert.equal(config.export?.traceSampler, "parentbased_traceidratio")
   assert.equal(config.export?.traceSampleRatio, 0.25)
   assert.equal(config.export?.endpointConfigured, true)
@@ -179,7 +179,7 @@ test("observability configuration rejects unsafe protocols, headers, limits, and
       },
     },
     { observability: { serviceName: "unsafe service name" } },
-    { observability: { serviceName: "discord-mcp.999999999999999999" } },
+    { observability: { serviceName: "guildcontrol.999999999999999999" } },
     {
       observability: unsafeObservability({
         traceSampler: "remote_parent_sampled",

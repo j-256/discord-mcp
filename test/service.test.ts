@@ -2080,7 +2080,7 @@ test("service rejects application entitlement write policy before identity or SK
 })
 
 test("service requires private attachment client support only when its gate is enabled", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-private-attachment-client-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-private-attachment-client-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const directClient: Partial<DiscordServiceClient> = {
@@ -2427,7 +2427,7 @@ test("service exposes privacy-safe reaction reads and coordinates exact-message 
 
 test("service coordinates every receipt-backed single-step workflow by shared targets", async (context) => {
   const writeCoordinator = new CapturingWriteCoordinator()
-  const webhookCredentialTemporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-coordination-"))
+  const webhookCredentialTemporary = await mkdtemp(join(tmpdir(), "guildcontrol-webhook-coordination-"))
   context.after(() => rm(webhookCredentialTemporary, { force: true, recursive: true }))
   const webhookCredentialRoot = await realpath(webhookCredentialTemporary)
   const coordinationBotRoleId = "700000000000000003"
@@ -3484,7 +3484,7 @@ test("service coordinates global application commands by the exact application-w
 })
 
 test("distinct connector facades coordinate through one production state root", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-service-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-service-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const auditFile = join(root, "activity.jsonl")
   let created: DiscordChannel | undefined
@@ -3602,7 +3602,7 @@ test("distinct connector facades coordinate through one production state root", 
 })
 
 test("distinct connector facades serialize resumable scaffold guild collections", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-scaffold-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-scaffold-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const auditFile = join(root, "activity.jsonl")
   const botRoleId = "700000000000000002"
@@ -4032,7 +4032,7 @@ test("service verifies identity through credential-safe webhook administration",
 })
 
 test("service keeps webhook credentials private across exact message lifecycle operations", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-message-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-webhook-message-service-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const credentialRoot = await realpath(temporary)
   const credential = "private-webhook-token.canary"
@@ -7289,7 +7289,7 @@ test("service coordinates permission synchronization across the child and parent
 })
 
 test("service verifies identity before reviewed local-file attachment execution", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-service-attachment-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-service-attachment-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "report.txt")

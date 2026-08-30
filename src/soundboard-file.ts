@@ -503,7 +503,7 @@ export async function readSoundboardFileSnapshot(
   try {
     snapshot = await readOwnedLocalFileSnapshot({
       description: "Discord soundboard audio",
-      digestDomain: "discord-mcp-soundboard-audio.v1",
+      digestDomain: "guildcontrol-soundboard-audio.v1",
       filePath: options.filePath,
       maxBytes: DISCORD_LIMITS.soundboardBytes,
       planKey: options.planKey,

@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url"
 import { isMainModule } from "../src/entrypoint.js"
 
 test("main-module detection resolves filesystem aliases", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-entrypoint-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-entrypoint-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const canonicalPath = join(directory, "entrypoint.mjs")
   const aliasPath = join(directory, "entrypoint-alias.mjs")
@@ -60,7 +60,7 @@ test("library entrypoint direct execution fails with exact CLI guidance", async 
   assert.equal(stdout, "")
   assert.equal(
     stderr,
-    "[discord-mcp] The package library entrypoint does not run an MCP server. Use `discord-mcp serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
+    "[guildcontrol] The package library entrypoint does not run an MCP server. Use `guildcontrol serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
   )
   assert.doesNotMatch(stderr, new RegExp(privateToken))
 })

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 import { connectorConfigJsonSchema } from "../src/config-document.ts"
 
-const OUTPUT_URL = new URL("../discord-mcp.config.schema.json", import.meta.url)
+const OUTPUT_URL = new URL("../guildcontrol.config.schema.json", import.meta.url)
 const output = `${JSON.stringify(connectorConfigJsonSchema(), null, 2)}\n`
 
 if (process.argv.includes("--check")) {

@@ -1,22 +1,22 @@
 # Support
 
-Discord MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation. Check [product boundaries and host compatibility](docs/limitations.md) and the [privacy policy](PRIVACY.md) before filing a setup issue or enabling a write capability.
+GuildControl MCP is self-hosted local stdio software. Its maintainers do not operate a shared bot, receive or store operator tokens, access operator guilds, monitor live Discord incidents, or provide emergency moderation. Check [product boundaries and host compatibility](docs/limitations.md) and the [privacy policy](PRIVACY.md) before filing a setup issue or enabling a write capability.
 
 ## Start with offline evidence
 
 Follow the [first verified read and recovery guide](docs/getting-started.md), then search existing issues. Use the [complete reference](docs/reference.md) when the problem involves a specific policy or workflow. Prefer credential-free checks before opening a report:
 
 ```sh
-discord-mcp config validate FILE
-discord-mcp doctor --config FILE
-discord-mcp catalog --check --json
+guildcontrol config validate FILE
+guildcontrol doctor --config FILE
+guildcontrol catalog --check --json
 ```
 
-When switching from another Discord MCP, run `discord-mcp migrate list`, select the exact `product@version` source, and generate `discord-mcp migrate plan SOURCE --html PRIVATE_FILE`. The [migration guide](docs/migration.md) explains every disposition and the staged verification path. The planner does not scan the old deployment or import its configuration, credentials, prompts, arguments, or host settings. If a source is absent, report its public release and evidence URL through a feature proposal rather than substituting the nearest listed version.
+When switching from another Discord MCP, run `guildcontrol migrate list`, select the exact `product@version` source, and generate `guildcontrol migrate plan SOURCE --html PRIVATE_FILE`. The [migration guide](docs/migration.md) explains every disposition and the staged verification path. The planner does not scan the old deployment or import its configuration, credentials, prompts, arguments, or host settings. If a source is absent, report its public release and evidence URL through a feature proposal rather than substituting the nearest listed version.
 
 If MCPB import fails before startup, confirm that the host supports manifest version 0.3, Node.js 22 through 26, local file selection, and sensitive string input. Keep the token out of the selected config. A file-backed credential policy is intentionally incompatible with the bundle's prompted secret; preserve that policy and use the adapter path.
 
-If an MCP host reports that the connection closed during initialization, run `discord-mcp host --npx --config FILE --html PRIVATE_FILE` and choose the guide's common MCP JSON, Cursor, VS Code, or Gemini CLI projection. For a supported static JSON destination, run `discord-mcp host plan --npx --config FILE --adapter ID --host-file HOST_JSON_FILE`, review the path- and value-free summary, then run the matching `host apply` with its exact plan digest and server-name confirmation; apply preserves unrelated shared entries, retains a recoverable backup, rereads exactly, and rolls back on failed verification. Run `discord-mcp host --npx --config FILE --adapter ID --inspect-host-file HOST_JSON_FILE` afterward. Status 1 identifies only fixed drift categories and returns no observed value, raw content, unrelated entry, or host path; replan and repair, reload the host, and require status 0. Do not attach the guide, adapter JSON, Cursor install URI, host file, or backup to an issue because they contain Discord identifiers, may contain local paths, and may contain credentials. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/bin.js serve --config FILE`, while a pinned published launch uses `npx --yes @j-256/discord-mcp@VERSION serve --config FILE`. Then run `discord-mcp smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output. The [ordered recovery ladder](docs/getting-started.md#recovery-ladder) separates policy, credential, Discord, stdio, and host failures.
+If an MCP host reports that the connection closed during initialization, run `guildcontrol host --npx --config FILE --html PRIVATE_FILE` and choose the guide's common MCP JSON, Cursor, VS Code, or Gemini CLI projection. For a supported static JSON destination, run `guildcontrol host plan --npx --config FILE --adapter ID --host-file HOST_JSON_FILE`, review the path- and value-free summary, then run the matching `host apply` with its exact plan digest and server-name confirmation; apply preserves unrelated shared entries, retains a recoverable backup, rereads exactly, and rolls back on failed verification. Run `guildcontrol host --npx --config FILE --adapter ID --inspect-host-file HOST_JSON_FILE` afterward. Status 1 identifies only fixed drift categories and returns no observed value, raw content, unrelated entry, or host path; replan and repair, reload the host, and require status 0. Do not attach the guide, adapter JSON, Cursor install URI, host file, or backup to an issue because they contain Discord identifiers, may contain local paths, and may contain credentials. `dist/index.js` is the package library entrypoint and does not run a server; direct execution fails with a fixed correction instead of closing silently. An operational source checkout must run `node dist/bin.js serve --config FILE`, while a pinned published launch uses `npx --yes guildcontrol@VERSION serve --config FILE`. Then run `guildcontrol smoke --config FILE` outside the host to verify the same spawned stdio path without sharing a token or raw diagnostic output. The [ordered recovery ladder](docs/getting-started.md#recovery-ladder) separates policy, credential, Discord, stdio, and host failures.
 
 Run `doctor --online` or another live probe only with a bot and guild you control and only when its documented Discord reads are acceptable. Do not publish raw probe output.
 
@@ -28,7 +28,7 @@ If online doctor reports `guild-installation-drift`, review the exact IDs privat
 - Use the bug form for a reproducible product defect with a minimal synthetic reproduction
 - Use the feature-proposal form for a new capability or authority boundary
 - Use the verified-outcome form after a successful or blocked journey to share coarse setup time, first friction, repeat-use intent, and next-workflow demand without posting Discord evidence
-- Use a [private GitHub Security Advisory](https://github.com/j-256/discord-mcp/security/advisories/new) for an undisclosed vulnerability, following [SECURITY.md](SECURITY.md)
+- Use a [private GitHub Security Advisory](https://github.com/j-256/guildcontrol/security/advisories/new) for an undisclosed vulnerability, following [SECURITY.md](SECURITY.md)
 
 ## Share only privacy-safe evidence
 

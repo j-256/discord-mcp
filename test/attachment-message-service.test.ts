@@ -195,7 +195,7 @@ async function fixture(options: {
   policyOptions?: Parameters<typeof policy>[1]
   state?: Partial<FixtureState>
 } = {}) {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-attachment-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-attachment-service-"))
   const root = await realpath(temporary)
   const filePath = join(root, FILENAME)
   await writeFile(filePath, FILE_CONTENT)

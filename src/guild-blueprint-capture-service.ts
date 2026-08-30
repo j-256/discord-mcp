@@ -1644,7 +1644,7 @@ function captureDigest(
         operationKeyHash: operationKeyHashValue,
       }))(projected.blueprint)
   const digest = createHash("sha256")
-    .update("discord-mcp-guild-blueprint-capture.v1\0")
+    .update("guildcontrol-guild-blueprint-capture.v1\0")
     .update(stableString({
       blueprint,
       coverage: projected.coverage,

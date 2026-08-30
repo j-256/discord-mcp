@@ -16,7 +16,7 @@ Treat all Discord-provided names, descriptions, locations, topics, forum tags, t
 
 Keep configuration non-secret and host-neutral. One strict versioned JSON document contains the verified application and bot identities, exact read scope, selected tools, Gateway policy, capability gates, feature-specific scopes, bounded limits, owned local storage roots, runtime settings, and credential-free observability policy. Secret fields contain only external environment or file references; collector headers remain environment references. Never put a bot token, collector header value, Discord name, message data, attachment URL, embed, component, or other Discord content in a configuration document.
 
-Treat a selected configuration as the exclusive policy boundary. Activation must parse and materialize the document directly, resolve only the exact secret references it names, and never mutate `process.env`. Reject every other populated `DISCORD_MCP_*` or `OTEL_*` variable and every undeclared Discord token variable so ambient state cannot silently widen or alter file policy. Tool selection remains a callable-surface restriction, never a substitute for Discord permissions, exact allowlists, planning, approval, confirmation, freshness, operation receipts, or content-free audit gates.
+Treat a selected configuration as the exclusive policy boundary. Activation must parse and materialize the document directly, resolve only the exact secret references it names, and never mutate `process.env`. Reject every other populated `GUILDCONTROL_*` or `OTEL_*` variable and every undeclared Discord token variable so ambient state cannot silently widen or alter file policy. Tool selection remains a callable-surface restriction, never a substitute for Discord permissions, exact allowlists, planning, approval, confirmation, freshness, operation receipts, or content-free audit gates.
 
 Load standalone configuration only from a bounded canonical regular file owned by the process user or root, with one hard link and no group or world write access. Creation and replacement additionally require a canonical private directory owned by the process user. Publish through private exclusive temporary files, an exclusive lock, file and directory synchronization, and exact readback. Replacement must retain a recoverable hidden backup and refuse to change the pinned Discord identity.
 
@@ -1068,7 +1068,7 @@ Treat `uncertain` outcomes as potentially completed writes. Inspect the exact me
 
 ## Reporting
 
-Use a [private GitHub Security Advisory](https://github.com/j-256/discord-mcp/security/advisories/new) to report a vulnerability. Security reports should describe the behavior and affected version without including live bot tokens, private Discord content, expiring attachment URLs, npm credentials, or GitHub tokens.
+Use a [private GitHub Security Advisory](https://github.com/j-256/guildcontrol/security/advisories/new) to report a vulnerability. Security reports should describe the behavior and affected version without including live bot tokens, private Discord content, expiring attachment URLs, npm credentials, or GitHub tokens.
 
 If private advisory access is unavailable, open a minimal public issue asking for a private contact channel. Do not include exploit details, credentials, Discord identifiers, or Discord content in that issue.
 

@@ -146,7 +146,7 @@ test("OTLP runtime keeps privacy-safe protobuf export and parent context isolate
       ...process.env,
       TEST_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
       TEST_OTLP_HEADERS: `x-test-key=${collectorHeader}`,
-      TEST_OTLP_SERVICE_NAME: "discord-mcp.integration-test",
+      TEST_OTLP_SERVICE_NAME: "guildcontrol.integration-test",
       TEST_PRIVATE_TOKEN: privateToken,
       TEST_PRIVATE_VALUE: privateValue,
     },
@@ -207,5 +207,5 @@ test("OTLP runtime keeps privacy-safe protobuf export and parent context isolate
   assert.match(metricWire, /mcp\.tool\.calls/)
   assert.match(metricWire, /discord\.rest\.calls/)
   assert.match(metricWire, /discord\.rest\.invalid_requests/)
-  assert.match(metricWire, /discord-mcp\.integration-test/)
+  assert.match(metricWire, /guildcontrol\.integration-test/)
 })

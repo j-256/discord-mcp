@@ -13,7 +13,7 @@ import {
 } from "./constants.js"
 import { stableString } from "./normalize.js"
 
-const ATTESTATION_DOMAIN = "discord-mcp-guild-recovery-attestation.v1\0"
+const ATTESTATION_DOMAIN = "guildcontrol-guild-recovery-attestation.v1\0"
 const ATTESTATION_PREFIX = "guild-recovery.v1."
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/

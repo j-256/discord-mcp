@@ -208,7 +208,7 @@ function compareSnowflakes(left: string, right: string): number {
 
 function targetSetDigest(userIds: readonly string[]): string {
   const hash = createHash("sha256")
-  hash.update("discord-mcp-bulk-member-role-targets.v1\0")
+  hash.update("guildcontrol-bulk-member-role-targets.v1\0")
   for (const userId of userIds) hash.update(userId).update("\0")
   return `sha256:${hash.digest("hex")}`
 }
@@ -257,7 +257,7 @@ function derivedOperationKey(
   purpose: "execute" | "inspect",
 ): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-bulk-member-role-child.v1\0")
+    .update("guildcontrol-bulk-member-role-child.v1\0")
     .update(purpose)
     .update("\0")
     .update(request.action)
@@ -398,7 +398,7 @@ export class BulkMemberRoleService {
     return reviewedPlanDigest(Buffer.from(request.operationKey, "utf8"), {
       applicationId,
       botId,
-      domain: "discord-mcp-bulk-member-role-request.v1",
+      domain: "guildcontrol-bulk-member-role-request.v1",
       request: requestSnapshot(request),
     })
   }
@@ -614,7 +614,7 @@ export class BulkMemberRoleService {
       applicationId,
       botId,
       commonEvidenceDigest: first.plan.commonEvidenceDigest,
-      domain: "discord-mcp-bulk-member-role-plan.v1",
+      domain: "guildcontrol-bulk-member-role-plan.v1",
       executionFrontier,
       request: requestSnapshot(request),
       requestDigest,

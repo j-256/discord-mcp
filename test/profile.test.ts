@@ -43,7 +43,7 @@ const CHANNEL_ID = "200000000000000001"
 const OTHER_CHANNEL_ID = "200000000000000002"
 const TOKEN = "test-discord-token"
 const ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
-const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
+const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "GUILDCONTROL_UNDECLARED_POLICY"
 
 function profile(overrides: Partial<{
   applicationId: string
@@ -74,7 +74,7 @@ function profile(overrides: Partial<{
 }
 
 async function profileRoot(context: test.TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-profiles-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-profiles-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return join(await realpath(root), "profiles")
 }
@@ -174,7 +174,7 @@ test("profile directories use platform configuration roots and exact overrides",
       homeDirectory: "/Users/operator",
       platform: "darwin",
     }),
-    resolve("/Users/operator/Library/Application Support/discord-mcp/profiles"),
+    resolve("/Users/operator/Library/Application Support/guildcontrol/profiles"),
   )
   assert.equal(
     resolveProfileDirectory({
@@ -182,7 +182,7 @@ test("profile directories use platform configuration roots and exact overrides",
       homeDirectory: "/home/operator",
       platform: "linux",
     }),
-    resolve("/configuration/discord-mcp/profiles"),
+    resolve("/configuration/guildcontrol/profiles"),
   )
   assert.equal(
     resolveProfileDirectory({
@@ -190,7 +190,7 @@ test("profile directories use platform configuration roots and exact overrides",
       homeDirectory: "/home/operator",
       platform: "linux",
     }),
-    resolve("/home/operator/.config/discord-mcp/profiles"),
+    resolve("/home/operator/.config/guildcontrol/profiles"),
   )
   assert.equal(
     profilePath("support-bot", { directory: "/profiles" }),
@@ -435,7 +435,7 @@ test("profile activation loads complete policy and rejects ambient policy", asyn
       directory,
       environment: {
         [ALIAS]: TOKEN,
-        [CONFIG_FILE_ENVIRONMENT_VARIABLE]: "/configuration/discord-mcp.json",
+        [CONFIG_FILE_ENVIRONMENT_VARIABLE]: "/configuration/guildcontrol.json",
       },
     }),
     new RegExp(`conflicts.*${CONFIG_FILE_ENVIRONMENT_VARIABLE}`),

@@ -1364,7 +1364,7 @@ export class MemberRoleService {
   #commonEvidenceDigest(commonEvidence: Record<string, unknown>): string {
     return reviewedPlanDigest(this.#planKey, {
       ...commonEvidence,
-      domain: "discord-mcp-member-role-common-evidence.v1",
+      domain: "guildcontrol-member-role-common-evidence.v1",
     })
   }
 

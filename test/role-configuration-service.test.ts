@@ -530,7 +530,7 @@ test("role configuration enforces modern gradient and holographic color contract
 })
 
 test("role configuration binds reviewed local icon bytes and response-assigned hash", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-role-config-icon-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-role-config-icon-"))
   const root = await realpath(temporary)
   const filePath = join(root, "icon.png")
   try {

@@ -337,7 +337,7 @@ export class WriteCoordinationConflictError extends Error {
 
   constructor(claimId: string) {
     super(
-      `Reviewed Discord write claim ${claimId} already owns at least one required target; inspect it with discord-mcp coordination list`,
+      `Reviewed Discord write claim ${claimId} already owns at least one required target; inspect it with guildcontrol coordination list`,
     )
     this.name = "WriteCoordinationConflictError"
     this.claimId = claimId
@@ -349,7 +349,7 @@ export class WriteCoordinationQuarantinedError extends Error {
 
   constructor(claimId: string, options?: ErrorOptions) {
     super(
-      `Reviewed Discord write claim ${claimId} is quarantined because its outcome is not safely settled; inspect Discord and run discord-mcp coordination list`,
+      `Reviewed Discord write claim ${claimId} is quarantined because its outcome is not safely settled; inspect Discord and run guildcontrol coordination list`,
       options,
     )
     this.name = "WriteCoordinationQuarantinedError"

@@ -12,7 +12,7 @@ import {
   type ExclusivePrivateFileSystem,
 } from "./exclusive-private-file.js"
 
-export const ONBOARDING_HTML_FORMAT = "discord-mcp.onboarding-html.v3"
+export const ONBOARDING_HTML_FORMAT = "guildcontrol.onboarding-html.v3"
 export const ONBOARDING_HTML_SCHEMA_VERSION = 3
 
 export interface DiscordOnboardingHtmlExportOptions {
@@ -153,8 +153,8 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; manifest-src 'none'; media-src 'none'; object-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'unsafe-inline'; worker-src 'none'; require-trusted-types-for 'script'">
-  <meta name="description" content="Credential-free Discord MCP onboarding guide">
-  <title>Discord MCP onboarding: ${escapeHtml(plan.preset.name)}</title>
+  <meta name="description" content="Credential-free GuildControl MCP onboarding guide">
+  <title>GuildControl MCP onboarding: ${escapeHtml(plan.preset.name)}</title>
   <style>
     :root{--bg:#f4f6fb;--panel:#fff;--panel-2:#f8f9fd;--ink:#172036;--muted:#56617a;--line:#d8deec;--brand:#5865f2;--brand-2:#3944bd;--action:#3b46bf;--action-hover:#2d379f;--good:#087c62;--attention:#a15b00;--focus:#bc4d00;--shadow:0 18px 55px rgba(32,43,76,.1)}
     @media(prefers-color-scheme:dark){:root{--bg:#0c111c;--panel:#151c2a;--panel-2:#101725;--ink:#edf1ff;--muted:#aab4ca;--line:#30394d;--brand:#8993ff;--brand-2:#b2b8ff;--action:#3b46bf;--action-hover:#2d379f;--good:#67d5b6;--attention:#ffc06d;--focus:#ffd166;--shadow:0 18px 55px rgba(0,0,0,.3)}}
@@ -263,10 +263,10 @@ export function renderDiscordOnboardingHtml(plan: BotInstallPlan): string {
       <div class="step-body">
         <div class="command"> <code id="host-command">${escapeHtml(hostActivation || "")}</code>${copyButton("host-command", "host activation command")}</div>
         <p class="callout good"><strong>You can connect now.</strong> Setup is the readiness gate. It validated the strict policy, verified the bot and application, audited the exact guild installation, and printed a portable launch descriptor.</p>
-        <p>Open <code>discord-mcp-host-activation.html</code> locally and map its exact command, ordered arguments, external secret references, approval requirements, and timeouts into any compatible local MCP host. The guide cannot discover or edit a host, contains private Discord identifiers and local paths, and must not be shared or committed.</p>
+        <p>Open <code>guildcontrol-host-activation.html</code> locally and map its exact command, ordered arguments, external secret references, approval requirements, and timeouts into any compatible local MCP host. The guide cannot discover or edit a host, contains private Discord identifiers and local paths, and must not be shared or committed.</p>
         <div class="field"><span class="field-label">First useful read</span><div class="value-row"><code id="first-read-prompt">${escapeHtml(plan.postInstall.firstRead.prompt)}</code>${copyButton("first-read-prompt", "first-read prompt")}</div><p class="note">Tools: <code>${escapeHtml(plan.postInstall.firstRead.toolNames.join(", "))}</code>. Discord writes remain disabled.</p></div>
         <details class="evidence"><summary>Optional assurance and troubleshooting commands</summary><div class="evidence-body"><div class="command-list">${diagnosticMarkup}</div><p class="note">Validation rechecks the document after a manual edit. Doctor shows actionable readiness exceptions and accepts <code>--verbose</code> for complete evidence. Smoke launches a child server and negotiates the real MCP contract.</p></div></details>
-        <p class="note">The host runs this local process. Discord MCP supplies no shared bot, remote relay, account login, or model-specific integration.</p>
+        <p class="note">The host runs this local process. GuildControl MCP supplies no shared bot, remote relay, account login, or model-specific integration.</p>
       </div>
     </section>
     <details class="evidence">

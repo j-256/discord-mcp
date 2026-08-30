@@ -853,7 +853,7 @@ export class IntegrationService {
       },
       botId,
       botMemberRoleIds: [...state.botMember.roles].sort(),
-      domain: "discord-mcp-integration-deletion-plan.v1",
+      domain: "guildcontrol-integration-deletion-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

@@ -58,8 +58,8 @@ const REQUIRED_OUTPUTS = [
   "public/generated/LICENSE.txt",
   "public/generated/contract-evidence.json",
   "public/generated/contract-explorer.html",
-  "public/generated/discord-mcp-icon.png",
-  "public/generated/discord-mcp.config.schema.json",
+  "public/generated/guildcontrol-icon.png",
+  "public/generated/guildcontrol.config.schema.json",
   "public/generated/server.json",
   "public/llms-full.txt",
   "public/llms.txt",
@@ -156,7 +156,7 @@ test("public documentation verification requires an exact bounded no-redirect JS
       const url = new URL(input instanceof Request ? input.url : input)
       observedUrl = url.toString()
       assert.equal(url.origin, new URL(documentation.DOCUMENTATION_URL).origin)
-      assert.equal(url.pathname, `/discord-mcp/${documentation.DOCUMENTATION_MANIFEST_PATH}`)
+      assert.equal(url.pathname, `/guildcontrol/${documentation.DOCUMENTATION_MANIFEST_PATH}`)
       assert.match(url.searchParams.get("verification") || "", /^[0-9a-f]{64}-1$/u)
       assert.equal(init?.redirect, "error")
       assert.equal(init?.cache, "no-store")

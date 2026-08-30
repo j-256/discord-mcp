@@ -198,7 +198,7 @@ test("coordination note reads return one exact minimized page and count every di
     }),
     message(
       "600000000000000003",
-      "[discord-mcp.coordination-note.v1]\nmalformed-envelope-secret",
+      "[guildcontrol.coordination-note.v1]\nmalformed-envelope-secret",
     ),
     message("600000000000000002", "ordinary-chatter-secret"),
     note("600000000000000001", {

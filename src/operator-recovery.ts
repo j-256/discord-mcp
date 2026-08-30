@@ -80,8 +80,8 @@ export function classifyCliFailure(
 ): CliFailureGuidance {
   if (context.usage) {
     const helpCommand = context.helpTopic
-      ? `discord-mcp help ${context.helpTopic}`
-      : "discord-mcp help"
+      ? `guildcontrol help ${context.helpTopic}`
+      : "guildcontrol help"
     return guidance(
       CLI_FAILURE_CATEGORIES.usage,
       `Run ${helpCommand} and correct the command before retrying.`,
@@ -92,7 +92,7 @@ export function classifyCliFailure(
   if (error instanceof ProfileError) {
     return guidance(
       CLI_FAILURE_CATEGORIES.profile,
-      "Run discord-mcp profile list, inspect the intended profile, and retry only after its state is known.",
+      "Run guildcontrol profile list, inspect the intended profile, and retry only after its state is known.",
       OPERATOR_REFERENCES.operatorCli,
       OPERATOR_RETRY.afterInspection,
     )
@@ -100,19 +100,19 @@ export function classifyCliFailure(
   if (error instanceof RuntimeConfigurationRequiredError) {
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
-      "Create a policy with discord-mcp config init or setup --preset, then select it with --config or --profile.",
+      "Create a policy with guildcontrol config init or setup --preset, then select it with --config or --profile.",
       OPERATOR_REFERENCES.configuration,
       OPERATOR_RETRY.afterCorrection,
     )
   }
   if (error instanceof ConfigChangeError) {
     const action = error.reason === "active"
-      ? "Run discord-mcp config validate ACTIVE_FILE, correct the active policy, and create a fresh config plan before retrying."
+      ? "Run guildcontrol config validate ACTIVE_FILE, correct the active policy, and create a fresh config plan before retrying."
       : error.reason === "candidate"
-        ? "Run discord-mcp config validate CANDIDATE_FILE, correct the candidate policy, and create a fresh config plan before retrying."
+        ? "Run guildcontrol config validate CANDIDATE_FILE, correct the candidate policy, and create a fresh config plan before retrying."
         : error.reason === "identity"
           ? "Keep the active application and bot IDs unchanged, or create a separate configuration for the different Discord bot."
-          : "Rerun discord-mcp config plan ACTIVE_FILE CANDIDATE_FILE, review the fresh digest and changes, then apply only that exact plan."
+          : "Rerun guildcontrol config plan ACTIVE_FILE CANDIDATE_FILE, review the fresh digest and changes, then apply only that exact plan."
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
       action,
@@ -124,7 +124,7 @@ export function classifyCliFailure(
     if (error.status === 401) {
       return guidance(
         CLI_FAILURE_CATEGORIES.discordAuthentication,
-        "Verify the caller-owned bot credential and expected identity with discord-mcp doctor --online before retrying.",
+        "Verify the caller-owned bot credential and expected identity with guildcontrol doctor --online before retrying.",
         OPERATOR_REFERENCES.botSetup,
         OPERATOR_RETRY.afterCorrection,
       )
@@ -132,7 +132,7 @@ export function classifyCliFailure(
     if (error.status === 403) {
       return guidance(
         CLI_FAILURE_CATEGORIES.discordPermission,
-        "Run discord-mcp doctor --online, then correct the bot installation, role hierarchy, Discord permissions, or exact local scope before retrying.",
+        "Run guildcontrol doctor --online, then correct the bot installation, role hierarchy, Discord permissions, or exact local scope before retrying.",
         OPERATOR_REFERENCES.botSetup,
         OPERATOR_RETRY.afterCorrection,
       )
@@ -152,14 +152,14 @@ export function classifyCliFailure(
     if (error.status >= 500) {
       return guidance(
         CLI_FAILURE_CATEGORIES.discordRemote,
-        "Wait for Discord service health to recover, rerun discord-mcp doctor --online, and inspect state before repeating any state-changing command.",
+        "Wait for Discord service health to recover, rerun guildcontrol doctor --online, and inspect state before repeating any state-changing command.",
         OPERATOR_REFERENCES.verification,
         OPERATOR_RETRY.afterDelay,
       )
     }
     return guidance(
       CLI_FAILURE_CATEGORIES.discordRemote,
-      "Run discord-mcp doctor --online and correct the exact identity, scope, or request evidence before retrying.",
+      "Run guildcontrol doctor --online and correct the exact identity, scope, or request evidence before retrying.",
       OPERATOR_REFERENCES.verification,
       OPERATOR_RETRY.afterCorrection,
     )
@@ -172,7 +172,7 @@ export function classifyCliFailure(
   ) {
     return guidance(
       CLI_FAILURE_CATEGORIES.writeCoordination,
-      "Run discord-mcp coordination list and inspect Discord before resolving or repeating the affected write.",
+      "Run guildcontrol coordination list and inspect Discord before resolving or repeating the affected write.",
       OPERATOR_REFERENCES.operatorCli,
       OPERATOR_RETRY.afterInspection,
     )
@@ -188,14 +188,14 @@ export function classifyCliFailure(
     }
     return guidance(
       CLI_FAILURE_CATEGORIES.configuration,
-      "Run discord-mcp doctor with the intended --config or --profile, resolve every failing check, and retry only with that credential, identity, scope, and policy.",
+      "Run guildcontrol doctor with the intended --config or --profile, resolve every failing check, and retry only with that credential, identity, scope, and policy.",
       OPERATOR_REFERENCES.configuration,
       OPERATOR_RETRY.afterCorrection,
     )
   }
   return guidance(
     CLI_FAILURE_CATEGORIES.operation,
-    "Run discord-mcp doctor with the intended --config or --profile and inspect the reported local or Discord state before retrying.",
+    "Run guildcontrol doctor with the intended --config or --profile and inspect the reported local or Discord state before retrying.",
     OPERATOR_REFERENCES.verification,
     OPERATOR_RETRY.afterInspection,
   )

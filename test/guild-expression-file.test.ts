@@ -131,7 +131,7 @@ function avif(animated = false): Buffer {
 }
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

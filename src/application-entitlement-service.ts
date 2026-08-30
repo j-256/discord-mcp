@@ -363,7 +363,7 @@ export function fulfillmentReferenceHash(value: string): string {
     )
   }
   return `sha256:${createHash("sha256")
-    .update("discord-mcp-application-entitlement-fulfillment.v1\0")
+    .update("guildcontrol-application-entitlement-fulfillment.v1\0")
     .update(value)
     .digest("hex")}`
 }

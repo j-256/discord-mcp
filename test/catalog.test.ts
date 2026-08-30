@@ -46,7 +46,7 @@ import {
   MCP_PLAN_REVIEW_TOOL_NAMES,
   isPlanReviewToolName,
 } from "../src/mcp-plan-review-app.js"
-import { DISCORD_MCP_RECEIPT_PREFIX } from "../src/mcp-output.js"
+import { GUILDCONTROL_RECEIPT_PREFIX } from "../src/mcp-output.js"
 import {
   createMcpToolAccessDocument,
   createMcpToolAccessIndex,
@@ -231,7 +231,7 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
       error: {
         category: "client",
         code: CATALOG_ONLY_ERROR_CODE,
-        recoveryHint: "Use discord-mcp serve with credentialed configuration to execute tools",
+        recoveryHint: "Use guildcontrol serve with credentialed configuration to execute tools",
         retriable: false,
       },
       schemaVersion: 1,
@@ -241,7 +241,7 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
     const receipt = results[0]?.content[1]
     assert.equal(receipt?.type, "text")
     if (receipt?.type === "text") {
-      assert.ok(receipt.text.startsWith(DISCORD_MCP_RECEIPT_PREFIX))
+      assert.ok(receipt.text.startsWith(GUILDCONTROL_RECEIPT_PREFIX))
       assert.equal(receipt.text.includes(CATALOG_ONLY_ERROR_CODE), true)
     }
   })
@@ -434,7 +434,7 @@ test("catalog evidence digest binds the normalized advertised contract and safet
 })
 
 test("catalog self-check ignores hostile ambient credentials and unrelated settings", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-catalog-test-"))
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "guildcontrol-catalog-test-"))
   const activityFile = join(temporaryDirectory, "activity.jsonl")
   const ambientSecret = "ambient-catalog-secret"
   const overrides = new Map<string, string>([

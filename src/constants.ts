@@ -1,22 +1,22 @@
-export const CONNECTOR_NAME = "discord-mcp"
-export const CONNECTOR_TITLE = "Discord MCP"
+export const CONNECTOR_NAME = "guildcontrol"
+export const CONNECTOR_TITLE = "GuildControl MCP"
 export const CONNECTOR_VERSION = "0.1.2"
-export const CONNECTOR_NPM_PACKAGE = "@j-256/discord-mcp"
+export const CONNECTOR_NPM_PACKAGE = "guildcontrol"
 export const CONNECTOR_NPX_COMMAND = "npx"
 export const CONNECTOR_NPX_ARGUMENTS = Object.freeze([
   "--yes",
   `${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`,
 ] as const)
-export const CONNECTOR_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
-export const CONNECTOR_WEBSITE_URL = "https://j-256.github.io/discord-mcp"
-export const CONNECTOR_ICON_URL = `https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png`
+export const CONNECTOR_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
+export const CONNECTOR_WEBSITE_URL = "https://j-256.github.io/guildcontrol"
+export const CONNECTOR_ICON_URL = `https://raw.githubusercontent.com/j-256/guildcontrol/v${CONNECTOR_VERSION}/assets/guildcontrol-icon.png`
 export const CONNECTOR_ICON_MIME_TYPE = "image/png"
 export const CONNECTOR_ICON_SIZES = Object.freeze(["1254x1254"] as const)
 export const SCHEMA_VERSION = 1
 
 export const DISCORD_API_BASE_URL = "https://discord.com/api/v10"
 export const DISCORD_WEB_BASE_URL = "https://discord.com"
-export const DISCORD_USER_AGENT = `DiscordBot (discord-mcp, ${CONNECTOR_VERSION})`
+export const DISCORD_USER_AGENT = `DiscordBot (guildcontrol, ${CONNECTOR_VERSION})`
 export const DISCORD_SNOWFLAKE_PATTERN = /^[0-9]{1,20}$/
 export const DISCORD_SNOWFLAKE_MAX = 18_446_744_073_709_551_615n
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
@@ -232,7 +232,7 @@ export const GUILD_SYSTEM_NOTIFICATION_SUPPRESSIONS = [
 export type GuildSystemNotificationSuppression =
   typeof GUILD_SYSTEM_NOTIFICATION_SUPPRESSIONS[number]
 
-export const CONFIG_FILE_ENVIRONMENT_VARIABLE = "DISCORD_MCP_CONFIG_FILE"
+export const CONFIG_FILE_ENVIRONMENT_VARIABLE = "GUILDCONTROL_CONFIG_FILE"
 export const DEFAULT_TOKEN_ENVIRONMENT_VARIABLE = "DISCORD_BOT_TOKEN"
 export const DISCORD_TOKEN_ENVIRONMENT_PATTERN = /^DISCORD_(?:[A-Z0-9]+_)*TOKEN$/
 
@@ -814,7 +814,7 @@ export const INTERACTION_DEFAULTS = Object.freeze({
 })
 
 export const NATIVE_INTERACTION_DEFAULTS = Object.freeze({
-  commandName: "discord-mcp",
+  commandName: "guildcontrol",
   maximumFollowups: 3,
   maximumPending: 25,
   pendingPerUser: 3,

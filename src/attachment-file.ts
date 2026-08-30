@@ -25,7 +25,7 @@ export async function readAttachmentFileSnapshot(
   return readSnapshot(
     options,
     "Discord attachment",
-    "discord-mcp-attachment-file.v1",
+    "guildcontrol-attachment-file.v1",
   )
 }
 
@@ -35,7 +35,7 @@ export async function readDirectAttachmentFileSnapshot(
   return readSnapshot(
     options,
     "Discord direct-message attachment",
-    "discord-mcp-direct-attachment-file.v1",
+    "guildcontrol-direct-attachment-file.v1",
   )
 }
 

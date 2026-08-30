@@ -248,7 +248,7 @@ test("plan-review app completes a display-only host lifecycle without trusted HT
     method: "ui/initialize",
     params: {
       appCapabilities: { availableDisplayModes: ["inline"] },
-      appInfo: { name: "discord-mcp-plan-review", version: "1.0.0" },
+      appInfo: { name: "guildcontrol-plan-review", version: "1.0.0" },
       protocolVersion: MCP_PLAN_REVIEW_APP_PROTOCOL_VERSION,
     },
   })

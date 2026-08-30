@@ -1132,7 +1132,7 @@ export class MemberVoiceService {
       destination: channelSnapshot(state.destination),
       destinationBotPermission: state.destinationBotPermission,
       destinationTargetPermission: state.destinationTargetPermission,
-      domain: "discord-mcp-member-voice-change-plan.v1",
+      domain: "guildcontrol-member-voice-change-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

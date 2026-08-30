@@ -27,7 +27,7 @@ import {
   type McpToolName,
 } from "./observability-catalog.js"
 
-export const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v3"
+export const CATALOG_HTML_FORMAT = "guildcontrol.catalog-html.v3"
 
 const ANNOTATION_NAMES = [
   "readOnlyHint",
@@ -220,7 +220,7 @@ function guidedTourMarkup(
       2,
       "Create a narrow read-only boundary",
       "Start with one owner-managed bot, one verified guild, one strict non-secret policy, and one external token secret.",
-      `<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} setup --npx --config ./discord-mcp.json --preset server-observer --guild-id YOUR_GUILD_ID`)}</code></pre><div class="tour-proof-grid"><div><b>Authority starts absent</b><span>The read-only preset cannot enable writes, Gateway access, telemetry export, activity persistence, or Message Content access</span></div><div><b>Live setup must prove</b><span>The application, bot, guild membership, selected credential source, and actual Discord permissions</span></div></div>`,
+      `<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} setup --npx --config ./guildcontrol.json --preset server-observer --guild-id YOUR_GUILD_ID`)}</code></pre><div class="tour-proof-grid"><div><b>Authority starts absent</b><span>The read-only preset cannot enable writes, Gateway access, telemetry export, activity persistence, or Message Content access</span></div><div><b>Live setup must prove</b><span>The application, bot, guild membership, selected credential source, and actual Discord permissions</span></div></div>`,
     ),
     tourPanel(
       "route",
@@ -255,7 +255,7 @@ function guidedTourMarkup(
       7,
       "Settle ambiguity without guessing",
       "Content-free activity and durable claims separate completed, failed, drifting, and uncertain outcomes while preserving operator control.",
-      `${tourToolLink(activity, "Negotiated local evidence tool")}<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} coordination list --config ./discord-mcp.json`)}</code></pre><div class="tour-proof-grid"><div><b>Evidence retains</b><span>Exact identifiers where permitted, hashes, timestamps, stages, outcomes, and sanitized error categories</span></div><div><b>Evidence excludes</b><span>Messages, names, topics, URLs, reasons, raw operation keys, credentials, and transport response bodies</span></div></div>`,
+      `${tourToolLink(activity, "Negotiated local evidence tool")}<pre tabindex="0"><code>${escapeHtml(`npx --yes ${packageSpec} coordination list --config ./guildcontrol.json`)}</code></pre><div class="tour-proof-grid"><div><b>Evidence retains</b><span>Exact identifiers where permitted, hashes, timestamps, stages, outcomes, and sanitized error categories</span></div><div><b>Evidence excludes</b><span>Messages, names, topics, URLs, reasons, raw operation keys, credentials, and transport response bodies</span></div></div>`,
     ),
   ].join("")
   return `<div class="tour-tabs" role="tablist" aria-label="Guided product tour steps">${tabs}</div><div class="tour-panels">${panels}</div>`
@@ -428,8 +428,8 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; media-src 'none'; object-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'">
-  <meta name="description" content="Credential-free, release-exact Discord MCP product tour and contract explorer">
-  <title>Discord MCP Contract Explorer ${escapeHtml(report.serverVersion)}</title>
+  <meta name="description" content="Credential-free, release-exact GuildControl MCP product tour and contract explorer">
+  <title>GuildControl MCP Contract Explorer ${escapeHtml(report.serverVersion)}</title>
   <style>
     :root{color-scheme:light dark;--bg:#f4f6fb;--panel:#fff;--panel-2:#f8f9fd;--text:#162033;--muted:#5d687b;--line:#d8deea;--brand:#5865f2;--brand-2:#3643c8;--on-brand:#fff;--focus:#ffb020;--local:#6c5ce7;--read:#147d64;--interaction:#b85c00;--admin:#a13b78;--destructive:#bd2838;--shadow:0 18px 50px rgba(29,40,76,.09)}
     @media(prefers-color-scheme:dark){:root{--bg:#0d111b;--panel:#151b28;--panel-2:#101622;--text:#eef2ff;--muted:#aab4ca;--line:#30394c;--brand:#8993ff;--brand-2:#b1b7ff;--on-brand:#0d111b;--focus:#ffd166;--local:#a99cff;--read:#63d1b1;--interaction:#ffb56b;--admin:#ee8fc5;--destructive:#ff7d8a;--shadow:0 18px 50px rgba(0,0,0,.28)}}
@@ -443,7 +443,7 @@ export function renderDiscordCatalogHtml(snapshot: DiscordCatalogSnapshot): stri
   <a class="skip-link" href="#main">Skip to contract</a>
   <header class="shell hero">
     <p class="eyebrow">Credential-free release inspection</p>
-    <h1>Discord MCP Contract Explorer</h1>
+    <h1>GuildControl MCP Contract Explorer</h1>
     <p class="lede">A self-contained view of the exact MCP contract negotiated from version ${escapeHtml(report.serverVersion)}. This artifact cannot execute a tool, contact Discord, read a credential, expose completion IDs, open the Gateway, export telemetry, or create an activity record.</p>
     <a class="hero-link" href="#tour">Start the guided product tour</a>
     <div class="proof-strip" role="list" aria-label="Catalog summary">

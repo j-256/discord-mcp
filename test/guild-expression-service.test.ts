@@ -513,7 +513,7 @@ test("guild expression policy separates audit from changes and exact guild scope
 })
 
 test("guild expression create plans bind owned local bytes and execute after pending audit", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-service-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "hello.png")
@@ -639,7 +639,7 @@ test("guild expression creation requires CREATE_GUILD_EXPRESSIONS even with mana
 })
 
 test("guild expression planning requires fresh eligible guild features for Lottie stickers", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-lottie-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-lottie-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "sticker.json")
@@ -715,7 +715,7 @@ test("guild expression delete distinguishes exact absence from server drift", as
 })
 
 test("guild expression execution covers sticker creation and update plus emoji deletion", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-actions-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-actions-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "new-sticker.png")
@@ -835,7 +835,7 @@ test("guild expression execution rejects stale plans and reserved operation keys
 })
 
 test("guild expression execution treats an invalidated creation file as a changed plan", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-replan-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-replan-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "planned.png")
@@ -862,7 +862,7 @@ test("guild expression execution treats an invalidated creation file as a change
 })
 
 test("guild expression creation records an uncertain terminal outcome for a malformed success identity", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-expression-identity-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-expression-identity-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "identity.png")

@@ -515,9 +515,9 @@ import {
   WriteCoordinationStateError,
 } from "../src/errors.js"
 import {
-  createDiscordMcpServer,
-  runDiscordMcpServer,
-  type DiscordMcpRunOptions,
+  createGuildControlServer,
+  runGuildControlServer,
+  type GuildControlRunOptions,
   type DiscordToolService,
 } from "../src/mcp.js"
 import { GatewayEventStore, type GatewayEventSource } from "../src/gateway-events.js"
@@ -805,10 +805,10 @@ async function stdioConfigFile(
     toolSurface: "full" | "progressive"
   },
 ): Promise<string> {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-stdio-policy-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-stdio-policy-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   await writeConnectorConfigDocumentFile(
     configFile,
     createConnectorConfigDocument({
@@ -929,10 +929,10 @@ const ONBOARDING_DEFAULT_CHANNEL_IDS = Array.from(
 const EMOJI_ID = "380000000000000001"
 const STICKER_ID = "390000000000000001"
 const GUILD_EXPRESSION_OPERATION_KEY = "guild-expression-attempt-0001"
-const GUILD_EXPRESSION_PATH = "/test/discord-mcp/reviewed-expression.png"
+const GUILD_EXPRESSION_PATH = "/test/guildcontrol/reviewed-expression.png"
 const APPLICATION_EMOJI_ID = "381000000000000001"
 const APPLICATION_EMOJI_OPERATION_KEY = "application-emoji-attempt-0001"
-const APPLICATION_EMOJI_PATH = "/test/discord-mcp/reviewed-application-emoji.png"
+const APPLICATION_EMOJI_PATH = "/test/guildcontrol/reviewed-application-emoji.png"
 const APPLICATION_TEST_ENTITLEMENT_OPERATION_KEY =
   "application-test-entitlement-attempt-0001"
 const APPLICATION_TEST_ENTITLEMENT_CREATION_OPERATION_KEY =
@@ -945,7 +945,7 @@ const APPLICATION_INTENT_OPERATION_KEY = "application-intent-attempt-0001"
 const APPLICATION_INTENT_REVIEW_REASON = "Enable the schema-v2 member directory"
 const BOT_PROFILE_OPERATION_KEY = "bot-profile-attempt-0001"
 const BOT_PROFILE_REVIEW_REASON = "Align the public bot identity with the reviewed product"
-const BOT_PROFILE_AVATAR_PATH = "/test/discord-mcp/reviewed-bot-avatar.png"
+const BOT_PROFILE_AVATAR_PATH = "/test/guildcontrol/reviewed-bot-avatar.png"
 const APPLICATION_ROLE_CONNECTION_METADATA_OPERATION_KEY =
   "linked-role-metadata-attempt-0001"
 const APPLICATION_ROLE_CONNECTION_METADATA_RECORD = Object.freeze({
@@ -962,15 +962,15 @@ const APPLICATION_ROLE_CONNECTION_METADATA_RECORD = Object.freeze({
 const SOUNDBOARD_SOUND_ID = "391000000000000001"
 const SOUNDBOARD_OPERATION_KEY = "soundboard-change-attempt-0001"
 const SOUNDBOARD_PLAYBACK_OPERATION_KEY = "soundboard-playback-attempt-0001"
-const SOUNDBOARD_PATH = "/test/discord-mcp/reviewed-sound.mp3"
+const SOUNDBOARD_PATH = "/test/guildcontrol/reviewed-sound.mp3"
 const AUTOMOD_RULE_ID = "392000000000000001"
 const AUTOMOD_OPERATION_KEY = "automod-attempt-0001"
 const SCHEDULED_EVENT_ID = "395000000000000001"
 const SCHEDULED_EVENT_OPERATION_KEY = "scheduled-event-attempt-0001"
-const SCHEDULED_EVENT_COVER_PATH = "/test/discord-mcp/reviewed-event-cover.png"
+const SCHEDULED_EVENT_COVER_PATH = "/test/guildcontrol/reviewed-event-cover.png"
 const STAGE_INSTANCE_ID = "396000000000000001"
 const STAGE_INSTANCE_OPERATION_KEY = "stage-instance-attempt-0001"
-const ATTACHMENT_PATH = "/test/discord-mcp/report.txt"
+const ATTACHMENT_PATH = "/test/guildcontrol/report.txt"
 const COMPONENT_LAYOUT: ComponentLayoutInput[] = [{
   accentColor: 0x58_65_F2,
   components: [{ content: `Reviewed component for <@${USER_ID}>`, kind: "text" as const }],
@@ -1513,7 +1513,7 @@ function nativeInteractionCommandPlan(
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
     command: {
-      contract: nativeInteractionCommandContract("discord-mcp"),
+      contract: nativeInteractionCommandContract("guildcontrol"),
       id: installed ? "700000000000000001" : null,
       version: installed ? "700000000000000002" : null,
     },
@@ -9397,7 +9397,7 @@ function fixturePolicy(): PolicyDescription {
     messageForwardSourceChannelIds: [],
     messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
-    nativeCommandName: "discord-mcp",
+    nativeCommandName: "guildcontrol",
     nativeInteractionChannelIds: [],
     nativeInteractionGuildIds: [],
     nativeInteractionMaxPending: 25,
@@ -14950,7 +14950,7 @@ async function connectedFixture(
     ...options.configOverrides,
   }
   const loadedConfig = loadFixtureConfig(configOverrides)
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config: options.runtimeMcpReadResponseMaxBytes === undefined
       ? loadedConfig
       : {
@@ -14981,7 +14981,7 @@ async function connectedFixture(
   }
   await server.connect(serverTransport)
   const client = new Client(
-    { name: "discord-mcp-test", version: "1.0.0" },
+    { name: "guildcontrol-test", version: "1.0.0" },
     {
       capabilities: { elicitation: {} },
       ...(options.listChanged ? { listChanged: options.listChanged } : {}),
@@ -15074,7 +15074,7 @@ async function connectedModernStdioFixture(
   const serviceData = serviceFixture(serviceOverrides)
   const serverInput = new PassThrough()
   const serverOutput = new PassThrough()
-  const handle = runDiscordMcpServer({
+  const handle = runGuildControlServer({
     config: loadFixtureConfig({
       token: TOKEN,
     }),
@@ -15091,7 +15091,7 @@ async function connectedModernStdioFixture(
     stdout: serverOutput,
   })
   const client = new Client(
-    { name: "discord-mcp-modern-test", version: "1.0.0" },
+    { name: "guildcontrol-modern-test", version: "1.0.0" },
     {
       capabilities: { elicitation: {} },
       versionNegotiation: { mode: { pin: "2026-07-28" } },
@@ -15140,7 +15140,7 @@ function assertContentFreeToolReceipt(result: {
   assert.equal(result.content?.[1]?.type, "text")
   assert.match(
     result.content?.[1]?.text || "",
-    /^DISCORD_MCP_RECEIPT \{"receiptSchema":"discord-mcp-result-receipt\.v1"/,
+    /^GUILDCONTROL_RECEIPT \{"receiptSchema":"guildcontrol-result-receipt\.v1"/,
   )
 }
 
@@ -16540,7 +16540,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
   })
 
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: gateway(false, GUILD_ID),
@@ -16549,7 +16549,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
     /requires an enabled Gateway layout source/,
   )
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: gateway(true, OTHER_GUILD_ID),
@@ -16558,7 +16558,7 @@ test("MCP server validates the exact reviewed channel-workflow Gateway layout sc
     /layout scope does not match configured exact guild scope/,
   )
 
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config: loadFixtureConfig(configOverrides),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gateway: gateway(true, GUILD_ID),
@@ -16596,7 +16596,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
   })
 
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(0),
@@ -16605,7 +16605,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     /voice-channel status scope does not match configured exact channel scope/,
   )
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(1),
@@ -16619,7 +16619,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
   })
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: disabled,
@@ -16633,7 +16633,7 @@ test("MCP server requires an exact operational Gateway source for voice channel 
     voiceChannelStatusEnabled: true,
     waitForVoiceChannelStatusUpdate: async () => Promise.reject(new Error("not called")),
   })
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config: loadFixtureConfig(configOverrides),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gateway: enabled,
@@ -16672,7 +16672,7 @@ test("MCP server requires an exact operational Gateway source for soundboard pla
   })
 
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(0),
@@ -16681,7 +16681,7 @@ test("MCP server requires an exact operational Gateway source for soundboard pla
     /soundboard playback scope does not match configured exact channel scope/,
   )
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: store(1),
@@ -16694,7 +16694,7 @@ test("MCP server requires an exact operational Gateway source for soundboard pla
     waitForSoundboardPlaybackEvent: async () => Promise.reject(new Error("not called")),
   })
   assert.throws(
-    () => createDiscordMcpServer({
+    () => createGuildControlServer({
       config: loadFixtureConfig(configOverrides),
       environment: { DISCORD_BOT_TOKEN: TOKEN },
       gateway: disabled,
@@ -16707,7 +16707,7 @@ test("MCP server requires an exact operational Gateway source for soundboard pla
     soundboardPlaybackEventsEnabled: true,
     waitForSoundboardPlaybackEvent: async () => Promise.reject(new Error("not called")),
   })
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config: loadFixtureConfig(configOverrides),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gateway: enabled,
@@ -20205,7 +20205,7 @@ test("MCP native Interaction resources and tools keep tokens private and request
       return {
         command: {
           guildCount: 1,
-          name: "discord-mcp",
+          name: "guildcontrol",
           verifiedGuildCount: 1,
         },
         enabled: true,
@@ -21975,7 +21975,7 @@ test("MCP component template compilation is typed, local, and workflow-ready", a
         url: "https://Docs.example.com/releases/latest",
       },
       notifyUserIds: [USER_ID],
-      releaseName: "Discord MCP 1.0",
+      releaseName: "GuildControl MCP 1.0",
       summary: "A reviewed release.",
       template: "release-notes",
     },
@@ -24010,7 +24010,7 @@ test("MCP managed native command planning is exact and signed approval binds exe
   assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
   assert.match(confirmationMessage, new RegExp(BOT_ID))
   assert.match(confirmationMessage, new RegExp(GUILD_ID))
-  assert.match(confirmationMessage, /Command name: discord-mcp/)
+  assert.match(confirmationMessage, /Command name: guildcontrol/)
   assert.match(confirmationMessage, /Default member permissions: 0/)
   assert.match(confirmationMessage, /Guild only: true/)
   assert.match(confirmationMessage, /Request option maximum length: 2000/)
@@ -41130,7 +41130,7 @@ test("MCP stdio progressive discovery negotiates modern tool-list changes", asyn
     rejectNotification = reject
   })
   const client = new Client(
-    { name: "discord-mcp-stdio-progressive-test", version: "1.0.0" },
+    { name: "guildcontrol-stdio-progressive-test", version: "1.0.0" },
     {
       capabilities: { elicitation: {} },
       listChanged: {
@@ -41219,7 +41219,7 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     diagnostics += String(chunk)
   })
   const client = new Client(
-    { name: "discord-mcp-stdio-test", version: "1.0.0" },
+    { name: "guildcontrol-stdio-test", version: "1.0.0" },
     {
       capabilities: { elicitation: {} },
       versionNegotiation: { mode: { pin: "2026-07-28" } },
@@ -41318,7 +41318,7 @@ test("MCP stdio entrypoint completes policy IDs for legacy clients", async (cont
     diagnostics += String(chunk)
   })
   const client = new Client(
-    { name: "discord-mcp-stdio-legacy-completion-test", version: "1.0.0" },
+    { name: "guildcontrol-stdio-legacy-completion-test", version: "1.0.0" },
     { capabilities: {} },
   )
   context.after(async () => {
@@ -41353,9 +41353,9 @@ test("MCP stdio entrypoint completes policy IDs for legacy clients", async (cont
 })
 
 test("MCP stdio startup fails before reporting ready when the referenced token is absent", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-missing-token-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-missing-token-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
-  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  const configFile = join(await realpath(temporary), "guildcontrol.json")
   await writeConnectorConfigDocumentFile(
     configFile,
     createConnectorConfigDocument({
@@ -41370,7 +41370,7 @@ test("MCP stdio startup fails before reporting ready when the referenced token i
   let diagnostics = ""
 
   assert.throws(
-    () => runDiscordMcpServer({
+    () => runGuildControlServer({
       environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile },
       stderr: {
         write(value) {
@@ -41386,7 +41386,7 @@ test("MCP stdio startup fails before reporting ready when the referenced token i
 
 test("MCP stdio runner rejects a source-only native Interaction adapter", () => {
   assert.throws(
-    () => runDiscordMcpServer({
+    () => runGuildControlServer({
       config: loadFixtureConfig({
         token: TOKEN,
       }),
@@ -41394,7 +41394,7 @@ test("MCP stdio runner rejects a source-only native Interaction adapter", () => 
         DISCORD_BOT_TOKEN: TOKEN,
       },
       nativeInteractions: undefined,
-    } as unknown as DiscordMcpRunOptions),
+    } as unknown as GuildControlRunOptions),
     /accept nativeInteractionRuntime, not a source-only/,
   )
 })
@@ -41430,7 +41430,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
       return {
         command: {
           guildCount: 1,
-          name: "discord-mcp",
+          name: "guildcontrol",
           verifiedGuildCount: 1,
         },
         enabled: true,
@@ -41492,7 +41492,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
       return () => undefined
     },
   }
-  const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
+  const gatewayRuntime: NonNullable<GuildControlRunOptions["gatewayRuntime"]> = {
     enabled: true,
     layoutEnabled: feed.layoutEnabled,
     soundboardPlaybackEventsEnabled: false,
@@ -41539,7 +41539,7 @@ test("MCP stdio runner starts native Interaction ingress before Gateway and stop
       nativeInteractionUserIds: [USER_ID],
     },
   }
-  const handle = runDiscordMcpServer({
+  const handle = runGuildControlServer({
     config: loadFixtureConfig(configOverrides),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     gatewayRuntime,
@@ -41578,7 +41578,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   const stopped = new Promise<void>((resolve) => {
     reportStopped = resolve
   })
-  const gatewayRuntime: NonNullable<DiscordMcpRunOptions["gatewayRuntime"]> = {
+  const gatewayRuntime: NonNullable<GuildControlRunOptions["gatewayRuntime"]> = {
     enabled: true,
     layoutEnabled: feed.layoutEnabled,
     soundboardPlaybackEventsEnabled: false,
@@ -41626,7 +41626,7 @@ test("MCP stdio runner stops Gateway and observability runtimes idempotently", a
   let diagnostics = ""
   const stdin = new PassThrough()
   const stdout = new PassThrough()
-  const handle = runDiscordMcpServer({
+  const handle = runGuildControlServer({
     config: loadFixtureConfig({
       token: TOKEN,
     }),

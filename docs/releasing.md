@@ -1,6 +1,6 @@
 # Release runbook
 
-Discord MCP uses deliberately separate release operations for a credential-free first-publication candidate, normal staged npm publication, immutable OCI publication, an immutable GitHub Release, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
+GuildControl MCP uses deliberately separate release operations for a credential-free first-publication candidate, normal staged npm publication, immutable OCI publication, an immutable GitHub Release, and MCP Registry registration. No operation contacts Discord or needs a Discord bot token.
 
 ## Public-source preflight
 
@@ -19,16 +19,16 @@ Before changing visibility:
 
 Before any publication:
 
-1. Make `j-256/discord-mcp` public. npm provenance and public GitHub attestations fail for a private source repository, and the workflow enforces this boundary.
-2. Set the repository description exactly to `Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `discord-mcp`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
+1. Make `j-256/guildcontrol` public. npm provenance and public GitHub attestations fail for a private source repository, and the workflow enforces this boundary.
+2. Set the repository description exactly to `Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration`. Replace its topics with the exact model- and harness-neutral topic set `ai-agents`, `automation`, `community-management`, `discord`, `discord-api`, `discord-bot`, `guildcontrol`, `least-privilege`, `mcp`, `mcp-server`, `model-context-protocol`, `moderation`, `security`, and `typescript`. Keep Issues enabled. Leave Discussions, Projects, and the wiki disabled until each has an owned maintenance purpose. Topic names are public even for a private repository, so apply this profile only after the visibility decision.
 3. Create or re-enable protection for `main` after the visibility change and require the `CI gate` and CodeQL checks. Require CODEOWNERS review for workflows, package metadata, registry metadata, release scripts, security policy, and community files.
-4. Before the first Pages deployment, follow [GitHub's publishing-source instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow): open Settings, Pages, and under Build and deployment select GitHub Actions. Restrict the `github-pages` environment to protected `main`, let the `Publish documentation portal` job deploy the exact browser-verified artifact, then run `node scripts/check-public-documentation.mjs` and require an exact result. Only after that verification succeeds, set the repository homepage to `https://j-256.github.io/discord-mcp`.
+4. Before the first Pages deployment, follow [GitHub's publishing-source instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow): open Settings, Pages, and under Build and deployment select GitHub Actions. Restrict the `github-pages` environment to protected `main`, let the `Publish documentation portal` job deploy the exact browser-verified artifact, then run `node scripts/check-public-documentation.mjs` and require an exact result. Only after that verification succeeds, set the repository homepage to `https://j-256.github.io/guildcontrol`.
 5. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
 6. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Enable repository-level immutable Releases before publishing any GitHub Release. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
 7. Enable two-factor authentication on the npm maintainer account.
-8. Confirm that the npm maintainer controls the `@j-256` scope.
+8. Confirm that the unscoped npm name `guildcontrol` is either available for the first publication or already owned by the `j-256` maintainer account for later releases.
 9. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
-10. Confirm that the repository owner can administer the `discord-mcp` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
+10. Confirm that the repository owner can administer the `guildcontrol` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
 The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version. Every release operation also requires the canonical public documentation manifest to contain that version and exact hashes for the release's documentation source frontier.
 
@@ -48,25 +48,25 @@ gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=candidate -f t
 
 ```sh
 gh run download RUN_ID --name release-evidence-candidate-vMAJOR.MINOR.PATCH
-gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
-gh attestation verify discord-mcp-MAJOR.MINOR.PATCH.mcpb \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.mcpb \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify discord-mcp-MAJOR.MINOR.PATCH.mcpb \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.mcpb \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
@@ -77,14 +77,14 @@ gh attestation verify discord-mcp-MAJOR.MINOR.PATCH.mcpb \
 ```sh
 npm login --auth-type=web
 npm whoami
-npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public --provenance=false
+npm publish ./guildcontrol-MAJOR.MINOR.PATCH.tgz --provenance=false
 ```
 
 6. After npm makes the version available, require its published SHA-512 integrity to match the candidate before any OCI or MCP Registry operation:
 
 ```sh
 node scripts/check-published-artifacts.mjs \
-  --tarball ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
+  --tarball ./guildcontrol-MAJOR.MINOR.PATCH.tgz \
   --expect-package matching \
   --expect-npm matching \
   --expect-oci missing \
@@ -99,7 +99,7 @@ Immediately after the first publication, configure the npm package's trusted pub
 
 - Provider: GitHub Actions
 - Repository owner: `j-256`
-- Repository: `discord-mcp`
+- Repository: `guildcontrol`
 - Workflow: `release.yml`
 - Environment: `release`
 - Permission: allow staged publishing and disallow direct publishing
@@ -109,7 +109,7 @@ Set package publishing access to require two-factor authentication and disallow 
 ## Prepare a version
 
 1. Update `version` in `package.json`, the lockfile root, `CONNECTOR_VERSION` in `src/constants.ts`, the npm version and OCI image tag in `server.json`, the runtime `VERSION` default in `Dockerfile`, the MCPB manifest version, and every versioned public URL including the icon, privacy support link, and MCPB release asset.
-2. Set `mcpb/reproducible-build.json` to the release's reviewed UTC build epoch. Run `node scripts/build-mcpb.mjs --allow-registry-mismatch`, copy the reported raw SHA-256 into the MCPB package in `server.json`, then run `npm run mcpb:verify` and require the digest to remain identical. The normal verifier fails when the generated bytes differ from Registry metadata; the mismatch option is only for this reviewed release-preparation step. The URL must name `discord-mcp-MAJOR.MINOR.PATCH.mcpb` under the exact `vMAJOR.MINOR.PATCH` GitHub Release.
+2. Set `mcpb/reproducible-build.json` to the release's reviewed UTC build epoch. Run `node scripts/build-mcpb.mjs --allow-registry-mismatch`, copy the reported raw SHA-256 into the MCPB package in `server.json`, then run `npm run mcpb:verify` and require the digest to remain identical. The normal verifier fails when the generated bytes differ from Registry metadata; the mismatch option is only for this reviewed release-preparation step. The URL must name `guildcontrol-MAJOR.MINOR.PATCH.mcpb` under the exact `vMAJOR.MINOR.PATCH` GitHub Release.
 3. Run the complete local gate:
 
 ```sh
@@ -146,7 +146,7 @@ gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=stage -f tag=v
 3. Inspect the private npm stage from a maintainer workstation:
 
 ```sh
-npm stage list @j-256/discord-mcp
+npm stage list guildcontrol
 npm stage view STAGE_ID
 npm stage download STAGE_ID
 ```
@@ -168,7 +168,7 @@ Publish the OCI image only after npm exposes the exact approved version:
 gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=image -f tag=vMAJOR.MINOR.PATCH
 ```
 
-The protected image operation reconstructs the npm archive from the tag and requires it to match the public npm integrity before inspecting the exact OCI tag through an authenticated registry request. If the tag is absent, it builds and publishes `linux/amd64` and `linux/arm64` manifests under `ghcr.io/j-256/discord-mcp:MAJOR.MINOR.PATCH`. Both stages use the same reviewed digest-pinned Node.js base. The image runs as an unprivileged user, defaults to credential-free catalog mode, and contains only the compiled server, production dependencies, package metadata, and license.
+The protected image operation reconstructs the npm archive from the tag and requires it to match the public npm integrity before inspecting the exact OCI tag through an authenticated registry request. If the tag is absent, it builds and publishes `linux/amd64` and `linux/arm64` manifests under `ghcr.io/j-256/guildcontrol:MAJOR.MINOR.PATCH`. Both stages use the same reviewed digest-pinned Node.js base. The image runs as an unprivileged user, defaults to credential-free catalog mode, and contains only the compiled server, production dependencies, package metadata, and license.
 
 Before publishing, the workflow exports and validates the complete multi-architecture OCI layout with digest-pinned BuildKit, architecture-emulation, and SBOM-generator images. It verifies every referenced blob and requires the exact platform, annotation, configuration, layer-binding, provenance, and SPDX structure. BuildKit evidence may use its legacy compatibility image config or its OCI artifact encoding. The artifact form must name the exact runnable manifest as its subject and use OCI's canonical empty JSON config descriptor. The release build then binds BuildKit provenance and SPDX records for both platform manifests into the root index and pushes signed GitHub provenance for that exact root digest. It requires the public index to match the preflight invariants, runs the pulled image with a read-only root filesystem and no network or Linux capabilities, compares its catalog evidence to the source contract, and verifies the signed root claim against the exact repository, workflow, tag ref, and source commit.
 
@@ -190,8 +190,8 @@ The read-only release job reconstructs the npm archive, MCPB, catalog evidence, 
 
 An absent Release is created as a draft. An existing draft may be reconciled only for the exact asset set below, then its tag, title, notes, asset names, sizes, SHA-256 digests, download URLs, and source commit are verified before publication:
 
-- `j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz`
-- `discord-mcp-MAJOR.MINOR.PATCH.mcpb`
+- `guildcontrol-MAJOR.MINOR.PATCH.tgz`
+- `guildcontrol-MAJOR.MINOR.PATCH.mcpb`
 - `catalog-evidence.json`
 - `release-notes.md`
 - `sbom.spdx.json`
@@ -216,13 +216,13 @@ Metadata checks require the npm entry to pass one config-file argument, the OCI 
 Verify the immutable GitHub Release, download its exact assets, verify each local asset against GitHub's Release attestation, and check the checksum manifest:
 
 ```sh
-mkdir discord-mcp-release
-gh release verify vMAJOR.MINOR.PATCH --repo j-256/discord-mcp
-gh release download vMAJOR.MINOR.PATCH --repo j-256/discord-mcp --dir discord-mcp-release
-gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --repo j-256/discord-mcp
-gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/discord-mcp-MAJOR.MINOR.PATCH.mcpb --repo j-256/discord-mcp
-gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/release-notes.md --repo j-256/discord-mcp
-(cd discord-mcp-release && shasum -a 256 -c SHA256SUMS)
+mkdir guildcontrol-release
+gh release verify vMAJOR.MINOR.PATCH --repo j-256/guildcontrol
+gh release download vMAJOR.MINOR.PATCH --repo j-256/guildcontrol --dir guildcontrol-release
+gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.tgz --repo j-256/guildcontrol
+gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.mcpb --repo j-256/guildcontrol
+gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/release-notes.md --repo j-256/guildcontrol
+(cd guildcontrol-release && shasum -a 256 -c SHA256SUMS)
 ```
 
 `gh release verify` establishes GitHub's signed binding among the immutable tag, source commit, and complete asset digest set. `gh release verify-asset` establishes that the local file is one exact attested asset. The checksum manifest makes the package, MCPB, catalog evidence, canonical notes, and SBOM directly comparable with ordinary local tools. These integrity checks establish identity and origin, not freedom from defects, vulnerabilities, malicious source, or scanner omissions.
@@ -230,31 +230,31 @@ gh release verify-asset vMAJOR.MINOR.PATCH discord-mcp-release/release-notes.md 
 Download the exact npm package and verify both provenance and its SBOM attestation:
 
 ```sh
-npm pack @j-256/discord-mcp@MAJOR.MINOR.PATCH
-gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+npm pack guildcontrol@MAJOR.MINOR.PATCH
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
 gh attestation verify catalog-evidence.json \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify discord-mcp-release/discord-mcp-MAJOR.MINOR.PATCH.mcpb \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.mcpb \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify discord-mcp-release/discord-mcp-MAJOR.MINOR.PATCH.mcpb \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+gh attestation verify guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.mcpb \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
@@ -263,8 +263,8 @@ gh attestation verify discord-mcp-release/discord-mcp-MAJOR.MINOR.PATCH.mcpb \
 From an isolated consumer directory, install the downloaded archive without lifecycle scripts and save the credential-free catalog evidence:
 
 ```sh
-npm install --ignore-scripts ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz
-./node_modules/.bin/discord-mcp catalog --check --json > catalog-evidence.json
+npm install --ignore-scripts ./guildcontrol-MAJOR.MINOR.PATCH.tgz
+./node_modules/.bin/guildcontrol catalog --check --json > catalog-evidence.json
 ```
 
 The evidence must be identical across repeated runs of the same installed archive. Review its exact inventories and accounting fields, including complete per-tool authentication, connector policy, Discord permission, conditional case, Gateway intent, hierarchy, curated setup, access-lifecycle, and live-verification contracts with zero unknown requirement entries. Preserve its `contractDigest` for contract comparison and its separate `safetyResourceDigest` for focused safety-guidance comparison. The report must state that credentials, Discord execution, Gateway access, telemetry export, activity persistence, authority grants, and target-readiness claims are disabled.
@@ -272,10 +272,10 @@ The evidence must be identical across repeated runs of the same installed archiv
 Authenticate the container client, pull the exact image, verify its signed root provenance from the OCI registry, inspect the root-bound per-platform SPDX records, and run its credential-free catalog under the recommended restrictions:
 
 ```sh
-docker pull ghcr.io/j-256/discord-mcp:MAJOR.MINOR.PATCH
-gh attestation verify oci://ghcr.io/j-256/discord-mcp:MAJOR.MINOR.PATCH \
-  --repo j-256/discord-mcp \
-  --signer-workflow j-256/discord-mcp/.github/workflows/release.yml \
+docker pull ghcr.io/j-256/guildcontrol:MAJOR.MINOR.PATCH
+gh attestation verify oci://ghcr.io/j-256/guildcontrol:MAJOR.MINOR.PATCH \
+  --repo j-256/guildcontrol \
+  --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners \
   --bundle-from-oci
@@ -285,23 +285,23 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/discord-mcp:MAJOR.MINOR.PATCH catalog --check --json > container-catalog-evidence.json
+  ghcr.io/j-256/guildcontrol:MAJOR.MINOR.PATCH catalog --check --json > container-catalog-evidence.json
 ```
 
-Review the image index with `docker buildx imagetools inspect ghcr.io/j-256/discord-mcp:MAJOR.MINOR.PATCH`. It must expose only `linux/amd64` and `linux/arm64` as runnable platforms, retain the reviewed index description and source annotations, and bind BuildKit evidence to both manifests. The container catalog evidence must be byte-identical across repeated runs and match the installed npm package's evidence.
+Review the image index with `docker buildx imagetools inspect ghcr.io/j-256/guildcontrol:MAJOR.MINOR.PATCH`. It must expose only `linux/amd64` and `linux/arm64` as runnable platforms, retain the reviewed index description and source annotations, and bind BuildKit evidence to both manifests. The container catalog evidence must be byte-identical across repeated runs and match the installed npm package's evidence.
 
 From a checkout of the same tag, compare npm and MCP Registry state with the same code used by release automation:
 
 ```sh
 node scripts/check-published-artifacts.mjs \
-  --tarball j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz \
+  --tarball guildcontrol-MAJOR.MINOR.PATCH.tgz \
   --expect-package matching \
   --expect-npm matching \
   --expect-oci matching \
   --expect-registry matching
 ```
 
-The exact registry response is also available from `https://registry.modelcontextprotocol.io/v0.1/servers/io.github.j-256%2Fdiscord-mcp/versions/MAJOR.MINOR.PATCH`.
+The exact registry response is also available from `https://registry.modelcontextprotocol.io/v0.1/servers/io.github.j-256%2Fguildcontrol/versions/MAJOR.MINOR.PATCH`.
 
 ## Failed or compromised releases
 

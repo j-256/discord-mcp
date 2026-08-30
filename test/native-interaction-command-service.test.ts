@@ -33,7 +33,7 @@ const VERSION_ID = "500000000000000001"
 const OTHER_VERSION_ID = "500000000000000002"
 const OPERATION_KEY = "native-command-operation-0001"
 const NOW = "2026-08-22T00:00:00.000Z"
-const COMMAND_NAME = "discord-mcp"
+const COMMAND_NAME = "guildcontrol"
 
 function command(overrides: Partial<DiscordApplicationCommand> = {}): DiscordApplicationCommand {
   const contract = nativeInteractionCommandContract(COMMAND_NAME)

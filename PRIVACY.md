@@ -1,6 +1,6 @@
 # Privacy policy
 
-Discord MCP is a local stdio connector. It does not provide a hosted service, shared bot, advertising, analytics, or an operator-run collection endpoint. You supply and control the Discord application, bot, configuration, MCP host, machine, and any optional observability destination.
+GuildControl MCP is a local stdio connector. It does not provide a hosted service, shared bot, advertising, analytics, or an operator-run collection endpoint. You supply and control the Discord application, bot, configuration, MCP host, machine, and any optional observability destination.
 
 ## Credentials
 
@@ -54,4 +54,4 @@ Metrics and traces are bounded and redacted. Export is off unless the configurat
 
 You choose the bot's Discord permissions, exact connector scope, enabled toolsets, write capabilities, local record paths, Gateway policy, and telemetry policy. Revoke the bot token in the Discord Developer Portal to stop its use. Remove the connector from the MCP host to stop local execution. Delete any generated migration guide and configuration-selected local activity, receipt, profile, or telemetry files according to your own retention policy.
 
-Discord processes data under [Discord's privacy policy](https://discord.com/privacy). Questions or vulnerability reports for this connector can be filed through the repository's [support and security channels](https://github.com/j-256/discord-mcp/blob/v0.1.2/SUPPORT.md).
+Discord processes data under [Discord's privacy policy](https://discord.com/privacy). Questions or vulnerability reports for this connector can be filed through the repository's [support and security channels](https://github.com/j-256/guildcontrol/blob/v0.1.2/SUPPORT.md).

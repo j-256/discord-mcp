@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.j-256/discord-mcp",
-  "title": "Discord MCP",
-  "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
+  "name": "io.github.j-256/guildcontrol",
+  "title": "GuildControl MCP",
+  "description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
   "repository": {
-    "url": "https://github.com/j-256/discord-mcp",
+    "url": "https://github.com/j-256/guildcontrol",
     "source": "github",
     "id": "1334461127"
   },
   "version": "0.1.2",
-  "websiteUrl": "https://j-256.github.io/discord-mcp",
+  "websiteUrl": "https://j-256.github.io/guildcontrol",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.2/assets/discord-mcp-icon.png",
+      "src": "https://raw.githubusercontent.com/j-256/guildcontrol/v0.1.2/assets/guildcontrol-icon.png",
       "mimeType": "image/png",
       "sizes": [
         "1254x1254"
@@ -23,7 +23,7 @@
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "@j-256/discord-mcp",
+      "identifier": "guildcontrol",
       "version": "0.1.2",
       "runtimeHint": "npx",
       "transport": {
@@ -53,13 +53,13 @@
           "description": "Absolute path to one strict versioned non-secret configuration document",
           "format": "filepath",
           "isRequired": true,
-          "placeholder": "/absolute/path/to/discord-mcp.json"
+          "placeholder": "/absolute/path/to/guildcontrol.json"
         }
       ]
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/j-256/discord-mcp:0.1.2",
+      "identifier": "ghcr.io/j-256/guildcontrol:0.1.2",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"
@@ -94,14 +94,14 @@
           "type": "named",
           "name": "--mount",
           "description": "Read-only bind mount for the non-secret connector configuration",
-          "value": "type=bind,source={config_file},target=/configuration/discord-mcp.json,readonly",
+          "value": "type=bind,source={config_file},target=/configuration/guildcontrol.json,readonly",
           "isRequired": true,
           "variables": {
             "config_file": {
               "description": "Absolute host path to the connector configuration",
               "format": "filepath",
               "isRequired": true,
-              "placeholder": "/absolute/path/to/discord-mcp.json"
+              "placeholder": "/absolute/path/to/guildcontrol.json"
             }
           }
         }
@@ -117,14 +117,14 @@
         },
         {
           "type": "positional",
-          "value": "/configuration/discord-mcp.json"
+          "value": "/configuration/guildcontrol.json"
         }
       ]
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/j-256/discord-mcp/releases/download/v0.1.2/discord-mcp-0.1.2.mcpb",
-      "fileSha256": "d70c1df0243ce9c4c9f9a6e5d626f89c83cfe7640cab302a4e994b7bc5c552c1",
+      "identifier": "https://github.com/j-256/guildcontrol/releases/download/v0.1.2/guildcontrol-0.1.2.mcpb",
+      "fileSha256": "42d594c75fe35cfc716740bb0d4221cf7ef41b460e0bf7bcfb925e7037eb323a",
       "transport": {
         "type": "stdio"
       }

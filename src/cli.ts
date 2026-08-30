@@ -12,7 +12,7 @@ import {
 } from "./activity-review.js"
 import {
   checkDiscordCatalog,
-  runDiscordMcpCatalog,
+  runGuildControlCatalog,
   type DiscordCatalogCheckReport,
 } from "./catalog.js"
 import {
@@ -127,7 +127,7 @@ import {
   RuntimeConfigurationRequiredError,
 } from "./errors.js"
 import { isMainModule } from "./entrypoint.js"
-import { runDiscordMcpServer } from "./mcp.js"
+import { runGuildControlServer } from "./mcp.js"
 import {
   lowMemoryNodeArguments,
   STANDARD_RUNTIME_ARGUMENT,
@@ -585,7 +585,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   applyConfigChange,
   applyHostFile: applyHostAdapterFile,
   applyRecipe: applyConfigRecipe,
-  catalog: runDiscordMcpCatalog,
+  catalog: runGuildControlCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
   exportActivityHtml: exportDiscordActivityHtml,
@@ -621,7 +621,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
     ).resolve(claimId, confirmation)
   },
   restoreProfile,
-  serve: runDiscordMcpServer,
+  serve: runGuildControlServer,
   smoke: smokeConnector,
   showConfig: showConnectorConfigFile,
   trashProfile,
@@ -1885,14 +1885,14 @@ function helpText(
     return contextualHelpText(topic, action)
   }
   if (topic === "activity") {
-    return "Usage: discord-mcp activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure."
+    return "Usage: guildcontrol activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure."
   }
   if (topic === "catalog") {
-    return "Usage: discord-mcp catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file."
+    return "Usage: guildcontrol catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file."
   }
   if (topic === "config") {
     return [
-      "Usage: discord-mcp config <action> [options]",
+      "Usage: guildcontrol config <action> [options]",
       "",
       "Actions:",
       "  init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force] [--json]",
@@ -1907,13 +1907,13 @@ function helpText(
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: discord-mcp doctor (--config FILE | --profile NAME) [--online] [-v | --verbose] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Default human output shows totals plus only actionable warnings and failures; -v or --verbose shows every check, while --json always emits the complete report. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return "Usage: guildcontrol doctor (--config FILE | --profile NAME) [--online] [-v | --verbose] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Default human output shows totals plus only actionable warnings and failures; -v or --verbose shows every check, while --json always emits the complete report. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
   }
   if (topic === "host") {
     return [
-      "Usage: discord-mcp host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
-      "       discord-mcp host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]",
-      "       discord-mcp host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]",
+      "Usage: guildcontrol host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
+      "       guildcontrol host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]",
+      "       guildcontrol host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]",
       "",
       `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog.`,
       "",
@@ -1926,18 +1926,18 @@ function helpText(
   }
   if (topic === "migrate") {
     return [
-      "Usage: discord-mcp migrate <action> [options]",
+      "Usage: guildcontrol migrate <action> [options]",
       "",
       "Actions:",
       "  list [--json]",
       "  plan SOURCE [--html FILE] [--json]",
       "",
-      "Generate a release-exact, complete outcome map from one scored Discord MCP source release into this connector's strict presets, recipes, tools, and reviewed lifecycles. SOURCE must be a versioned ID shown by migrate list. Planning reads no source checkout, configuration, host setting, credential, environment value, network, or Discord endpoint and changes nothing. It does not rewrite prompts, arguments, configuration, credentials, or host settings. Optional HTML exclusively creates a mode-0600 standalone interactive guide without replacing an existing file.",
+      "Generate a release-exact, complete outcome map from one scored GuildControl MCP source release into this connector's strict presets, recipes, tools, and reviewed lifecycles. SOURCE must be a versioned ID shown by migrate list. Planning reads no source checkout, configuration, host setting, credential, environment value, network, or Discord endpoint and changes nothing. It does not rewrite prompts, arguments, configuration, credentials, or host settings. Optional HTML exclusively creates a mode-0600 standalone interactive guide without replacing an existing file.",
     ].join("\n")
   }
   if (topic === "coordination") {
     return [
-      "Usage: discord-mcp coordination <action> [options]",
+      "Usage: guildcontrol coordination <action> [options]",
       "",
       "Actions:",
       "  list [--config FILE | --profile NAME] [--json]",
@@ -1947,17 +1947,17 @@ function helpText(
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: discord-mcp setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory. Completed setup exits 0 even when it reports non-blocking warnings; a command, policy, credential, identity, installation, or Discord verification failure exits 2."
+    return "Usage: guildcontrol setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory. Completed setup exits 0 even when it reports non-blocking warnings; a command, policy, credential, identity, installation, or Discord verification failure exits 2."
   }
   if (topic === "smoke") {
-    return "Usage: discord-mcp smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
+    return "Usage: guildcontrol smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments."
   }
   if (topic === "serve") {
-    return "Usage: discord-mcp serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret DISCORD_MCP_CONFIG_FILE selector is available for hosts that cannot supply arguments."
+    return "Usage: guildcontrol serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments."
   }
   if (topic === "profile") {
     return [
-      "Usage: discord-mcp profile <action> [options]",
+      "Usage: guildcontrol profile <action> [options]",
       "",
       "Actions:",
       "  list [--json]",
@@ -1970,7 +1970,7 @@ function helpText(
   }
   if (topic === "preset") {
     return [
-      "Usage: discord-mcp preset <action> [options]",
+      "Usage: guildcontrol preset <action> [options]",
       "",
       "Actions:",
       "  list [--json]",
@@ -1982,7 +1982,7 @@ function helpText(
   }
   if (topic === "recipe") {
     return [
-      "Usage: discord-mcp recipe <action> [options]",
+      "Usage: guildcontrol recipe <action> [options]",
       "",
       "Actions:",
       "  list [--json]",
@@ -1993,7 +1993,7 @@ function helpText(
       "Review and add one bounded write workflow to an existing strict policy. Planning and application do not resolve secrets or contact Discord. Application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
     ].join("\n")
   }
-  if (topic === "version") return "Usage: discord-mcp version\n\nPrint the package version."
+  if (topic === "version") return "Usage: guildcontrol version\n\nPrint the package version."
   return [
     `Usage: ${CONNECTOR_NAME} <command> [options]`,
     `       ${CONNECTOR_NAME} ${STANDARD_RUNTIME_ARGUMENT} <command> [options]`,
@@ -2039,7 +2039,7 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
     report.toolAccessManifest.requirementCoverage.targetScopeCounts,
   ).map(([name, count]) => `${name}=${count}`).join(", ")
   return [
-    "Discord MCP catalog: ok",
+    "GuildControl MCP catalog: ok",
     `Server: ${report.serverName}@${report.serverVersion}`,
     `Evidence format: ${report.evidenceFormat}`,
     `Contract digest: ${report.contractDigest}`,
@@ -2072,7 +2072,7 @@ function renderCatalog(report: DiscordCatalogCheckReport): string {
 
 function renderCatalogHtmlExport(report: DiscordCatalogHtmlExportReport): string {
   return [
-    "Discord MCP catalog HTML: ok",
+    "GuildControl MCP catalog HTML: ok",
     `File: ${report.file}`,
     `Format: ${report.format}`,
     `Contract digest: ${report.contractDigest}`,
@@ -2086,7 +2086,7 @@ function renderCatalogHtmlExport(report: DiscordCatalogHtmlExportReport): string
 
 function renderActivityReview(report: DiscordActivityReviewReport): string {
   const lines = [
-    `Discord MCP activity review: ${report.outcome}`,
+    `GuildControl MCP activity review: ${report.outcome}`,
     `Report digest: ${report.reportDigest}`,
     `Recent records: ${report.summary.records} (limit ${report.limit})`,
     `Current activities: ${report.summary.currentActivities}`,
@@ -2141,7 +2141,7 @@ function renderActivityHtmlExport(
   report: DiscordActivityHtmlExportReport,
 ): string {
   return [
-    "Discord MCP activity HTML: ok",
+    "GuildControl MCP activity HTML: ok",
     `File: ${report.file}`,
     `Format: ${report.format}`,
     `Review digest: ${report.reportDigest}`,
@@ -2176,7 +2176,7 @@ function renderDoctor(report: DoctorReport, verbose = false): string {
       ? "ready with warnings"
       : "not ready"
   const lines = [
-    `Discord MCP doctor: ${outcome}`,
+    `GuildControl MCP doctor: ${outcome}`,
     `Checks: ${doctorCountLabel(counts.pass, "pass", "passes")}, ${doctorCountLabel(counts.warn, "warning", "warnings")}, ${doctorCountLabel(counts.fail, "failure", "failures")}`,
   ]
   const visible = verbose
@@ -2266,7 +2266,7 @@ function renderCoordinationResolution(report: WriteCoordinationResolution): stri
 
 function renderSetup(report: SetupReport): string {
   const lines = [
-    "Discord MCP setup: ready",
+    "GuildControl MCP setup: ready",
     `Verified application ${report.applicationId} and bot ${report.botId}`,
     `Guild installations: ${report.configuredGuildCount} configured, ${report.installedGuildCount} installed, ${report.installedInScopeGuildCount} in scope, ${report.unexpectedGuildCount} unexpected`,
     `Tools: ${report.toolSurface} surface; ${report.toolsets.join(", ")}`,
@@ -2323,7 +2323,7 @@ function renderHostActivation(
     ? `configuration ${plan.policy.source.file}`
     : `managed profile ${plan.policy.source.name}`
   return [
-    "Discord MCP host activation: ok",
+    "GuildControl MCP host activation: ok",
     `Activation digest: ${plan.activationDigest}`,
     `Policy: ${plan.policy.name} from ${source}`,
     `Application: ${plan.policy.identity.applicationId}`,
@@ -2350,7 +2350,7 @@ function renderHostActivation(
 
 function renderHostAdapter(adapter: HostAdapter): string {
   return [
-    `Discord MCP host adapter: ${adapter.title} (${adapter.id})`,
+    `GuildControl MCP host adapter: ${adapter.title} (${adapter.id})`,
     `Adapter digest: ${adapter.adapterDigest}`,
     `Activation digest: ${adapter.activationDigest}`,
     `Host server name: ${adapter.hostServerName}`,
@@ -2378,7 +2378,7 @@ function renderHostActivationHtmlExport(
   report: DiscordHostActivationHtmlExportReport,
 ): string {
   return [
-    "Discord MCP host activation guide: ok",
+    "GuildControl MCP host activation guide: ok",
     `File: ${report.file}`,
     `Format: ${report.format}`,
     `Activation digest: ${report.activationDigest}`,
@@ -2394,7 +2394,7 @@ function renderHostActivationHtmlExport(
 
 function renderHostInspection(report: HostInspectionReport): string {
   return [
-    `Discord MCP host inspection: ${report.status}`,
+    `GuildControl MCP host inspection: ${report.status}`,
     `Inspection digest: ${report.inspectionDigest}`,
     `Adapter: ${report.adapter.title} (${report.adapter.id})`,
     `Adapter digest: ${report.adapter.adapterDigest}`,
@@ -2420,7 +2420,7 @@ function renderHostInspection(report: HostInspectionReport): string {
 function renderHostChangePlan(report: HostChangePlanReport): string {
   const inputs = report.change.sensitiveInputs
   return [
-    "Discord MCP host configuration plan: ready",
+    "GuildControl MCP host configuration plan: ready",
     `Plan digest: ${report.planDigest}`,
     `Adapter: ${report.adapter.title} (${report.adapter.id})`,
     `Adapter digest: ${report.adapter.adapterDigest}`,
@@ -2446,7 +2446,7 @@ function renderHostChangePlan(report: HostChangePlanReport): string {
 
 function renderHostChangeApply(report: HostChangeApplyReport): string {
   return [
-    `Discord MCP host configuration apply: ${report.status}`,
+    `GuildControl MCP host configuration apply: ${report.status}`,
     `Plan digest: ${report.planDigest}`,
     `Adapter: ${report.adapter.title} (${report.adapter.id})`,
     `Adapter digest: ${report.adapter.adapterDigest}`,
@@ -2464,7 +2464,7 @@ function renderHostChangeApply(report: HostChangeApplyReport): string {
 
 function renderMigrationCatalog(report: MigrationCatalogReport): string {
   return [
-    "Discord MCP release-exact migration sources",
+    "GuildControl MCP release-exact migration sources",
     `Catalog digest: ${report.catalogDigest}`,
     "",
     ...report.sources.flatMap((source, index) => [
@@ -2488,7 +2488,7 @@ function renderMigrationCatalog(report: MigrationCatalogReport): string {
 
 function renderMigrationPlan(report: MigrationPlanReport): string {
   const lines = [
-    `Discord MCP migration plan: ${report.source.id} -> ${report.target.package}@${report.target.version}`,
+    `GuildControl MCP migration plan: ${report.source.id} -> ${report.target.package}@${report.target.version}`,
     `Plan digest: ${report.planDigest}`,
     `Source manifest digest: ${report.source.manifestDigest}`,
     `Source inventory digest: ${report.source.sourceInventoryDigest}`,
@@ -2540,7 +2540,7 @@ function renderMigrationHtmlExport(
   report: DiscordMigrationHtmlExportReport,
 ): string {
   return [
-    "Discord MCP migration HTML: ok",
+    "GuildControl MCP migration HTML: ok",
     `File: ${report.file}`,
     `Format: ${report.format}`,
     `Source: ${report.sourceId}`,
@@ -2599,7 +2599,7 @@ function renderBotInstallPlan(report: BotInstallPlan): string {
       .join(", ")
   const [setup, validate, doctor, smoke, hostActivation] = report.postInstall.commands
   return [
-    `Discord MCP bot install plan: ${report.preset.name}`,
+    `GuildControl MCP bot install plan: ${report.preset.name}`,
     `Application: ${report.applicationId}`,
     `Guild: ${report.guildId} (selection locked)`,
     `Bot permissions: ${report.permissions.names.join(", ")} (${report.permissions.bitfield})`,
@@ -2632,7 +2632,7 @@ function renderOnboardingHtmlExport(
   report: DiscordOnboardingHtmlExportReport,
 ): string {
   return [
-    "Discord MCP onboarding HTML: ok",
+    "GuildControl MCP onboarding HTML: ok",
     `File: ${report.file}`,
     `Format: ${report.format}`,
     `Plan digest: ${report.planDigest}`,
@@ -2647,7 +2647,7 @@ function renderOnboardingHtmlExport(
 
 function renderPresetList(report: PresetListReport): string {
   return [
-    "Discord MCP least-privilege setup presets",
+    "GuildControl MCP least-privilege setup presets",
     "",
     ...report.presets.flatMap((preset, index) => [
       ...(index > 0 ? [""] : []),
@@ -2699,7 +2699,7 @@ function renderRecipe(recipe: ConfigRecipeDescriptor): string {
 
 function renderRecipeList(report: RecipeListReport): string {
   return [
-    "Discord MCP additive configuration recipes",
+    "GuildControl MCP additive configuration recipes",
     "",
     ...report.recipes.flatMap((recipe, index) => [
       ...(index > 0 ? [""] : []),
@@ -2731,7 +2731,7 @@ function renderRecipePlan(
       ]
     : []
   return [
-    `Discord MCP configuration recipe ${report.action}: ${report.recipe.name} (${report.status})`,
+    `GuildControl MCP configuration recipe ${report.action}: ${report.recipe.name} (${report.status})`,
     `File: ${report.file}`,
     `Exact ${scope.kind} scope: ${scope.ids.join(", ")}`,
     `Current document digest: ${report.currentDocumentDigest}`,
@@ -2822,7 +2822,7 @@ function profileSummary(profile: ConnectorProfile): ProfileSummary {
 }
 
 function renderProfileList(report: ProfileListReport): string {
-  if (report.profiles.length === 0) return "No saved Discord MCP profiles"
+  if (report.profiles.length === 0) return "No saved GuildControl MCP profiles"
   return report.profiles.map((profile) => (
     `${profile.name}: application ${profile.applicationId}, bot ${profile.botId}, ${profile.guildCount} guilds, ${profile.channelCount} channels, ${profile.toolSurface} tools, Gateway ${profile.gatewayEnabled ? "enabled" : "disabled"}, credential ${profile.credentialProvider} ${profile.credentialReference}`
   )).join("\n")
@@ -2830,7 +2830,7 @@ function renderProfileList(report: ProfileListReport): string {
 
 function renderProfileShow(report: ProfileShowReport): string {
   return [
-    `Discord MCP profile: ${report.profile.name}`,
+    `GuildControl MCP profile: ${report.profile.name}`,
     JSON.stringify(report.profile, null, 2),
   ].join("\n\n")
 }
@@ -2873,7 +2873,7 @@ function renderConfigSummary(report: ConfigValidationReport): string {
 
 function renderConfigValidation(report: ConfigValidationReport): string {
   return [
-    "Discord MCP configuration: valid",
+    "GuildControl MCP configuration: valid",
     renderConfigSummary(report),
     "Validation used placeholders, read no secret values, and did not contact Discord.",
   ].join("\n")
@@ -2889,7 +2889,7 @@ function renderConfigShow(report: ConfigShowReport): string {
 
 function renderConfigExplain(report: ConfigExplainReport): string {
   return [
-    `Discord MCP configuration fields: ${report.query}`,
+    `GuildControl MCP configuration fields: ${report.query}`,
     `Schema: ${report.schemaId}`,
     "Operational policy source: one selected schema-v2 configuration document",
     "Secret values: external references only; never stored in the policy document",
@@ -2908,14 +2908,14 @@ function renderConfigExplain(report: ConfigExplainReport): string {
 function renderConfigWrite(report: ConfigWriteReport): string {
   const result = report.created ? "created" : "replaced"
   return [
-    `Discord MCP configuration ${result}: ${report.file}`,
+    `GuildControl MCP configuration ${result}: ${report.file}`,
     `Source: ${report.source}`,
     ...(report.backupFile
       ? [`Recoverable prior version: ${report.backupFile}`]
       : []),
     renderConfigSummary(report),
     "",
-    "Next: Run discord-mcp doctor --config with the file path shown above.",
+    "Next: Run guildcontrol doctor --config with the file path shown above.",
   ].join("\n")
 }
 
@@ -2923,7 +2923,7 @@ function renderConfigWorkbench(
   report: DiscordConfigWorkbenchHtmlExportReport,
 ): string {
   return [
-    `Discord MCP configuration workbench: ${report.file}`,
+    `GuildControl MCP configuration workbench: ${report.file}`,
     `Validated active file: ${report.activeFile}`,
     `Suggested candidate filename: ${report.candidateFilename}`,
     `Active document digest: ${report.activeDocumentDigest}`,
@@ -2953,7 +2953,7 @@ function renderConfigChange(
     ? report.tools.removed.join(", ")
     : "none"
   return [
-    `Discord MCP configuration change ${report.action}: ${report.status}`,
+    `GuildControl MCP configuration change ${report.action}: ${report.status}`,
     `Active file: ${report.file}`,
     `Candidate file: ${report.candidateFile}`,
     `Current document digest: ${report.currentDocumentDigest}`,
@@ -2986,7 +2986,7 @@ function renderConfigChange(
 
 function renderSmoke(report: SmokeReport): string {
   return [
-    "Discord MCP smoke: ok",
+    "GuildControl MCP smoke: ok",
     `Transport: ${report.transport}`,
     `Protocol: ${report.protocolVersion}`,
     `Server: ${report.serverName} ${report.serverVersion}`,
@@ -3071,7 +3071,7 @@ function configSelectionEnvironment(
 }
 
 const CONFIG_SELECTION_REQUIRED_MESSAGE =
-  "Operational commands require --config FILE, --profile NAME, or DISCORD_MCP_CONFIG_FILE; create a policy with discord-mcp config init or setup --preset"
+  "Operational commands require --config FILE, --profile NAME, or GUILDCONTROL_CONFIG_FILE; create a policy with guildcontrol config init or setup --preset"
 
 interface RuntimeSelection {
   config: ConnectorConfig

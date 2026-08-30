@@ -602,7 +602,7 @@ test("scheduled event policy separates audit, changes, and exact guild scope", a
 })
 
 test("scheduled event creation binds a local cover and executes after pending audit", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-event-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-event-service-"))
   const root = await realpath(temporary)
   try {
     const coverImagePath = join(root, "cover.png")

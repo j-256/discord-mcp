@@ -1,8 +1,8 @@
 {
-  "name": "@j-256/discord-mcp-docs",
+  "name": "guildcontrol-docs",
   "version": "0.0.0",
   "private": true,
-  "description": "Static documentation portal for Discord MCP",
+  "description": "Static documentation portal for GuildControl MCP",
   "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {

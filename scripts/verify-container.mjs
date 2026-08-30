@@ -27,15 +27,15 @@ import {
 
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CONTAINER_EVIDENCE_FILENAME = "container-evidence.json"
-const CONTAINER_EVIDENCE_FORMAT = "discord-mcp.container-evidence.v2"
-const CONTAINER_CONFIG_FILE = "/configuration/discord-mcp.json"
-const CONTAINER_CONFIG_SOURCE_FILE = "/source/discord-mcp.json"
+const CONTAINER_EVIDENCE_FORMAT = "guildcontrol.container-evidence.v2"
+const CONTAINER_CONFIG_FILE = "/configuration/guildcontrol.json"
+const CONTAINER_CONFIG_SOURCE_FILE = "/source/guildcontrol.json"
 const CONFIG_APPLICATION_ID = "100000000000000001"
 const CONFIG_BOT_ID = "200000000000000001"
 const CONFIG_GUILD_ID = "300000000000000001"
-const IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
-const MCP_NAME = "io.github.j-256/discord-mcp"
-const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
+const IMAGE_NAME = "ghcr.io/j-256/guildcontrol"
+const MCP_NAME = "io.github.j-256/guildcontrol"
+const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 const SAFETY_RESOURCE_URI = "discord://connector/safety"
 const SENSITIVE_NAME_PATTERN = /(?:CREDENTIAL|PASS|PRIVATE_KEY|SECRET|TOKEN)/iu
 const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u
@@ -124,11 +124,11 @@ function restrictedRunArguments(image, command = [], entrypoint, runtimeArgument
 }
 
 async function verifyMountedConfiguration(image) {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-container-config-"))
-  const volume = `discord-mcp-container-config-${process.pid}-${randomUUID()}`
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-container-config-"))
+  const volume = `guildcontrol-container-config-${process.pid}-${randomUUID()}`
   try {
     const directory = await realpath(temporary)
-    const configFile = join(directory, "discord-mcp.json")
+    const configFile = join(directory, "guildcontrol.json")
     const hostEnvironment = {
       LANG: "C.UTF-8",
       PATH: process.env.PATH || "/usr/bin:/bin",
@@ -237,12 +237,12 @@ async function inspectImage(image, packageJson, revision) {
   )
   const expectedLabels = {
     "io.modelcontextprotocol.server.name": MCP_NAME,
-    "org.opencontainers.image.description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
+    "org.opencontainers.image.description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
     "org.opencontainers.image.documentation": `${REPOSITORY_URL}/blob/v${packageJson.version}/README.md`,
     "org.opencontainers.image.licenses": "AGPL-3.0-only",
     "org.opencontainers.image.revision": revision,
     "org.opencontainers.image.source": REPOSITORY_URL,
-    "org.opencontainers.image.title": "Discord MCP",
+    "org.opencontainers.image.title": "GuildControl MCP",
     "org.opencontainers.image.url": DOCUMENTATION_URL,
     "org.opencontainers.image.version": packageJson.version,
   }
@@ -461,7 +461,7 @@ async function verifyMcp(image, catalog) {
     invariant(guard.isError === true, "container catalog allowed a Discord tool call")
     invariant(guard.structuredContent?.error?.code === "CATALOG_ONLY", "container catalog returned the wrong execution guard")
     invariant(guard.content.length === 2, "container catalog omitted the content-free receipt")
-    invariant(guard.content[1]?.type === "text" && guard.content[1].text.startsWith("DISCORD_MCP_RECEIPT ") && guard.content[1].text.includes("CATALOG_ONLY"), "container catalog returned an invalid content-free receipt")
+    invariant(guard.content[1]?.type === "text" && guard.content[1].text.startsWith("GUILDCONTROL_RECEIPT ") && guard.content[1].text.includes("CATALOG_ONLY"), "container catalog returned an invalid content-free receipt")
     const safety = await client.readResource({ uri: SAFETY_RESOURCE_URI })
     invariant(safety.contents.length === 1, "container safety resource changed")
     return {

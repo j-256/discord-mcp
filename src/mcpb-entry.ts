@@ -8,8 +8,8 @@ import {
 } from "./config.js"
 import { ConfigurationError, redactText } from "./errors.js"
 import {
-  runDiscordMcpServer,
-  type DiscordMcpRunOptions,
+  runGuildControlServer,
+  type GuildControlRunOptions,
 } from "./mcp.js"
 
 export const MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE = "MCPB_DISCORD_BOT_SECRET"
@@ -32,7 +32,7 @@ export interface McpbServerOptions {
     environment: NodeJS.ProcessEnv,
   ) => ConnectorConfig
   loadConfigDocument?: (file: string) => ConnectorConfigDocument
-  serve?: (options: DiscordMcpRunOptions) => unknown
+  serve?: (options: GuildControlRunOptions) => unknown
   stderr?: Pick<NodeJS.WriteStream, "write">
 }
 
@@ -95,7 +95,7 @@ export async function runMcpbServer(options: McpbServerOptions = {}): Promise<nu
       preparation.document,
       preparation.environment,
     )
-    const serve = options.serve || runDiscordMcpServer
+    const serve = options.serve || runGuildControlServer
     serve({
       config,
       environment: preparation.environment,
@@ -108,7 +108,7 @@ export async function runMcpbServer(options: McpbServerOptions = {}): Promise<nu
     const message = error instanceof Error
       ? redactText(error.message, secrets)
       : "The MCPB launcher could not prepare the server environment"
-    stderr.write(`[discord-mcp] ${message}\n`)
+    stderr.write(`[guildcontrol] ${message}\n`)
     return MCPB_FAILURE_EXIT_CODE
   }
 }

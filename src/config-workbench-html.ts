@@ -31,7 +31,7 @@ import {
 } from "./exclusive-private-file.js"
 import { stableString } from "./normalize.js"
 
-export const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
+export const CONFIG_WORKBENCH_HTML_FORMAT = "guildcontrol.config-workbench-html.v1"
 export const CONFIG_WORKBENCH_HTML_SCHEMA_VERSION = 1
 
 const CONFIG_WORKBENCH_TOP_LEVEL_ORDER = Object.freeze([
@@ -861,7 +861,7 @@ function suggestedCandidateFilename(activeFile: string): string {
     .replace(/[^a-zA-Z0-9._-]+/gu, "-")
     .slice(0, 96)
   const stem = trimFilenameSeparators(sanitizedStem)
-  return `${stem || "discord-mcp"}.candidate.json`
+  return `${stem || "guildcontrol"}.candidate.json`
 }
 
 export function createDiscordConfigWorkbenchModel(
@@ -921,8 +921,8 @@ export function renderDiscordConfigWorkbenchHtml(
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; manifest-src 'none'; media-src 'none'; object-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'sha256-${styleHash}'; worker-src 'none'; require-trusted-types-for 'script'">
-  <meta name="description" content="Private offline Discord MCP configuration workbench">
-  <title>Discord MCP configuration workbench</title>
+  <meta name="description" content="Private offline GuildControl MCP configuration workbench">
+  <title>GuildControl MCP configuration workbench</title>
   <style>${WORKBENCH_STYLE}</style>
 </head>
 <body>

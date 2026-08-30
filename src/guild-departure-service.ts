@@ -536,7 +536,7 @@ export class GuildDepartureService {
       applicationId,
       botId,
       botMemberRoleIds: [...rawMember.roles].sort(),
-      domain: "discord-mcp-guild-departure-plan.v1",
+      domain: "guildcontrol-guild-departure-plan.v1",
       guild: {
         id: guild.id,
         name: guild.name,

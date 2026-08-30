@@ -315,7 +315,7 @@ function validUnicode(value: string): boolean {
 
 function deterministicNonce(request: Omit<NormalizedMessageForwardRequest, "nonce">): string {
   return createHash("sha256")
-    .update("discord-mcp-message-forward-nonce.v1\0")
+    .update("guildcontrol-message-forward-nonce.v1\0")
     .update(request.sourceChannelId)
     .update("\0")
     .update(request.sourceMessageId)

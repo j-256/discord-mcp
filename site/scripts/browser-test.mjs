@@ -13,7 +13,7 @@ const SITE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..")
 const HOST = "127.0.0.1"
 const PORT = 4327
 const ORIGIN = `http://${HOST}:${PORT}`
-const BASE_URL = `${ORIGIN}/discord-mcp`
+const BASE_URL = `${ORIGIN}/guildcontrol`
 const ASTRO_CLI = join(SITE_DIRECTORY, "node_modules", "astro", "bin", "astro.mjs")
 const START_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
@@ -159,7 +159,9 @@ async function main() {
       assert.equal(await page.getByRole("link", { name: "Get a verified read" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Switch from another Discord MCP" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Take the verified product tour" }).count(), 1)
-      assert.match(await page.locator(".release-context").innerText(), /@j-256\/discord-mcp@[0-9]+\.[0-9]+\.[0-9]+/u)
+      const releaseContext = await page.locator(".release-context").innerText()
+      assert.match(releaseContext, /guildcontrol@[0-9]+\.[0-9]+\.[0-9]+/u)
+      assert.match(releaseContext, /not affiliated with or endorsed by Discord Inc\./u)
       await page.keyboard.press("Tab")
       assert.equal(await page.locator(":focus").innerText(), "Skip to content")
       await page.getByRole("link", { name: "Get a verified read" }).click()
@@ -182,7 +184,7 @@ async function main() {
 
       reportProgress("checking contract explorer")
       await page.goto(`${BASE_URL}/generated/contract-explorer.html`, { waitUntil: "networkidle" })
-      assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "Discord MCP Contract Explorer")
+      assert.equal(await page.getByRole("heading", { level: 1 }).innerText(), "GuildControl MCP Contract Explorer")
       const scopeTab = page.getByRole("tab", { name: /Scope/u })
       const routeTab = page.getByRole("tab", { name: /Route/u })
       const recoverTab = page.getByRole("tab", { name: /Recover/u })

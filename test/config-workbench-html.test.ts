@@ -69,7 +69,7 @@ function embeddedModel(html: string): DiscordConfigWorkbenchModel {
 
 test("configuration workbench renders a deterministic complete offline editor", () => {
   const model = createDiscordConfigWorkbenchModel(
-    "/configuration/discord-mcp.json",
+    "/configuration/guildcontrol.json",
     document(),
     "darwin",
   )
@@ -119,8 +119,8 @@ test("configuration workbench renders a deterministic complete offline editor", 
   assert.equal(payload.schemaVersion, CONFIG_WORKBENCH_HTML_SCHEMA_VERSION)
   assert.equal(payload.schemaId, CONFIG_DOCUMENT_SCHEMA_ID)
   assert.equal(payload.platform, "darwin")
-  assert.equal(payload.activeFile, "/configuration/discord-mcp.json")
-  assert.equal(payload.candidateFilename, "discord-mcp.candidate.json")
+  assert.equal(payload.activeFile, "/configuration/guildcontrol.json")
+  assert.equal(payload.candidateFilename, "guildcontrol.candidate.json")
   assert.deepEqual(payload.activeDocument, document())
   assert.equal(payload.fields.length, connectorConfigFields().length)
   assert.deepEqual(
@@ -157,7 +157,7 @@ test("configuration workbench renders a deterministic complete offline editor", 
 })
 
 test("configuration workbench base64 payload contains hostile non-secret paths without HTML execution", () => {
-  const hostile = "/var/lib/discord-mcp/<img-onerror-alert>"
+  const hostile = "/var/lib/guildcontrol/<img-onerror-alert>"
   const configured = document({
     storage: {
       auditFile: hostile,
@@ -181,12 +181,12 @@ test("configuration workbench bounds and trims separator-heavy candidate names",
   const activeFile = `/configuration/${".-".repeat(100)}.json`
   const model = createDiscordConfigWorkbenchModel(activeFile, document(), "darwin")
 
-  assert.equal(model.candidateFilename, "discord-mcp.candidate.json")
+  assert.equal(model.candidateFilename, "guildcontrol.candidate.json")
 })
 
 test("configuration workbench rejects a model changed after validation", () => {
   const model = createDiscordConfigWorkbenchModel(
-    "/configuration/discord-mcp.json",
+    "/configuration/guildcontrol.json",
     document(),
   )
   const changed = {
@@ -204,9 +204,9 @@ test("configuration workbench rejects a model changed after validation", () => {
 })
 
 test("configuration workbench export is private, exclusive, credential-free, and network-free", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-workbench-test-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-workbench-test-"))
   const directory = await realpath(temporary)
-  const active = join(directory, "discord-mcp.json")
+  const active = join(directory, "guildcontrol.json")
   const first = join(directory, "first.html")
   const second = join(directory, "second.html")
   const existing = join(directory, "existing.html")
@@ -233,7 +233,7 @@ test("configuration workbench export is private, exclusive, credential-free, and
     assert.equal(firstReport.browserOpened, false)
     assert.equal(firstReport.bytes, firstBytes.byteLength)
     assert.equal(firstReport.candidateAuthority, "explicit-download-only")
-    assert.equal(firstReport.candidateFilename, "discord-mcp.candidate.json")
+    assert.equal(firstReport.candidateFilename, "guildcontrol.candidate.json")
     assert.equal(firstReport.configurationEmbedded, true)
     assert.equal(firstReport.credentialsEmbedded, false)
     assert.equal(firstReport.discordContacted, false)
@@ -272,9 +272,9 @@ test("configuration workbench export is private, exclusive, credential-free, and
 })
 
 test("configuration workbench rejects unsafe output directories before opening a file", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-workbench-directory-test-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-workbench-directory-test-"))
   const directory = await realpath(temporary)
-  const active = join(directory, "discord-mcp.json")
+  const active = join(directory, "guildcontrol.json")
   const unsafe = join(directory, "unsafe")
   let opens = 0
   try {
@@ -310,9 +310,9 @@ test("configuration workbench rejects unsafe output directories before opening a
 })
 
 test("configuration workbench removes a partial output after an exclusive write failure", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-workbench-write-test-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-workbench-write-test-"))
   const directory = await realpath(temporary)
-  const active = join(directory, "discord-mcp.json")
+  const active = join(directory, "guildcontrol.json")
   const output = "/virtual/workbench.html"
   const events: string[] = []
   try {

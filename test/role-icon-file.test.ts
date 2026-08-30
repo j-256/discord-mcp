@@ -59,7 +59,7 @@ function jpeg(width: number, height: number): Buffer {
 }
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-role-icon-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-role-icon-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

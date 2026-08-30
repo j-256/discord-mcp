@@ -78,7 +78,7 @@ function jpeg(width: number, height: number): Buffer {
 }
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-bot-profile-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

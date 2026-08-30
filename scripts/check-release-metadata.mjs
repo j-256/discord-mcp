@@ -22,11 +22,12 @@ import {
   documentationSourcePaths,
 } from "./documentation-manifest.mjs"
 
-const PACKAGE_NAME = "@j-256/discord-mcp"
-const MCP_NAME = "io.github.j-256/discord-mcp"
-const MCP_TITLE = "Discord MCP"
-const MCP_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
-const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
+const PACKAGE_NAME = "guildcontrol"
+const MCP_NAME = "io.github.j-256/guildcontrol"
+const MCP_TITLE = "GuildControl MCP"
+const MCP_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
+const TRADEMARK_DISCLAIMER = "GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to."
+const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 const REPOSITORY_ID = "1334461127"
 const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
 const ICON_MIME_TYPE = "image/png"
@@ -34,8 +35,8 @@ const ICON_SIZE = "1254x1254"
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
-const FIRST_PUBLICATION_COMMAND = "npm publish ./j-256-discord-mcp-MAJOR.MINOR.PATCH.tgz --access public --provenance=false"
-const OCI_IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
+const FIRST_PUBLICATION_COMMAND = "npm publish ./guildcontrol-MAJOR.MINOR.PATCH.tgz --provenance=false"
+const OCI_IMAGE_NAME = "ghcr.io/j-256/guildcontrol"
 const NODE_IMAGE = "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
 const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
@@ -126,6 +127,13 @@ const EXPECTED_SITE_SCRIPTS = {
 const EXPECTED_SITE_PRERELEASE_DEPENDENCIES = {
   "node_modules/get-tsconfig": "5.0.0-beta.4",
 }
+const LEGACY_IDENTITY_EXCEPTIONS = new Set([
+  "docs/comparison.md",
+  "src/migration-manifests.ts",
+])
+const LEGACY_IDENTITY_PATTERN = /discord[-_]?mcp/iu
+const LEGACY_SELF_IDENTITY_PATTERN = new RegExp("j-256(?:\\/|%2f)discord" + "-mcp", "iu")
+const LEGACY_SCOPED_PACKAGE_PATTERN = /(?:@|%40)j-256(?:\/|%2f)guildcontrol/iu
 
 async function checkNeutrality() {
   const clientCompatibilityPaths = new Set([
@@ -169,12 +177,19 @@ async function checkNeutrality() {
     const bytes = metadata.isSymbolicLink()
       ? Buffer.from(await readlink(absolutePath))
       : await readFile(absolutePath)
+    const text = bytes.toString("latin1")
     invariant(
-      !containsSpecificReference(bytes.toString("latin1"), {
+      !containsSpecificReference(text, {
         allowClientCompatibility: clientCompatibilityPaths.has(path),
       }),
       `${path} has model- or harness-specific branding`,
     )
+    if (!LEGACY_IDENTITY_EXCEPTIONS.has(path)) {
+      invariant(!LEGACY_IDENTITY_PATTERN.test(path), `${path} uses the retired product identity`)
+      invariant(!LEGACY_IDENTITY_PATTERN.test(text), `${path} uses the retired product identity`)
+    }
+    invariant(!LEGACY_SELF_IDENTITY_PATTERN.test(text), `${path} uses the retired project identity`)
+    invariant(!LEGACY_SCOPED_PACKAGE_PATTERN.test(text), `${path} uses a scoped GuildControl package identity`)
   }
 }
 
@@ -183,7 +198,7 @@ const EXPECTED_PACKAGE_FILES = [
   "README.md",
   "SECURITY.md",
   "dist",
-  "discord-mcp.config.schema.json",
+  "guildcontrol.config.schema.json",
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
@@ -195,7 +210,7 @@ const EXPECTED_PACKAGE_FILES = [
   "server.json",
 ]
 
-const OCI_CONFIG_FILE = "/configuration/discord-mcp.json"
+const OCI_CONFIG_FILE = "/configuration/guildcontrol.json"
 const REGISTRY_TOKEN_INPUT = Object.freeze({
   description: "Discord bot token sent only to fixed Discord REST and vetted Gateway origins",
   format: "string",
@@ -207,7 +222,7 @@ const REGISTRY_CONFIG_ARGUMENT = Object.freeze({
   description: "Absolute path to one strict versioned non-secret configuration document",
   format: "filepath",
   isRequired: true,
-  placeholder: "/absolute/path/to/discord-mcp.json",
+  placeholder: "/absolute/path/to/guildcontrol.json",
   type: "positional",
   valueHint: "config_file",
 })
@@ -237,7 +252,7 @@ const OCI_RUNTIME_ARGUMENTS = Object.freeze([
         description: "Absolute host path to the connector configuration",
         format: "filepath",
         isRequired: true,
-        placeholder: "/absolute/path/to/discord-mcp.json",
+        placeholder: "/absolute/path/to/guildcontrol.json",
       },
     },
   },
@@ -286,7 +301,7 @@ async function checkPackageAndLock() {
   invariant(packageJson.engines?.node === ">=22", "package Node.js floor must remain 22")
   invariant(packageJson.main === "./dist/index.js", "package main entrypoint is invalid")
   invariant(packageJson.types === "./dist/index.d.ts", "package types entrypoint is invalid")
-  invariant(packageJson.bin?.["discord-mcp"] === "dist/bin.js", "package CLI entrypoint is invalid")
+  invariant(packageJson.bin?.["guildcontrol"] === "dist/bin.js", "package CLI entrypoint is invalid")
   assertEqual(packageJson.exports, {
     ".": {
       import: "./dist/index.js",
@@ -304,10 +319,10 @@ async function checkPackageAndLock() {
     "moderation",
   ], "package keywords are invalid")
   assertEqual([...packageJson.files].sort(), [...EXPECTED_PACKAGE_FILES].sort(), "package file allowlist is invalid")
-  assertEqual(packageJson.publishConfig, { access: "public", provenance: true }, "publish configuration must require public provenance")
+  assertEqual(packageJson.publishConfig, { provenance: true }, "publish configuration must require provenance")
   assertEqual(packageJson.repository, {
     type: "git",
-    url: "git+https://github.com/j-256/discord-mcp.git",
+    url: "git+https://github.com/j-256/guildcontrol.git",
   }, "package repository metadata is invalid")
   invariant(packageJson.homepage === DOCUMENTATION_URL, "package homepage is invalid")
   invariant(packageJson.bugs?.url === `${REPOSITORY_URL}/issues`, "package issue tracker is invalid")
@@ -370,7 +385,7 @@ async function checkDocumentationPortal() {
     join(REPOSITORY_ROOT, "scripts/check-public-documentation.mjs"),
     "utf8",
   )
-  invariant(packageJson.name === "@j-256/discord-mcp-docs", "documentation package name is invalid")
+  invariant(packageJson.name === "guildcontrol-docs", "documentation package name is invalid")
   invariant(packageJson.version === "0.0.0", "documentation package must remain non-published")
   invariant(packageJson.private === true, "documentation package must remain private")
   invariant(packageJson.license === "AGPL-3.0-only", "documentation package license is invalid")
@@ -435,10 +450,10 @@ async function checkDocumentationPortal() {
     "CODE_OF_CONDUCT.md",
     "docs/reference.md",
     "SECURITY.md",
-    "discord-mcp.config.schema.json",
+    "guildcontrol.config.schema.json",
     "server.json",
     "LICENSE",
-    "assets/discord-mcp-icon.png",
+    "assets/guildcontrol-icon.png",
     "package.json",
   ], "documentation source frontier changed")
   const documentationSources = await documentationSourcePaths()
@@ -474,9 +489,9 @@ async function checkDocumentationPortal() {
   ]) {
     invariant(documentationSources.includes(required), `documentation source frontier lacks ${required}`)
   }
-  invariant(DOCUMENTATION_MANIFEST_FORMAT === "discord-mcp.docs-manifest.v1", "documentation manifest format changed")
+  invariant(DOCUMENTATION_MANIFEST_FORMAT === "guildcontrol.docs-manifest.v1", "documentation manifest format changed")
   invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://j-256.github.io"'), "documentation origin is invalid")
-  invariant(astroConfiguration.includes('const SITE_BASE = "/discord-mcp"'), "documentation base path is invalid")
+  invariant(astroConfiguration.includes('const SITE_BASE = "/guildcontrol"'), "documentation base path is invalid")
   for (const binding of [
     "DOCUMENTATION_MANIFEST_FORMAT",
     "documentationSourcePaths",
@@ -510,24 +525,24 @@ async function checkSourceIdentity(packageJson) {
   )?.[1]
   const policyEnvironmentNames = [
     ...new Set(
-      [...source.matchAll(/"((?:DISCORD_MCP_|OTEL_)[A-Z0-9_]+)"/g)]
+      [...source.matchAll(/"((?:GUILDCONTROL_|OTEL_)[A-Z0-9_]+)"/g)]
         .map((match) => match[1]),
     ),
   ].sort()
-  invariant(connectorName === "discord-mcp", "source connector name is out of sync")
+  invariant(connectorName === "guildcontrol", "source connector name is out of sync")
   invariant(connectorTitle === MCP_TITLE, "source connector title is out of sync")
   invariant(connectorVersion === packageJson.version, "source connector version is out of sync")
   invariant(connectorNpmPackage === packageJson.name, "source npm package is out of sync")
   invariant(connectorDescription === MCP_DESCRIPTION, "source connector description is out of sync")
   invariant(connectorWebsiteUrl === DOCUMENTATION_URL, "source connector website is out of sync")
   invariant(
-    connectorIconUrl === "https://raw.githubusercontent.com/j-256/discord-mcp/v${CONNECTOR_VERSION}/assets/discord-mcp-icon.png",
+    connectorIconUrl === "https://raw.githubusercontent.com/j-256/guildcontrol/v${CONNECTOR_VERSION}/assets/guildcontrol-icon.png",
     "source connector icon URL is out of sync",
   )
   invariant(connectorIconMimeType === ICON_MIME_TYPE, "source connector icon media type is out of sync")
   invariant(connectorIconSize === ICON_SIZE, "source connector icon size is out of sync")
   invariant(
-    configSelector === "DISCORD_MCP_CONFIG_FILE",
+    configSelector === "GUILDCONTROL_CONFIG_FILE",
     "source configuration selector is out of sync",
   )
   invariant(
@@ -540,13 +555,17 @@ async function checkSourceIdentity(packageJson) {
   )
   assertEqual(
     policyEnvironmentNames,
-    ["DISCORD_MCP_CONFIG_FILE"],
+    ["GUILDCONTROL_CONFIG_FILE"],
     "source must expose only the non-secret configuration selector",
   )
 }
 
 async function checkDocumentation(packageJson) {
   const readme = await readFile(join(REPOSITORY_ROOT, "README.md"), "utf8")
+  const releaseFooter = await readFile(
+    join(REPOSITORY_ROOT, "site/src/components/ReleaseFooter.astro"),
+    "utf8",
+  )
   const security = await readFile(join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")
   const gettingStarted = await readFile(
     join(REPOSITORY_ROOT, "docs/getting-started.md"),
@@ -567,12 +586,14 @@ async function checkDocumentation(packageJson) {
     "utf8",
   )
   const documentation = `${readme}\n${gettingStarted}\n${migration}\n${limitations}\n${comparison}\n${reference}`
-  const documentedVersions = [...documentation.matchAll(/@j-256\/discord-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)]
+  const documentedVersions = [...documentation.matchAll(/\bguildcontrol@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
   invariant(documentedVersions.every((version) => version === packageJson.version), "documentation npm versions are out of sync")
-  invariant(readme.includes(`https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`), "README icon URL is out of sync")
+  invariant(readme.includes(`https://raw.githubusercontent.com/j-256/guildcontrol/v${packageJson.version}/assets/guildcontrol-icon.png`), "README icon URL is out of sync")
   invariant(readme.includes(`[Documentation portal](${DOCUMENTATION_URL}/)`), "README lacks the public documentation portal")
+  invariant(readme.includes(TRADEMARK_DISCLAIMER), "README lacks the independent-project trademark disclaimer")
+  invariant(releaseFooter.includes(TRADEMARK_DISCLAIMER), "documentation portal lacks the independent-project trademark disclaimer")
   invariant(releasing.includes(`set the repository homepage to \`${DOCUMENTATION_URL}\``), "release runbook lacks the documentation homepage")
   invariant(releasing.includes("node scripts/check-public-documentation.mjs"), "release runbook lacks public documentation verification")
   invariant(Buffer.byteLength(readme) <= README_MAX_BYTES, "README must remain a concise landing page")
@@ -585,14 +606,14 @@ async function checkDocumentation(packageJson) {
   }
   for (const required of [
     "[Complete reference](docs/reference.md)",
-    "[Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour)",
+    "[Verified product tour](https://j-256.github.io/guildcontrol/generated/contract-explorer.html#tour)",
     "--preset server-observer",
     "preset install server-observer",
-    "--config ./discord-mcp.json",
+    "--config ./guildcontrol.json",
     "catalog --check --json",
-    "config validate ./discord-mcp.json",
-    "doctor --config ./discord-mcp.json --online",
-    "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
+    "config validate ./guildcontrol.json",
+    "doctor --config ./guildcontrol.json --online",
+    "host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html",
     "--inspect-host-file",
     "incident-response",
     "coordination-channel",
@@ -600,7 +621,7 @@ async function checkDocumentation(packageJson) {
     "recipe list",
     "recipe plan guild-starter",
     "recipe apply guild-starter",
-    "smoke --config ./discord-mcp.json",
+    "smoke --config ./guildcontrol.json",
   ]) {
     invariant(readme.includes(required), `README is missing ${required}`)
   }
@@ -627,7 +648,7 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("There is no environment-policy or automatic configuration-import command"), "complete reference lacks clean-break configuration policy")
   invariant(security.includes("no environment-policy compatibility shape is accepted"), "security policy lacks clean-break configuration policy")
   invariant(security.includes("An already-current application is a no-write, no-backup operation"), "security policy lacks guarded recipe application")
-  invariant(reference.startsWith("# Discord MCP complete reference\n"), "complete reference heading is invalid")
+  invariant(reference.startsWith("# GuildControl MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Getting started and first verified read](getting-started.md)"), "complete reference lacks the getting-started link")
   invariant(reference.includes("[Project overview](../README.md)"), "complete reference lacks the landing-page link")
   invariant(gettingStarted.startsWith("# Getting started: first verified Discord read\n"), "getting-started heading is invalid")
@@ -654,11 +675,11 @@ async function checkDocumentation(packageJson) {
     "--npx",
     "list_channels",
     "Setup is the first-run readiness gate",
-    "Show me the channels in Discord server YOUR_GUILD_ID using Discord MCP.",
+    "Show me the channels in Discord server YOUR_GUILD_ID using GuildControl MCP.",
     "## Recovery ladder",
     "dist/index.js",
     "environment.forward",
-    "host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html",
+    "host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html",
     "release-exact credential-free guided tour",
   ]) {
     invariant(gettingStarted.includes(required), `getting-started guide is missing ${required}`)
@@ -667,7 +688,7 @@ async function checkDocumentation(packageJson) {
   invariant(readme.includes("[Switch from another MCP](docs/migration.md)"), "README lacks the migration route")
   invariant(readme.includes("[Fit and boundaries](docs/limitations.md)"), "README lacks the product-boundaries route")
   invariant(readme.includes("[Field comparison](docs/comparison.md)"), "README lacks the field-comparison route")
-  invariant(comparison.startsWith("# Discord MCP field comparison\n"), "field comparison heading is invalid")
+  invariant(comparison.startsWith("# GuildControl MCP field comparison\n"), "field comparison heading is invalid")
   for (const required of [
     "## How to read the matrix",
     "## Head-to-head matrix",
@@ -697,7 +718,7 @@ async function checkDocumentation(packageJson) {
     .filter((line) => line.startsWith("| "))
   invariant(comparisonRows.length > 2, "field comparison has no scored outcomes")
   invariant(
-    comparisonRows[0]?.startsWith("| Operator outcome | Discord MCP |"),
+    comparisonRows[0]?.startsWith("| Operator outcome | GuildControl MCP |"),
     "field comparison has an invalid header",
   )
   invariant(
@@ -706,7 +727,7 @@ async function checkDocumentation(packageJson) {
   )
   invariant(
     comparisonRows.slice(2).every((row) => row.split("|")[2]?.trim() === "**Lead**"),
-    "field comparison contains an outcome Discord MCP does not lead",
+    "field comparison contains an outcome GuildControl MCP does not lead",
   )
   const comparisonLines = comparison.split("\n")
   const sourceHeadSectionStart = comparisonLines.indexOf(
@@ -726,7 +747,7 @@ async function checkDocumentation(packageJson) {
       ?.split("|")
       .slice(1, -1)
       .map((cell) => cell.trim())
-    if (header?.[1] !== "Discord MCP") continue
+    if (header?.[1] !== "GuildControl MCP") continue
     const sourceHeadComparison = index > sourceHeadSectionStart
       && index < sourceHeadSectionEnd
     if (sourceHeadComparison) sourceHeadComparisonTables += 1
@@ -748,7 +769,7 @@ async function checkDocumentation(packageJson) {
       if (!sourceHeadComparison) {
         invariant(
           cells[1]?.startsWith("**Lead**"),
-          `field comparison table ${header[0]} contains a row Discord MCP does not lead`,
+          `field comparison table ${header[0]} contains a row GuildControl MCP does not lead`,
         )
       }
       scoredRows += 1
@@ -766,8 +787,8 @@ async function checkDocumentation(packageJson) {
   invariant(migration.startsWith("# Migrate from another Discord MCP\n"), "migration guide heading is invalid")
   for (const required of [
     "## Supported source releases",
-    "discord-mcp migrate list",
-    "discord-mcp migrate plan cappyeo@0.25.0",
+    "guildcontrol migrate list",
+    "guildcontrol migrate plan cappyeo@0.25.0",
     "## Read the dispositions correctly",
     "## Follow the staged path",
     "## Configuration remains a clean break",
@@ -782,7 +803,7 @@ async function checkDocumentation(packageJson) {
   }
   invariant(gettingStarted.includes("[product boundaries and host compatibility](limitations.md)"), "getting-started guide lacks the product-boundaries route")
   invariant(gettingStarted.includes("`adapterCatalog`"), "getting-started guide lacks the complete host adapter output")
-  invariant(gettingStarted.includes("`${input:discord-mcp-credential-1}`"), "getting-started guide lacks secure VS Code activation")
+  invariant(gettingStarted.includes("`${input:guildcontrol-credential-1}`"), "getting-started guide lacks secure VS Code activation")
   invariant(gettingStarted.includes("--inspect-host-file"), "getting-started guide lacks exact host drift inspection")
   invariant(gettingStarted.includes("host plan"), "getting-started guide lacks reviewed host planning")
   invariant(gettingStarted.includes("host apply"), "getting-started guide lacks reviewed host application")
@@ -794,10 +815,10 @@ async function checkDocumentation(packageJson) {
   invariant(reference.includes("cross-platform manifest requires Node.js 22 through 26"), "complete reference lacks the exact MCPB runtime range")
   invariant(reference.includes("bundle verification rejects any other stderr"), "complete reference lacks the MCPB warning boundary")
   invariant(reference.includes("The `host` generation form requires one explicit `--config FILE` or `--profile NAME`"), "complete reference lacks the host activation contract")
-  invariant(reference.includes("`discord-mcp.host-adapters.v1`"), "complete reference lacks verified host adapters")
+  invariant(reference.includes("`guildcontrol.host-adapters.v1`"), "complete reference lacks verified host adapters")
   invariant(reference.includes("### Reviewed host configuration installation"), "complete reference lacks reviewed host installation")
-  invariant(reference.includes("`discord-mcp.host-change-plan.v1`"), "complete reference lacks the host change-plan contract")
-  invariant(reference.includes("`discord-mcp.host-change-apply.v1`"), "complete reference lacks the host change-apply contract")
+  invariant(reference.includes("`guildcontrol.host-change-plan.v1`"), "complete reference lacks the host change-plan contract")
+  invariant(reference.includes("`guildcontrol.host-change-apply.v1`"), "complete reference lacks the host change-apply contract")
   invariant(reference.includes("### Host configuration drift inspection"), "complete reference lacks host drift inspection")
   invariant(security.includes("## Host configuration inspection"), "security policy lacks host inspection requirements")
   invariant(security.includes("## Reviewed host configuration installation"), "security policy lacks host installation requirements")
@@ -807,7 +828,7 @@ async function checkDocumentation(packageJson) {
   invariant(limitations.includes("Native-process memory parity"), "product boundaries lack the native-memory limitation")
   invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
   invariant(readme.includes("`host plan` and `host apply`"), "README lacks reviewed host installation")
-  invariant(comparison.includes("Discord MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
+  invariant(comparison.includes("GuildControl MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")
   invariant(comparison.includes("executes the unpacked server handshake"), "field comparison lacks bundle execution evidence")
   invariant(comparison.includes("Reviewed static host-configuration installation, drift inspection, and recovery"), "field comparison lacks reviewed host installation")
@@ -828,7 +849,7 @@ async function checkDocumentation(packageJson) {
     "discord",
     "discord-api",
     "discord-bot",
-    "discord-mcp",
+    "guildcontrol",
     "least-privilege",
     "mcp",
     "mcp-server",
@@ -912,12 +933,12 @@ async function checkCommunityFiles() {
     "private GitHub Security Advisory",
     "no response-time guarantee",
     "guild-installation-drift",
-    "discord-mcp migrate plan SOURCE --html PRIVATE_FILE",
+    "guildcontrol migrate plan SOURCE --html PRIVATE_FILE",
   ]) {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }
   invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
-  invariant(support.includes("discord-mcp host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
+  invariant(support.includes("guildcontrol host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
   invariant(support.includes("node dist/bin.js serve --config FILE"), "support guide lacks the public source launcher")
   invariant(support.includes("Node.js 22 through 26"), "support guide lacks the exact MCPB runtime range")
   invariant(privacy.startsWith("# Privacy policy\n"), "privacy policy heading is invalid")
@@ -996,12 +1017,12 @@ async function checkMcpbSource(packageJson) {
     "manifest.json",
     "server/THIRD_PARTY_NOTICES.md",
     "server/catalog-evidence.json",
-    "server/discord-mcp.mjs",
-    "server/discord-mcp.mjs.LEGAL.txt",
+    "server/guildcontrol.mjs",
+    "server/guildcontrol.mjs.LEGAL.txt",
     "server/sbom.spdx.json",
   ], "MCPB archive allowlist is invalid")
   invariant(
-    mcpbArchiveName(packageJson.version) === `discord-mcp-${packageJson.version}.mcpb`,
+    mcpbArchiveName(packageJson.version) === `guildcontrol-${packageJson.version}.mcpb`,
     "MCPB archive name is invalid",
   )
   assertEqual(Object.keys(reproducibleBuild), ["sourceDateEpoch"], "MCPB reproducible build metadata is invalid")
@@ -1039,9 +1060,9 @@ async function checkRegistryManifest(packageJson) {
   invariant(server.websiteUrl === DOCUMENTATION_URL, "registry website is invalid")
   invariant(server.icons?.length === 1, "registry manifest must declare one project icon")
   const icon = server.icons[0]
-  invariant(icon.src === `https://raw.githubusercontent.com/j-256/discord-mcp/v${packageJson.version}/assets/discord-mcp-icon.png`, "registry icon URL must use the exact release tag")
+  invariant(icon.src === `https://raw.githubusercontent.com/j-256/guildcontrol/v${packageJson.version}/assets/guildcontrol-icon.png`, "registry icon URL must use the exact release tag")
   invariant(icon.mimeType === ICON_MIME_TYPE, "registry icon media type is invalid")
-  const iconBytes = await readFile(join(REPOSITORY_ROOT, "assets/discord-mcp-icon.png"))
+  const iconBytes = await readFile(join(REPOSITORY_ROOT, "assets/guildcontrol-icon.png"))
   const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   invariant(iconBytes.subarray(0, pngSignature.length).equals(pngSignature), "project icon is not a PNG")
   invariant(sha256(iconBytes) === ICON_SHA256, "project icon checksum changed")
@@ -1073,7 +1094,7 @@ async function checkRegistryManifest(packageJson) {
   const mcpbPackage = server.packages[2]
   invariant(mcpbPackage.registryType === "mcpb", "MCPB registry package type is invalid")
   invariant(
-    mcpbPackage.identifier === `https://github.com/j-256/discord-mcp/releases/download/v${packageJson.version}/discord-mcp-${packageJson.version}.mcpb`,
+    mcpbPackage.identifier === `https://github.com/j-256/guildcontrol/releases/download/v${packageJson.version}/guildcontrol-${packageJson.version}.mcpb`,
     "MCPB registry package URL is out of sync",
   )
   invariant(/^[0-9a-f]{64}$/.test(mcpbPackage.fileSha256), "MCPB registry package digest is invalid")
@@ -1106,9 +1127,9 @@ async function checkContainerSource(packageJson) {
     `ARG VERSION=${packageJson.version}`,
     "ARG REVISION=local",
     `org.opencontainers.image.url="${DOCUMENTATION_URL}"`,
-    "org.opencontainers.image.documentation=\"https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md\"",
+    "org.opencontainers.image.documentation=\"https://github.com/j-256/guildcontrol/blob/v${VERSION}/README.md\"",
     "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
-    "io.modelcontextprotocol.server.name=\"io.github.j-256/discord-mcp\"",
+    "io.modelcontextprotocol.server.name=\"io.github.j-256/guildcontrol\"",
     "ENV NODE_ENV=production",
     "COPY --from=build --chown=node:node /app/dist ./dist",
     "COPY --from=build --chown=node:node /app/node_modules ./node_modules",
@@ -1178,7 +1199,7 @@ async function checkAutomation() {
     "Verify versioned public icon",
     "Verify exact public documentation",
     "scripts/check-public-documentation.mjs",
-    "cmp assets/discord-mcp-icon.png",
+    "cmp assets/guildcontrol-icon.png",
     "--proto-redir '=https'",
     "mcp-publisher_linux_amd64.tar.gz",
     "test \"$(uname -m)\" = \"x86_64\"",
@@ -1209,9 +1230,9 @@ async function checkAutomation() {
     "gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz",
     "subject-name: ${{ steps.release.outputs.image_name }}",
     "catalog-evidence.json",
-    "discord-mcp-${RELEASE_TAG#v}.mcpb",
+    "guildcontrol-${RELEASE_TAG#v}.mcpb",
     "container-evidence.json",
-    "ghcr.io/j-256/discord-mcp:$version",
+    "ghcr.io/j-256/guildcontrol:$version",
     "linux/amd64,linux/arm64",
     `index:org.opencontainers.image.description=${MCP_DESCRIPTION}`,
     "npm run container:verify",
@@ -1397,7 +1418,7 @@ async function checkAutomation() {
     "uses: actions/deploy-pages@",
     "artifact_name: github-pages",
     "name: Verify exact public documentation",
-    'test "${DEPLOYED_PAGE_URL%/}" = "https://j-256.github.io/discord-mcp"',
+    'test "${DEPLOYED_PAGE_URL%/}" = "https://j-256.github.io/guildcontrol"',
     "--manifest documentation/generated/docs-manifest.json",
     "--attempts 6",
     "--delay-ms 10000",

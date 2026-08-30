@@ -13,7 +13,7 @@ const SITE_DIRECTORY = resolve(TEST_DIRECTORY, "..")
 const REPOSITORY_ROOT = resolve(SITE_DIRECTORY, "..")
 const DIST_DIRECTORY = join(SITE_DIRECTORY, "dist")
 const SITE_ORIGIN = "https://j-256.github.io"
-const SITE_BASE = "/discord-mcp"
+const SITE_BASE = "/guildcontrol"
 const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`
 const REQUIRED_CSP = "default-src 'none'"
 const STABLE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u
@@ -90,8 +90,8 @@ test("documentation generation is deterministic and source-bound", async () => {
   })
   const after = JSON.parse(await readFile(manifestFile, "utf8"))
   assert.deepEqual(generatedSnapshot(after), generatedSnapshot(before))
-  assert.equal(after.format, "discord-mcp.docs-manifest.v1")
-  assert.equal(after.package.name, "@j-256/discord-mcp")
+  assert.equal(after.format, "guildcontrol.docs-manifest.v1")
+  assert.equal(after.package.name, "guildcontrol")
   assert.match(after.package.version, STABLE_VERSION)
   assert.equal(new Set(after.outputs.map(({ path }) => path)).size, after.outputs.length)
   assert.equal(new Set(after.sources.map(({ path }) => path)).size, after.sources.length)
@@ -138,7 +138,7 @@ test("built documentation has complete local navigation and no remote runtime as
   assert.ok(await exists(join(DIST_DIRECTORY, "pagefind", "pagefind.js")))
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "contract-explorer.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "contract-evidence.json")))
-  assert.ok(await exists(join(DIST_DIRECTORY, "generated", "discord-mcp.config.schema.json")))
+  assert.ok(await exists(join(DIST_DIRECTORY, "generated", "guildcontrol.config.schema.json")))
   assert.ok(await exists(join(DIST_DIRECTORY, "start", "migration", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms.txt")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms-full.txt")))

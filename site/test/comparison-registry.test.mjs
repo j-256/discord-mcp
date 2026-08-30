@@ -158,7 +158,7 @@ test("Registry projection rejects malformed, non-latest, and duplicate evidence"
     () => collectCurrentRegistryCompetitors([
       projectRegistryPage(registryPage([registryEntry(COMPETITOR_ONE, VERSION_ONE)])),
     ]),
-    /omitted io\.github\.j-256\/discord-mcp/u,
+    /omitted io\.github\.j-256\/guildcontrol/u,
   )
 })
 

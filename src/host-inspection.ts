@@ -16,7 +16,7 @@ import {
 } from "./host-file.js"
 import { stableString } from "./normalize.js"
 
-export const HOST_INSPECTION_FORMAT = "discord-mcp.host-inspection.v1"
+export const HOST_INSPECTION_FORMAT = "guildcontrol.host-inspection.v1"
 export const HOST_INSPECTION_SCHEMA_VERSION = 1
 export const HOST_INSPECTION_MIN_BYTES = HOST_JSON_MIN_BYTES
 export const HOST_INSPECTION_MAX_BYTES = HOST_JSON_MAX_BYTES
@@ -88,7 +88,7 @@ interface ComparisonResult {
   readonly unrelatedState: HostInspectionReport["comparison"]["unrelatedState"]
 }
 
-const HOST_INSPECTION_DIGEST_DOMAIN = "discord-mcp-host-inspection-v1\0"
+const HOST_INSPECTION_DIGEST_DOMAIN = "guildcontrol-host-inspection-v1\0"
 const SHARED_ADAPTER_IDS = new Set<HostAdapterId>(["cursor", "mcp-json", "vscode"])
 const STANDARD_SERVER_KEYS = new Set(["args", "command", "env", "type"])
 const HOST_INSPECTION_LIMITATIONS = Object.freeze([

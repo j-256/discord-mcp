@@ -56,15 +56,15 @@ test("bot installation plans are exact, fixed-origin, and credential-free", () =
   assert.equal(observer.postInstall.credentialVariable, DEFAULT_TOKEN_ENVIRONMENT_VARIABLE)
   const packageCommand = `npx --yes ${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`
   assert.deepEqual(observer.postInstall.commands, [
-    `${packageCommand} setup --npx --config ./discord-mcp.json --preset server-observer --guild-id ${GUILD_ID}`,
-    `${packageCommand} config validate ./discord-mcp.json`,
-    `${packageCommand} doctor --config ./discord-mcp.json --online`,
-    `${packageCommand} smoke --config ./discord-mcp.json`,
-    `${packageCommand} host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html`,
+    `${packageCommand} setup --npx --config ./guildcontrol.json --preset server-observer --guild-id ${GUILD_ID}`,
+    `${packageCommand} config validate ./guildcontrol.json`,
+    `${packageCommand} doctor --config ./guildcontrol.json --online`,
+    `${packageCommand} smoke --config ./guildcontrol.json`,
+    `${packageCommand} host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html`,
   ])
   assert.deepEqual(observer.postInstall.firstRead, {
     guildId: GUILD_ID,
-    prompt: `Show me the channels in Discord server ${GUILD_ID} using Discord MCP. Do not make changes.`,
+    prompt: `Show me the channels in Discord server ${GUILD_ID} using GuildControl MCP. Do not make changes.`,
     toolNames: ["list_channels"],
     writeCapable: false,
   })

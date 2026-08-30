@@ -1838,7 +1838,7 @@ function channelPermissionSync(
 }
 
 test("JSONL activity log appends privately and reads newest first", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "nested", "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -1855,7 +1855,7 @@ test("JSONL activity log appends privately and reads newest first", async (conte
 })
 
 test("JSONL activity log tolerates malformed historical lines", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -1877,7 +1877,7 @@ test("JSONL activity log tolerates malformed historical lines", async (context) 
 })
 
 test("JSONL activity log accepts only exact content-free private-message lifecycle evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -1960,7 +1960,7 @@ test("JSONL activity log accepts only exact content-free private-message lifecyc
 })
 
 test("JSONL activity log keeps durable deletion evidence content-free and internally consistent", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2018,7 +2018,7 @@ test("JSONL activity log keeps durable deletion evidence content-free and intern
 })
 
 test("JSONL activity log accepts content-free interaction records without surfacing extra data", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2042,7 +2042,7 @@ test("JSONL activity log accepts content-free interaction records without surfac
 })
 
 test("JSONL activity log retains only content-free reaction moderation evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2079,7 +2079,7 @@ test("JSONL activity log retains only content-free reaction moderation evidence"
 })
 
 test("JSONL activity log rejects member moderation records with private fields", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2120,7 +2120,7 @@ test("JSONL activity log rejects member moderation records with private fields",
 })
 
 test("JSONL activity log keeps exact bulk guild ban evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2169,7 +2169,7 @@ test("JSONL activity log keeps exact bulk guild ban evidence content-free", asyn
 })
 
 test("JSONL activity log keeps non-exact guild prune evidence content-free and count-bound", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2219,7 +2219,7 @@ test("JSONL activity log keeps non-exact guild prune evidence content-free and c
 })
 
 test("JSONL activity log strips channel content and raw operation keys from creation records", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2253,7 +2253,7 @@ test("JSONL activity log strips channel content and raw operation keys from crea
 })
 
 test("JSONL activity log strips role content and raw operation keys from creation records", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2286,7 +2286,7 @@ test("JSONL activity log strips role content and raw operation keys from creatio
 })
 
 test("JSONL activity log keeps role-configuration evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2349,7 +2349,7 @@ test("JSONL activity log keeps role-configuration evidence content-free", async 
 })
 
 test("JSONL activity log keeps role-ordering evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2419,7 +2419,7 @@ test("JSONL activity log keeps role-ordering evidence content-free", async (cont
 })
 
 test("JSONL activity log keeps channel-clone evidence content-free and exact", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2495,7 +2495,7 @@ test("JSONL activity log keeps channel-clone evidence content-free and exact", a
 })
 
 test("JSONL activity log keeps channel-ordering evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2579,7 +2579,7 @@ test("JSONL activity log keeps channel-ordering evidence content-free", async (c
 })
 
 test("JSONL activity log keeps channel-deletion evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2644,7 +2644,7 @@ test("JSONL activity log keeps channel-deletion evidence content-free", async (c
 })
 
 test("JSONL activity log keeps role-deletion evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2706,7 +2706,7 @@ test("JSONL activity log keeps role-deletion evidence content-free", async (cont
 })
 
 test("JSONL activity log strips poll content and enforces pending identity shape", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2770,7 +2770,7 @@ test("JSONL activity log strips poll content and enforces pending identity shape
 })
 
 test("JSONL activity log keeps member-role evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2810,7 +2810,7 @@ test("JSONL activity log keeps member-role evidence content-free", async (contex
 })
 
 test("JSONL activity log keeps member nickname evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2867,7 +2867,7 @@ test("JSONL activity log keeps member nickname evidence content-free", async (co
 })
 
 test("JSONL activity log keeps member verification evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2914,7 +2914,7 @@ test("JSONL activity log keeps member verification evidence content-free", async
 })
 
 test("JSONL activity log keeps member voice evidence and state content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -2972,7 +2972,7 @@ test("JSONL activity log keeps member voice evidence and state content-free", as
 })
 
 test("JSONL activity log keeps thread-governance evidence content-free and action exact", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3029,7 +3029,7 @@ test("JSONL activity log keeps thread-governance evidence content-free and actio
 })
 
 test("JSONL activity log strips all attachment and message content from attachment records", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3072,7 +3072,7 @@ test("JSONL activity log strips all attachment and message content from attachme
 })
 
 test("JSONL activity log strips component layouts and rejects edit replies", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3109,7 +3109,7 @@ test("JSONL activity log strips component layouts and rejects edit replies", asy
 })
 
 test("JSONL activity log strips embed presentations and rejects edit replies", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3148,7 +3148,7 @@ test("JSONL activity log strips embed presentations and rejects edit replies", a
 })
 
 test("JSONL activity log strips forum-post intent and rejects mismatched starter IDs", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3188,7 +3188,7 @@ test("JSONL activity log strips forum-post intent and rejects mismatched starter
 })
 
 test("JSONL activity log strips forum-tag metadata and rejects invalid create evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3229,7 +3229,7 @@ test("JSONL activity log strips forum-tag metadata and rejects invalid create ev
 })
 
 test("JSONL activity log keeps thread-creation evidence content-free and mode exact", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3268,7 +3268,7 @@ test("JSONL activity log keeps thread-creation evidence content-free and mode ex
 })
 
 test("JSONL activity log keeps message pin evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3307,7 +3307,7 @@ test("JSONL activity log keeps message pin evidence content-free", async (contex
 })
 
 test("JSONL activity log keeps announcement-crosspost evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3345,7 +3345,7 @@ test("JSONL activity log keeps announcement-crosspost evidence content-free", as
 })
 
 test("JSONL activity log keeps message-forward evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3391,7 +3391,7 @@ test("JSONL activity log keeps message-forward evidence content-free", async (co
 })
 
 test("JSONL activity log keeps announcement-subscription evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3455,7 +3455,7 @@ test("JSONL activity log keeps announcement-subscription evidence content-free",
 })
 
 test("JSONL activity log keeps native Interaction command and response evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3541,7 +3541,7 @@ test("JSONL activity log keeps native Interaction command and response evidence 
 })
 
 test("JSONL activity log keeps guild application-command definitions content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-command-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-command-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3584,7 +3584,7 @@ test("JSONL activity log keeps guild application-command definitions content-fre
 })
 
 test("JSONL activity log keeps global application-command definitions content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-global-command-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-global-command-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3622,7 +3622,7 @@ test("JSONL activity log keeps global application-command definitions content-fr
 })
 
 test("JSONL activity log keeps permission-overwrite evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3662,7 +3662,7 @@ test("JSONL activity log keeps permission-overwrite evidence content-free", asyn
 })
 
 test("JSONL activity log keeps parent-category permission-sync evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3703,7 +3703,7 @@ test("JSONL activity log keeps parent-category permission-sync evidence content-
 })
 
 test("JSONL activity log returns an empty result before the first deletion", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
 
@@ -3717,7 +3717,7 @@ test("JSONL activity log returns an empty result before the first deletion", asy
 })
 
 test("JSONL activity log keeps webhook deletion evidence credential-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3778,7 +3778,7 @@ test("JSONL activity log keeps webhook deletion evidence credential-free", async
 })
 
 test("JSONL activity log keeps webhook creation and changes credential-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3846,7 +3846,7 @@ test("JSONL activity log keeps webhook creation and changes credential-free", as
 })
 
 test("JSONL activity log keeps webhook message lifecycle evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3923,7 +3923,7 @@ test("JSONL activity log keeps webhook message lifecycle evidence content-free",
 })
 
 test("JSONL activity log keeps integration deletion evidence identity-safe", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -3985,7 +3985,7 @@ test("JSONL activity log keeps integration deletion evidence identity-safe", asy
 })
 
 test("JSONL activity log keeps guild departure evidence identity-safe", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4050,7 +4050,7 @@ test("JSONL activity log keeps guild departure evidence identity-safe", async (c
 })
 
 test("JSONL activity log keeps invite creation evidence capability- and path-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4112,7 +4112,7 @@ test("JSONL activity log keeps invite creation evidence capability- and path-fre
 })
 
 test("JSONL activity log keeps invite deletion evidence capability-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4171,7 +4171,7 @@ test("JSONL activity log keeps invite deletion evidence capability-free", async 
 })
 
 test("JSONL activity log keeps Guild Template evidence content- and capability-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4230,7 +4230,7 @@ test("JSONL activity log keeps Guild Template evidence content- and capability-f
 })
 
 test("JSONL activity log keeps onboarding evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4292,7 +4292,7 @@ test("JSONL activity log keeps onboarding evidence content-free", async (context
 })
 
 test("JSONL activity log keeps Welcome Screen evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4349,7 +4349,7 @@ test("JSONL activity log keeps Welcome Screen evidence content-free", async (con
 })
 
 test("JSONL activity log keeps widget-settings evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4403,7 +4403,7 @@ test("JSONL activity log keeps widget-settings evidence content-free", async (co
 })
 
 test("JSONL activity log accepts only exact content-free guild-settings evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4455,7 +4455,7 @@ test("JSONL activity log accepts only exact content-free guild-settings evidence
 })
 
 test("JSONL activity log accepts only exact content-free guild Community evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4516,7 +4516,7 @@ test("JSONL activity log accepts only exact content-free guild Community evidenc
 })
 
 test("JSONL activity log accepts only exact content-free guild-incident evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4571,7 +4571,7 @@ test("JSONL activity log accepts only exact content-free guild-incident evidence
 })
 
 test("JSONL activity log accepts only exact content-free guild-profile evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4627,7 +4627,7 @@ test("JSONL activity log accepts only exact content-free guild-profile evidence"
 })
 
 test("JSONL activity log keeps channel metadata evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4684,7 +4684,7 @@ test("JSONL activity log keeps channel metadata evidence content-free", async (c
 })
 
 test("JSONL activity log keeps voice channel status text content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4740,7 +4740,7 @@ test("JSONL activity log keeps voice channel status text content-free", async (c
 })
 
 test("JSONL activity log keeps guild expression evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4811,7 +4811,7 @@ test("JSONL activity log keeps guild expression evidence content-free", async (c
 })
 
 test("JSONL activity log keeps application emoji evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4874,7 +4874,7 @@ test("JSONL activity log keeps application emoji evidence content-free", async (
 })
 
 test("JSONL activity log keeps application entitlement lifecycle evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -4948,7 +4948,7 @@ test("JSONL activity log keeps application entitlement lifecycle evidence conten
 })
 
 test("JSONL activity log keeps application intent evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5001,7 +5001,7 @@ test("JSONL activity log keeps application intent evidence content-free", async 
 })
 
 test("JSONL activity log keeps bot-profile evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5068,7 +5068,7 @@ test("JSONL activity log keeps bot-profile evidence content-free", async (contex
 })
 
 test("JSONL activity log keeps linked-role metadata lifecycle evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5148,7 +5148,7 @@ test("JSONL activity log keeps linked-role metadata lifecycle evidence content-f
 })
 
 test("JSONL activity log keeps AutoMod evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5226,7 +5226,7 @@ test("JSONL activity log keeps AutoMod evidence content-free", async (context) =
 })
 
 test("JSONL activity log keeps scheduled event evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5296,7 +5296,7 @@ test("JSONL activity log keeps scheduled event evidence content-free", async (co
 })
 
 test("JSONL activity log keeps soundboard evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5362,7 +5362,7 @@ test("JSONL activity log keeps soundboard evidence content-free", async (context
 })
 
 test("JSONL activity log keeps soundboard playback evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)
@@ -5425,7 +5425,7 @@ test("JSONL activity log keeps soundboard playback evidence content-free", async
 })
 
 test("JSONL activity log keeps Stage-instance evidence content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-activity-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-activity-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const file = join(root, "activity.jsonl")
   const store = new JsonlActivityLog(file)

@@ -33,7 +33,7 @@ import {
 } from "./release-lib.mjs"
 
 const EVIDENCE_FILENAME = "oci-index-evidence.json"
-const EVIDENCE_FORMAT = "discord-mcp.oci-index-evidence.v1"
+const EVIDENCE_FORMAT = "guildcontrol.oci-index-evidence.v1"
 const EVIDENCE_BYTE_LIMIT = 16 * 1024 * 1024
 const IMAGE_INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
 const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u
@@ -166,7 +166,7 @@ async function writeEvidence(outputDirectory, evidence) {
 
 const options = parseArguments(process.argv.slice(2))
 const packageJson = await readJson(join(REPOSITORY_ROOT, "package.json"))
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-oci-layout-"))
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "guildcontrol-oci-layout-"))
 const layout = join(temporaryDirectory, "layout")
 try {
   await run(process.execPath, ["scripts/check-release-metadata.mjs"])

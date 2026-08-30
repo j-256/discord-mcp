@@ -137,13 +137,13 @@ export function requestButtonVerificationKey(token: string): Uint8Array {
     throw new RangeError("Discord request-button verification requires a non-empty secret")
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-request-button-verification-key.v1\0")
+    .update("guildcontrol-request-button-verification-key.v1\0")
     .digest()
 }
 
 export function requestButtonLayoutDigest(layout: unknown): string {
   return `sha256:${createHash("sha256")
-    .update("discord-mcp-request-button-layout.v1\0")
+    .update("guildcontrol-request-button-layout.v1\0")
     .update(stableString(layout))
     .digest("hex")}`
 }
@@ -161,7 +161,7 @@ export function createRequestButtonRoute(
   }
   return truncatedHmac(
     key,
-    "discord-mcp-request-button-route.v1",
+    "guildcontrol-request-button-route.v1",
     {
       applicationId: binding.applicationId,
       botId: binding.botId,
@@ -190,7 +190,7 @@ function requestButtonTag(
   }
   return truncatedHmac(
     key,
-    "discord-mcp-request-button-tag.v1",
+    "guildcontrol-request-button-tag.v1",
     {
       applicationId: scope.applicationId,
       botId: scope.botId,
@@ -284,7 +284,7 @@ export function requestButtonRouteHash(route: string): string {
     throw new RangeError("Discord request-button route is invalid")
   }
   return `sha256:${createHash("sha256")
-    .update("discord-mcp-request-button-route-reference.v1\0")
+    .update("guildcontrol-request-button-route-reference.v1\0")
     .update(route)
     .digest("hex")}`
 }

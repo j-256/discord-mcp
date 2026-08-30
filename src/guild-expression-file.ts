@@ -644,7 +644,7 @@ export async function readGuildExpressionFileSnapshot(
   return readExpressionFileSnapshot({
     ...options,
     description: `Discord ${options.kind}`,
-    digestDomain: `discord-mcp-guild-expression-${options.kind}.v1`,
+    digestDomain: `guildcontrol-guild-expression-${options.kind}.v1`,
   })
 }
 
@@ -654,7 +654,7 @@ export async function readApplicationEmojiFileSnapshot(
   return readExpressionFileSnapshot({
     ...options,
     description: "Discord application emoji",
-    digestDomain: "discord-mcp-application-emoji.v1",
+    digestDomain: "guildcontrol-application-emoji.v1",
     kind: "emoji",
   })
 }

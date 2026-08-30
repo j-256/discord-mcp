@@ -69,7 +69,7 @@ const INTEGRATION_ID = "600000000000000001"
 const USER_ID = "700000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const SPAWNED_SMOKE_TOKEN_VARIABLE = "DISCORD_SMOKE_TOKEN"
-const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
+const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "GUILDCONTROL_UNDECLARED_POLICY"
 
 function fixturePolicy(
   overrides: FixtureConfigOverrides = {},
@@ -124,8 +124,8 @@ async function prepareSetup(options: FixtureSetupOptions): Promise<SetupReport> 
     return prepareConfigSetup(nativeOptions)
   }
   const fixture = fixtureConfigInput(configOverrides)
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-policy-"))
-  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-operator-policy-"))
+  const configFile = join(await realpath(temporary), "guildcontrol.json")
   try {
     await writeConnectorConfigDocumentFile(configFile, fixture.document)
     return await prepareConfigSetup({
@@ -395,7 +395,7 @@ function status(
       messageForwardSourceChannelIds: [],
       messageForwardTargetChannelIds: [],
       nativeCommandChangesEnabled: false,
-      nativeCommandName: "discord-mcp",
+      nativeCommandName: "guildcontrol",
       nativeInteractionChannelIds: [],
       nativeInteractionGuildIds: [],
       nativeInteractionMaxPending: 25,
@@ -796,9 +796,9 @@ test("doctor reports unsupported runtime and missing configuration without throw
 })
 
 test("doctor resolves the credential variable referenced by a selected configuration", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-policy-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-doctor-policy-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
-  const configFile = join(await realpath(temporary), "discord-mcp.json")
+  const configFile = join(await realpath(temporary), "guildcontrol.json")
   await writeConnectorConfigDocumentFile(
     configFile,
     createConnectorConfigDocument({
@@ -865,11 +865,11 @@ test("doctor inspects a strict document when its declared environment credential
     report.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.toolSurface)?.status,
     "pass",
   )
-  assert.doesNotMatch(JSON.stringify(report), /DISCORD_MCP_DOCTOR_TOKEN|credential-unavailable/)
+  assert.doesNotMatch(JSON.stringify(report), /DISCORD_GUILDCONTROL_DOCTOR_TOKEN|credential-unavailable/)
 })
 
 test("doctor inspects a strict document when its file credential is unavailable", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-missing-file-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-doctor-missing-file-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const credentialFile = join(root, "missing-token")
@@ -973,7 +973,7 @@ test("credential-independent doctor never masks a colliding ambient variable", a
       toolSurface: "full",
     }),
     environment: {
-      DISCORD_MCP_DOCTOR_TOKEN: "hostile-policy-value",
+      DISCORD_GUILDCONTROL_DOCTOR_TOKEN: "hostile-policy-value",
     },
     nodeVersion: "22.14.0",
   })
@@ -986,14 +986,14 @@ test("credential-independent doctor never masks a colliding ambient variable", a
     (entry) => entry.id === DOCTOR_CHECK_IDS.configuration,
   )
   assert.equal(configuration?.status, "fail")
-  assert.match(configuration?.summary || "", /DISCORD_MCP_DOCTOR_TOKEN/)
+  assert.match(configuration?.summary || "", /DISCORD_GUILDCONTROL_DOCTOR_TOKEN/)
 })
 
 test("doctor resolves file-backed credentials and redacts downstream failures", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-doctor-file-secret-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-doctor-file-secret-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   const credentialFile = join(root, "discord-token")
   await writeFile(credentialFile, `${TOKEN}\n`, { mode: 0o600 })
   await writeConnectorConfigDocumentFile(
@@ -1373,7 +1373,7 @@ test("doctor and setup explain exact-user private-message boundaries without con
 })
 
 test("doctor explains independently gated private-file delivery without reading files", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-private-attachment-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-operator-private-attachment-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const report = await diagnoseConnector({
@@ -1402,7 +1402,7 @@ test("doctor explains independently gated private-file delivery without reading 
 })
 
 test("doctor and setup explain reviewed attachment scope without reading files or writing to Discord", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-operator-attachment-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-operator-attachment-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const enabled = await diagnoseConnector({
@@ -2330,7 +2330,7 @@ test("doctor and setup explain native poll privacy and reviewed write scope", as
 })
 
 test("doctor and setup explain credential-safe webhook administration and messages", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-operator-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-webhook-operator-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const webhookCredentialRoot = await realpath(temporary)
   const enabledPolicy = fixturePolicy({
@@ -2591,7 +2591,7 @@ test("doctor and setup explain reviewed guild departure", async () => {
 })
 
 test("doctor and setup explain capability-safe invite creation, audit, and revocation", async (context) => {
-  const capabilityRoot = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-invite-capabilities-")))
+  const capabilityRoot = await realpath(await mkdtemp(join(tmpdir(), "guildcontrol-invite-capabilities-")))
   context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
   const enabledPolicy = fixturePolicy({
     capabilities: {
@@ -3209,7 +3209,7 @@ test("doctor and setup explain reviewed exact-channel metadata changes", async (
 })
 
 test("doctor and setup explain privacy-safe reviewed guild expression scope", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-expressions-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-expressions-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
   const enabledPolicy = fixturePolicy({
@@ -3300,7 +3300,7 @@ test("doctor and setup explain privacy-safe reviewed guild expression scope", as
 })
 
 test("doctor and setup explain identity-bound reviewed application emoji scope", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-emojis-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-emojis-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
   const enabledPolicy = fixturePolicy({
@@ -3362,7 +3362,7 @@ test("doctor and setup explain identity-bound reviewed application emoji scope",
 })
 
 test("doctor and setup explain identity-bound reviewed bot-profile scope", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-bot-profile-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
   const enabledPolicy = fixturePolicy({
@@ -3727,7 +3727,7 @@ test("doctor and setup explain reviewed application privileged-intent enablement
 })
 
 test("doctor and setup explain privacy-safe reviewed scheduled event scope", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-events-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-events-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
   const enabledPolicy = fixturePolicy({
@@ -3838,7 +3838,7 @@ test("doctor and setup explain privacy-safe reviewed scheduled event scope", asy
 })
 
 test("doctor and setup explain privacy-safe reviewed soundboard scope", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-soundboard-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const canonicalRoot = await realpath(root)
   const enabledPolicy = fixturePolicy({
@@ -5486,14 +5486,14 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
   const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
-    command: "/opt/Discord MCP/bin/discord-mcp",
+    command: "/opt/GuildControl MCP/bin/guildcontrol",
     config,
     serverName: "team-discord",
   })
 
   assert.deepEqual(result, {
     args: ["serve", "--config", file],
-    command: "/opt/Discord MCP/bin/discord-mcp",
+    command: "/opt/GuildControl MCP/bin/guildcontrol",
     environment: {
       forward: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
       set: {},
@@ -5582,14 +5582,14 @@ test("stdio launch descriptor makes a saved profile the complete non-overridable
   })
   const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: ["/srv/guildcontrol/dist/cli.js", "serve"],
     botId: BOT_ID,
     command: "/usr/bin/node",
     profile,
   })
 
   assert.deepEqual(result.args, [
-    "/srv/discord-mcp/dist/cli.js",
+    "/srv/guildcontrol/dist/cli.js",
     "serve",
     "--profile",
     "support-bot",
@@ -5671,7 +5671,7 @@ test("stdio launch descriptor makes a standalone configuration the only policy i
 
 test("setup verifies in-scope access and emits a credential-free report", async () => {
   const report = await prepareSetup({
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: ["/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configOverrides: fixturePolicy(),
     serverName: "discord-safe",
@@ -5686,7 +5686,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
   assert.equal(report.toolSurface, "full")
   assert.deepEqual(report.toolsets, MCP_TOOLSET_NAMES)
   assert.deepEqual(report.launch.args, [
-    "/srv/discord-mcp/dist/cli.js",
+    "/srv/guildcontrol/dist/cli.js",
     "serve",
     "--config",
     report.configFile,
@@ -5712,7 +5712,7 @@ test("setup verifies in-scope access and emits a credential-free report", async 
 })
 
 test("preset setup saves resolved read-only authority and forwards only its credential", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-preset-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-setup-preset-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const profileDirectory = join(await realpath(temporary), "profiles")
   const source = { [TOKEN_ALIAS]: TOKEN }
@@ -5802,14 +5802,14 @@ test("preset setup saves resolved read-only authority and forwards only its cred
 })
 
 test("setup creates and verifies a preset-backed profile without persisting or reporting its credential", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-profile-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-setup-profile-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const profileDirectory = join(await realpath(temporary), "profiles")
   const source = { [TOKEN_ALIAS]: TOKEN }
   const before = { ...source }
 
   const report = await prepareSetup({
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: ["/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     credentialVariable: TOKEN_ALIAS,
     environment: source,
@@ -5861,7 +5861,7 @@ test("setup creates and verifies a preset-backed profile without persisting or r
     report.profile,
   )
   assert.deepEqual(report.launch.args, [
-    "/srv/discord-mcp/dist/cli.js",
+    "/srv/guildcontrol/dist/cli.js",
     "serve",
     "--profile",
     "support-bot",
@@ -5910,14 +5910,14 @@ test("setup creates and verifies a preset-backed profile without persisting or r
 })
 
 test("setup creates and verifies a preset-backed configuration with recoverable replacement", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-config-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-setup-config-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const configFile = join(await realpath(temporary), "discord.json")
   const source = { [TOKEN_ALIAS]: TOKEN }
   const before = { ...source }
 
   const report = await prepareSetup({
-    args: ["/srv/discord-mcp/dist/cli.js", "serve"],
+    args: ["/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile,
     credentialVariable: TOKEN_ALIAS,
@@ -5938,7 +5938,7 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
   })
   assert.equal(report.profile, null)
   assert.deepEqual(report.launch.args, [
-    "/srv/discord-mcp/dist/cli.js",
+    "/srv/guildcontrol/dist/cli.js",
     "serve",
     "--config",
     configFile,
@@ -6026,7 +6026,7 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
 })
 
 test("setup records and verifies a file-backed credential without forwarding an environment secret", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-file-secret-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-setup-file-secret-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const configFile = join(root, "discord.json")
@@ -6092,7 +6092,7 @@ test("setup records and verifies a file-backed credential without forwarding an 
 })
 
 test("setup requires one schema-v2 target and rejects ambient policy or implicit replacement", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-setup-selection-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-setup-selection-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const configFile = join(root, "discord.json")
@@ -6189,7 +6189,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.status, "ok")
   assert.equal(report.transport, "in-memory")
   assert.match(report.protocolVersion, /^2025-/)
-  assert.equal(report.serverName, "discord-mcp")
+  assert.equal(report.serverName, "guildcontrol")
   assert.equal(report.serverVersion, "0.1.2")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
@@ -6315,7 +6315,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
     "discord://interactions/status",
     "discord://soundboard/defaults",
     "discord://voice/regions",
-    "ui://discord-mcp/plan-review",
+    "ui://guildcontrol/plan-review",
   ])
   assert.deepEqual(report.resourceTemplateUris, [
     "discord://application/commands/{guildId}",
@@ -6514,7 +6514,7 @@ test("MCP smoke negotiates the stable protocol through a minimized spawned stdio
   assert.equal(report.status, "ok")
   assert.equal(report.transport, "stdio")
   assert.equal(report.protocolVersion, "2026-07-28")
-  assert.equal(report.serverName, "discord-mcp")
+  assert.equal(report.serverName, "guildcontrol")
   assert.equal(report.serverVersion, "0.1.2")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)

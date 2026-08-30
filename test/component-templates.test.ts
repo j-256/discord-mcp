@@ -38,7 +38,7 @@ test("compiles every named template into the bounded static layout DSL", () => {
     },
     {
       changes: ["Added safer templates", "Improved documentation"],
-      releaseName: "Discord MCP 1.0",
+      releaseName: "GuildControl MCP 1.0",
       summary: "A focused product release.",
       template: "release-notes",
     },

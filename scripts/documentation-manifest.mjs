@@ -9,8 +9,8 @@ import {
   sha256,
 } from "./release-lib.mjs"
 
-export const DOCUMENTATION_URL = "https://j-256.github.io/discord-mcp"
-export const DOCUMENTATION_MANIFEST_FORMAT = "discord-mcp.docs-manifest.v1"
+export const DOCUMENTATION_URL = "https://j-256.github.io/guildcontrol"
+export const DOCUMENTATION_MANIFEST_FORMAT = "guildcontrol.docs-manifest.v1"
 export const DOCUMENTATION_MANIFEST_PATH = "generated/docs-manifest.json"
 export const DOCUMENTATION_CONTENT_PATHS = Object.freeze([
   "README.md",
@@ -25,10 +25,10 @@ export const DOCUMENTATION_CONTENT_PATHS = Object.freeze([
   "CODE_OF_CONDUCT.md",
   "docs/reference.md",
   "SECURITY.md",
-  "discord-mcp.config.schema.json",
+  "guildcontrol.config.schema.json",
   "server.json",
   "LICENSE",
-  "assets/discord-mcp-icon.png",
+  "assets/guildcontrol-icon.png",
   "package.json",
 ])
 
@@ -77,8 +77,8 @@ const REQUIRED_OUTPUT_PATHS = Object.freeze([
   "public/generated/LICENSE.txt",
   "public/generated/contract-evidence.json",
   "public/generated/contract-explorer.html",
-  "public/generated/discord-mcp-icon.png",
-  "public/generated/discord-mcp.config.schema.json",
+  "public/generated/guildcontrol-icon.png",
+  "public/generated/guildcontrol.config.schema.json",
   "public/generated/server.json",
   "public/llms-full.txt",
   "public/llms.txt",

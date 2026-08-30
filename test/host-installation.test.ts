@@ -35,7 +35,7 @@ import { createStdioLaunchDescriptor } from "../src/operator.js"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
-const POLICY_FILE = "/configuration/discord-mcp.json"
+const POLICY_FILE = "/configuration/guildcontrol.json"
 const TOKEN_ALIAS = "DISCORD_HOST_INSTALL_TOKEN"
 const RAW_SECRET = "host-install-secret-that-must-never-escape"
 const SERVER_NAME = "discord-install"
@@ -52,7 +52,7 @@ function activationPlan(serverName = SERVER_NAME) {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `@j-256/discord-mcp@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document, file: POLICY_FILE },
@@ -99,7 +99,7 @@ async function writeJson(file: string, value: unknown): Promise<void> {
 }
 
 async function fixture(context: test.TestContext, name: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), `discord-mcp-${name}-`))
+  const directory = await mkdtemp(join(tmpdir(), `guildcontrol-${name}-`))
   context.after(() => rm(directory, { force: true, recursive: true }))
   return realpath(directory)
 }
@@ -361,7 +361,7 @@ test("host apply rejects stale plans, target creation, and active locks without 
   )
 
   const lockPlan = planHostAdapterFile(activation, "mcp-json", file)
-  const lock = join(directory, `.${basename(file)}.discord-mcp.lock`)
+  const lock = join(directory, `.${basename(file)}.guildcontrol.lock`)
   await writeFile(lock, "", { mode: 0o600 })
   assert.throws(
     () => applyHostAdapterFile(activation, "mcp-json", file, {

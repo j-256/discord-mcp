@@ -648,7 +648,7 @@ function hmacHex(key: Uint8Array, domain: string, payload: string): string {
 function templateReference(key: Uint8Array, guildId: string, code: string): string {
   return `${TEMPLATE_REFERENCE_PREFIX}${hmacHex(
     key,
-    "discord-mcp-guild-template-reference.v1",
+    "guildcontrol-guild-template-reference.v1",
     `${guildId}\0${code}`,
   )}`
 }
@@ -660,7 +660,7 @@ function identityFingerprint(
 ): string {
   return hmacHex(
     key,
-    `discord-mcp-guild-template-${kind}-identity.v1`,
+    `guildcontrol-guild-template-${kind}-identity.v1`,
     stableString(values),
   )
 }
@@ -865,7 +865,7 @@ function parseTemplateStructure(
           ? identityFingerprint(planKey, "role", [roleName])
           : hmacHex(
               planKey,
-              "discord-mcp-guild-template-overwrite-target.v1",
+              "guildcontrol-guild-template-overwrite-target.v1",
               `${String(type)}\0${targetId}`,
             ),
         type,
@@ -1177,7 +1177,7 @@ function liveStructure(
           ? identityFingerprint(planKey, "role", [roleName])
           : hmacHex(
               planKey,
-              "discord-mcp-guild-template-overwrite-target.v1",
+              "guildcontrol-guild-template-overwrite-target.v1",
               `${overwrite.type}\0${overwrite.id}`,
             ),
         type: overwrite.type,
@@ -1624,7 +1624,7 @@ export class GuildTemplateService {
       botMemberRoleIds: [...member.roles].sort(),
       channelEvidence: channelEvidence.view,
       channels,
-      domain: "discord-mcp-guild-template-inventory.v1",
+      domain: "guildcontrol-guild-template-inventory.v1",
       guild: {
         id: guild.id,
         name: guild.name,
@@ -1794,7 +1794,7 @@ export class GuildTemplateService {
       botId,
       channelEvidence: state.channelEvidence,
       desiredMetadata: desiredMetadata(request),
-      domain: "discord-mcp-guild-template-change-plan.v1",
+      domain: "guildcontrol-guild-template-change-plan.v1",
       drift,
       inventoryDigest: state.inventoryDigest,
       liveStructure: state.liveStructure.view,

@@ -27,7 +27,7 @@ import {
 
 async function privateRoot(context: test.TestContext): Promise<string> {
   const parent = await realpath(
-    await mkdtemp(join(tmpdir(), "discord-mcp-invite-file-")),
+    await mkdtemp(join(tmpdir(), "guildcontrol-invite-file-")),
   )
   const root = join(parent, "capabilities")
   await mkdir(root, { mode: 0o700 })

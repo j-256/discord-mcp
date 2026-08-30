@@ -1,10 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json",
   "manifest_version": "0.3",
-  "name": "discord-mcp",
-  "display_name": "Discord MCP",
+  "name": "guildcontrol",
+  "display_name": "GuildControl MCP",
   "version": "0.1.2",
-  "description": "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration",
+  "description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
   "long_description": "Use an operator-owned Discord application and bot through one strict non-secret policy file. Read operations stay exactly scoped, high-impact changes require fresh reviewed plans and signed confirmation, and durable records exclude Discord content and display data.",
   "author": {
     "name": "j-256",
@@ -12,20 +12,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/j-256/discord-mcp.git"
+    "url": "https://github.com/j-256/guildcontrol.git"
   },
-  "homepage": "https://j-256.github.io/discord-mcp",
-  "documentation": "https://j-256.github.io/discord-mcp/start/choose/",
-  "support": "https://github.com/j-256/discord-mcp/issues",
+  "homepage": "https://j-256.github.io/guildcontrol",
+  "documentation": "https://j-256.github.io/guildcontrol/start/choose/",
+  "support": "https://github.com/j-256/guildcontrol/issues",
   "icon": "icon.png",
   "server": {
     "type": "node",
-    "entry_point": "server/discord-mcp.mjs",
+    "entry_point": "server/guildcontrol.mjs",
     "mcp_config": {
       "command": "node",
       "args": [
         "--lite-mode",
-        "${__dirname}/server/discord-mcp.mjs",
+        "${__dirname}/server/guildcontrol.mjs",
         "serve",
         "--config",
         "${user_config.config_file}"
@@ -46,7 +46,7 @@
   ],
   "license": "AGPL-3.0-only",
   "privacy_policies": [
-    "https://github.com/j-256/discord-mcp/blob/v0.1.2/PRIVACY.md",
+    "https://github.com/j-256/guildcontrol/blob/v0.1.2/PRIVACY.md",
     "https://discord.com/privacy"
   ],
   "compatibility": {
@@ -62,8 +62,8 @@
   "user_config": {
     "config_file": {
       "type": "file",
-      "title": "Discord MCP configuration",
-      "description": "Select one strict versioned non-secret Discord MCP JSON configuration file.",
+      "title": "GuildControl MCP configuration",
+      "description": "Select one strict versioned non-secret GuildControl MCP JSON configuration file.",
       "required": true
     },
     "bot_token": {

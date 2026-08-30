@@ -408,7 +408,7 @@ export function applicationRoleConnectionMetadataSchemaDigest(
   schema: readonly ApplicationRoleConnectionMetadataDefinition[],
 ): string {
   return `sha256:${createHash("sha256")
-    .update("discord-mcp:application-role-connection-metadata-schema:v1\0")
+    .update("guildcontrol:application-role-connection-metadata-schema:v1\0")
     .update(stableString(normalizeApplicationRoleConnectionMetadataSchema(schema)))
     .digest("hex")}`
 }
@@ -417,7 +417,7 @@ export function applicationRoleConnectionMetadataRecordDigest(
   definition: ApplicationRoleConnectionMetadataDefinition,
 ): string {
   return `sha256:${createHash("sha256")
-    .update("discord-mcp:application-role-connection-metadata-record:v1\0")
+    .update("guildcontrol:application-role-connection-metadata-record:v1\0")
     .update(stableString(normalizeApplicationRoleConnectionMetadataSchema([definition])[0]))
     .digest("hex")}`
 }

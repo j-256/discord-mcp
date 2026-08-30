@@ -21,7 +21,7 @@ import {
 import { readOwnedLocalFileSnapshot } from "../src/local-file.js"
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-attachment-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-attachment-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

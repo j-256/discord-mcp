@@ -24,9 +24,9 @@ import { stableString } from "./normalize.js"
 import type { StdioLaunchDescriptor } from "./operator.js"
 
 export const HOST_ACTIVATION_REPORT_SCHEMA_VERSION = 1
-export const HOST_ACTIVATION_REPORT_FORMAT = "discord-mcp.host-activation.v1"
+export const HOST_ACTIVATION_REPORT_FORMAT = "guildcontrol.host-activation.v1"
 
-const ACTIVATION_DIGEST_DOMAIN = "discord-mcp-host-activation-v1\0"
+const ACTIVATION_DIGEST_DOMAIN = "guildcontrol-host-activation-v1\0"
 const CHANNEL_LIST_TOOL_NAME = "list_channels"
 const CONNECTOR_STATUS_TOOL_NAME = "get_connector_status"
 const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/

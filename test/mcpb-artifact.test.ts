@@ -13,7 +13,7 @@ const manifest = JSON.parse(await readFile("mcpb/manifest.json", "utf8"))
 
 test("MCPB manifest is pinned, model-neutral, and exact", async () => {
   await validateMcpbManifest(manifest, packageJson)
-  assert.equal(mcpbArchiveName(packageJson.version), `discord-mcp-${packageJson.version}.mcpb`)
+  assert.equal(mcpbArchiveName(packageJson.version), `guildcontrol-${packageJson.version}.mcpb`)
 })
 
 test("MCPB archive allowlist is canonical and content-bearing", () => {

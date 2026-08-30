@@ -744,8 +744,8 @@ test("Gateway identifies with fixed nonprivileged intents and exposes no session
   assert.equal((Number(data.intents) & (1 << 8)) === 0, true)
   assert.equal(Object.hasOwn(data, "capabilities"), false)
   assert.deepEqual(data.properties, {
-    browser: "discord-mcp",
-    device: "discord-mcp",
+    browser: "guildcontrol",
+    device: "guildcontrol",
     os: process.platform,
   })
   assert.deepEqual(data.shard, [0, 1])

@@ -9,12 +9,12 @@ import { redactText } from "./errors.js"
 
 export const MCP_READ_RESPONSE_TOO_LARGE_CODE = "MCP_READ_RESPONSE_TOO_LARGE"
 export const MCP_READ_RESPONSE_TOO_LARGE_STATUS = "response-too-large"
-export const DISCORD_MCP_RECEIPT_PREFIX = "DISCORD_MCP_RECEIPT "
-export const DISCORD_MCP_RECEIPT_SCHEMA = "discord-mcp-result-receipt.v1"
+export const GUILDCONTROL_RECEIPT_PREFIX = "GUILDCONTROL_RECEIPT "
+export const GUILDCONTROL_RECEIPT_SCHEMA = "guildcontrol-result-receipt.v1"
 
 const MCP_READ_RESPONSE_BUDGET_CONFIG_PATH = "$.limits.mcpReadResponseMaxBytes"
 const MCP_READ_RESPONSE_RECOVERY = `Narrow the request or review ${MCP_READ_RESPONSE_BUDGET_CONFIG_PATH}.`
-const MCP_READ_RESPONSE_TOO_LARGE_MESSAGE = `Discord MCP withheld an oversized read result. ${MCP_READ_RESPONSE_RECOVERY}`
+const MCP_READ_RESPONSE_TOO_LARGE_MESSAGE = `GuildControl MCP withheld an oversized read result. ${MCP_READ_RESPONSE_RECOVERY}`
 const CONTENT_FREE_RECEIPT_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 const CONTENT_FREE_RECEIPT_DIGEST_PATTERN = /^(?:hmac-sha256|sha256):[a-f0-9]{64}$/
 const CONTENT_FREE_RECEIPT_TOKEN_PATTERN = /^[a-z][a-z0-9-]{0,95}$/
@@ -76,7 +76,7 @@ export function contentFreeToolReceipt(
   const structured = objectValue(structuredContent)
   if (!structured) return undefined
   const receipt: Record<string, unknown> = {
-    receiptSchema: DISCORD_MCP_RECEIPT_SCHEMA,
+    receiptSchema: GUILDCONTROL_RECEIPT_SCHEMA,
   }
   if (
     typeof structured.schemaVersion === "number"
@@ -138,7 +138,7 @@ export function withContentFreeToolReceipt<T extends CallToolResult>(
 ): T {
   const receipt = contentFreeToolReceipt(result.structuredContent)
   if (!receipt) return result
-  const serialized = `${DISCORD_MCP_RECEIPT_PREFIX}${JSON.stringify(receipt)}`
+  const serialized = `${GUILDCONTROL_RECEIPT_PREFIX}${JSON.stringify(receipt)}`
   if (result.content.some((content) => (
     content.type === "text" && content.text === serialized
   ))) return result

@@ -57,7 +57,7 @@ function jpeg(width: number, height: number): Buffer {
 }
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-event-cover-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-event-cover-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

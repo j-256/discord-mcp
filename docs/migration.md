@@ -2,7 +2,7 @@
 
 [Getting started](getting-started.md) | [Field comparison](comparison.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Support](../SUPPORT.md)
 
-Discord MCP can produce a complete, release-exact switching plan for every competitor in the scored local comparison. The planner maps audited source tools into operator outcomes, then routes each outcome to this connector's least-privilege presets, additive recipes, exact target tools, and reviewed lifecycles.
+GuildControl MCP can produce a complete, release-exact switching plan for every competitor in the scored local comparison. The planner maps audited source tools into operator outcomes, then routes each outcome to this connector's least-privilege presets, additive recipes, exact target tools, and reviewed lifecycles.
 
 It is deliberately a planner, not an importer. It does not scan another checkout, read an existing policy or MCP host file, resolve a credential, contact a network or Discord endpoint, rewrite prompts or arguments, or change anything. Source environment variables never become an alternate policy interface. The only environment value shown in staged commands is a non-secret reference to the bot-token variable selected by a new schema-v2 configuration file.
 
@@ -11,8 +11,8 @@ It is deliberately a planner, not an importer. It does not scan another checkout
 Run `migrate list` instead of guessing an alias:
 
 ```bash
-discord-mcp migrate list
-discord-mcp migrate list --json
+guildcontrol migrate list
+guildcontrol migrate list --json
 ```
 
 The catalog contains these immutable source IDs:
@@ -33,7 +33,7 @@ Each entry includes its Registry identity, commit-pinned evidence URL, audit fid
 Choose the source ID shown by `migrate list`:
 
 ```bash
-discord-mcp migrate plan cappyeo@0.25.0
+guildcontrol migrate plan cappyeo@0.25.0
 ```
 
 The terminal report accounts for every audited source tool exactly once. Each outcome group includes:
@@ -50,7 +50,7 @@ The report also binds the source manifest and complete inventory to the negotiat
 Add `--json` for deterministic machine-readable evidence:
 
 ```bash
-discord-mcp migrate plan cappyeo@0.25.0 --json
+guildcontrol migrate plan cappyeo@0.25.0 --json
 ```
 
 JSON is suitable for review automation, but it is not a generated policy. `configurationImported`, `argumentsTranslated`, and `hostSettingsChanged` remain `false`.
@@ -60,7 +60,7 @@ JSON is suitable for review automation, but it is not a generated policy. `confi
 Add `--html FILE` to create a standalone guide without replacing an existing file:
 
 ```bash
-discord-mcp migrate plan cappyeo@0.25.0 --html ./cappyeo-migration.html
+guildcontrol migrate plan cappyeo@0.25.0 --html ./cappyeo-migration.html
 ```
 
 The file is created exclusively with mode `0600`. It contains the exact plan, source and target evidence, searchable outcome cards, disposition filters, tool-level accounting, copyable commands, visible limitations, and an in-memory checklist. It loads no external asset, makes no automatic request, persists no browser state, and embeds neither the output path nor a credential value. Activating a source or Registry evidence link is an explicit browser navigation.
@@ -81,7 +81,7 @@ Cappyeo's bundled component-template send maps to `compile_component_template` b
 
 Every plan emits a source-specific version of this sequence:
 
-1. Run `discord-mcp catalog --check` to fingerprint the installed target contract without credentials or execution.
+1. Run `guildcontrol catalog --check` to fingerprint the installed target contract without credentials or execution.
 2. Run the emitted `setup --preset ...` command from a canonical private directory after replacing placeholder Discord IDs. This creates a new strict schema-v2 policy and references the token without embedding its value.
 3. For each needed recipe, run the emitted `recipe plan`, review the complete proposed configuration and risks, then use its fresh digest in the emitted `recipe apply` command. Skip recipes for outcomes you do not need.
 4. Use `config workbench` for an exact capability not represented by a named recipe. Download and validate a candidate, then use the separate config plan and confirmed apply workflow. Do not edit broad authority into the source plan.
@@ -111,11 +111,11 @@ Hosted or non-auditable Registry entries are not offered as source IDs because t
 
 ## Troubleshooting
 
-If the source ID is rejected, run `discord-mcp migrate list` and copy the complete `product@version` value. Unversioned names and source paths are intentionally invalid.
+If the source ID is rejected, run `guildcontrol migrate list` and copy the complete `product@version` value. Unversioned names and source paths are intentionally invalid.
 
 If HTML creation reports that the target exists, move the existing file or choose a new path. The exporter never overwrites operator-owned content. A failed partial write is removed before the command reports failure.
 
-If planning reports a missing target tool, stop and run `discord-mcp catalog --check --json`. The installed package and migration manifest do not describe the same production contract. Reinstall one exact package release rather than editing the plan.
+If planning reports a missing target tool, stop and run `guildcontrol catalog --check --json`. The installed package and migration manifest do not describe the same production contract. Reinstall one exact package release rather than editing the plan.
 
 If setup or live verification fails, use the [recovery ladder](getting-started.md#recovery-ladder). Do not broaden Discord permissions, add policy environment variables, paste a token into static host configuration, or skip the exact failing layer.
 

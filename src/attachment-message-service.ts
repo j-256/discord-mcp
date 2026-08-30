@@ -299,7 +299,7 @@ export function attachmentMessageNonce(
   operationKey: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-attachment-message.v1\0")
+    .update("guildcontrol-attachment-message.v1\0")
     .update(channelId)
     .update("\0")
     .update(operationKey)

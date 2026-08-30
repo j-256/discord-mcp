@@ -25,7 +25,7 @@ const OTHER_WEBHOOK_ID = "200000000000000002"
 const TOKEN = "private_webhook_token.test-value"
 
 async function privateRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-webhook-credentials-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-webhook-credentials-"))
   await chmod(root, 0o700)
   return realpath(root)
 }

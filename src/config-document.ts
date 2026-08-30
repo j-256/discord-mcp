@@ -39,7 +39,7 @@ import { ConfigDocumentError } from "./errors.js"
 
 export const CONFIG_DOCUMENT_SCHEMA_VERSION = 2
 export const CONFIG_DOCUMENT_SCHEMA_ID =
-  "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json"
+  "https://raw.githubusercontent.com/j-256/guildcontrol/main/guildcontrol.config.schema.json"
 
 const CONFIG_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
@@ -915,9 +915,9 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
       .describe("Canonical MCP toolset selection"),
   }).describe("Advertised MCP tool surface"),
 }).meta({
-  description: "Strict non-secret configuration for discord-mcp",
+  description: "Strict non-secret configuration for guildcontrol",
   id: CONFIG_DOCUMENT_SCHEMA_ID,
-  title: "discord-mcp configuration",
+  title: "guildcontrol configuration",
 })
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1470,8 +1470,8 @@ export function connectorConfigJsonSchema(): Record<string, unknown> {
   return {
     ...schema,
     $id: CONFIG_DOCUMENT_SCHEMA_ID,
-    description: "Strict non-secret configuration for discord-mcp",
-    title: "discord-mcp configuration",
+    description: "Strict non-secret configuration for guildcontrol",
+    title: "guildcontrol configuration",
   }
 }
 

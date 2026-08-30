@@ -1,4 +1,4 @@
-const AUTHORITY = Symbol("discord-mcp-bulk-member-role-authority")
+const AUTHORITY = Symbol("guildcontrol-bulk-member-role-authority")
 
 export interface BulkMemberRoleAuthority {
   readonly authority: typeof AUTHORITY

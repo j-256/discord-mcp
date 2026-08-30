@@ -388,7 +388,7 @@ function permissionBits(value: unknown): bigint | undefined {
 
 function referenceHash(reference: string): string {
   return `sha256:${createHash("sha256")
-    .update("discord-mcp-native-interaction-reference.v1\0")
+    .update("guildcontrol-native-interaction-reference.v1\0")
     .update(reference)
     .digest("hex")}`
 }

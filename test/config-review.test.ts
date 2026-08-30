@@ -64,7 +64,7 @@ function document(
 }
 
 async function reviewRoot(context: test.TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-config-review-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-config-review-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return realpath(root)
 }
@@ -116,9 +116,9 @@ test("configuration change plans are deterministic, credential-free, and exact n
   assert.equal(first.execution.discordContacted, false)
   assert.equal(first.execution.secretValuesRead, false)
   assert.deepEqual(first.nextChecks, [
-    { args: ["config", "validate", paths.file], command: "discord-mcp" },
-    { args: ["doctor", "--config", paths.file, "--online"], command: "discord-mcp" },
-    { args: ["smoke", "--config", paths.file], command: "discord-mcp" },
+    { args: ["config", "validate", paths.file], command: "guildcontrol" },
+    { args: ["doctor", "--config", paths.file, "--online"], command: "guildcontrol" },
+    { args: ["smoke", "--config", paths.file], command: "guildcontrol" },
   ])
   assert.equal(JSON.stringify(first).includes("test-discord-token"), false)
 
@@ -282,7 +282,7 @@ test("configuration change plans retain explicit default representation as metad
     },
     name: "support-bot",
     observability: { exportEnabled: false, jsonLogsEnabled: false },
-    runtime: { nativeCommandName: "discord-mcp" },
+    runtime: { nativeCommandName: "guildcontrol" },
     scopes: { protectedUserIds: [] },
     storage: { attachmentRoots: [] },
     toolsets: ["connector", "messages"],

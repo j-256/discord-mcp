@@ -6,8 +6,8 @@ import {
 } from "./constants.js"
 import { assertDiscordMessageContent } from "./message-safety.js"
 
-export const COORDINATION_ADDRESS_FORMAT = "discord-mcp.coordination-address.v1"
-export const COORDINATION_NOTE_FORMAT = "discord-mcp.coordination-note.v1"
+export const COORDINATION_ADDRESS_FORMAT = "guildcontrol.coordination-address.v1"
+export const COORDINATION_NOTE_FORMAT = "guildcontrol.coordination-note.v1"
 export const COORDINATION_NOTE_SCHEMA_VERSION = 1
 export const COORDINATION_BROADCAST_RECIPIENT = "broadcast"
 export const COORDINATION_ADDRESS_BYTES = 16

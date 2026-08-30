@@ -439,7 +439,7 @@ export function embedMessageNonce(
   operationKey: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-embed-message.v1\0")
+    .update("guildcontrol-embed-message.v1\0")
     .update(channelId)
     .update("\0")
     .update(operationKey)
@@ -452,7 +452,7 @@ export function embedMessageVerificationKey(token: string): Uint8Array {
     throw new RangeError("Discord embed-message verification requires a non-empty secret")
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-embed-message-verification-key.v1\0")
+    .update("guildcontrol-embed-message-verification-key.v1\0")
     .digest()
 }
 
@@ -467,7 +467,7 @@ export function embedMessageRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-embed-message-request.v1",
+    domain: "guildcontrol-embed-message-request.v1",
     request: {
       action: request.action,
       channelId: request.channelId,
@@ -1355,7 +1355,7 @@ export class EmbedMessageService {
       botMemberRoleIds: [...state.botMember.roles].sort(),
       channel: channelSnapshot(state.channel),
       current: currentSnapshot,
-      domain: "discord-mcp-embed-message-plan.v1",
+      domain: "guildcontrol-embed-message-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

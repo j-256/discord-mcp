@@ -952,7 +952,7 @@ export function autoModerationVerificationKey(token: string): Uint8Array {
     throw new RangeError("Discord AutoMod verification requires a non-empty secret")
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-automod-verification-key.v1\0")
+    .update("guildcontrol-automod-verification-key.v1\0")
     .digest()
 }
 
@@ -967,7 +967,7 @@ export function autoModerationRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-automod-request.v1",
+    domain: "guildcontrol-automod-request.v1",
     request,
   })
 }

@@ -21,7 +21,7 @@ import { createStdioLaunchDescriptor } from "../src/operator.js"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
-const CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_FILE = "/configuration/guildcontrol.json"
 const TOKEN_ALIAS = "DISCORD_ADAPTER_BOT_TOKEN"
 const TOKEN_VALUE = "private-adapter-token-value"
 const SERVER_NAME = "Discord_Test-42"
@@ -38,7 +38,7 @@ function environmentPlan(): HostActivationPlan {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `@j-256/discord-mcp@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document, file: CONFIG_FILE },
@@ -159,7 +159,7 @@ test("VS Code adapter uses password inputs and leaves auto-approving sandbox dis
   assert.deepEqual(adapter.configuration, {
     inputs: [{
       description: `Discord bot credential for ${TOKEN_ALIAS}`,
-      id: "discord-mcp-credential-1",
+      id: "guildcontrol-credential-1",
       password: true,
       type: "promptString",
     }],
@@ -167,7 +167,7 @@ test("VS Code adapter uses password inputs and leaves auto-approving sandbox dis
       [SERVER_NAME]: {
         args: plan.launch.args,
         command: plan.launch.command,
-        env: { [TOKEN_ALIAS]: "${input:discord-mcp-credential-1}" },
+        env: { [TOKEN_ALIAS]: "${input:guildcontrol-credential-1}" },
         type: "stdio",
       },
     },
@@ -185,7 +185,7 @@ test("Gemini CLI adapter uses a policy-specific safe alias and keychain settings
     settings: readonly Record<string, unknown>[]
   }
 
-  assert.match(configuration.name, /^discord-mcp-[a-f0-9]{12}$/)
+  assert.match(configuration.name, /^guildcontrol-[a-f0-9]{12}$/)
   assert.equal(configuration.name.includes("_"), false)
   assert.equal(adapter.hostServerName, configuration.name)
   assert.deepEqual(configuration.settings, [{

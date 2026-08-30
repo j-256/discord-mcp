@@ -1229,7 +1229,7 @@ export class WidgetSettingsService {
       applicationId,
       botId,
       desired,
-      domain: "discord-mcp-widget-settings-change-plan.v1",
+      domain: "guildcontrol-widget-settings-change-plan.v1",
       evidence,
       localConstraints: LOCAL_CONSTRAINTS,
       privacy,
