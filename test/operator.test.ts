@@ -1051,6 +1051,10 @@ test("doctor distinguishes complete scope from a missing channel boundary", asyn
     guildOnly.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.status,
     "warn",
   )
+  assert.match(
+    guildOnly.checks.find((entry) => entry.id === DOCTOR_CHECK_IDS.channelScope)?.action || "",
+    /readScope\.channelIds/,
+  )
   for (const entry of guildOnly.checks.filter((candidate) => candidate.status !== "pass")) {
     assert.ok(entry.action)
     assert.equal(entry.reference, "docs/reference.md#operator-cli")
