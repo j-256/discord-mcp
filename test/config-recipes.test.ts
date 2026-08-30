@@ -774,6 +774,57 @@ test("recipe plans bind the exact request and normalized file path", async (cont
   assert.notEqual(first.proposedDocumentDigest, otherRequest.proposedDocumentDigest)
 })
 
+test("recipe plans emit exact immutable apply commands for every scope kind", async (context) => {
+  const file = await configFile(
+    context,
+    document({
+      channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+      guildIds: [GUILD_ID, OTHER_GUILD_ID],
+    }),
+  )
+  const cases = [
+    {
+      name: "incident-response",
+      option: "--guild-id",
+      selection: { guildIds: [OTHER_GUILD_ID, GUILD_ID] },
+    },
+    {
+      name: "message-channel",
+      option: "--channel-id",
+      selection: { channelIds: [OTHER_CHANNEL_ID, CHANNEL_ID] },
+    },
+    {
+      name: "direct-messenger",
+      option: "--user-id",
+      selection: { userIds: [USER_ID] },
+    },
+  ] as const
+
+  for (const entry of cases) {
+    const plan = planConfigRecipe({
+      file,
+      name: entry.name,
+      ...entry.selection,
+    })
+    assert.deepEqual(plan.applyCommand, {
+      args: [
+        "recipe",
+        "apply",
+        entry.name,
+        file,
+        ...plan.request.scope.ids.flatMap((id) => [entry.option, id]),
+        "--plan-digest",
+        plan.planDigest,
+        "--confirm",
+        entry.name,
+      ],
+      command: "discord-mcp",
+    })
+    assert.equal(Object.isFrozen(plan.applyCommand), true)
+    assert.equal(Object.isFrozen(plan.applyCommand.args), true)
+  }
+})
+
 test("recipe application requires exact review and preserves a recoverable backup", async (context) => {
   const original = document()
   const file = await configFile(context, original)
@@ -808,6 +859,7 @@ test("recipe application requires exact review and preserves a recoverable backu
   })
   assert.equal(applied.status, "applied")
   assert.equal(applied.applied, true)
+  assert.deepEqual(applied.applyCommand, plan.applyCommand)
   assert.equal(applied.execution.configurationWritten, true)
   assert.ok(applied.backupFile)
   assert.deepEqual(loadConnectorConfigDocumentFile(file), plan.proposedDocument)
@@ -825,6 +877,7 @@ test("recipe application requires exact review and preserves a recoverable backu
   })
   assert.equal(noOp.status, "already-current")
   assert.equal(noOp.applied, false)
+  assert.deepEqual(noOp.applyCommand, currentPlan.applyCommand)
   assert.equal(noOp.execution.configurationWritten, false)
   assert.equal(noOp.backupFile, undefined)
 })

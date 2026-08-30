@@ -140,6 +140,7 @@ export interface ConfigRecipeCommand {
 
 export interface ConfigRecipePlanReport {
   readonly action: "plan"
+  readonly applyCommand: ConfigRecipeCommand
   readonly changes: readonly ConfigRecipeChange[]
   readonly confirmation: {
     readonly requiredValue: ConfigRecipeName
@@ -835,6 +836,32 @@ function nextChecks(file: string): readonly ConfigRecipeCommand[] {
   ])
 }
 
+function recipeApplyCommand(
+  file: string,
+  request: NormalizedConfigRecipeRequest,
+  planDigest: string,
+): ConfigRecipeCommand {
+  const scopeOption = request.scope.kind === "guild"
+    ? "--guild-id"
+    : request.scope.kind === "channel"
+      ? "--channel-id"
+      : "--user-id"
+  return Object.freeze({
+    args: Object.freeze([
+      "recipe",
+      "apply",
+      request.name,
+      file,
+      ...request.scope.ids.flatMap((id) => [scopeOption, id]),
+      "--plan-digest",
+      planDigest,
+      "--confirm",
+      request.name,
+    ]),
+    command: "discord-mcp" as const,
+  })
+}
+
 interface InternalRecipePlan {
   currentDocument: ConnectorConfigDocument
   report: ConfigRecipePlanReport
@@ -873,6 +900,7 @@ function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan 
   })
   const report: ConfigRecipePlanReport = {
     action: "plan",
+    applyCommand: recipeApplyCommand(file, request, planDigest),
     changes,
     confirmation: Object.freeze({ requiredValue: recipe.name }),
     currentDocumentDigest,
