@@ -62,6 +62,10 @@ export class ConversationRecallEvidenceError extends ConfigurationError {
   override name = "ConversationRecallEvidenceError"
 }
 
+export class ChannelInventoryEvidenceError extends ConfigurationError {
+  override name = "ChannelInventoryEvidenceError"
+}
+
 export class BulkGuildBanEvidenceError extends Error {
   override name = "BulkGuildBanEvidenceError"
 }

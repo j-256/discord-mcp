@@ -25,7 +25,7 @@ Use the [first verified read guide](docs/getting-started.md) for one linear setu
 
 ## Quick start
 
-The fastest supported outcome is an operator-owned read-only bot, one non-secret policy file, a private host activation guide, and a successful host-side channel inventory. Follow the [complete getting-started guide](docs/getting-started.md) if this is your first installation; the commands below are the condensed operator path.
+The fastest supported outcome is an operator-owned read-only bot, one non-secret policy file, a private host activation guide, and a successful host-side channel inventory. The first inventory response is a compact bounded directory page, with an authenticated continuation for larger guilds and exact metadata available only when requested. Follow the [complete getting-started guide](docs/getting-started.md) if this is your first installation; the commands below are the condensed operator path.
 
 Every command and nested action supports credential-independent `-h` and `--help`; use `discord-mcp FAMILY ACTION --help` or the equivalent `discord-mcp help FAMILY ACTION` for exact syntax and the action's authority, privacy, and side-effect boundary before supplying values.
 

@@ -660,6 +660,11 @@ import type {
 } from "./permission-service.js"
 import { PermissionService } from "./permission-service.js"
 import { ScopePolicy } from "./policy.js"
+import {
+  ChannelInventoryService,
+  type ChannelInventoryListOptions,
+  type ChannelInventoryServiceOptions,
+} from "./channel-inventory-service.js"
 import type {
   PollCreationPlan,
   PollCreationRequest,
@@ -1253,6 +1258,7 @@ export interface ConnectorServiceOptions {
     ChannelMetadataServiceOptions,
     "clock" | "planKey" | "randomId"
   >
+  channelInventoryOptions?: Pick<ChannelInventoryServiceOptions, "cursorKey">
   channelOrderingOptions?: Pick<
     ChannelOrderingServiceOptions,
     "clock" | "planKey" | "randomId" | "verificationTimeoutMs"
@@ -1616,6 +1622,7 @@ export class ConnectorService {
   readonly #channelCloneService: ChannelCloneService
   readonly #channelDeletionService: ChannelDeletionService
   readonly #channelMetadataService: ChannelMetadataService
+  readonly #channelInventoryService: ChannelInventoryService
   readonly #channelOrderingService: ChannelOrderingService
   readonly #client: DiscordServiceClient
   readonly #config: ConnectorConfig
@@ -1683,6 +1690,11 @@ export class ConnectorService {
       token: options.config.token,
     })
     this.#policy = options.policy || new ScopePolicy(options.config)
+    this.#channelInventoryService = new ChannelInventoryService({
+      client: this.#client,
+      policy: this.#policy,
+      ...options.channelInventoryOptions,
+    })
     this.#botInstallationAuditService = new BotInstallationAuditService({
       client: this.#client,
       configuredGuildIds: options.config.allowedGuildIds,
@@ -2634,30 +2646,12 @@ export class ConnectorService {
     }
   }
 
-  async listChannels(guildId: string, options: RequestOptions = {}) {
+  async listChannels(
+    guildId: string,
+    options: ChannelInventoryListOptions = {},
+  ) {
     await this.#verifyIdentity(options)
-    this.#policy.assertGuildAllowed(guildId)
-    const channels: DiscordChannel[] = await this.#client.getGuildChannels(guildId, options)
-    const scopedChannels = this.#policy.filterChannels(
-      channels.filter((channel) => !channel.guild_id || channel.guild_id === guildId),
-    )
-    const projectedChannels = scopedChannels
-      .map((channel) => normalizedGuildChannel(channel, guildId))
-      .sort((left, right) => (
-        (left.position ?? Number.MAX_SAFE_INTEGER)
-        - (right.position ?? Number.MAX_SAFE_INTEGER)
-      ))
-    return {
-      channels: projectedChannels,
-      guildId,
-      inventory: {
-        completeness: "visibility-bounded" as const,
-        returned: projectedChannels.length,
-        scope: "configured-policy-and-discord-visibility" as const,
-      },
-      schemaVersion: SCHEMA_VERSION,
-      status: "ok",
-    }
+    return this.#channelInventoryService.list(guildId, options)
   }
 
   async getChannel(

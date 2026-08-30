@@ -27,6 +27,7 @@ import type { SpanContext } from "@opentelemetry/api"
 import {
   AUDIT_LOG_LIMITS,
   BAN_AUDIT_LIMITS,
+  CHANNEL_INVENTORY_LIMITS,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   CONNECTOR_DESCRIPTION,
   CONNECTOR_ICON_MIME_TYPE,
@@ -9815,6 +9816,9 @@ function serviceFixture(overrides: {
       DiscordToolService["recallConversation"]
     > | null,
   }
+  const channelInventoryCalls = {
+    arguments: [] as Array<Parameters<DiscordToolService["listChannels"]>>,
+  }
   const messageCatchupCalls = {
     arguments: null as Parameters<
       DiscordToolService["catchUpMessages"]
@@ -13765,7 +13769,46 @@ function serviceFixture(overrides: {
         visibility,
       }
     },
-    async listChannels(guildId) {
+    async listChannels(...arguments_) {
+      channelInventoryCalls.arguments.push(arguments_)
+      const [guildId, options] = arguments_
+      if (
+        options?.cursor !== undefined
+        || options?.detail !== undefined
+        || options?.limit !== undefined
+      ) {
+        const detail = options.detail ?? "compact"
+        return {
+          channels: [{
+            id: CHANNEL_ID,
+            name: "general",
+            parentId: null,
+            position: 0,
+            type: 0,
+            typeName: "guild-text",
+          }],
+          guildId,
+          inventory: {
+            completeness: "visibility-bounded" as const,
+            scope: "configured-policy-and-discord-visibility" as const,
+          },
+          page: {
+            continuation: "process-local-fresh-ordered-inventory-bound" as const,
+            cursor: options.cursor ?? null,
+            hasMore: false,
+            nextCursor: null,
+            requestedLimit: options.limit ?? 50,
+            returned: 1,
+            totalVisible: 1,
+          },
+          projection: {
+            detail,
+            exactMetadataTool: detail === "compact" ? "get_channel" as const : null,
+          },
+          schemaVersion: 1,
+          status: "ok" as const,
+        }
+      }
       return {
         channels: [],
         guildId,
@@ -14856,6 +14899,7 @@ function serviceFixture(overrides: {
     applicationActivityInstanceCalls,
     applicationMonetizationCalls,
     calls,
+    channelInventoryCalls,
     communityActivityCalls,
     conversationRecallCalls,
     guildBlueprintCaptureCalls,
@@ -19105,6 +19149,60 @@ test("progressive permission discovery reveals only the requested exact tool", a
     (await client.listTools()).tools.map(({ name }) => name),
     ["explain_principal_permissions", "discover_discord_tools"],
   )
+})
+
+test("MCP channel inventory defaults to a compact bounded page and forwards explicit detail", async (context) => {
+  const { channelInventoryCalls, client } = await connectedFixture(context)
+  const tool = listedTool((await client.listTools()).tools, "list_channels")
+  const properties = tool.inputSchema.properties as Record<
+    string,
+    Record<string, unknown>
+  >
+
+  assert.equal(properties.limit?.default, CHANNEL_INVENTORY_LIMITS.pageDefault)
+  assert.equal(properties.limit?.maximum, CHANNEL_INVENTORY_LIMITS.page)
+  assert.deepEqual(properties.detail?.enum, ["compact", "full"])
+  assert.equal(
+    properties.cursor?.maxLength,
+    CHANNEL_INVENTORY_LIMITS.cursorCharacters,
+  )
+
+  const compact = await client.callTool({
+    arguments: { guildId: GUILD_ID },
+    name: "list_channels",
+  })
+  const full = await client.callTool({
+    arguments: { detail: "full", guildId: GUILD_ID, limit: 7 },
+    name: "list_channels",
+  })
+  const invalid = await client.callTool({
+    arguments: {
+      guildId: GUILD_ID,
+      limit: CHANNEL_INVENTORY_LIMITS.page + 1,
+    },
+    name: "list_channels",
+  })
+
+  assert.equal(
+    (structuredContent(compact).projection as Record<string, unknown>).detail,
+    "compact",
+  )
+  assert.equal(
+    (structuredContent(full).projection as Record<string, unknown>).detail,
+    "full",
+  )
+  assert.equal(invalid.isError, true)
+  assert.equal(channelInventoryCalls.arguments.length, 2)
+  assert.equal(
+    channelInventoryCalls.arguments[0]?.[1]?.limit,
+    CHANNEL_INVENTORY_LIMITS.pageDefault,
+  )
+  assert.equal(channelInventoryCalls.arguments[0]?.[1]?.detail, undefined)
+  assert.equal(channelInventoryCalls.arguments[1]?.[1]?.detail, "full")
+  assert.equal(channelInventoryCalls.arguments[1]?.[1]?.limit, 7)
+  const summary = compact.content?.[0]
+  if (summary?.type !== "text") assert.fail("Expected a text tool summary")
+  assert.match(summary.text, /returned 1 of 1 visible channels/)
 })
 
 test("MCP role reads expose complete inventory and exact lookup with snowflake validation", async (context) => {
