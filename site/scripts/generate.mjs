@@ -23,7 +23,7 @@ const SITE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..")
 const REPOSITORY_ROOT = resolve(SITE_DIRECTORY, "..")
 const CONTENT_ROOT = join(SITE_DIRECTORY, "src", "content", "docs")
 const PUBLIC_ROOT = join(SITE_DIRECTORY, "public", "generated")
-const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
+const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 const TOKEN_PATTERN = /(?:mfa\.[A-Za-z0-9_-]{60,}|[A-Za-z0-9_-]{23,30}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,})/u
 const PRIVATE_PATH_PATTERN = /(?:file:\/\/\/|\/Users\/|\/home\/[A-Za-z0-9._-]+\/)/u
 const STABLE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u
@@ -285,7 +285,7 @@ const FULL_DOCUMENTS = Object.freeze([
     source: "docs/getting-started.md",
   },
   {
-    description: "Map an audited Discord MCP release into least-privilege setup, policy, verification, and retirement steps",
+    description: "Map an audited GuildControl MCP release into least-privilege setup, policy, verification, and retirement steps",
     route: "start/migration",
     source: "docs/migration.md",
   },
@@ -300,7 +300,7 @@ const FULL_DOCUMENTS = Object.freeze([
     source: "PRIVACY.md",
   },
   {
-    description: "Dated source-audited comparison of operator outcomes across the Discord MCP field",
+    description: "Dated source-audited comparison of operator outcomes across the GuildControl MCP field",
     route: "understand/comparison",
     source: "docs/comparison.md",
   },
@@ -504,10 +504,10 @@ function transformOutsideFences(markdown, transform) {
 
 function buildLinkResolver({ anchorRoutes, sourceRoutes }) {
   const publicTargets = new Map([
-    ["discord-mcp.config.schema.json", "generated/discord-mcp.config.schema.json"],
+    ["guildcontrol.config.schema.json", "generated/guildcontrol.config.schema.json"],
     ["server.json", "generated/server.json"],
     ["LICENSE", "generated/LICENSE.txt"],
-    ["assets/discord-mcp-icon.png", "generated/discord-mcp-icon.png"],
+    ["assets/guildcontrol-icon.png", "generated/guildcontrol-icon.png"],
   ])
   return (source, fromRoute, destination) => {
     if (/^[a-z][a-z0-9+.-]*:/iu.test(destination) || destination.startsWith("//")) {
@@ -552,8 +552,8 @@ function rewriteMarkdown(markdown, source, route, resolveLink) {
       return `${label}(${rewritten}${destinationMatch[2] || ""})`
     })
     return withMarkdownLinks.replace(
-      /src="https:\/\/raw\.githubusercontent\.com\/j-256\/discord-mcp\/v[0-9]+\.[0-9]+\.[0-9]+\/assets\/discord-mcp-icon\.png"/gu,
-      `src="${relativeTarget(route, "generated/discord-mcp-icon.png", false)}"`,
+      /src="https:\/\/raw\.githubusercontent\.com\/j-256\/guildcontrol\/v[0-9]+\.[0-9]+\.[0-9]+\/assets\/guildcontrol-icon\.png"/gu,
+      `src="${relativeTarget(route, "generated/guildcontrol-icon.png", false)}"`,
     )
   })
 }
@@ -641,7 +641,7 @@ function stableRouteSlug(title) {
 }
 
 function llmsIndex(packageJson) {
-  return `# Discord MCP
+  return `# GuildControl MCP
 
 > Owner-managed local stdio Discord access with exact scope, reviewed writes, privacy-minimized results, and content-free evidence.
 
@@ -671,7 +671,7 @@ Documentation: ${DOCUMENTATION_URL}/
 - [Security details](${DOCUMENTATION_URL}/security/): Searchable canonical security policy
 - [Contract explorer](${DOCUMENTATION_URL}/generated/contract-explorer.html): Credential-free production MCP contract
 - [Contract evidence](${DOCUMENTATION_URL}/generated/contract-evidence.json): Deterministic catalog verification report
-- [Configuration schema](${DOCUMENTATION_URL}/generated/discord-mcp.config.schema.json): Strict non-secret policy schema
+- [Configuration schema](${DOCUMENTATION_URL}/generated/guildcontrol.config.schema.json): Strict non-secret policy schema
 - [Full machine-readable documentation](${DOCUMENTATION_URL}/llms-full.txt): Canonical public documents with source labels
 
 ## Safety constraints
@@ -687,7 +687,7 @@ Documentation: ${DOCUMENTATION_URL}/
 
 async function main() {
   const packageJson = JSON.parse(await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"))
-  invariant(packageJson.name === "@j-256/discord-mcp", "Unexpected package identity")
+  invariant(packageJson.name === "guildcontrol", "Unexpected package identity")
   invariant(STABLE_VERSION.test(packageJson.version), "Documentation requires a stable package version")
 
   const documentationSources = await documentationSourcePaths()
@@ -757,7 +757,7 @@ async function main() {
       : section.body
     const content = [
       frontmatter({
-        description: `Canonical Discord MCP reference for ${section.title.toLocaleLowerCase("en-US")}`,
+        description: `Canonical GuildControl MCP reference for ${section.title.toLocaleLowerCase("en-US")}`,
         editUrl: sourceEditUrl("docs/reference.md"),
         order: index + 1,
         title: section.title,
@@ -774,7 +774,7 @@ async function main() {
     const route = securityRoutes.get(section.title)
     const content = [
       frontmatter({
-        description: `Canonical Discord MCP security requirements for ${section.title.toLocaleLowerCase("en-US")}`,
+        description: `Canonical GuildControl MCP security requirements for ${section.title.toLocaleLowerCase("en-US")}`,
         editUrl: sourceEditUrl("SECURITY.md"),
         hidden: true,
         title: section.title,
@@ -805,10 +805,10 @@ async function main() {
   await mkdir(PUBLIC_ROOT, { recursive: true })
   await writeText(join(PUBLIC_ROOT, "contract-evidence.json"), json(snapshot.report))
   await writeText(join(PUBLIC_ROOT, "contract-explorer.html"), renderDiscordCatalogHtml(snapshot))
-  await writeText(join(PUBLIC_ROOT, "discord-mcp.config.schema.json"), sourceContents.get("discord-mcp.config.schema.json").toString("utf8"))
+  await writeText(join(PUBLIC_ROOT, "guildcontrol.config.schema.json"), sourceContents.get("guildcontrol.config.schema.json").toString("utf8"))
   await writeText(join(PUBLIC_ROOT, "server.json"), sourceContents.get("server.json").toString("utf8"))
   await writeText(join(PUBLIC_ROOT, "LICENSE.txt"), sourceContents.get("LICENSE").toString("utf8"))
-  await copyFile(join(REPOSITORY_ROOT, "assets", "discord-mcp-icon.png"), join(PUBLIC_ROOT, "discord-mcp-icon.png"))
+  await copyFile(join(REPOSITORY_ROOT, "assets", "guildcontrol-icon.png"), join(PUBLIC_ROOT, "guildcontrol-icon.png"))
   await writeText(join(SITE_DIRECTORY, "public", "llms.txt"), llmsIndex(packageJson))
 
   const fullSources = [
@@ -826,12 +826,12 @@ async function main() {
     "CODE_OF_CONDUCT.md",
   ]
   const fullText = [
-    "# Discord MCP full documentation",
+    "# GuildControl MCP full documentation",
     "",
     `Package: ${packageJson.name}@${packageJson.version}`,
     `Repository: ${REPOSITORY_URL}`,
     "",
-    "Canonical public documents follow in source order. Discord MCP is local owner-managed stdio software. Keep credentials in a caller-owned secret source, start read-only, and treat every write as a reviewed workflow.",
+    "Canonical public documents follow in source order. GuildControl MCP is local owner-managed stdio software. Keep credentials in a caller-owned secret source, start read-only, and treat every write as a reviewed workflow.",
     "",
     ...fullSources.flatMap((source) => [
       `===== SOURCE: ${source} =====`,
@@ -869,7 +869,7 @@ async function main() {
     })),
   }
   await writeText(join(PUBLIC_ROOT, "docs-manifest.json"), json(manifest))
-  process.stdout.write(`Generated Discord MCP documentation for ${packageJson.version}\n`)
+  process.stdout.write(`Generated GuildControl MCP documentation for ${packageJson.version}\n`)
 }
 
 await main()

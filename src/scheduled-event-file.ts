@@ -202,7 +202,7 @@ export async function readScheduledEventCoverFileSnapshot(
   try {
     snapshot = await readOwnedLocalFileSnapshot({
       description: "Discord scheduled event cover",
-      digestDomain: "discord-mcp-scheduled-event-cover.v1",
+      digestDomain: "guildcontrol-scheduled-event-cover.v1",
       filePath: options.filePath,
       maxBytes: DISCORD_LIMITS.scheduledEventCoverBytes,
       planKey: options.planKey,

@@ -509,7 +509,7 @@ function inventoryDigest(
   applicationId: string,
   inventory: readonly ProjectedGlobalApplicationCommand[],
 ): string {
-  return evidenceDigest("discord-mcp:global-application-command-inventory:v1", {
+  return evidenceDigest("guildcontrol:global-application-command-inventory:v1", {
     applicationId,
     inventory,
   })

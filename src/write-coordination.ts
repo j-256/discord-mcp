@@ -204,7 +204,7 @@ const CLAIM_FILE = "claim.json"
 const ACKNOWLEDGEMENT_FILE = "acknowledgement.json"
 const RESOLUTION_REASON = "operator-reviewed"
 const ACTIVE_LOCAL_CLAIMS_SYMBOL = Symbol.for(
-  "io.github.j-256.discord-mcp.write-coordination.active.v1",
+  "io.github.j-256.guildcontrol.write-coordination.active.v1",
 )
 const PROCESS_GLOBAL = globalThis as unknown as Record<symbol, unknown>
 const ACTIVE_LOCAL_CLAIMS = PROCESS_GLOBAL[ACTIVE_LOCAL_CLAIMS_SYMBOL] instanceof Map
@@ -703,7 +703,7 @@ export function writeApplicationCollectionTarget(
 export function writeCoordinationTargetHash(target: WriteCoordinationTarget): string {
   const normalized = parseTarget(target)
   return createHash("sha256")
-    .update("discord-mcp-write-target.v1\0")
+    .update("guildcontrol-write-target.v1\0")
     .update(targetDescriptor(normalized))
     .digest("hex")
 }

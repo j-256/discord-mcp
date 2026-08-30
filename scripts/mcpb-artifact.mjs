@@ -37,9 +37,9 @@ const MCPB_SCHEMA_SHA256 = "c9c44ccff69bc033736c1f4c7c7ba18cf55cbf66c5e38db11da8
 const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
 const MCPB_MANIFEST_SCHEMA_URL = "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json"
 const MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE = "MCPB_DISCORD_BOT_SECRET"
-const MCPB_VERIFY_TOKEN_VARIABLE = "DISCORD_MCPB_VERIFY_TOKEN"
+const MCPB_VERIFY_TOKEN_VARIABLE = "DISCORD_GUILDCONTROL_BUNDLE_VERIFY_TOKEN"
 const MCPB_VERIFY_TOKEN = "mcpb-artifact-verification-token"
-const MCPB_READY_MESSAGE = "[mcp] Discord connector stdio server ready\n"
+const MCPB_READY_MESSAGE = "[mcp] GuildControl MCP stdio server ready\n"
 const MCPB_LITE_MODE_WARNING_MAX_NODE_MAJOR = 23
 const LEGACY_LITE_MODE_WARNING = "Warning: disabling flag --expose_wasm due to conflicting flags\n"
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
@@ -68,8 +68,8 @@ export const MCPB_ARCHIVE_ENTRIES = Object.freeze([
   "manifest.json",
   "server/THIRD_PARTY_NOTICES.md",
   "server/catalog-evidence.json",
-  "server/discord-mcp.mjs",
-  "server/discord-mcp.mjs.LEGAL.txt",
+  "server/guildcontrol.mjs",
+  "server/guildcontrol.mjs.LEGAL.txt",
   "server/sbom.spdx.json",
 ])
 
@@ -97,7 +97,7 @@ function assertExactKeys(value, expected, label) {
 
 export function mcpbArchiveName(version) {
   invariant(/^\d+\.\d+\.\d+$/.test(version), `Invalid stable MCPB version ${version}`)
-  return `discord-mcp-${version}.mcpb`
+  return `guildcontrol-${version}.mcpb`
 }
 
 export async function validateMcpbManifest(document, packageJson) {
@@ -115,19 +115,19 @@ export async function validateMcpbManifest(document, packageJson) {
   )
   invariant(document.$schema === MCPB_MANIFEST_SCHEMA_URL, "MCPB manifest schema source is invalid")
   invariant(document.manifest_version === "0.3", "MCPB manifest version is invalid")
-  invariant(document.name === "discord-mcp", "MCPB manifest name is invalid")
-  invariant(document.display_name === "Discord MCP", "MCPB manifest display name is invalid")
+  invariant(document.name === "guildcontrol", "MCPB manifest name is invalid")
+  invariant(document.display_name === "GuildControl MCP", "MCPB manifest display name is invalid")
   invariant(document.version === packageJson.version, "MCPB manifest version differs from package.json")
   invariant(document.description === packageJson.description, "MCPB manifest description differs from package.json")
   invariant(document.license === packageJson.license, "MCPB manifest license differs from package.json")
   invariant(document.homepage === packageJson.homepage, "MCPB manifest homepage differs from package.json")
   assertExactKeys(document.server.mcp_config.env, [MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE], "MCPB server environment")
   assert.deepEqual(document.server, {
-    entry_point: "server/discord-mcp.mjs",
+    entry_point: "server/guildcontrol.mjs",
     mcp_config: {
       args: [
         "--lite-mode",
-        "${__dirname}/server/discord-mcp.mjs",
+        "${__dirname}/server/guildcontrol.mjs",
         "serve",
         "--config",
         "${user_config.config_file}",
@@ -152,14 +152,14 @@ export async function validateMcpbManifest(document, packageJson) {
       type: "string",
     },
     config_file: {
-      description: "Select one strict versioned non-secret Discord MCP JSON configuration file.",
+      description: "Select one strict versioned non-secret GuildControl MCP JSON configuration file.",
       required: true,
-      title: "Discord MCP configuration",
+      title: "GuildControl MCP configuration",
       type: "file",
     },
   })
   assert.deepEqual(document.privacy_policies, [
-    `https://github.com/j-256/discord-mcp/blob/v${packageJson.version}/PRIVACY.md`,
+    `https://github.com/j-256/guildcontrol/blob/v${packageJson.version}/PRIVACY.md`,
     "https://discord.com/privacy",
   ])
   invariant(document.icon === "icon.png", "MCPB manifest icon path is invalid")
@@ -169,7 +169,7 @@ export async function validateMcpbManifest(document, packageJson) {
 }
 
 function validateCatalogEvidence(document, version) {
-  invariant(document.evidenceFormat === "discord-mcp.catalog-evidence.v3", "MCPB catalog evidence format is invalid")
+  invariant(document.evidenceFormat === "guildcontrol.catalog-evidence.v3", "MCPB catalog evidence format is invalid")
   invariant(document.schemaVersion === 1, "MCPB catalog evidence schema is invalid")
   invariant(document.serverVersion === version, "MCPB catalog evidence version is invalid")
   invariant(document.status === "ok", "MCPB catalog evidence status is invalid")
@@ -180,7 +180,7 @@ function validateCatalogEvidence(document, version) {
   invariant(document.observabilityExport === "disabled", "MCPB catalog evidence exported telemetry")
   invariant(document.activityRecordsCreated === false, "MCPB catalog evidence persisted activity")
   invariant(
-    document.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+    document.toolAccessManifest?.format === "guildcontrol.tool-access-manifest.v2"
       && document.toolAccessManifest.entries?.length === document.toolCount
       && document.toolAccessManifest.requirementCoverage?.complete === true
       && document.toolAccessManifest.requirementCoverage?.unknownEntries === 0
@@ -201,10 +201,10 @@ function validateSbom(document, packageJson, reproducibleBuild) {
     document.creationInfo?.created === new Date(reproducibleBuild.sourceDateEpoch * 1_000).toISOString().replace(".000Z", "Z"),
     "MCPB SBOM creation time is not reproducible",
   )
-  assert.deepEqual(document.creationInfo?.creators, ["Tool: discord-mcp-sbom/1"])
+  assert.deepEqual(document.creationInfo?.creators, ["Tool: guildcontrol-sbom/1"])
   invariant(
     typeof document.documentNamespace === "string"
-      && /^http:\/\/spdx\.org\/spdxdocs\/@j-256%2fdiscord-mcp-[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{64}$/.test(document.documentNamespace),
+      && /^http:\/\/spdx\.org\/spdxdocs\/guildcontrol-[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{64}$/.test(document.documentNamespace),
     "MCPB SBOM namespace is invalid",
   )
   invariant(Array.isArray(document.packages) && document.packages.length > 1, "MCPB SBOM package inventory is missing")
@@ -363,12 +363,12 @@ async function buildServerBundle(path) {
   const result = await build({
     absWorkingDir: REPOSITORY_ROOT,
     banner: {
-      js: 'import { createRequire as __discordMcpCreateRequire } from "node:module"; const require = __discordMcpCreateRequire(import.meta.url);',
+      js: 'import { createRequire as __guildControlCreateRequire } from "node:module"; const require = __guildControlCreateRequire(import.meta.url);',
     },
     bundle: true,
     charset: "ascii",
     define: {
-      "import.meta.url": JSON.stringify("file:///__discord_mcp_internal__.mjs"),
+      "import.meta.url": JSON.stringify("file:///__guildcontrol_internal__.mjs"),
     },
     entryPoints: ["src/mcpb-main.ts"],
     format: "esm",
@@ -397,11 +397,11 @@ async function createStagingDirectory(root, packageJson, catalogEvidencePath) {
   await Promise.all([
     copyFile(join(REPOSITORY_ROOT, "LICENSE"), join(root, "LICENSE")),
     copyFile(join(REPOSITORY_ROOT, "PRIVACY.md"), join(root, "PRIVACY.md")),
-    copyFile(join(REPOSITORY_ROOT, "assets", "discord-mcp-icon.png"), join(root, "icon.png")),
+    copyFile(join(REPOSITORY_ROOT, "assets", "guildcontrol-icon.png"), join(root, "icon.png")),
     copyFile(manifestPath, join(root, "manifest.json")),
   ])
   await Promise.all([
-    buildServerBundle(join(root, "server", "discord-mcp.mjs")),
+    buildServerBundle(join(root, "server", "guildcontrol.mjs")),
     run(process.execPath, [
       "scripts/generate-sbom.mjs",
       "--output",
@@ -461,7 +461,7 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
   const { createConnectorConfigDocument } = await import(
     new URL("../dist/config-document.js", import.meta.url)
   )
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   const config = createConnectorConfigDocument({
     applicationId: "300000000000000001",
     botId: "400000000000000001",
@@ -496,13 +496,13 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
   invariant(transport.stderr, "Unpacked MCPB stderr capture is unavailable")
   transport.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)))
   const client = new Client(
-    { name: "discord-mcp-mcpb-verifier", version: "1.0.0" },
+    { name: "guildcontrol-mcpb-verifier", version: "1.0.0" },
     { capabilities: {} },
   )
   try {
     await client.connect(transport)
     const identity = client.getServerVersion()
-    invariant(identity?.name === "discord-mcp", "Unpacked MCPB server name is invalid")
+    invariant(identity?.name === "guildcontrol", "Unpacked MCPB server name is invalid")
     invariant(identity?.version === packageJson.version, "Unpacked MCPB server version is invalid")
     const [tools, resources, templates, prompts] = await Promise.all([
       client.listTools(),
@@ -532,7 +532,7 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
 
 export async function buildAndVerifyMcpb(options = {}) {
   const packageJson = await readJson(join(REPOSITORY_ROOT, "package.json"))
-  const workDirectory = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-mcpb-")))
+  const workDirectory = await realpath(await mkdtemp(join(tmpdir(), "guildcontrol-mcpb-")))
   try {
     const firstRoot = join(workDirectory, "first")
     const secondRoot = join(workDirectory, "second")

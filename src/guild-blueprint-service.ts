@@ -1335,7 +1335,7 @@ function derivedOperationKey(
   phase: GuildBlueprintSingletonPhase,
 ): string {
   return `blueprint:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-step.v1\0")
+    .update("guildcontrol-guild-blueprint-step.v1\0")
     .update(phase)
     .digest("hex")}`
 }
@@ -1361,7 +1361,7 @@ function derivedExactTargetOperationKey(
   targetId: string,
 ): string {
   return `blueprint-target:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-target.v1\0")
+    .update("guildcontrol-guild-blueprint-target.v1\0")
     .update(phase)
     .update("\0")
     .update(targetId)
@@ -1387,7 +1387,7 @@ function derivedRoleOrderingOperationKey(
   anchor: GuildBlueprintRoleReference,
 ): string {
   return `blueprint-role-order:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-role-order.v1\0")
+    .update("guildcontrol-guild-blueprint-role-order.v1\0")
     .update(roleReferenceKey(role))
     .update("\0")
     .update(roleReferenceKey(anchor))
@@ -1400,7 +1400,7 @@ function derivedChannelOrderingOperationKey(
   anchor: GuildBlueprintChannelReference,
 ): string {
   return `blueprint-channel-order:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-channel-order.v1\0")
+    .update("guildcontrol-guild-blueprint-channel-order.v1\0")
     .update(channelReferenceKey(channel))
     .update("\0")
     .update(channelReferenceKey(anchor))
@@ -1421,7 +1421,7 @@ function derivedChannelPermissionOverwriteOperationKey(
   target: GuildBlueprintChannelPermissionOverwriteTarget,
 ): string {
   return `blueprint-overwrite:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-overwrite.v1\0")
+    .update("guildcontrol-guild-blueprint-overwrite.v1\0")
     .update(channelId)
     .update("\0")
     .update(permissionOverwriteTargetKey(target))
@@ -1430,7 +1430,7 @@ function derivedChannelPermissionOverwriteOperationKey(
 
 function derivedPublicationOperationKey(operationKey: string, key: string): string {
   return `blueprint-publication:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-publication.v1\0")
+    .update("guildcontrol-guild-blueprint-publication.v1\0")
     .update(key)
     .digest("hex")}`
 }
@@ -1456,7 +1456,7 @@ function derivedAutoModerationOperationKey(
   stage: GuildBlueprintAutoModerationStage,
 ): string {
   return `blueprint-automod:${createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-blueprint-automod.v1\0")
+    .update("guildcontrol-guild-blueprint-automod.v1\0")
     .update(key)
     .update("\0")
     .update(stage)
@@ -3055,7 +3055,7 @@ function requestSnapshot(request: NormalizedGuildBlueprintRequest): unknown {
 
 function normalizedRequestDigest(request: NormalizedGuildBlueprintRequest): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-blueprint-request.v8\0")
+    .update("guildcontrol-guild-blueprint-request.v8\0")
     .update(stableString(requestSnapshot(request)))
     .digest("hex")
   return `${BLUEPRINT_REQUEST_DIGEST_PREFIX}${digest}`

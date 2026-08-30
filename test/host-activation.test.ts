@@ -18,7 +18,7 @@ const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const SECOND_GUILD_ID = "300000000000000002"
 const CHANNEL_ID = "400000000000000001"
-const CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_FILE = "/configuration/guildcontrol.json"
 const TOKEN_ALIAS = "DISCORD_ACTIVATION_BOT_TOKEN"
 const TOKEN = "private-activation-token"
 
@@ -39,7 +39,7 @@ function launch() {
   const policy = document()
   return createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `@j-256/discord-mcp@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document: policy, file: CONFIG_FILE },
@@ -59,7 +59,7 @@ function withMatchingDigest(value: Record<string, unknown>) {
   return {
     ...base,
     activationDigest: `sha256:${createHash("sha256")
-      .update("discord-mcp-host-activation-v1\0")
+      .update("guildcontrol-host-activation-v1\0")
       .update(stableString(base))
       .digest("hex")}`,
   }
@@ -273,7 +273,7 @@ test("host activation verification rejects internally inconsistent self-digested
       policy: {
         ...valid.policy,
         source: {
-          file: "/configuration/\0discord-mcp.json",
+          file: "/configuration/\0guildcontrol.json",
           kind: "config",
         },
       },

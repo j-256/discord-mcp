@@ -132,7 +132,7 @@ const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
 const USER_ID = "500000000000000001"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
-const CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_FILE = "/configuration/guildcontrol.json"
 const LOW_MEMORY_NODE_ARGUMENTS = lowMemoryNodeArguments(process.versions.node)
 
 function outputStream() {
@@ -180,7 +180,7 @@ function doctorReport(status: DoctorReport["status"] = "ok"): DoctorReport {
 }
 
 function setupReport(): SetupReport {
-  const configFile = "/configuration/discord-mcp.json"
+  const configFile = "/configuration/guildcontrol.json"
   return {
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
@@ -195,7 +195,7 @@ function setupReport(): SetupReport {
     installedInScopeGuildCount: 1,
     launch: {
       args: ["serve", "--config", configFile],
-      command: "discord-mcp",
+      command: "guildcontrol",
       environment: {
         forward: ["DISCORD_BOT_TOKEN"],
         set: {},
@@ -243,7 +243,7 @@ function smokeReport(): SmokeReport {
     resourceTemplateUris: ["discord://channels/{channelId}/access"],
     resourceUris: ["discord://connector/safety"],
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
-    serverName: "discord-mcp",
+    serverName: "guildcontrol",
     serverVersion: "0.1.2",
     status: "ok",
     toolCount: 3,
@@ -277,7 +277,7 @@ function catalogReport(): DiscordCatalogCheckReport {
     contractDigest: `sha256:${"a".repeat(64)}`,
     credentialsRequired: false,
     discordExecution: "disabled",
-    evidenceFormat: "discord-mcp.catalog-evidence.v3",
+    evidenceFormat: "guildcontrol.catalog-evidence.v3",
     executionGuard: "CATALOG_ONLY",
     gateway: "disabled",
     observabilityExport: "disabled",
@@ -290,7 +290,7 @@ function catalogReport(): DiscordCatalogCheckReport {
       mimeType: "text/html;profile=mcp-app",
       permissions: [],
       resourceDigest: `sha256:${"d".repeat(64)}`,
-      resourceUri: "ui://discord-mcp/plan-review",
+      resourceUri: "ui://guildcontrol/plan-review",
       serverToolAuthority: false,
       toolVisibility: ["model"],
     },
@@ -317,7 +317,7 @@ function catalogReport(): DiscordCatalogCheckReport {
     },
     safetyResourceDigest: `sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
-    serverName: "discord-mcp",
+    serverName: "guildcontrol",
     serverVersion: "0.1.2",
     status: "ok",
     toolCount: 3,
@@ -330,7 +330,7 @@ function catalogReport(): DiscordCatalogCheckReport {
   }
 }
 
-function catalogHtmlReport(file = "/output/discord-mcp-catalog.html"): DiscordCatalogHtmlExportReport {
+function catalogHtmlReport(file = "/output/guildcontrol-catalog.html"): DiscordCatalogHtmlExportReport {
   return {
     activityRecordsCreated: false,
     bytes: 12345,
@@ -346,7 +346,7 @@ function catalogHtmlReport(file = "/output/discord-mcp-catalog.html"): DiscordCa
 }
 
 function onboardingHtmlReport(
-  file = "/output/discord-mcp-onboarding.html",
+  file = "/output/guildcontrol-onboarding.html",
 ): DiscordOnboardingHtmlExportReport {
   return {
     activityRecordsCreated: false,
@@ -418,7 +418,7 @@ function activityReviewReport(
 }
 
 function activityHtmlReport(
-  file = "/output/discord-mcp-activity.html",
+  file = "/output/guildcontrol-activity.html",
 ): DiscordActivityHtmlExportReport {
   return {
     activityRecordsCreated: false,
@@ -442,7 +442,7 @@ function activityHtmlReport(
 }
 
 function configWorkbenchHtmlReport(
-  file = "/output/discord-mcp-config-workbench.html",
+  file = "/output/guildcontrol-config-workbench.html",
 ): DiscordConfigWorkbenchHtmlExportReport {
   return {
     activeConfigurationWritten: false,
@@ -452,7 +452,7 @@ function configWorkbenchHtmlReport(
     browserOpened: false,
     bytes: 76543,
     candidateAuthority: "explicit-download-only",
-    candidateFilename: "discord-mcp.candidate.json",
+    candidateFilename: "guildcontrol.candidate.json",
     configurationEmbedded: true,
     credentialsEmbedded: false,
     discordContacted: false,
@@ -470,7 +470,7 @@ function configWorkbenchHtmlReport(
 }
 
 function hostActivationHtmlReport(
-  file = "/output/discord-mcp-host-activation.html",
+  file = "/output/guildcontrol-host-activation.html",
 ): DiscordHostActivationHtmlExportReport {
   return {
     activationDigest: `sha256:${"a".repeat(64)}`,
@@ -501,7 +501,7 @@ function hostActivationHtmlReport(
 
 function migrationHtmlReport(
   plan: MigrationPlanReport,
-  file = "/output/discord-mcp-migration.html",
+  file = "/output/guildcontrol-migration.html",
 ): DiscordMigrationHtmlExportReport {
   return {
     activityRecordsCreated: false,
@@ -543,7 +543,7 @@ function configValidationReport(
 ): ConfigValidationReport {
   if (profile.schemaVersion !== 2) throw new Error("Expected schema-v2 profile")
   return {
-    file: "/configuration/discord-mcp.json",
+    file: "/configuration/guildcontrol.json",
     schemaVersion: CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
     summary: summarizeConnectorConfigDocument(profile),
@@ -968,7 +968,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "--name",
       "team-discord",
       "--command",
-      "/usr/local/bin/discord-mcp",
+      "/usr/local/bin/guildcontrol",
     ]),
     /requires --config FILE or --profile NAME/,
   )
@@ -1019,7 +1019,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "--name",
     "team-discord",
     "--command",
-    "/usr/local/bin/discord-mcp",
+    "/usr/local/bin/guildcontrol",
     "--adapter",
     "vscode",
     "--inspect-host-file",
@@ -1035,7 +1035,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     htmlFile: "./host-activation.html",
     inspectHostFile: "./mcp.json",
     json: true,
-    launcherCommand: "/usr/local/bin/discord-mcp",
+    launcherCommand: "/usr/local/bin/guildcontrol",
     serverName: "team-discord",
   })
   assert.deepEqual(parseCliArguments([
@@ -1323,7 +1323,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "/configuration/discord.json",
       "--npx",
       "--command",
-      "/usr/local/bin/discord-mcp",
+      "/usr/local/bin/guildcontrol",
     ]),
     /--npx and --command are mutually exclusive/,
   )
@@ -1348,7 +1348,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "support-bot",
       "--npx",
       "--command",
-      "/usr/local/bin/discord-mcp",
+      "/usr/local/bin/guildcontrol",
     ]),
     /--npx and --command are mutually exclusive/,
   )
@@ -1970,7 +1970,7 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
     stdout: htmlOutput.stream,
   }), 0)
 
-  assert.match(textOutput.value(), /Discord MCP catalog: ok/)
+  assert.match(textOutput.value(), /GuildControl MCP catalog: ok/)
   assert.match(textOutput.value(), /Contract digest: sha256:[a-f0-9]{64}/)
   assert.match(textOutput.value(), /Tool access resource digest: sha256:[a-f0-9]{64}/)
   assert.match(textOutput.value(), /Access stages: guarded-write=0/)
@@ -1983,7 +1983,7 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
   assert.match(textOutput.value(), /Execution guard: CATALOG_ONLY/)
   assert.match(textOutput.value(), /Credentials required: no/)
   assert.deepEqual(JSON.parse(jsonOutput.value()), catalogReport())
-  assert.match(htmlOutput.value(), /Discord MCP catalog HTML: ok/)
+  assert.match(htmlOutput.value(), /GuildControl MCP catalog HTML: ok/)
   assert.match(htmlOutput.value(), new RegExp(htmlFile))
   assert.match(htmlOutput.value(), new RegExp(CATALOG_HTML_FORMAT))
   assert.match(htmlOutput.value(), /Credentials required: no/)
@@ -1991,8 +1991,8 @@ test("CLI renders credential-free catalog checks as exact text and JSON", async 
 })
 
 test("CLI reviews activity and optionally exports the exact private HTML report", async () => {
-  const activityFile = "/test/discord-mcp-cli-activity.jsonl"
-  const htmlFile = "/output/discord-mcp-activity.html"
+  const activityFile = "/test/guildcontrol-cli-activity.jsonl"
+  const htmlFile = "/output/guildcontrol-activity.html"
   const textOutput = outputStream()
   const jsonOutput = outputStream()
   const events: string[] = []
@@ -2041,7 +2041,7 @@ test("CLI reviews activity and optionally exports the exact private HTML report"
     stdout: jsonOutput.stream,
   }), 1)
 
-  assert.match(textOutput.value(), /Discord MCP activity review: clear/)
+  assert.match(textOutput.value(), /GuildControl MCP activity review: clear/)
   assert.match(textOutput.value(), /Credentials read: no/)
   assert.match(textOutput.value(), /Discord contacted: no/)
   assert.match(textOutput.value(), /Activity\/coordination state changed: no/)
@@ -2056,11 +2056,11 @@ test("CLI reviews activity and optionally exports the exact private HTML report"
 })
 
 test("CLI activity review uses selected policy without resolving credentials or creating state", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-activity-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-activity-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const activityFile = join(root, "activity.jsonl")
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   const profile = connectorProfile({ auditFile: activityFile })
   assert.equal(profile.schemaVersion, 2)
   await writeConnectorConfigDocumentFile(configFile, profile)
@@ -2084,7 +2084,7 @@ test("CLI activity review uses selected policy without resolving credentials or 
 
 test("CLI inspects and resolves coordination without credentials or Discord access", async () => {
   const claimId = `claim_${"a".repeat(32)}`
-  const activityFile = "/test/discord-mcp-cli-activity.jsonl"
+  const activityFile = "/test/guildcontrol-cli-activity.jsonl"
   const environment = {}
   const events: string[] = []
   const listOutput = outputStream()
@@ -2163,14 +2163,14 @@ test("CLI inspects and resolves coordination without credentials or Discord acce
 })
 
 test("CLI coordination inspection uses selected policy without resolving credentials", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-coordination-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-coordination-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const stdout = outputStream()
   const stderr = outputStream()
   const claimId = `claim_${"f".repeat(32)}`
   const activityFile = join(root, "activity.jsonl")
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   const profile = connectorProfile({ auditFile: activityFile })
   assert.equal(profile.schemaVersion, 2)
   await writeConnectorConfigDocumentFile(configFile, profile)
@@ -2227,10 +2227,10 @@ test("CLI returns diagnostic failure while preserving secret-free JSON", async (
 })
 
 test("CLI doctor reports an unavailable selected credential without aborting diagnostics", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-doctor-missing-secret-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-doctor-missing-secret-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   await writeConnectorConfigDocumentFile(
     configFile,
     createConnectorConfigDocument({
@@ -2266,14 +2266,14 @@ test("CLI doctor reports an unavailable selected credential without aborting dia
     "pass",
   )
   assert.equal("error" in report, false)
-  assert.doesNotMatch(stdout.value(), /DISCORD_MCP_DOCTOR_TOKEN|credential-unavailable/)
+  assert.doesNotMatch(stdout.value(), /DISCORD_GUILDCONTROL_DOCTOR_TOKEN|credential-unavailable/)
 })
 
 test("CLI doctor turns an unreadable selected document into a diagnostic report", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-doctor-invalid-config-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-doctor-invalid-config-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
-  const configFile = join(root, "discord-mcp.json")
+  const configFile = join(root, "guildcontrol.json")
   await writeFile(configFile, "{invalid-json}\n")
   const stdout = outputStream()
   const stderr = outputStream()
@@ -2322,7 +2322,7 @@ test("CLI distinguishes doctor warnings and renders their recovery guidance", as
   })
 
   assert.equal(exitCode, 1)
-  assert.match(stdout.value(), /Discord MCP doctor: ready with warnings/)
+  assert.match(stdout.value(), /GuildControl MCP doctor: ready with warnings/)
   assert.match(stdout.value(), /Checks: 0 passes, 1 warning, 0 failures/)
   assert.match(stdout.value(), /WARN configuration: Configuration needs review/)
   assert.match(stdout.value(), /Next: Correct the diagnostic boundary/)
@@ -2360,7 +2360,7 @@ test("CLI doctor keeps passing checks concise unless verbose or JSON evidence is
     stdout: json.stream,
   }), 0)
 
-  assert.match(compact.value(), /Discord MCP doctor: ready/)
+  assert.match(compact.value(), /GuildControl MCP doctor: ready/)
   assert.match(compact.value(), /No warnings or failures/)
   assert.doesNotMatch(compact.value(), /PASS configuration/)
   assert.match(verbose.value(), /PASS configuration: Configuration is valid/)
@@ -2413,7 +2413,7 @@ test("CLI keeps JSON usage and profile failures machine-readable", async () => {
   const usage = JSON.parse(usageOutput.value())
   assert.equal(usage.error.category, "usage")
   assert.equal(usage.error.recovery.retry, "after-correction")
-  assert.match(usage.error.recovery.action, /discord-mcp help catalog/)
+  assert.match(usage.error.recovery.action, /guildcontrol help catalog/)
   assert.equal(usageError.value(), "")
 
   assert.equal(await runCli({
@@ -2493,7 +2493,7 @@ test("CLI preserves long-running startup failure status with recovery text", asy
 
   assert.equal(exitCode, 1)
   assert.match(stderr.value(), /Operator command failed/)
-  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
+  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
 })
 
@@ -2515,7 +2515,7 @@ test("CLI generates an exact host activation plan without reading ambient creden
         return connectorProfile()
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment,
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -2524,13 +2524,13 @@ test("CLI generates an exact host activation plan without reading ambient creden
   assert.equal(exitCode, 0)
   assert.equal(loadedFile, CONFIG_FILE)
   const report = JSON.parse(stdout.value())
-  assert.equal(report.format, "discord-mcp.host-activation.v1")
+  assert.equal(report.format, "guildcontrol.host-activation.v1")
   assert.match(report.activationDigest, /^sha256:[a-f0-9]{64}$/)
   assert.deepEqual(report.policy.source, { file: CONFIG_FILE, kind: "config" })
   assert.deepEqual(report.launch, {
     args: [
       ...LOW_MEMORY_NODE_ARGUMENTS,
-      "/srv/discord-mcp/dist/cli.js",
+      "/srv/guildcontrol/dist/cli.js",
       "serve",
       "--config",
       CONFIG_FILE,
@@ -2567,7 +2567,7 @@ test("CLI generates an exact host activation plan without reading ambient creden
     HOST_ADAPTER_IDS,
   )
   assert.match(report.adapterCatalog.adapters[0].adapterDigest, /^sha256:[a-f0-9]{64}$/)
-  assert.match(report.adapterCatalog.adapters[2].content, /\$\{input:discord-mcp-credential-1\}/)
+  assert.match(report.adapterCatalog.adapters[2].content, /\$\{input:guildcontrol-credential-1\}/)
   assert.match(report.verification.prompt, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
@@ -2635,7 +2635,7 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
       "--config",
       CONFIG_FILE,
       "--command",
-      "/usr/local/bin/discord-mcp",
+      "/usr/local/bin/guildcontrol",
       "--adapter",
       "vscode",
       "--html",
@@ -2647,15 +2647,15 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
   })
 
   assert.equal(exitCode, 0)
-  assert.match(stdout.value(), /Discord MCP host activation: ok/)
-  assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/discord-mcp"/)
+  assert.match(stdout.value(), /GuildControl MCP host activation: ok/)
+  assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/guildcontrol"/)
   assert.match(stdout.value(), /Read-only host verification request:/)
   assert.match(stdout.value(), /Verified host adapters:/)
-  assert.match(stdout.value(), /Discord MCP host adapter: Visual Studio Code \(vscode\)/)
+  assert.match(stdout.value(), /GuildControl MCP host adapter: Visual Studio Code \(vscode\)/)
   assert.match(stdout.value(), /Secret strategy: secure-input/)
-  assert.match(stdout.value(), /\$\{input:discord-mcp-credential-1\}/)
+  assert.match(stdout.value(), /\$\{input:guildcontrol-credential-1\}/)
   assert.match(stdout.value(), /sandboxing disabled/)
-  assert.match(stdout.value(), /Discord MCP host activation guide: ok/)
+  assert.match(stdout.value(), /GuildControl MCP host activation guide: ok/)
   assert.match(stdout.value(), /private mode-0600 standalone HTML/)
   assert.match(stdout.value(), /must not be shared or committed/)
   assert.match(stdout.value(), /No credential value was read/)
@@ -2721,7 +2721,7 @@ test("CLI renders fixed host drift evidence and returns warning status", async (
   })
 
   assert.equal(exitCode, 1)
-  assert.match(stdout.value(), /Discord MCP host inspection: drift/)
+  assert.match(stdout.value(), /GuildControl MCP host inspection: drift/)
   assert.match(stdout.value(), /- command-mismatch/)
   assert.match(stdout.value(), /merge only its owned projection/)
   assert.match(stdout.value(), /then run smoke/)
@@ -2730,7 +2730,7 @@ test("CLI renders fixed host drift evidence and returns warning status", async (
 })
 
 test("CLI plans and applies one exact host projection without returning private content", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-cli-host-apply-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-cli-host-apply-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const hostFile = join(root, "mcp.json")
@@ -2868,7 +2868,7 @@ test("CLI reports host parse failures without enumerating ambient credentials", 
   const report = JSON.parse(stdout.value())
   assert.equal(report.error.category, "usage")
   assert.equal(report.error.message, "Invalid command usage")
-  assert.match(report.error.recovery.action, /discord-mcp help host/)
+  assert.match(report.error.recovery.action, /guildcontrol help host/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
@@ -2884,7 +2884,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
       "--name",
       "team-discord",
       "--command",
-      "/bin/discord-mcp",
+      "/bin/guildcontrol",
     ],
     dependencies: dependencies({
       async prepareSetup(options) {
@@ -2902,7 +2902,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
     args: ["serve"],
-    command: "/bin/discord-mcp",
+    command: "/bin/guildcontrol",
     configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
     overwriteConfig: false,
@@ -2923,7 +2923,7 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
         return setupReport()
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -2931,14 +2931,14 @@ test("CLI setup pins the running Node.js executable and built entrypoint by defa
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     overwriteConfig: false,
   })
   assert.match(stdout.value(), /Portable stdio launch descriptor/)
-  assert.match(stdout.value(), /Discord MCP setup: ready/)
+  assert.match(stdout.value(), /GuildControl MCP setup: ready/)
   assert.match(stdout.value(), /Ask the host to list channels/)
   assert.match(stdout.value(), /required-server, write-approval, elicitation, and timeout settings/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
@@ -2963,7 +2963,7 @@ test("CLI setup can emit a stable pinned npx package launch", async () => {
         }
       },
     }),
-    entrypointPath: "/temporary/npm-cache/discord-mcp/dist/cli.js",
+    entrypointPath: "/temporary/npm-cache/guildcontrol/dist/cli.js",
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -3010,7 +3010,7 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
         }
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -3018,7 +3018,7 @@ test("CLI forwards profile setup intent and redacts custom credential aliases", 
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     credentialVariable: TOKEN_ALIAS,
     environment: source,
@@ -3077,7 +3077,7 @@ test("CLI forwards standalone configuration setup and renders recoverable replac
         }
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -3085,7 +3085,7 @@ test("CLI forwards standalone configuration setup and renders recoverable replac
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: "/configuration/discord.json",
     credentialVariable: TOKEN_ALIAS,
@@ -3140,7 +3140,7 @@ test("CLI forwards and renders a file-backed setup credential", async () => {
         }
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -3148,7 +3148,7 @@ test("CLI forwards and renders a file-backed setup credential", async () => {
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     configFile: "/configuration/discord.json",
     credentialFile,
@@ -3195,7 +3195,7 @@ test("CLI forwards exact preset setup intent and renders its read-only boundary"
         }
       },
     }),
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: stdout.stream,
@@ -3203,7 +3203,7 @@ test("CLI forwards exact preset setup intent and renders its read-only boundary"
 
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
-    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/discord-mcp/dist/cli.js", "serve"],
+    args: [...LOW_MEMORY_NODE_ARGUMENTS, "/srv/guildcontrol/dist/cli.js", "serve"],
     command: "/usr/bin/node",
     credentialVariable: TOKEN_ALIAS,
     environment: source,
@@ -3281,7 +3281,7 @@ test("CLI inspects additive recipes without credentials or file access", async (
     stdout: jsonOutput.stream,
   }), 0)
 
-  assert.match(textOutput.value(), /Discord MCP additive configuration recipes/)
+  assert.match(textOutput.value(), /GuildControl MCP additive configuration recipes/)
   assert.match(textOutput.value(), /guild-starter/)
   assert.match(textOutput.value(), /guild-builder/)
   assert.match(textOutput.value(), /coordination-channel/)
@@ -3302,10 +3302,10 @@ test("CLI inspects additive recipes without credentials or file access", async (
 })
 
 test("CLI plans and applies an exact recipe without resolving its credential", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-recipe-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-recipe-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   await writeConnectorConfigDocumentFile(file, connectorProfile())
   const textOutput = outputStream()
   const jsonOutput = outputStream()
@@ -3353,7 +3353,7 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
       "--confirm",
       "channel-publisher",
     ],
-    command: "discord-mcp",
+    command: "guildcontrol",
   })
   assert.match(textOutput.value(), /Configuration written: no/)
   assert.match(textOutput.value(), /No secret value was read and Discord was not contacted/)
@@ -3440,7 +3440,7 @@ test("CLI generates human and JSON bot installation plans with optional offline 
     stdout: guideJsonOutput.stream,
   }), 0)
 
-  assert.match(textOutput.value(), /Discord MCP bot install plan: channel-reader/)
+  assert.match(textOutput.value(), /GuildControl MCP bot install plan: channel-reader/)
   assert.match(textOutput.value(), /VIEW_CHANNEL, READ_MESSAGE_HISTORY \(66560\)/)
   assert.match(textOutput.value(), /Administrator: not requested/)
   assert.match(textOutput.value(), /MESSAGE_CONTENT \(recommended\)/)
@@ -3475,7 +3475,7 @@ test("CLI generates human and JSON bot installation plans with optional offline 
     guildId: GUILD_ID,
     preset: "channel-reader",
   }))
-  assert.match(guideTextOutput.value(), /Discord MCP onboarding HTML: ok/)
+  assert.match(guideTextOutput.value(), /GuildControl MCP onboarding HTML: ok/)
   assert.match(guideTextOutput.value(), new RegExp(guideFile))
   assert.match(guideTextOutput.value(), /Credentials embedded: no/)
   assert.match(guideTextOutput.value(), /Automatic network: disabled/)
@@ -3523,7 +3523,7 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
       assert.deepEqual(options.launch, {
         args: [
           ...LOW_MEMORY_NODE_ARGUMENTS,
-          "/srv/discord-mcp/dist/cli.js",
+          "/srv/guildcontrol/dist/cli.js",
           "serve",
           "--profile",
           "support-bot",
@@ -3548,7 +3548,7 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
   assert.equal(await runCli({
     args: ["smoke", "--profile", "support-bot"],
     dependencies: profiledDependencies,
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: outputStream().stream,
@@ -3566,7 +3566,7 @@ test("CLI inspects profiles without activation for doctor while serve and smoke 
 })
 
 test("CLI selects one explicit configuration file before serve, doctor, and smoke", async () => {
-  const file = "/configuration/discord-mcp.json"
+  const file = "/configuration/guildcontrol.json"
   const source = { KEEP: "value" }
   const before = { ...source }
   const events: string[] = []
@@ -3594,7 +3594,7 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
       assert.deepEqual(options.launch, {
         args: [
           ...LOW_MEMORY_NODE_ARGUMENTS,
-          "/srv/discord-mcp/dist/cli.js",
+          "/srv/guildcontrol/dist/cli.js",
           "serve",
           "--config",
           file,
@@ -3619,7 +3619,7 @@ test("CLI selects one explicit configuration file before serve, doctor, and smok
   assert.equal(await runCli({
     args: ["smoke", "--config", file],
     dependencies: configDependencies,
-    entrypointPath: "/srv/discord-mcp/dist/cli.js",
+    entrypointPath: "/srv/guildcontrol/dist/cli.js",
     environment: source,
     executablePath: "/usr/bin/node",
     stdout: outputStream().stream,
@@ -3653,13 +3653,13 @@ test("CLI routes config lifecycle commands without exposing credential values", 
   })
 
   assert.equal(await runCli({
-    args: ["config", "validate", "/configuration/discord-mcp.json"],
+    args: ["config", "validate", "/configuration/guildcontrol.json"],
     dependencies: configDependencies,
     environment,
     stdout: output.stream,
   }), 0)
   assert.equal(await runCli({
-    args: ["config", "show", "/configuration/discord-mcp.json", "--json"],
+    args: ["config", "show", "/configuration/guildcontrol.json", "--json"],
     dependencies: configDependencies,
     environment,
     stdout: output.stream,
@@ -3689,8 +3689,8 @@ test("CLI routes config lifecycle commands without exposing credential values", 
     stdout: output.stream,
   }), 0)
   assert.deepEqual(events, [
-    "validate:/configuration/discord-mcp.json",
-    "show:/configuration/discord-mcp.json",
+    "validate:/configuration/guildcontrol.json",
+    "show:/configuration/guildcontrol.json",
     "explain:capabilities.deletions",
     "init:/configuration/new.json:new",
   ])
@@ -3699,8 +3699,8 @@ test("CLI routes config lifecycle commands without exposing credential values", 
 })
 
 test("CLI exports a private configuration workbench without resolving secrets", async () => {
-  const active = "/configuration/discord-mcp.json"
-  const html = "/output/discord-mcp-workbench.html"
+  const active = "/configuration/guildcontrol.json"
+  const html = "/output/guildcontrol-workbench.html"
   const environment = { [TOKEN_ALIAS]: TOKEN }
   const calls: Array<[string, string]> = []
   const workbenchDependencies = dependencies({
@@ -3736,7 +3736,7 @@ test("CLI exports a private configuration workbench without resolving secrets", 
 })
 
 test("CLI plans and applies one exact candidate configuration without resolving secrets", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-cli-config-review-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-config-review-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const file = join(root, "active.json")
@@ -3822,7 +3822,7 @@ test("CLI plans and applies one exact candidate configuration without resolving 
   assert.equal(staleError.value(), "")
   assert.equal(stale.error.category, "configuration")
   assert.match(stale.error.message, /stale or does not match/)
-  assert.match(stale.error.recovery.action, /Rerun discord-mcp config plan/)
+  assert.match(stale.error.recovery.action, /Rerun guildcontrol config plan/)
   assert.equal(stale.error.recovery.retry, "after-correction")
   assert.doesNotMatch(staleOutput.value(), new RegExp(TOKEN))
 })
@@ -3928,7 +3928,7 @@ test("CLI profile lifecycle is credential-free, recoverable, and exactly confirm
   assert.deepEqual(listReport.profiles.map((profile) => profile.name), ["support-bot"])
   assert.equal(listReport.profiles[0]?.credentialProvider, "environment")
   assert.equal(listReport.profiles[0]?.credentialReference, TOKEN_ALIAS)
-  assert.match(showOutput.value(), /Discord MCP profile: support-bot/)
+  assert.match(showOutput.value(), /GuildControl MCP profile: support-bot/)
   assert.match(mismatchError.value(), /Confirmation must exactly match/)
   assert.match(removeOutput.value(), /moved to recoverable trash/)
   assert.deepEqual(JSON.parse(restoreOutput.value()), {
@@ -4006,10 +4006,10 @@ test("CLI lists release-exact migration sources and renders complete plans with 
   assert.equal(plan.configurationImported, false)
   assert.equal(plan.argumentsTranslated, false)
   assert.equal(plan.mappings.flatMap(({ sourceTools }: { sourceTools: string[] }) => sourceTools).length, plan.source.sourceToolCount)
-  assert.match(guideOutput.value(), /Discord MCP migration plan: targeted-reader@1\.0\.0/)
+  assert.match(guideOutput.value(), /GuildControl MCP migration plan: targeted-reader@1\.0\.0/)
   assert.match(guideOutput.value(), /Migration catalog digest: sha256:/)
   assert.match(guideOutput.value(), /Source evidence: https:\/\/github\.com\/Targeted-Design-Agency\/mcp-discord-reader\/tree\/[0-9a-f]{40}/)
-  assert.match(guideOutput.value(), /Discord MCP migration HTML: ok/)
+  assert.match(guideOutput.value(), /GuildControl MCP migration HTML: ok/)
   assert.match(guideOutput.value(), /Configuration changed: no/)
   assert.equal(stderr.value(), "")
   assert.doesNotMatch(listOutput.value(), new RegExp(TOKEN))
@@ -4032,7 +4032,7 @@ test("CLI returns structured migration selection failures", async () => {
   const report = JSON.parse(stdout.value())
   assert.equal(report.status, "error")
   assert.equal(report.error.message, "Invalid command usage")
-  assert.match(report.error.recovery.action, /discord-mcp help migrate/)
+  assert.match(report.error.recovery.action, /guildcontrol help migrate/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.equal(stderr.value(), "")
 })
@@ -4092,7 +4092,7 @@ test("CLI renders contextual action help without consulting dependencies or envi
 
     assert.equal(exitCode, 0)
     assert.equal(
-      stdout.value().startsWith(`Usage: discord-mcp ${topic} ${action}`),
+      stdout.value().startsWith(`Usage: guildcontrol ${topic} ${action}`),
       true,
     )
     assert.equal(stderr.value(), "")
@@ -4107,7 +4107,7 @@ test("CLI renders contextual action help without consulting dependencies or envi
       environment: forbiddenEnvironment,
       stdout: stdout.stream,
     }), 0)
-    assert.match(stdout.value(), /^Usage: discord-mcp/u)
+    assert.match(stdout.value(), /^Usage: guildcontrol/u)
   }
 
   const canonical = outputStream()
@@ -4198,10 +4198,10 @@ test("CLI renders smoke, help, and version output", async () => {
     stdout: versionOutput.stream,
   }), 0)
 
-  assert.match(smokeOutput.value(), /Discord MCP smoke: ok/)
+  assert.match(smokeOutput.value(), /GuildControl MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
-  assert.match(smokeOutput.value(), /Server: discord-mcp 0\.1\.2/)
+  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.1\.2/)
   assert.match(smokeOutput.value(), /Write-capable tools: delete_messages, send_message/)
   assert.match(smokeOutput.value(), /Destructive subset: delete_messages/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
@@ -4262,8 +4262,8 @@ test("CLI converts unknown failures into bounded diagnostics", async () => {
   })
 
   assert.equal(exitCode, 2)
-  assert.match(stderr.value(), /discord-mcp: Operator command failed/)
-  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
+  assert.match(stderr.value(), /guildcontrol: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
@@ -4282,7 +4282,7 @@ test("CLI redacts a custom profile credential when activation fails", async () =
   })
 
   assert.equal(exitCode, 2)
-  assert.match(stderr.value(), /discord-mcp: Operator command failed/)
-  assert.match(stderr.value(), /Next: Run discord-mcp doctor/)
+  assert.match(stderr.value(), /guildcontrol: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })

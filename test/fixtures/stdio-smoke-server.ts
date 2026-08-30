@@ -1,6 +1,6 @@
 import { loadConnectorConfigDocument } from "../../src/config.js"
 import { createConnectorConfigDocument } from "../../src/config-document.js"
-import { runDiscordMcpServer } from "../../src/mcp.js"
+import { runGuildControlServer } from "../../src/mcp.js"
 import {
   BOT_INSTALLATION_AUDIT_PRIVACY,
   BOT_INSTALLATION_AUDIT_SCHEMA_VERSION,
@@ -79,7 +79,7 @@ service.getStatus = async () => {
   } as unknown as Awaited<ReturnType<ConnectorService["getStatus"]>>
 }
 
-runDiscordMcpServer({
+runGuildControlServer({
   config,
   environment: process.env,
   service,

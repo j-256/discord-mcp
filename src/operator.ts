@@ -74,7 +74,7 @@ import {
   selectedMcpPromptNames,
 } from "./mcp-guidance.js"
 import {
-  createDiscordMcpServer,
+  createGuildControlServer,
   type DiscordToolService,
 } from "./mcp.js"
 import {
@@ -107,7 +107,7 @@ export const SUPPORTED_NODE_MAJOR = 22
 
 const SETUP_BOOTSTRAP_APPLICATION_ID = "900000000000000001"
 const SETUP_BOOTSTRAP_BOT_ID = "900000000000000002"
-const DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX = "DISCORD_MCP_DOCTOR"
+const DOCTOR_DIAGNOSTIC_CREDENTIAL_VARIABLE_PREFIX = "DISCORD_GUILDCONTROL_DOCTOR"
 const DOCTOR_DIAGNOSTIC_CREDENTIAL_VALUE = "credential-unavailable"
 const SMOKE_PROTOCOL_VERSION = "2026-07-28"
 const STDIO_SMOKE_STDERR_CAPTURE_BYTES = 16 * 1024
@@ -303,7 +303,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   webhookMessageDeliveryPolicy: "webhook-message-delivery-policy",
 })
 
-const DEFAULT_CLI_COMMAND = "discord-mcp"
+const DEFAULT_CLI_COMMAND = "guildcontrol"
 const DEFAULT_MCP_SERVER_NAME = "discord"
 const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 const STARTUP_TIMEOUT_SECONDS = 30
@@ -4175,7 +4175,7 @@ export async function prepareSetup(
   }
   if (!options.preset && !targetExists) {
     throw new ConfigurationError(
-      "Setup target was not found; create it with --preset or discord-mcp config init",
+      "Setup target was not found; create it with --preset or guildcontrol config init",
     )
   }
   if (
@@ -4746,7 +4746,7 @@ async function inspectSmokeClient(
   } else {
     structured = objectValue(await service.getStatus())
     if (structured?.status !== "ok") {
-      throw new Error("Discord connector identity smoke call failed")
+      throw new Error("GuildControl identity smoke call failed")
     }
   }
   const application = objectValue(structured.application)
@@ -4972,7 +4972,7 @@ async function smokeLinkedConnector(
   service: DiscordToolService,
 ): Promise<SmokeReport> {
   const gateway = smokeGateway(config)
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config,
     environment,
     ...(gateway ? { gateway } : {}),

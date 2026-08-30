@@ -70,7 +70,7 @@ Community leaders will follow these Community Impact Guidelines in determining t
 
 ## Project Safety
 
-Publishing credentials, private Discord identifiers or content, exploit details, or security reports outside the project's private reporting path violates this Code of Conduct. Project spaces must not be used to target Discord users or communities, evade platform rules, distribute malware, or coordinate abuse. Report product vulnerabilities through a [private GitHub Security Advisory](https://github.com/j-256/discord-mcp/security/advisories/new), not through a conduct report or public issue.
+Publishing credentials, private Discord identifiers or content, exploit details, or security reports outside the project's private reporting path violates this Code of Conduct. Project spaces must not be used to target Discord users or communities, evade platform rules, distribute malware, or coordinate abuse. Report product vulnerabilities through a [private GitHub Security Advisory](https://github.com/j-256/guildcontrol/security/advisories/new), not through a conduct report or public issue.
 
 ## Attribution
 

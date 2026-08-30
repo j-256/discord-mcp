@@ -670,7 +670,7 @@ test("application emoji receipt-finalization failure blocks queued application w
 })
 
 test("application emoji creation reads only a canonical owned local image", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-application-emoji-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-application-emoji-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "wave.png")

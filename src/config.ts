@@ -304,7 +304,7 @@ function assertNoAmbientPolicyEnvironment(
     .filter((name) => (
       !permitted.has(name)
       && (
-        name.startsWith("DISCORD_MCP_")
+        name.startsWith("GUILDCONTROL_")
         || name.startsWith("OTEL_")
         || DISCORD_TOKEN_ENVIRONMENT_PATTERN.test(name)
       )
@@ -433,7 +433,7 @@ function defaultAuditFile(environment: NodeJS.ProcessEnv, homeDirectory: string)
   const root = stateRoot && isAbsolute(stateRoot)
     ? stateRoot
     : join(homeDirectory, ".local", "state")
-  return join(root, "discord-mcp", "activity.jsonl")
+  return join(root, "guildcontrol", "activity.jsonl")
 }
 
 function auditFile(value: string | undefined, environment: NodeJS.ProcessEnv, homeDirectory: string): string {

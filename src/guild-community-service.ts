@@ -340,13 +340,13 @@ function contentFreeDigest(domain: string, value: unknown): string {
 
 function featureDigest(features: readonly string[]): string {
   return contentFreeDigest(
-    "discord-mcp-guild-community-features.v1",
+    "guildcontrol-guild-community-features.v1",
     [...features].sort(),
   )
 }
 
 function stateDigest(guild: ValidatedGuildCommunity): string {
-  return contentFreeDigest("discord-mcp-guild-community-state.v1", {
+  return contentFreeDigest("guildcontrol-guild-community-state.v1", {
     featureDigest: featureDigest(guild.features),
     featureCount: guild.features.length,
     publicUpdatesChannelId: guild.publicUpdatesChannelId,
@@ -1276,7 +1276,7 @@ export class GuildCommunityService {
       botId,
       changedFields: changed,
       desiredRequest,
-      domain: "discord-mcp-guild-community-change-plan.v1",
+      domain: "guildcontrol-guild-community-change-plan.v1",
       enablementRequired,
       evidence,
       localConstraints: LOCAL_CONSTRAINTS,

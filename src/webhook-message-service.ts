@@ -397,7 +397,7 @@ export function webhookMessageIntentKey(botToken: string): Uint8Array {
     throw new TypeError("Discord webhook message intent key requires a bot credential")
   }
   return createHash("sha256")
-    .update("discord-mcp-webhook-message-digest.v1\0")
+    .update("guildcontrol-webhook-message-digest.v1\0")
     .update(botToken)
     .digest()
 }

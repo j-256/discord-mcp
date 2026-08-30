@@ -1725,7 +1725,7 @@ function createInviteReference(
 ): string {
   return `${INVITE_REFERENCE_PREFIX}${hmacHex(
     key,
-    "discord-mcp-invite-reference.v1",
+    "guildcontrol-invite-reference.v1",
     `${guildId}\0${code}`,
   )}`
 }
@@ -1862,7 +1862,7 @@ function cursorSignature(
   key: Uint8Array,
   encodedPayload: string,
 ): string {
-  return hmacHex(key, "discord-mcp-invite-cursor.v1", encodedPayload)
+  return hmacHex(key, "guildcontrol-invite-cursor.v1", encodedPayload)
 }
 
 function encodeCursor(key: Uint8Array, payload: InviteCursorPayload): string {
@@ -2557,7 +2557,7 @@ export class InviteService {
       applicationId,
       botId,
       delivery,
-      domain: "discord-mcp-invite-creation-plan.v3",
+      domain: "guildcontrol-invite-creation-plan.v3",
       guild: {
         id: state.guild.id,
         name: state.guild.name,
@@ -2995,7 +2995,7 @@ export class InviteService {
       access,
       botMemberRoleIds: [...botMember.roles].sort(),
       channels,
-      domain: "discord-mcp-invite-inventory.v1",
+      domain: "guildcontrol-invite-inventory.v1",
       guild: {
         id: guild.id,
         name: guild.name,
@@ -3251,7 +3251,7 @@ export class InviteService {
     const digest = reviewedPlanDigest(this.#planKey, {
       applicationId,
       botId,
-      domain: "discord-mcp-invite-deletion-plan.v1",
+      domain: "guildcontrol-invite-deletion-plan.v1",
       inventoryDigest: state.inventoryDigest,
       privacy,
       request: requestProjection,

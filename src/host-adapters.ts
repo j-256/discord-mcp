@@ -11,7 +11,7 @@ import {
 } from "./host-activation.js"
 import { stableString } from "./normalize.js"
 
-export const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
+export const HOST_ADAPTER_CATALOG_FORMAT = "guildcontrol.host-adapters.v1"
 export const HOST_ADAPTER_CATALOG_SCHEMA_VERSION = 1
 export const HOST_ADAPTER_IDS = Object.freeze([
   "mcp-json",
@@ -64,7 +64,7 @@ export interface HostAdapterCatalog {
 
 interface HostAdapterBase extends Omit<HostAdapter, "adapterDigest"> {}
 
-const HOST_ADAPTER_DIGEST_DOMAIN = "discord-mcp-host-adapter-v1\0"
+const HOST_ADAPTER_DIGEST_DOMAIN = "guildcontrol-host-adapter-v1\0"
 const CURSOR_INSTALL_URI_PREFIX = "cursor://anysphere.cursor-deeplink/mcp/install"
 const GEMINI_EXTENSION_DIGEST_LENGTH = 12
 const JSON_INDENT = 2
@@ -251,7 +251,7 @@ function cursorAdapter(plan: HostActivationPlan): HostAdapter {
 }
 
 function vscodeInputId(index: number): string {
-  return `discord-mcp-credential-${index + 1}`
+  return `guildcontrol-credential-${index + 1}`
 }
 
 function vscodeAdapter(plan: HostActivationPlan): HostAdapter {
@@ -313,7 +313,7 @@ function vscodeAdapter(plan: HostActivationPlan): HostAdapter {
 }
 
 function geminiExtensionName(plan: HostActivationPlan): string {
-  return `discord-mcp-${plan.activationDigest.slice("sha256:".length, "sha256:".length + GEMINI_EXTENSION_DIGEST_LENGTH)}`
+  return `guildcontrol-${plan.activationDigest.slice("sha256:".length, "sha256:".length + GEMINI_EXTENSION_DIGEST_LENGTH)}`
 }
 
 function geminiAdapter(plan: HostActivationPlan): HostAdapter {

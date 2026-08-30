@@ -318,7 +318,7 @@ test("activity review validates path and limit before reading local state", asyn
 })
 
 test("activity review leaves missing production state absent and clear", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-activity-review-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-activity-review-test-"))
   try {
     const report = await reviewDiscordActivity(join(directory, "activity.jsonl"))
     assert.equal(report.outcome, "clear")
@@ -331,7 +331,7 @@ test("activity review leaves missing production state absent and clear", async (
 })
 
 test("activity review joins and settles real local journal, receipt, and claim state", { timeout: 5_000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-activity-review-state-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-activity-review-state-test-"))
   const activityFile = join(directory, "activity.jsonl")
   const activityId = "activity_state"
   const activityLog = new JsonlActivityLog(activityFile)

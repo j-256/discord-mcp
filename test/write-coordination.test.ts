@@ -136,7 +136,7 @@ function receipt(
 }
 
 async function fixture(context: test.TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new MemoryOperationStore()
@@ -451,7 +451,7 @@ test("coordination rejects invalid construction and intent identities", async (c
 })
 
 test("application emoji claims use one application-wide target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -494,7 +494,7 @@ test("application emoji claims use one application-wide target", async (context)
 })
 
 test("application intent claims use the exact application-wide security target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-intent-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-intent-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -543,7 +543,7 @@ test("application intent claims use the exact application-wide security target",
 })
 
 test("bot-profile claims use the exact application-wide profile target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-bot-profile-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -589,7 +589,7 @@ test("bot-profile claims use the exact application-wide profile target", async (
 })
 
 test("linked-role metadata claims use the exact application-wide schema target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-linked-role-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-linked-role-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -647,7 +647,7 @@ test("linked-role metadata claims use the exact application-wide schema target",
 })
 
 test("global command claims use the exact application-wide command target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-global-command-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-global-command-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -705,7 +705,7 @@ test("global command claims use the exact application-wide command target", asyn
 })
 
 test("application entitlement claims use one exact application-wide lifecycle target", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-entitlement-coordination-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-entitlement-coordination-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const operationStore = new FileOperationStore(join(root, "operations"))
@@ -1339,7 +1339,7 @@ test("unknown owner liveness remains quarantined", async (context) => {
 })
 
 test("unreadable receipt evidence remains quarantined", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-coordination-unreadable-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-coordination-unreadable-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "coordination")
   const coordinator = new FileWriteCoordinator(

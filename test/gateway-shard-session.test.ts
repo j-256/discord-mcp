@@ -456,7 +456,7 @@ test("Gateway shard reconnects before control traffic crosses the absolute budge
   })
   assert.deepEqual(socket.closed.at(-1), {
     code: 4_000,
-    reason: "discord-mcp reconnect",
+    reason: "guildcontrol reconnect",
   })
 })
 

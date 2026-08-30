@@ -857,7 +857,7 @@ function emojiFingerprint(
 ): string | null {
   if (emoji === null) return null
   return `hmac-sha256:${createHmac("sha256", key)
-    .update("discord-mcp-reaction-emoji-fingerprint.v1\0")
+    .update("guildcontrol-reaction-emoji-fingerprint.v1\0")
     .update(emoji.key)
     .digest("hex")}`
 }
@@ -1390,7 +1390,7 @@ export class ReactionService {
       botId,
       botMemberRoleIds: [...state.botMember.roles].sort(),
       channel: channelSummary(state.channel),
-      domain: "discord-mcp-reaction-moderation-plan.v1",
+      domain: "guildcontrol-reaction-moderation-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

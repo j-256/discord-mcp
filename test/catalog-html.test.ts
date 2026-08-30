@@ -61,8 +61,8 @@ test("catalog HTML renders the exact negotiated contract as one offline explorer
   assert.match(html, /href="#tool-plan_channel_creation"/)
   assert.match(html, /href="#tool-execute_channel_creation"/)
   assert.match(html, /href="#tool-list_activity"/)
-  assert.match(html, /setup --npx --config \.\/discord-mcp\.json --preset server-observer/)
-  assert.match(html, /coordination list --config \.\/discord-mcp\.json/)
+  assert.match(html, /setup --npx --config \.\/guildcontrol\.json --preset server-observer/)
+  assert.match(html, /coordination list --config \.\/guildcontrol\.json/)
   assert.match(html, /id="toolset-filter"/)
   assert.match(html, /id="risk-filter"/)
   assert.match(html, /id="access-filter"/)
@@ -164,7 +164,7 @@ test("catalog HTML escapes negotiated text and schema values before embedding th
 })
 
 test("catalog HTML export is deterministic, exclusive, private, and credential-free", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-catalog-html-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-catalog-html-test-"))
   const first = join(directory, "first.html")
   const second = join(directory, "second.html")
   const existing = join(directory, "existing.html")

@@ -1389,7 +1389,7 @@ export class ForumTagService {
       botId,
       channel: stateSnapshot(state.forum),
       desired: plannedStateSnapshot(change.desired),
-      domain: "discord-mcp-forum-tag-change-plan.v1",
+      domain: "guildcontrol-forum-tag-change-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

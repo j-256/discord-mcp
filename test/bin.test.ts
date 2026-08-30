@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { runDiscordMcpBin } from "../src/bin.js"
+import { runGuildControlBin } from "../src/bin.js"
 import { NODE_22_23_LOW_MEMORY_NODE_ARGUMENTS } from "../src/node-runtime.js"
 
 const EXECUTABLE = "/runtime/node"
@@ -15,7 +15,7 @@ test("package bin replaces one eligible process before importing the CLI", async
     file: string
   } | undefined
   let cliCalled = false
-  await assert.rejects(runDiscordMcpBin({
+  await assert.rejects(runGuildControlBin({
     argv: [EXECUTABLE, LAUNCHER, "version"],
     cliEntrypoint: CLI,
     execArgv: [],
@@ -39,7 +39,7 @@ test("package bin replaces one eligible process before importing the CLI", async
 
 test("package bin runs the CLI directly when replacement is unavailable", async () => {
   let observed: readonly string[] | undefined
-  const exitCode = await runDiscordMcpBin({
+  const exitCode = await runGuildControlBin({
     argv: [EXECUTABLE, LAUNCHER, "help"],
     cliEntrypoint: CLI,
     execArgv: [],

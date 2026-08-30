@@ -19,7 +19,7 @@ import {
   type WriteCoordinationList,
 } from "./write-coordination.js"
 
-export const ACTIVITY_REVIEW_FORMAT = "discord-mcp.activity-review.v1"
+export const ACTIVITY_REVIEW_FORMAT = "guildcontrol.activity-review.v1"
 export const ACTIVITY_REVIEW_SCHEMA_VERSION = 1
 
 export const ACTIVITY_REVIEW_DISPOSITIONS = Object.freeze([

@@ -17,7 +17,7 @@ import {
   type HostAdapter,
 } from "./host-adapters.js"
 
-export const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
+export const HOST_ACTIVATION_HTML_FORMAT = "guildcontrol.host-activation-html.v2"
 export const HOST_ACTIVATION_HTML_SCHEMA_VERSION = 2
 
 export interface DiscordHostActivationHtmlExportOptions {
@@ -184,8 +184,8 @@ export function renderDiscordHostActivationHtml(
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; manifest-src 'none'; media-src 'none'; object-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'unsafe-inline'; worker-src 'none'; require-trusted-types-for 'script'">
-  <meta name="description" content="Private credential-free Discord MCP host activation guide">
-  <title>Discord MCP host activation: ${escapeHtml(plan.policy.name)}</title>
+  <meta name="description" content="Private credential-free GuildControl MCP host activation guide">
+  <title>GuildControl MCP host activation: ${escapeHtml(plan.policy.name)}</title>
   <style>
     :root{--bg:#f4f6fb;--panel:#fff;--panel-2:#f7f8fc;--ink:#172035;--muted:#5d687d;--line:#d9deea;--brand:#5864e8;--brand-2:#3845bc;--action:#3d49c8;--good:#087b61;--warn:#9b5800;--focus:#b64a00;--shadow:0 18px 52px rgba(39,48,80,.1)}
     @media(prefers-color-scheme:dark){:root{--bg:#0b111c;--panel:#151d2b;--panel-2:#101825;--ink:#eef1ff;--muted:#aab4c9;--line:#313b4e;--brand:#98a1ff;--brand-2:#c0c5ff;--action:#4652d1;--good:#69d4b7;--warn:#ffc271;--focus:#ffd166;--shadow:0 18px 52px rgba(0,0,0,.34)}}
@@ -200,7 +200,7 @@ export function renderDiscordHostActivationHtml(
   <header class="shell hero">
     <p class="eyebrow">Private host activation</p>
     <h1>Map the contract. Keep custody.</h1>
-    <p class="lede">This credential-free artifact turns one verified Discord MCP policy into an exact local stdio handoff and four digest-bound host projections. It supplies copyable schemas without writing host configuration or putting a bot token in this page.</p>
+    <p class="lede">This credential-free artifact turns one verified GuildControl MCP policy into an exact local stdio handoff and four digest-bound host projections. It supplies copyable schemas without writing host configuration or putting a bot token in this page.</p>
     <div class="proofs" role="list" aria-label="Activation evidence">
       <div class="proof" role="listitem"><strong>${escapeHtml(plan.launch.transport)}</strong><span>Local MCP transport</span></div>
       <div class="proof" role="listitem"><strong>${escapeHtml(plan.launch.serverName)}</strong><span>Portable server label</span></div>

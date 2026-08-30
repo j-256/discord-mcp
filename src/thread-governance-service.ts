@@ -1501,7 +1501,7 @@ export class ThreadGovernanceService {
       connectorMembership: membershipView(botId, state.connectorMembership),
       connectorPermission: state.connectorPermission,
       desired,
-      domain: "discord-mcp-thread-governance-plan.v1",
+      domain: "guildcontrol-thread-governance-plan.v1",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

@@ -44,7 +44,7 @@ import {
 export const CONFIG_RECIPE_REPORT_SCHEMA_VERSION = 1
 export const CONFIG_RECIPE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const CONFIG_RECIPE_PLAN_FORMAT = "discord-mcp.config-recipe-plan.v1"
+const CONFIG_RECIPE_PLAN_FORMAT = "guildcontrol.config-recipe-plan.v1"
 
 export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-starter",
@@ -135,7 +135,7 @@ export interface ConfigRecipeChange {
 
 export interface ConfigRecipeCommand {
   readonly args: readonly string[]
-  readonly command: "discord-mcp"
+  readonly command: "guildcontrol"
 }
 
 export interface ConfigRecipePlanReport {
@@ -823,15 +823,15 @@ function nextChecks(file: string): readonly ConfigRecipeCommand[] {
   return Object.freeze([
     Object.freeze({
       args: Object.freeze(["config", "validate", file]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
     Object.freeze({
       args: Object.freeze(["doctor", "--config", file, "--online"]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
     Object.freeze({
       args: Object.freeze(["smoke", "--config", file]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
   ])
 }
@@ -858,7 +858,7 @@ function recipeApplyCommand(
       "--confirm",
       request.name,
     ]),
-    command: "discord-mcp" as const,
+    command: "guildcontrol" as const,
   })
 }
 

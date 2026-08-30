@@ -96,8 +96,8 @@ const SOCKET_STATES = Object.freeze({
 })
 const RECONNECT_CLOSE_CODE = 4_000
 const STOP_CLOSE_CODE = 1_000
-const STATIC_RECONNECT_REASON = "discord-mcp reconnect"
-const STATIC_STOP_REASON = "discord-mcp stop"
+const STATIC_RECONNECT_REASON = "guildcontrol reconnect"
+const STATIC_STOP_REASON = "guildcontrol stop"
 
 const FATAL_CLOSE_CATEGORIES: ReadonlyMap<number, GatewayErrorCategory> = new Map([
   [4_004, "authentication-failed"],

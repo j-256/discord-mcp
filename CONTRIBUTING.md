@@ -1,12 +1,12 @@
 # Contributing
 
-Discord MCP accepts focused fixes, tests, documentation improvements, and capabilities that preserve its least-privilege and privacy boundaries. Start with an issue for a substantial feature or architectural change so its authority, Discord prerequisites, persistence, and failure semantics can be reviewed before implementation.
+GuildControl MCP accepts focused fixes, tests, documentation improvements, and capabilities that preserve its least-privilege and privacy boundaries. Start with an issue for a substantial feature or architectural change so its authority, Discord prerequisites, persistence, and failure semantics can be reviewed before implementation.
 
 ## Protect credentials and Discord data
 
 Never include a bot token, webhook credential, invite code, Guild Template code, collector header, npm credential, GitHub token, or other bearer value in an issue, pull request, commit, test fixture, screenshot, recording, log, or diagnostic attachment. Rotate a credential immediately if it may have been exposed.
 
-Do not publish Discord message content, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, topics, avatars, or private guild, channel, user, message, application, or webhook identifiers. Use obviously synthetic fixtures. Report vulnerabilities through a [private GitHub Security Advisory](https://github.com/j-256/discord-mcp/security/advisories/new), following [SECURITY.md](SECURITY.md).
+Do not publish Discord message content, attachment URLs, embeds, components, audit-log reasons, usernames, profile names, role names, channel names, topics, avatars, or private guild, channel, user, message, application, or webhook identifiers. Use obviously synthetic fixtures. Report vulnerabilities through a [private GitHub Security Advisory](https://github.com/j-256/guildcontrol/security/advisories/new), following [SECURITY.md](SECURITY.md).
 
 ## Development setup
 

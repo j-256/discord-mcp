@@ -298,7 +298,7 @@ test("operation keys are domain-hashed and strictly bounded", () => {
 })
 
 test("file operation store reserves once and records a private terminal receipt", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -338,7 +338,7 @@ test("file operation store reserves once and records a private terminal receipt"
 })
 
 test("component-message receipts strictly bind a content-free keyed request digest", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-component-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-component-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -392,7 +392,7 @@ test("component-message receipts strictly bind a content-free keyed request dige
 })
 
 test("embed-message receipts strictly bind a content-free keyed request digest", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-embed-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-embed-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -442,7 +442,7 @@ test("embed-message receipts strictly bind a content-free keyed request digest",
 })
 
 test("direct-message receipts advance through immutable content-free checkpoints", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-direct-message-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-direct-message-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -491,7 +491,7 @@ test("direct-message receipts advance through immutable content-free checkpoints
 })
 
 test("direct-message receipts reject legacy shapes and unsafe stage transitions", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-direct-message-invalid-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-direct-message-invalid-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const malformedStore = new FileOperationStore(join(root, "malformed"))
   const reserved = directMessageReceipt()
@@ -617,7 +617,7 @@ test("direct-message receipts reject legacy shapes and unsafe stage transitions"
 })
 
 test("AutoMod receipts strictly bind a content-free keyed request digest", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-automod-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-automod-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -664,7 +664,7 @@ test("AutoMod receipts strictly bind a content-free keyed request digest", async
 })
 
 test("file operation store accepts voice status receipts and rejects status text", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-voice-status-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-voice-status-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -697,7 +697,7 @@ test("file operation store accepts voice status receipts and rejects status text
 })
 
 test("file operation store keeps application receipts application-scoped and content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -733,7 +733,7 @@ test("file operation store keeps application receipts application-scoped and con
 })
 
 test("file operation store rejects malformed application receipt identity and outcomes", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
 
@@ -754,7 +754,7 @@ test("file operation store rejects malformed application receipt identity and ou
 })
 
 test("file operation store keeps application intent receipts content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-intent-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-intent-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -794,7 +794,7 @@ test("file operation store keeps application intent receipts content-free", asyn
 })
 
 test("file operation store keeps bot-profile receipts content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-bot-profile-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-bot-profile-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -830,7 +830,7 @@ test("file operation store keeps bot-profile receipts content-free", async (cont
 })
 
 test("file operation store checkpoints exact application entitlement identities", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-entitlements-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-entitlements-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -883,7 +883,7 @@ test("file operation store checkpoints exact application entitlement identities"
 })
 
 test("file operation store rejects unsafe application entitlement lifecycle evidence", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-application-entitlements-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-application-entitlements-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
   const reserved = applicationEntitlementReceipt("create-test")
@@ -917,7 +917,7 @@ test("file operation store rejects unsafe application entitlement lifecycle evid
 })
 
 test("file operation store keeps global application-command receipts content-free", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-global-command-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-global-command-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)
@@ -942,7 +942,7 @@ test("file operation store keeps global application-command receipts content-fre
 })
 
 test("file operation store atomically selects one concurrent reservation", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
 
@@ -965,7 +965,7 @@ test("file operation store atomically selects one concurrent reservation", async
 })
 
 test("file operation store isolates every durable write operation-key domain", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
   const channel = receipt()
@@ -1270,7 +1270,7 @@ test("file operation store isolates every durable write operation-key domain", a
 })
 
 test("file operation store rejects identity changes and divergent terminal state", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const store = new FileOperationStore(join(root, "receipts"))
   await store.reserve(receipt())
@@ -1337,7 +1337,7 @@ test("file operation store rejects identity changes and divergent terminal state
 })
 
 test("file operation store fails closed on malformed, linked, and public receipts", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-operations-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-operations-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "receipts")
   const store = new FileOperationStore(directory)

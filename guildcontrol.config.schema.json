@@ -4,7 +4,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "const": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json",
+      "const": "https://raw.githubusercontent.com/j-256/guildcontrol/main/guildcontrol.config.schema.json",
       "description": "Editor schema identifier for this configuration format"
     },
     "capabilities": {
@@ -1935,7 +1935,7 @@
     "tools"
   ],
   "additionalProperties": false,
-  "description": "Strict non-secret configuration for discord-mcp",
-  "title": "discord-mcp configuration",
-  "$id": "https://raw.githubusercontent.com/j-256/discord-mcp/main/discord-mcp.config.schema.json"
+  "description": "Strict non-secret configuration for guildcontrol",
+  "title": "guildcontrol configuration",
+  "$id": "https://raw.githubusercontent.com/j-256/guildcontrol/main/guildcontrol.config.schema.json"
 }

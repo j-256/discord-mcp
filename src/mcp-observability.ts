@@ -38,7 +38,7 @@ export function registerDiscordObservabilityMcp(
       cacheHint: PRIVATE_RESOURCE_CACHE_HINT,
       description: "Process-local Discord REST and MCP tool health aggregates, bounded connector-observed invalid-request pressure, exporter health, and explicit telemetry privacy guarantees.",
       mimeType: "application/json",
-      title: "Discord connector observability",
+      title: "GuildControl observability",
     },
     async (uri) => assertMcpReadResultBudget({
       contents: [{

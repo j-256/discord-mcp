@@ -5,9 +5,9 @@ import { defineConfig } from "astro/config"
 import accessibleTables from "./plugins/accessible-tables.mjs"
 
 const SITE_ORIGIN = "https://j-256.github.io"
-const SITE_BASE = "/discord-mcp"
+const SITE_BASE = "/guildcontrol"
 const SITE_URL = `${SITE_ORIGIN}${SITE_BASE}`
-const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
+const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 
 const referenceGroups = [
   ["Foundations", "foundations"],
@@ -39,7 +39,7 @@ export default defineConfig({
       editLink: {
         baseUrl: `${REPOSITORY_URL}/edit/main/site/src/content/docs/`,
       },
-      favicon: "/generated/discord-mcp-icon.png",
+      favicon: "/generated/guildcontrol-icon.png",
       head: [
         {
           tag: "meta",
@@ -65,8 +65,8 @@ export default defineConfig({
       ],
       lastUpdated: false,
       logo: {
-        alt: "Discord MCP shield and reviewed connection icon",
-        src: "../assets/discord-mcp-icon.png",
+        alt: "GuildControl MCP shield and reviewed connection icon",
+        src: "../assets/guildcontrol-icon.png",
       },
       pagefind: true,
       pagination: true,
@@ -134,7 +134,7 @@ export default defineConfig({
         maxHeadingLevel: 3,
         minHeadingLevel: 2,
       },
-      title: "Discord MCP",
+      title: "GuildControl MCP",
       titleDelimiter: "|",
     }),
   ],

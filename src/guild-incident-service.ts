@@ -923,7 +923,7 @@ export class GuildIncidentService {
       botId,
       changedFields: changed,
       desiredRequest,
-      domain: "discord-mcp-guild-incident-action-change-plan.v1",
+      domain: "guildcontrol-guild-incident-action-change-plan.v1",
       effects,
       evidence,
       localConstraints: LOCAL_CONSTRAINTS,

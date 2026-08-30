@@ -13,8 +13,8 @@ import {
   assertMcpReadResultBudget,
   budgetMcpToolResult,
   contentFreeToolReceipt,
-  DISCORD_MCP_RECEIPT_PREFIX,
-  DISCORD_MCP_RECEIPT_SCHEMA,
+  GUILDCONTROL_RECEIPT_PREFIX,
+  GUILDCONTROL_RECEIPT_SCHEMA,
   MCP_READ_RESPONSE_TOO_LARGE_CODE,
   redactMcpValue,
   serializedMcpResultBytes,
@@ -53,14 +53,14 @@ test("reviewed tool results retain summaries and add content-free receipts", () 
   }
   const compatible = withContentFreeToolReceipt(original)
   const receipt = JSON.parse(
-    compatible.content[1]?.text.slice(DISCORD_MCP_RECEIPT_PREFIX.length) || "null",
+    compatible.content[1]?.text.slice(GUILDCONTROL_RECEIPT_PREFIX.length) || "null",
   )
 
   assert.equal(compatible.content[0]?.text, "Plan ready")
   assert.equal(compatible.content[1]?.type, "text")
-  assert.ok(compatible.content[1]?.text.startsWith(DISCORD_MCP_RECEIPT_PREFIX))
+  assert.ok(compatible.content[1]?.text.startsWith(GUILDCONTROL_RECEIPT_PREFIX))
   assert.deepEqual(receipt, {
-    receiptSchema: DISCORD_MCP_RECEIPT_SCHEMA,
+    receiptSchema: GUILDCONTROL_RECEIPT_SCHEMA,
     schemaVersion: 1,
     status: "planned",
     digest: structuredContent.digest,
@@ -112,7 +112,7 @@ test("content-free receipts reject malformed evidence and omit arbitrary error f
   const receipt = contentFreeToolReceipt(structuredContent)
 
   assert.deepEqual(receipt, {
-    receiptSchema: DISCORD_MCP_RECEIPT_SCHEMA,
+    receiptSchema: GUILDCONTROL_RECEIPT_SCHEMA,
     schemaVersion: 1,
     status: "stale",
     digest: structuredContent.digest,
@@ -192,7 +192,7 @@ test("MCP tool budget replaces an oversized read without leaking its value or si
   assert.equal(result.content.length, 2)
   assert.ok(
     result.content[1]?.type === "text"
-    && result.content[1].text.startsWith(DISCORD_MCP_RECEIPT_PREFIX),
+    && result.content[1].text.startsWith(GUILDCONTROL_RECEIPT_PREFIX),
   )
   assert.equal(result.content[1]?.text.includes(MCP_READ_RESPONSE_TOO_LARGE_CODE), true)
 })

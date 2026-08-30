@@ -1217,7 +1217,7 @@ export function operationKeyHash(operationKey: string): string {
     )
   }
   return `sha256:${createHash("sha256")
-    .update("discord-mcp-operation-key.v1\0")
+    .update("guildcontrol-operation-key.v1\0")
     .update(operationKey)
     .digest("hex")}`
 }

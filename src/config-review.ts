@@ -32,7 +32,7 @@ import { stableString } from "./normalize.js"
 export const CONFIG_CHANGE_REPORT_SCHEMA_VERSION = 1
 export const CONFIG_CHANGE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const CONFIG_CHANGE_PLAN_FORMAT = "discord-mcp.config-change-plan.v1"
+const CONFIG_CHANGE_PLAN_FORMAT = "guildcontrol.config-change-plan.v1"
 const OMITTED_VALUE = Object.freeze({ state: "omitted" as const })
 
 export type ConfigChangeCategory =
@@ -74,7 +74,7 @@ export interface ConfigChangeImpactSummary {
 
 export interface ConfigChangeCommand {
   readonly args: readonly string[]
-  readonly command: "discord-mcp"
+  readonly command: "guildcontrol"
 }
 
 export interface ConfigChangePlanOptions {
@@ -538,15 +538,15 @@ function nextChecks(file: string): readonly ConfigChangeCommand[] {
   return Object.freeze([
     Object.freeze({
       args: Object.freeze(["config", "validate", file]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
     Object.freeze({
       args: Object.freeze(["doctor", "--config", file, "--online"]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
     Object.freeze({
       args: Object.freeze(["smoke", "--config", file]),
-      command: "discord-mcp" as const,
+      command: "guildcontrol" as const,
     }),
   ])
 }

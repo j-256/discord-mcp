@@ -34,7 +34,7 @@ const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
-const CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_FILE = "/configuration/guildcontrol.json"
 const TOKEN_ALIAS = "DISCORD_ACTIVATION_BOT_TOKEN"
 const AMBIENT_SECRET = "host-activation-html-ambient-secret"
 
@@ -51,7 +51,7 @@ function activationPlan(command = "npx"): HostActivationPlan {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `@j-256/discord-mcp@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command,
     config: { document, file: CONFIG_FILE },
@@ -109,7 +109,7 @@ test("host activation HTML renders an exact private host-neutral handoff", () =>
   assert.match(html, /MCP install URI flow/)
   assert.match(html, /Private install URI/)
   assert.match(html, /text, not an active link/)
-  assert.ok(html.includes(escaped("${input:discord-mcp-credential-1}")))
+  assert.ok(html.includes(escaped("${input:guildcontrol-credential-1}")))
   assert.ok(html.includes(escaped(`\${env:${TOKEN_ALIAS}}`)))
   assert.ok(html.includes(escaped(`\${${TOKEN_ALIAS}}`)))
   assert.ok(html.includes(escaped(JSON.stringify(adapterCatalog, null, 2))))
@@ -166,7 +166,7 @@ test("host activation HTML escapes launch fields", () => {
 })
 
 test("host activation HTML export is deterministic, exclusive, private, and offline", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-activation-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-activation-test-"))
   const first = join(directory, "first.html")
   const second = join(directory, "second.html")
   const existing = join(directory, "existing.html")

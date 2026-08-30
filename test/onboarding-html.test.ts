@@ -113,9 +113,9 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(verificationCommands, / config validate /)
   assert.match(verificationCommands, / doctor /)
   assert.match(verificationCommands, / smoke /)
-  assert.match(verificationCommands, /npx --yes @j-256\/discord-mcp@/)
+  assert.match(verificationCommands, /npx --yes guildcontrol@/)
   assert.match(html, / host /)
-  assert.match(html, /--html \.\/discord-mcp-host-activation\.html/)
+  assert.match(html, /--html \.\/guildcontrol-host-activation\.html/)
 
   const script = html.match(/<script>([\s\S]+)<\/script>/iu)?.[1]
   assert.ok(script)
@@ -152,7 +152,7 @@ test("onboarding HTML renders channel-reader requirements and escapes display da
 })
 
 test("onboarding HTML export is deterministic, exclusive, private, and credential-free", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-onboarding-html-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-onboarding-html-test-"))
   const first = join(directory, "first.html")
   const second = join(directory, "second.html")
   const existing = join(directory, "existing.html")

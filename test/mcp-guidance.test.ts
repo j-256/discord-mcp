@@ -21,7 +21,7 @@ import {
   MCP_RESOURCE_URIS,
 } from "../src/mcp-guidance.js"
 import {
-  createDiscordMcpServer,
+  createGuildControlServer,
   type DiscordToolService,
 } from "../src/mcp.js"
 import {
@@ -2437,7 +2437,7 @@ function guidanceService(options: {
         messageForwardSourceChannelIds: [],
         messageForwardTargetChannelIds: [],
         nativeCommandChangesEnabled: false,
-        nativeCommandName: "discord-mcp",
+        nativeCommandName: "guildcontrol",
         nativeInteractionChannelIds: [],
         nativeInteractionGuildIds: [],
         nativeInteractionMaxPending: 25,
@@ -3161,7 +3161,7 @@ async function connectedFixture(
   const environment = {
     DISCORD_BOT_TOKEN: TOKEN,
   }
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     config: loadFixtureConfig({
       readScope: {
         channelIds: [CHANNEL_ID],
@@ -4191,7 +4191,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   const accessEntries = toolAccessData.entries as Array<Record<string, unknown>>
   assert.equal(
     toolAccessData.format,
-    "discord-mcp.tool-access-index.v2",
+    "guildcontrol.tool-access-index.v2",
   )
   assert.equal(toolAccessData.authorityGranted, false)
   assert.equal(toolAccessData.discordContacted, false)
@@ -4245,7 +4245,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   const exactToolAccessData = exactToolAccess.value.data as Record<string, unknown>
   assert.equal(
     exactToolAccessData.format,
-    "discord-mcp.tool-access-document.v1",
+    "guildcontrol.tool-access-document.v1",
   )
   const exactAccessEntry = exactToolAccessData.entry as Record<string, unknown>
   assert.equal(exactAccessEntry.name, "execute_channel_order")
@@ -4260,7 +4260,7 @@ test("MCP local resources expose safety, policy, and content-free activity witho
         "unknown_discord_tool",
       ),
     }),
-    /toolName must be one exact canonical Discord MCP tool name/,
+    /toolName must be one exact canonical GuildControl MCP tool name/,
   )
 
   const policy = await readJsonResource(client, MCP_RESOURCE_URIS.policy)
@@ -4345,7 +4345,7 @@ test("MCP coordination playbook is static, authority-free, and privacy explicit"
   assert.equal(directedRouting.addressAuthentication, "none")
   assert.equal(directedRouting.addressRegistration, "none")
   assert.equal(directedRouting.directory, "bounded-page-observation-only")
-  assert.equal(directedRouting.noteFormat, "discord-mcp.coordination-note.v1")
+  assert.equal(directedRouting.noteFormat, "guildcontrol.coordination-note.v1")
   assert.deepEqual(
     (data.statusSignals as Array<Record<string, unknown>>).map(({ meaning }) => meaning),
     [

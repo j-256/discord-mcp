@@ -16,15 +16,15 @@ FROM ${NODE_IMAGE} AS runtime
 ARG VERSION=0.1.2
 ARG REVISION=local
 
-LABEL org.opencontainers.image.title="Discord MCP" \
-  org.opencontainers.image.description="Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration" \
-  org.opencontainers.image.url="https://j-256.github.io/discord-mcp" \
-  org.opencontainers.image.source="https://github.com/j-256/discord-mcp" \
-  org.opencontainers.image.documentation="https://github.com/j-256/discord-mcp/blob/v${VERSION}/README.md" \
+LABEL org.opencontainers.image.title="GuildControl MCP" \
+  org.opencontainers.image.description="Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration" \
+  org.opencontainers.image.url="https://j-256.github.io/guildcontrol" \
+  org.opencontainers.image.source="https://github.com/j-256/guildcontrol" \
+  org.opencontainers.image.documentation="https://github.com/j-256/guildcontrol/blob/v${VERSION}/README.md" \
   org.opencontainers.image.licenses="AGPL-3.0-only" \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.revision="${REVISION}" \
-  io.modelcontextprotocol.server.name="io.github.j-256/discord-mcp"
+  io.modelcontextprotocol.server.name="io.github.j-256/guildcontrol"
 
 ENV NODE_ENV=production
 WORKDIR /app

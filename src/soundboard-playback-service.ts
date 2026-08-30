@@ -249,7 +249,7 @@ export function soundboardPlaybackIntentKey(token: string): Uint8Array {
     throw new RangeError("Discord soundboard playback intent requires a non-empty secret")
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-soundboard-playback-intent-key.v1\0")
+    .update("guildcontrol-soundboard-playback-intent-key.v1\0")
     .digest()
 }
 
@@ -264,7 +264,7 @@ export function soundboardPlaybackRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-soundboard-playback-request.v1",
+    domain: "guildcontrol-soundboard-playback-request.v1",
     request: {
       channelId: request.channelId,
       operationKeyHash: request.operationKeyHash,

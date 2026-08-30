@@ -854,7 +854,7 @@ export class GuildPruneService {
       botId,
       botMember: memberSnapshot(state.botMember),
       cohort,
-      domain: "discord-mcp-guild-prune-plan.v1",
+      domain: "guildcontrol-guild-prune-plan.v1",
       estimatedMemberCount: state.estimatedMemberCount,
       guildId: request.guildId,
       guildOwnerId: state.guild.owner_id,

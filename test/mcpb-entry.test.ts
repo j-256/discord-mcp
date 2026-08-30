@@ -13,14 +13,14 @@ import {
   prepareMcpbEnvironment,
   runMcpbServer,
 } from "../src/mcpb-entry.js"
-import type { DiscordMcpRunOptions } from "../src/mcp.js"
+import type { GuildControlRunOptions } from "../src/mcp.js"
 
 const APPLICATION_ID = "300000000000000001"
 const BOT_ID = "400000000000000001"
 const CHANNEL_ID = "200000000000000001"
 const GUILD_ID = "100000000000000001"
 const TOKEN = "mcpb-test-discord-token"
-const TOKEN_VARIABLE = "DISCORD_MCPB_TEST_TOKEN"
+const TOKEN_VARIABLE = "DISCORD_GUILDCONTROL_BUNDLE_TEST_TOKEN"
 
 function document(
   options: { credentialFile?: string } = {},
@@ -43,9 +43,9 @@ async function writeConfig(
   context: test.TestContext,
   value: ConnectorConfigDocument,
 ): Promise<string> {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-mcpb-entry-")))
+  const root = await realpath(await mkdtemp(join(tmpdir(), "guildcontrol-mcpb-entry-")))
   context.after(() => rm(root, { force: true, recursive: true }))
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
   return file
 }
@@ -74,7 +74,7 @@ test("MCPB environment maps only its sensitive input to the declared credential"
 
 test("MCPB launcher passes the isolated environment to the normal server", async (context) => {
   const file = await writeConfig(context, document())
-  let received: DiscordMcpRunOptions | undefined
+  let received: GuildControlRunOptions | undefined
   const exitCode = await runMcpbServer({
     args: ["serve", "--config", file],
     environment: { [MCPB_TOKEN_INPUT_ENVIRONMENT_VARIABLE]: TOKEN },
@@ -115,7 +115,7 @@ test("MCPB launcher rejects missing token, alternate commands, and file credenti
     })
     assert.equal(exitCode, 2)
     assert.equal(invoked, false)
-    assert.match(stderr, /^\[discord-mcp\] /)
+    assert.match(stderr, /^\[guildcontrol\] /)
     assert.equal(stderr.includes(TOKEN), false)
   }
 })

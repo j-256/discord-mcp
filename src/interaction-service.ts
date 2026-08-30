@@ -446,7 +446,7 @@ function assertCommandSource(
 
 export function interactionNonce(channelId: string, idempotencyKey: string): string {
   return createHash("sha256")
-    .update("discord-mcp-message\0")
+    .update("guildcontrol-message\0")
     .update(channelId)
     .update("\0")
     .update(idempotencyKey)

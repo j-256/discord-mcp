@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Discord MCP defect without exposing credentials or Discord data
+description: Report a reproducible GuildControl MCP defect without exposing credentials or Discord data
 title: "[Bug] "
 body:
   - type: markdown
@@ -66,7 +66,7 @@ body:
     attributes:
       label: Local verification
       description: List the offline commands run and their sanitized pass, warning, or fixed error result
-      placeholder: discord-mcp config validate ...; discord-mcp doctor ...
+      placeholder: guildcontrol config validate ...; guildcontrol doctor ...
   - type: checkboxes
     id: scope
     attributes:

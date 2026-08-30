@@ -916,7 +916,7 @@ export class ScopePolicy {
     this.#memberVoiceGuildIds = config.memberVoiceGuildIds ?? new Set()
     this.#messageForwardSourceChannelIds = config.messageForwardSourceChannelIds ?? new Set()
     this.#messageForwardTargetChannelIds = config.messageForwardTargetChannelIds ?? new Set()
-    this.#nativeCommandName = config.nativeCommandName ?? "discord-mcp"
+    this.#nativeCommandName = config.nativeCommandName ?? "guildcontrol"
     this.#nativeInteractionChannelIds = config.nativeInteractionChannelIds ?? new Set()
     this.#nativeInteractionGuildIds = config.nativeInteractionGuildIds ?? new Set()
     this.#nativeInteractionMaxPending = config.nativeInteractionMaxPending ?? 25

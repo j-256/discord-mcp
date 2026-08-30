@@ -2509,7 +2509,7 @@ export class OnboardingService {
         operationKeyHash: desired.operationKeyHash,
         prompts: desired.prompts,
       },
-      domain: "discord-mcp-onboarding-change-plan.v1",
+      domain: "guildcontrol-onboarding-change-plan.v1",
       evidence,
       localLimits: ONBOARDING_LOCAL_LIMITS,
       privacy,

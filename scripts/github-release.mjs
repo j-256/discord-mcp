@@ -13,10 +13,10 @@ import {
 
 const GITHUB_API_ORIGIN = "https://api.github.com"
 const GITHUB_API_VERSION = "2026-03-10"
-const GITHUB_REPOSITORY = "j-256/discord-mcp"
-const MCP_REGISTRY_NAME = "io.github.j-256/discord-mcp"
-const NPM_PACKAGE = "@j-256/discord-mcp"
-const RELEASE_EVIDENCE_FORMAT = "discord-mcp.github-release-evidence.v2"
+const GITHUB_REPOSITORY = "j-256/guildcontrol"
+const MCP_REGISTRY_NAME = "io.github.j-256/guildcontrol"
+const NPM_PACKAGE = "guildcontrol"
+const RELEASE_EVIDENCE_FORMAT = "guildcontrol.github-release-evidence.v2"
 const RELEASE_EVIDENCE_SCHEMA_VERSION = 2
 const RELEASE_NOTES_FILE = "release-notes.md"
 const RELEASE_CHECKSUM_FILE = "SHA256SUMS"
@@ -55,17 +55,17 @@ function releaseTag(version) {
 
 function releaseTitle(version) {
   assertVersion(version)
-  return `Discord MCP ${version}`
+  return `GuildControl MCP ${version}`
 }
 
 function npmArchiveName(version) {
   assertVersion(version)
-  return `j-256-discord-mcp-${version}.tgz`
+  return `guildcontrol-${version}.tgz`
 }
 
 function mcpbArchiveName(version) {
   assertVersion(version)
-  return `discord-mcp-${version}.mcpb`
+  return `guildcontrol-${version}.mcpb`
 }
 
 function mcpbReleaseUrl(version) {
@@ -86,7 +86,7 @@ export function renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, 
   invariant(/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(npmIntegrity), "GitHub Release npm integrity is invalid")
   const tag = releaseTag(version)
   return [
-    `Discord MCP ${version} is published from the protected [${tag}](https://github.com/${GITHUB_REPOSITORY}/tree/${tag}) source tag at commit \`${revision}\`.`,
+    `GuildControl MCP ${version} is published from the protected [${tag}](https://github.com/${GITHUB_REPOSITORY}/tree/${tag}) source tag at commit \`${revision}\`.`,
     "",
     "## Install",
     "",
@@ -208,7 +208,7 @@ export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociD
   invariant(bundleBytes.length >= 4 && bundleBytes.readUInt32LE(0) === 0x04034b50, "GitHub Release MCPB is not a ZIP archive")
 
   const catalogDocument = await readJson(catalogPath)
-  invariant(catalogDocument.evidenceFormat === "discord-mcp.catalog-evidence.v3", "GitHub Release catalog evidence format is invalid")
+  invariant(catalogDocument.evidenceFormat === "guildcontrol.catalog-evidence.v3", "GitHub Release catalog evidence format is invalid")
   invariant(catalogDocument.schemaVersion === 1, "GitHub Release catalog evidence schema is invalid")
   invariant(catalogDocument.serverVersion === version, "GitHub Release catalog evidence version is invalid")
   invariant(catalogDocument.status === "ok", "GitHub Release catalog evidence status is invalid")
@@ -218,7 +218,7 @@ export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociD
   invariant(catalogDocument.observabilityExport === "disabled", "GitHub Release catalog evidence exported telemetry")
   invariant(catalogDocument.activityRecordsCreated === false, "GitHub Release catalog evidence persisted activity")
   invariant(
-    catalogDocument.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+    catalogDocument.toolAccessManifest?.format === "guildcontrol.tool-access-manifest.v2"
       && catalogDocument.toolAccessManifest.entries?.length === catalogDocument.toolCount
       && catalogDocument.toolAccessManifest.requirementCoverage?.complete === true
       && catalogDocument.toolAccessManifest.requirementCoverage?.unknownEntries === 0
@@ -381,7 +381,7 @@ export function validateGitHubRelease({ evidence, expectedState, notes, release,
 async function githubRequest(path, token) {
   const headers = {
     accept: "application/vnd.github+json",
-    "user-agent": "discord-mcp-release-verifier",
+    "user-agent": "guildcontrol-release-verifier",
     "x-github-api-version": GITHUB_API_VERSION,
   }
   if (token) headers.authorization = `Bearer ${token}`

@@ -67,7 +67,7 @@ test("operator recovery distinguishes configuration, profile, and usage correcti
   assert.equal(classifyCliFailure(profile, COMMAND_CONTEXT).category, "profile")
   assert.equal(classifyCliFailure(configuration, COMMAND_CONTEXT).category, "configuration")
   assert.match(classifyCliFailure(new Error("ignored"), usage).recovery.action, /help setup/)
-  assert.match(classifyCliFailure(new Error("ignored"), genericUsage).recovery.action, /discord-mcp help/)
+  assert.match(classifyCliFailure(new Error("ignored"), genericUsage).recovery.action, /guildcontrol help/)
   assert.equal(safeCliFailureMessage(credential, COMMAND_CONTEXT), "credential is required")
   assert.equal(safeCliFailureMessage(profile, COMMAND_CONTEXT), "Profile not found")
   assert.equal(safeCliFailureMessage(configuration, COMMAND_CONTEXT), "Configuration is invalid")

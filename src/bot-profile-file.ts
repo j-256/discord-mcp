@@ -52,7 +52,7 @@ export async function readBotProfileImageFileSnapshot(
   try {
     snapshot = await readOwnedLocalFileSnapshot({
       description,
-      digestDomain: `discord-mcp-bot-profile-${options.kind}.v1`,
+      digestDomain: `guildcontrol-bot-profile-${options.kind}.v1`,
       filePath: options.filePath,
       maxBytes: CONNECTOR_LIMITS.botProfileImageBytes,
       planKey: options.planKey,

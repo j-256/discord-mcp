@@ -1,12 +1,14 @@
-# Discord MCP
+# GuildControl MCP
 
-<img src="https://raw.githubusercontent.com/j-256/discord-mcp/v0.1.2/assets/discord-mcp-icon.png" alt="Discord MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.1.2/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
 
-Discord MCP is a local stdio Model Context Protocol server for safe Discord guild and separately allowlisted one-to-one access through an operator-owned bot. It combines broad typed coverage with exact scope, privacy-minimized results, reviewed writes, content-free evidence, and explicit ambiguity handling.
+GuildControl MCP is a local stdio Model Context Protocol server for safe Discord guild and separately allowlisted one-to-one access through an operator-owned bot. It combines broad typed coverage with exact scope, privacy-minimized results, reviewed writes, content-free evidence, and explicit ambiguity handling.
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://j-256.github.io/discord-mcp/) | [Verified product tour](https://j-256.github.io/discord-mcp/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
+[Documentation portal](https://j-256.github.io/guildcontrol/) | [Verified product tour](https://j-256.github.io/guildcontrol/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
+
+GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
 
 ## Why this connector
 
@@ -27,7 +29,7 @@ Use the [first verified read guide](docs/getting-started.md) for one linear setu
 
 The fastest supported outcome is an operator-owned read-only bot, one non-secret policy file, a private host activation guide, and a successful host-side channel inventory. The first inventory response is a compact bounded directory page, with an authenticated continuation for larger guilds and exact metadata available only when requested. Follow the [complete getting-started guide](docs/getting-started.md) if this is your first installation; the commands below are the condensed operator path.
 
-Every command and nested action supports credential-independent `-h` and `--help`; use `discord-mcp FAMILY ACTION --help` or the equivalent `discord-mcp help FAMILY ACTION` for exact syntax and the action's authority, privacy, and side-effect boundary before supplying values.
+Every command and nested action supports credential-independent `-h` and `--help`; use `guildcontrol FAMILY ACTION --help` or the equivalent `guildcontrol help FAMILY ACTION` for exact syntax and the action's authority, privacy, and side-effect boundary before supplying values.
 
 Requirements:
 
@@ -38,7 +40,7 @@ Requirements:
 - A local stdio MCP host, with one-click MCPB import available in compatible hosts
 - Only the Discord permissions needed for the selected read or reviewed-write scope
 
-Each deployment uses a Discord application and bot controlled by that operator. Discord MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
+Each deployment uses a Discord application and bot controlled by that operator. GuildControl MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
 
 Do not grant the bot `Administrator`. Generate the exact initial permission grant from a read-only preset, then narrow the installed bot role with category or channel overrides. The [bot setup guide](docs/reference.md#discord-bot-setup) explains bot ownership, optional intents, and later feature-specific permissions.
 
@@ -47,9 +49,9 @@ Do not grant the bot `Administrator`. Generate the exact initial permission gran
 Inspect an exact release and its read-only preset without a token or Discord request:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 catalog --check
-npx --yes @j-256/discord-mcp@0.1.2 catalog --html ./discord-mcp-contract.html
-npx --yes @j-256/discord-mcp@0.1.2 preset show server-observer
+npx --yes guildcontrol@0.1.2 catalog --check
+npx --yes guildcontrol@0.1.2 catalog --html ./guildcontrol-contract.html
+npx --yes guildcontrol@0.1.2 preset show server-observer
 ```
 
 `catalog --check` verifies the credential-free, execution-disabled production contract, including complete per-tool setup and readiness metadata. `catalog --html FILE` renders it as a release-exact guided, searchable offline explorer with no external asset, runtime request, credential, or configured completion ID.
@@ -59,8 +61,8 @@ npx --yes @j-256/discord-mcp@0.1.2 preset show server-observer
 Generate a complete release-exact outcome map before creating policy or changing the old deployment:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 migrate list
-npx --yes @j-256/discord-mcp@0.1.2 migrate plan cappyeo@0.25.0 --html ./discord-mcp-migration.html
+npx --yes guildcontrol@0.1.2 migrate list
+npx --yes guildcontrol@0.1.2 migrate plan cappyeo@0.25.0 --html ./guildcontrol-migration.html
 ```
 
 The [migration guide](docs/migration.md) covers every scored peer release. Planning scans no checkout, reads no configuration, host setting, environment value, or credential, contacts no network or Discord endpoint, and changes nothing. It maps every audited source tool into supported, review-required, or intentionally excluded outcomes and validates target routes against the negotiated production catalog. It does not rewrite prompts, arguments, configuration, credentials, or host settings.
@@ -70,10 +72,10 @@ The [migration guide](docs/migration.md) covers every scored peer release. Plann
 Create a Discord application and bot in the [Developer Portal](https://discord.com/developers/applications), copy the public Application ID and target Server ID, and generate a callback-free install link whose guild and least-privilege permission grant come from the recommended preset:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 preset install server-observer \
+npx --yes guildcontrol@0.1.2 preset install server-observer \
   --application-id YOUR_APPLICATION_ID \
   --guild-id YOUR_GUILD_ID \
-  --html ./discord-mcp-onboarding.html
+  --html ./guildcontrol-onboarding.html
 ```
 
 Open the printed URL while signed in as a member allowed to manage that server. It requests only `View Channel` for `server-observer`, locks the server selector to the supplied ID, requests no user token, and never sends the bot token to the connector command. Keep Public Bot disabled unless other people should be able to install your application. Use `channel-reader` instead to request `View Channel` plus `Read Message History`; its plan also identifies Message Content as the recommended Developer Portal intent.
@@ -89,12 +91,12 @@ export DISCORD_BOT_TOKEN
 printf 'Discord bot token: '
 read -r -s DISCORD_BOT_TOKEN
 printf '\n'
-npx --yes @j-256/discord-mcp@0.1.2 setup \
+npx --yes guildcontrol@0.1.2 setup \
   --npx \
-  --config ./discord-mcp.json \
+  --config ./guildcontrol.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.2 host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html
+npx --yes guildcontrol@0.1.2 host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html
 ```
 
 On PowerShell 7.1 or newer, read the token into the current process without displaying it or placing its value in command history, then run the same commands:
@@ -108,9 +110,9 @@ Enter each displayed multi-line shell command on one line in PowerShell; the `np
 If the launcher, container runtime, or orchestrator mounts the token as a file, select that input instead. The path must be absolute, the file must already exist for verified setup, and `--token-file` cannot be combined with `--token-env` or an ambient `DISCORD_BOT_TOKEN`:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 setup \
+npx --yes guildcontrol@0.1.2 setup \
   --npx \
-  --config ./discord-mcp.json \
+  --config ./guildcontrol.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID \
   --token-file /run/secrets/discord_bot_token
@@ -118,28 +120,28 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
 
 The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup is the first-run readiness gate: it validates the strict policy, verifies the application and bot, audits the exact guild installation, stores public IDs and a credential reference but never the token, and prints the launch descriptor. A ready setup exits successfully even when it reports non-blocking warnings for deliberate review. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation; it creates bookkeeping keys itself instead of asking the operator to invent them.
 
-The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](discord-mcp.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
+The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](guildcontrol.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
 
-Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `DISCORD_MCP_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or automatic import mode. The offline `migrate` planner never becomes a runtime policy source. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
+Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `GUILDCONTROL_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or automatic import mode. The offline `migrate` planner never becomes a runtime policy source. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
 ### Connect with the one-click bundle or a generated adapter
 
-After setup reports `ready`, compatible MCPB hosts can import `discord-mcp-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/discord-mcp/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
+After setup reports `ready`, compatible MCPB hosts can import `guildcontrol-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
 
 For a file-backed token or another host, `host` emits deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; `--inspect-host-file` reports exact drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
 
 Once the host is connected, the first useful request can stay natural and narrow:
 
 ```text
-Show me the channels in Discord server YOUR_GUILD_ID using Discord MCP. Do not make changes.
+Show me the channels in Discord server YOUR_GUILD_ID using GuildControl MCP. Do not make changes.
 ```
 
 `config validate`, `doctor`, and `smoke` are optional assurance and recovery tools rather than mandatory repetitions after successful setup. Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. Its default human output shows totals plus actionable warnings and failures; add `--verbose` for every check or `--json` for complete machine-readable evidence. `doctor --online` contacts Discord only when the real selected credential is available, while `smoke` launches a child server and verifies the MCP handshake. Doctor exits 1 when warnings need review even though it describes that state as `ready with warnings`.
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 config validate ./discord-mcp.json
-npx --yes @j-256/discord-mcp@0.1.2 doctor --config ./discord-mcp.json --online
-npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
+npx --yes guildcontrol@0.1.2 config validate ./guildcontrol.json
+npx --yes guildcontrol@0.1.2 doctor --config ./guildcontrol.json --online
+npx --yes guildcontrol@0.1.2 smoke --config ./guildcontrol.json
 ```
 
 ### Review any policy replacement
@@ -147,15 +149,15 @@ npx --yes @j-256/discord-mcp@0.1.2 smoke --config ./discord-mcp.json
 Keep the active policy unchanged while editing a separate candidate, then review and apply only an exact fresh plan:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 config workbench \
-  ./discord-mcp.json \
-  --html ./discord-mcp-workbench.html
-npx --yes @j-256/discord-mcp@0.1.2 config plan \
-  ./discord-mcp.json \
-  ./discord-mcp.candidate.json
-npx --yes @j-256/discord-mcp@0.1.2 config apply \
-  ./discord-mcp.json \
-  ./discord-mcp.candidate.json \
+npx --yes guildcontrol@0.1.2 config workbench \
+  ./guildcontrol.json \
+  --html ./guildcontrol-workbench.html
+npx --yes guildcontrol@0.1.2 config plan \
+  ./guildcontrol.json \
+  ./guildcontrol.candidate.json
+npx --yes guildcontrol@0.1.2 config apply \
+  ./guildcontrol.json \
+  ./guildcontrol.candidate.json \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm ACTIVE_POLICY_NAME
 ```
@@ -165,9 +167,9 @@ The private workbench keeps edits in memory until explicit candidate download an
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 activity \
-  --config ./discord-mcp.json \
-  --html ./discord-mcp-activity.html
+npx --yes guildcontrol@0.1.2 activity \
+  --config ./guildcontrol.json \
+  --html ./guildcontrol-activity.html
 ```
 
 The bounded review collapses each activity into its newest outcome, retains superseded history, joins durable claims only through content-free digests, and warns on every unsettled state. Its optional private explorer adds search and filters but cannot contact Discord, resolve a claim, retry an operation, or persist browser state. Use `coordination resolve` only after stopping the owner and checking the exact Discord state and audit log.
@@ -177,7 +179,7 @@ Feature policy uses the same document shape. Reviewed features retain separate c
 Use `channel-reader` only when bounded message history, caller-retained channel catch-up, and native search are needed. It requires at least one exact channel:
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 setup \
+npx --yes guildcontrol@0.1.2 setup \
   --npx \
   --config ./discord-reader.json \
   --preset channel-reader \
@@ -190,22 +192,22 @@ npx --yes @j-256/discord-mcp@0.1.2 setup \
 Keep first setup read-only, then plan one additive recipe. `message-channel` is the narrowest first write: plain sends, replies, connector-owned edits, and typing acknowledgement in exact channels, with no privileged intent or message-history, reaction, component, or embed tools. Actual messages need ordinary host write approval, not a plan and signed confirmation. `coordination-channel` adds directed notes, `channel-publisher` adds the broader read, reaction, Components V2, and remote-free embed surface, `guild-starter` adds reviewed public layouts with nonprivileged `GUILDS` evidence, and `guild-builder` adds the broader blueprint lifecycle. `incident-response` adds reviewed lockdown, while [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds reviewed exact-user private messaging. Every recipe reports permissions, intents, scopes, risks, and exclusions before policy changes.
 
 ```sh
-npx --yes @j-256/discord-mcp@0.1.2 recipe list
-npx --yes @j-256/discord-mcp@0.1.2 recipe plan guild-starter ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe list
+npx --yes guildcontrol@0.1.2 recipe plan guild-starter ./guildcontrol.json \
   --guild-id YOUR_GUILD_ID
-npx --yes @j-256/discord-mcp@0.1.2 recipe apply guild-starter ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe apply guild-starter ./guildcontrol.json \
   --guild-id YOUR_GUILD_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm guild-starter
-npx --yes @j-256/discord-mcp@0.1.2 recipe plan message-channel ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe plan message-channel ./guildcontrol.json \
   --channel-id YOUR_MESSAGE_CHANNEL_ID
-npx --yes @j-256/discord-mcp@0.1.2 recipe apply message-channel ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe apply message-channel ./guildcontrol.json \
   --channel-id YOUR_MESSAGE_CHANNEL_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm message-channel
-npx --yes @j-256/discord-mcp@0.1.2 recipe plan direct-messenger ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe plan direct-messenger ./guildcontrol.json \
   --user-id EXPECTED_RECIPIENT_USER_ID
-npx --yes @j-256/discord-mcp@0.1.2 recipe apply direct-messenger ./discord-mcp.json \
+npx --yes guildcontrol@0.1.2 recipe apply direct-messenger ./guildcontrol.json \
   --user-id EXPECTED_RECIPIENT_USER_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm direct-messenger
@@ -218,8 +220,8 @@ Online doctor verifies identity, complete ID-only installation drift, and applic
 ### Build from source
 
 ```sh
-git clone https://github.com/j-256/discord-mcp.git
-cd discord-mcp
+git clone https://github.com/j-256/guildcontrol.git
+cd guildcontrol
 npm run deps:locked
 npm run build
 node dist/bin.js catalog --check
@@ -279,21 +281,21 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 
 | Command | What it proves | Discord access |
 | --- | --- | --- |
-| `discord-mcp catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value policy-completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
-| `discord-mcp catalog --html FILE` | Guided product tour and searchable rendering of the exact negotiated contract, including schemas, filters, completions, app source, resources, and safety guidance | None |
-| `discord-mcp preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
-| `discord-mcp preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
-| `discord-mcp config workbench ACTIVE --html FILE` | Private offline in-memory editor and explicit candidate download for one validated schema-v2 policy, with no active-file write or approval authority | None |
-| `discord-mcp config plan ACTIVE CANDIDATE --json` | Complete candidate policy, exact semantic changes, authority impacts, tool exposure, warnings, identity lock, and fresh path-bound digest | None |
-| `discord-mcp config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
-| `discord-mcp recipe show guild-starter --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
-| `discord-mcp recipe plan guild-starter FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
-| `discord-mcp migrate plan SOURCE [--html FILE] [--json]` | Complete release-exact source-tool accounting, safer target routes, staged switching commands, and deterministic plan evidence without reading or changing either deployment | None |
-| `discord-mcp activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
-| `discord-mcp doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
-| `discord-mcp doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, complete bounded ID-only installed-guild inventory, and exact configured-scope drift | Read-only |
-| `discord-mcp smoke --config FILE` | Spawned stdio negotiation, discovery, annotations, and connector identity through the selected policy | Read-only |
-| `discord-mcp host`; `host plan`; `host apply` | Credential-free adapters, reviewed freshness-bound static JSON installation with a recoverable backup and rollback, and value-free drift inspection | None |
+| `guildcontrol catalog --check --json` | Exact production MCP inventories, access lifecycles, schemas, annotations, zero-value policy-completion proof, plan-review app authority, execution guard, and stable contract and resource digests | None |
+| `guildcontrol catalog --html FILE` | Guided product tour and searchable rendering of the exact negotiated contract, including schemas, filters, completions, app source, resources, and safety guidance | None |
+| `guildcontrol preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
+| `guildcontrol preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
+| `guildcontrol config workbench ACTIVE --html FILE` | Private offline in-memory editor and explicit candidate download for one validated schema-v2 policy, with no active-file write or approval authority | None |
+| `guildcontrol config plan ACTIVE CANDIDATE --json` | Complete candidate policy, exact semantic changes, authority impacts, tool exposure, warnings, identity lock, and fresh path-bound digest | None |
+| `guildcontrol config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
+| `guildcontrol recipe show guild-starter --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
+| `guildcontrol recipe plan guild-starter FILE --guild-id ID --json` | Complete proposed policy, exact changes, requirements, warnings, and source-, path-, request-, and contract-bound digest | None |
+| `guildcontrol migrate plan SOURCE [--html FILE] [--json]` | Complete release-exact source-tool accounting, safer target routes, staged switching commands, and deterministic plan evidence without reading or changing either deployment | None |
+| `guildcontrol activity --config FILE [--html FILE] [--json]` | Bounded current write lifecycles, superseded history, exact content-free evidence, and correlated durable claims with warning status when operator attention is required | None |
+| `guildcontrol doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
+| `guildcontrol doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, complete bounded ID-only installed-guild inventory, and exact configured-scope drift | Read-only |
+| `guildcontrol smoke --config FILE` | Spawned stdio negotiation, discovery, annotations, and connector identity through the selected policy | Read-only |
+| `guildcontrol host`; `host plan`; `host apply` | Credential-free adapters, reviewed freshness-bound static JSON installation with a recoverable backup and rollback, and value-free drift inspection | None |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
@@ -312,7 +314,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 ## Documentation
 
-- [Verified documentation portal](https://j-256.github.io/discord-mcp/)
+- [Verified documentation portal](https://j-256.github.io/guildcontrol/)
 - [First verified read and initialization recovery](docs/getting-started.md)
 - [Release-exact migration from another Discord MCP](docs/migration.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)

@@ -43,7 +43,7 @@ export const MCP_RESOURCE_URIS = Object.freeze({
   nativeInteractionPending: "discord://interactions/pending",
   nativeInteractionStatus: "discord://interactions/status",
   observability: "discord://connector/observability",
-  planReviewApp: "ui://discord-mcp/plan-review",
+  planReviewApp: "ui://guildcontrol/plan-review",
   policy: "discord://connector/policy",
   safety: "discord://connector/safety",
   toolAccess: "discord://connector/tool-access",

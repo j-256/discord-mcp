@@ -17,7 +17,7 @@ const OGG_CRC_POLYNOMIAL = 0x04C11DB7
 const OGG_SERIAL = 0x12345678
 
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-soundboard-"))
   const root = await realpath(temporary)
   return {
     async cleanup() {

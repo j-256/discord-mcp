@@ -1336,7 +1336,7 @@ export class GuildSettingsService {
       botId,
       changedFields: changed,
       desiredRequest,
-      domain: "discord-mcp-guild-settings-change-plan.v1",
+      domain: "guildcontrol-guild-settings-change-plan.v1",
       effects: fieldEffects,
       evidence,
       localConstraints: LOCAL_CONSTRAINTS,

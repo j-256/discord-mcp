@@ -646,7 +646,7 @@ test("direct-message requests are closed and require action-specific acknowledge
 })
 
 test("direct-message send planning remains read-only and profile-minimized", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-plan-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-plan-"))
   try {
     const calls: string[] = []
     const service = new DirectMessageService({
@@ -678,7 +678,7 @@ test("direct-message send planning remains read-only and profile-minimized", asy
 })
 
 test("direct-message Components V2 links require exact origins before Discord contact", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-link-plan-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-link-plan-"))
   try {
     const base = componentSendRequest()
     if (base.action !== "send") assert.fail("Expected a direct-message send request")
@@ -736,7 +736,7 @@ test("direct-message Components V2 links require exact origins before Discord co
 test("direct-message owned-file send and reply bind, upload, and recover without reopening the file", async (t) => {
   for (const action of ["send", "reply"] as const) {
     await t.test(action, async () => {
-      const temporary = await mkdtemp(join(tmpdir(), `discord-mcp-dm-attachment-${action}-`))
+      const temporary = await mkdtemp(join(tmpdir(), `guildcontrol-dm-attachment-${action}-`))
       try {
         const root = await realpath(temporary)
         const filePath = join(root, "private-report.txt")
@@ -885,7 +885,7 @@ test("direct-message owned-file send and reply bind, upload, and recover without
 })
 
 test("direct-message owned-file execution rejects byte drift before durable or Discord writes", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-drift-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-dm-attachment-drift-"))
   try {
     const root = await realpath(temporary)
     const filePath = join(root, "private-report.txt")
@@ -927,7 +927,7 @@ test("direct-message owned-file execution rejects byte drift before durable or D
 })
 
 test("direct-message reads expose content and bounded counts without profiles or attachment URLs", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-read-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-read-"))
   try {
     const message = rawMessage({
       attachments: [{
@@ -968,7 +968,7 @@ test("direct-message reads expose content and bounded counts without profiles or
 })
 
 test("direct-message reads normalize static Components V2 and quarantine unsupported rich state", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-read-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-read-"))
   try {
     const supported = new DirectMessageService({
       activityStore: new MemoryActivityStore(),
@@ -1073,7 +1073,7 @@ test("direct-message reads normalize static Components V2 and quarantine unsuppo
 })
 
 test("direct-message reads project one bounded attachment without attachment URLs", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-read-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-attachment-read-"))
   try {
     const message = rawAttachmentMessage({
       content: "Requested private report attached",
@@ -1159,7 +1159,7 @@ test("direct-message reply, edit, and deletion coordinate exact targets and veri
 
   for (const entry of cases) {
     await t.test(entry.action, async () => {
-      const directory = await mkdtemp(join(tmpdir(), `discord-mcp-dm-${entry.action}-`))
+      const directory = await mkdtemp(join(tmpdir(), `guildcontrol-dm-${entry.action}-`))
       try {
         const calls: string[] = []
         let capturedIntent: WriteCoordinationIntent | undefined
@@ -1271,7 +1271,7 @@ test("direct-message reply, edit, and deletion coordinate exact targets and veri
 test("direct-message Components V2 reply and same-format edit verify exact readback", async (t) => {
   for (const action of ["reply", "edit"] as const) {
     await t.test(action, async () => {
-      const directory = await mkdtemp(join(tmpdir(), `discord-mcp-dm-components-${action}-`))
+      const directory = await mkdtemp(join(tmpdir(), `guildcontrol-dm-components-${action}-`))
       try {
         const calls: string[] = []
         const target = action === "reply"
@@ -1374,7 +1374,7 @@ test("direct-message Components V2 reply and same-format edit verify exact readb
 })
 
 test("direct-message identical edit is a record-free no-op", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-noop-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-noop-"))
   try {
     let coordinationCalls = 0
     const activities = new MemoryActivityStore()
@@ -1413,7 +1413,7 @@ test("direct-message identical edit is a record-free no-op", async () => {
 })
 
 test("direct-message Components V2 edits are no-op exact and reject format conversion", async () => {
-  const noOpDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-noop-"))
+  const noOpDirectory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-noop-"))
   try {
     const calls: string[] = []
     const request = componentEditRequest(COMPONENT_TEXT)
@@ -1454,7 +1454,7 @@ test("direct-message Components V2 edits are no-op exact and reject format conve
       request: componentEditRequest(),
     },
   ]) {
-    const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-format-"))
+    const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-format-"))
     try {
       const service = new DirectMessageService({
         activityStore: new MemoryActivityStore(),
@@ -1475,7 +1475,7 @@ test("direct-message Components V2 edits are no-op exact and reject format conve
 })
 
 test("direct-message execution refuses changed exact message evidence before coordination", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-stale-plan-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-stale-plan-"))
   try {
     const calls: string[] = []
     let current = rawMessage()
@@ -1516,7 +1516,7 @@ test("direct-message execution refuses changed exact message evidence before coo
 })
 
 test("direct-message send execution checkpoints exact identities and recovers without redispatch", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-execute-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-execute-"))
   try {
     const calls: string[] = []
     let capturedIntent: WriteCoordinationIntent | undefined
@@ -1627,7 +1627,7 @@ test("direct-message send execution checkpoints exact identities and recovers wi
 })
 
 test("direct-message Components V2 send persists only its format and recovers after restart", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-send-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-send-"))
   try {
     const calls: string[] = []
     const activities = new MemoryActivityStore()
@@ -1729,7 +1729,7 @@ test("direct-message Components V2 send persists only its format and recovers af
 })
 
 test("direct-message verification recovers an uncertain dispatch without scanning or retrying", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-verify-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-verify-"))
   try {
     const calls: string[] = []
     let failReadback = true
@@ -1808,7 +1808,7 @@ test("direct-message verification recovers an uncertain dispatch without scannin
 })
 
 test("direct-message verification blocks pending and failed receipts before Discord access", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-verify-state-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-verify-state-"))
   try {
     const calls: string[] = []
     const store = new FileOperationStore(directory)
@@ -1873,7 +1873,7 @@ test("direct-message verification blocks pending and failed receipts before Disc
 })
 
 test("direct-message execution quarantines a creation response with parsed mentions", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-mentions-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-mentions-"))
   try {
     const calls: string[] = []
     const activities = new MemoryActivityStore()
@@ -1937,7 +1937,7 @@ test("direct-message execution distinguishes deterministic refusal from ambiguou
     { receiptReason: "operation-uncertain", status: 500, terminal: "uncertain" },
   ] as const) {
     await t.test(String(expected.status), async () => {
-      const directory = await mkdtemp(join(tmpdir(), `discord-mcp-dm-error-${expected.status}-`))
+      const directory = await mkdtemp(join(tmpdir(), `guildcontrol-dm-error-${expected.status}-`))
       try {
         const calls: string[] = []
         const base = clientFixture({ calls })
@@ -1998,7 +1998,7 @@ test("direct-message execution distinguishes deterministic refusal from ambiguou
 })
 
 test("direct-message execution keeps a post-mutation 403 readback uncertain", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-readback-403-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-readback-403-"))
   try {
     const calls: string[] = []
     const base = clientFixture({ calls })
@@ -2051,7 +2051,7 @@ test("direct-message execution keeps a post-mutation 403 readback uncertain", as
 })
 
 test("direct-message pending activity failure blocks Discord contact and settles failed", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-pending-audit-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-pending-audit-"))
   try {
     const calls: string[] = []
     const service = new DirectMessageService({
@@ -2087,7 +2087,7 @@ test("direct-message pending activity failure blocks Discord contact and settles
 
 test("direct-message completion reports operation and activity finalization failures safely", async (t) => {
   await t.test("operation receipt", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-receipt-failure-"))
+    const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-receipt-failure-"))
     try {
       const calls: string[] = []
       const activities = new MemoryActivityStore()
@@ -2134,7 +2134,7 @@ test("direct-message completion reports operation and activity finalization fail
   })
 
   await t.test("terminal activity", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-terminal-audit-failure-"))
+    const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-terminal-audit-failure-"))
     try {
       const calls: string[] = []
       const activities = new SelectiveActivityStore((entry) => (
@@ -2177,7 +2177,7 @@ test("direct-message completion reports operation and activity finalization fail
 })
 
 test("direct-message limiter rejects a second same-recipient operation before durable or Discord writes", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-rate-limit-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-rate-limit-"))
   try {
     const calls: string[] = []
     const service = new DirectMessageService({
@@ -2253,7 +2253,7 @@ test("direct-message edits reject legacy sticker and reaction state", async () =
       }],
     }),
   ]) {
-    const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-plain-edit-"))
+    const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-plain-edit-"))
     try {
       const service = new DirectMessageService({
         activityStore: new MemoryActivityStore(),
@@ -2283,7 +2283,7 @@ test("direct-message edits reject legacy sticker and reaction state", async () =
 })
 
 test("direct-message deletion accepts exact static Components V2 and rejects richer state", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-delete-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-delete-"))
   try {
     const calls: string[] = []
     let exists = true
@@ -2351,7 +2351,7 @@ test("direct-message deletion accepts exact static Components V2 and rejects ric
       components: [{ custom_id: "unsafe", id: 1, type: 2 }],
     }),
   ]) {
-    const unsafeDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-component-delete-unsafe-"))
+    const unsafeDirectory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-component-delete-unsafe-"))
     try {
       const service = new DirectMessageService({
         activityStore: new MemoryActivityStore(),
@@ -2372,7 +2372,7 @@ test("direct-message deletion accepts exact static Components V2 and rejects ric
 })
 
 test("direct-message deletion accepts one exact URL-free attachment projection", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-attachment-delete-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-attachment-delete-"))
   try {
     const calls: string[] = []
     let exists = true
@@ -2424,7 +2424,7 @@ test("direct-message deletion accepts one exact URL-free attachment projection",
 })
 
 test("direct-message edit and deletion reject messages not owned by the connector", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-dm-owner-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-dm-owner-"))
   try {
     const service = new DirectMessageService({
       activityStore: new MemoryActivityStore(),

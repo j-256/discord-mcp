@@ -345,7 +345,7 @@ function stepOperationKey(
   index: number,
 ): string {
   const digest = createHmac("sha256", operationKey)
-    .update("discord-mcp-guild-scaffold-step.v1\0")
+    .update("guildcontrol-guild-scaffold-step.v1\0")
     .update(kind)
     .update("\0")
     .update(String(index))
@@ -393,7 +393,7 @@ function scaffoldRequestDigest(
   request: NormalizedGuildScaffoldRequest,
 ): string {
   const digest = createHmac("sha256", request.operationKey)
-    .update("discord-mcp-guild-scaffold-request.v1\0")
+    .update("guildcontrol-guild-scaffold-request.v1\0")
     .update(stableString({
       applicationId,
       auditReason: request.auditReason,

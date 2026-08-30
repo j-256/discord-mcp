@@ -759,7 +759,7 @@ export function directMessageVerificationKey(token: string): Uint8Array {
     )
   }
   return createHmac("sha256", token)
-    .update("discord-mcp-direct-message-verification-key.v1\0")
+    .update("guildcontrol-direct-message-verification-key.v1\0")
     .digest()
 }
 
@@ -774,7 +774,7 @@ export function directMessageRequestDigest(
   return reviewedPlanDigest(key, {
     applicationId,
     botId,
-    domain: "discord-mcp-direct-message-request.v3",
+    domain: "guildcontrol-direct-message-request.v3",
     request,
   })
 }
@@ -1245,7 +1245,7 @@ function directMessageNonce(
   channelId: string,
 ): string {
   return createHash("sha256")
-    .update("discord-mcp-direct-message-nonce.v3\0")
+    .update("guildcontrol-direct-message-nonce.v3\0")
     .update(request.action)
     .update("\0")
     .update(request.recipientId)
@@ -1656,7 +1656,7 @@ export class DirectMessageService {
         preview: desiredPreview,
         replyToMessageId: desiredReply,
       },
-      domain: "discord-mcp-direct-message-plan.v3",
+      domain: "guildcontrol-direct-message-plan.v3",
       effect,
       file: file === null
         ? null

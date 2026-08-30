@@ -16,7 +16,7 @@ const CONCURRENCY = 4
 const REQUEST_TIMEOUT_MS = 20_000
 const RETRY_DELAYS_MS = Object.freeze([0, 750, 2_500])
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504])
-const USER_AGENT = "discord-mcp-documentation-link-verifier/1.0"
+const USER_AGENT = "guildcontrol-documentation-link-verifier/1.0"
 
 function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))

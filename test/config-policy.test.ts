@@ -77,7 +77,7 @@ test("credential-free activity-state resolution is absolute and lexical-canonica
       },
       { homeDirectory: "/test/home" },
     ),
-    "/test/home/.local/state/discord-mcp/activity.jsonl",
+    "/test/home/.local/state/guildcontrol/activity.jsonl",
   )
   assert.equal(
     loadConnectorConfig({
@@ -185,7 +185,7 @@ test("configuration parses bounded scope and deletion controls", () => {
     exportEnabled: false,
     jsonLogsEnabled: false,
   })
-  assert.equal(config.auditFile, "/test/state/discord-mcp/activity.jsonl")
+  assert.equal(config.auditFile, "/test/state/guildcontrol/activity.jsonl")
 })
 
 test("configuration strictly parses the MCP tool surface and risk-separated toolsets", () => {
@@ -375,7 +375,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     messageForwardSourceChannelIds: [],
     messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
-    nativeCommandName: "discord-mcp",
+    nativeCommandName: "guildcontrol",
     nativeInteractionChannelIds: [],
     nativeInteractionGuildIds: [],
     nativeInteractionMaxPending: 25,
@@ -847,7 +847,7 @@ test("configuration and policy isolate exact-user private-message authority", ()
 })
 
 test("configuration and policy independently gate exact-user private attachments", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-private-attachment-policy-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-private-attachment-policy-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const config = loadConnectorConfig({
@@ -1124,7 +1124,7 @@ test("configuration rejects deletion channels outside a read channel allowlist",
 })
 
 test("configuration and policy isolate webhook audit and administration authority", async (context) => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-webhook-root-")))
+  const root = await realpath(await mkdtemp(join(tmpdir(), "guildcontrol-webhook-root-")))
   context.after(() => rm(root, { force: true, recursive: true }))
   await chmod(root, 0o700)
   const config = loadConnectorConfig({
@@ -1375,7 +1375,7 @@ test("configuration and policy isolate webhook audit and administration authorit
 })
 
 test("configuration and policy isolate credential-safe webhook messages", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "discord-mcp-webhook-messages-")))
+  const root = await realpath(await mkdtemp(join(tmpdir(), "guildcontrol-webhook-messages-")))
   await chmod(root, 0o700)
   try {
     const config = loadConnectorConfig({
@@ -1896,7 +1896,7 @@ test("configuration and policy require an exact administration guild and protect
     messageForwardSourceChannelIds: [],
     messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
-    nativeCommandName: "discord-mcp",
+    nativeCommandName: "guildcontrol",
     nativeInteractionChannelIds: [],
     nativeInteractionGuildIds: [],
     nativeInteractionMaxPending: 25,
@@ -2380,7 +2380,7 @@ test("configuration and policy isolate capability-safe invite audit and revocati
 
 test("configuration and policy isolate finite private-file invite creation", async (context) => {
   const capabilityRoot = await realpath(
-    await mkdtemp(join(tmpdir(), "discord-mcp-invite-policy-")),
+    await mkdtemp(join(tmpdir(), "guildcontrol-invite-policy-")),
   )
   context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
   const config = loadConnectorConfig({
@@ -2459,7 +2459,7 @@ test("configuration and policy isolate finite private-file invite creation", asy
 
 test("configuration and policy separately gate persistent invite role assignment", async (context) => {
   const capabilityRoot = await realpath(
-    await mkdtemp(join(tmpdir(), "discord-mcp-invite-role-policy-")),
+    await mkdtemp(join(tmpdir(), "guildcontrol-invite-role-policy-")),
   )
   context.after(() => rm(capabilityRoot, { recursive: true, force: true }))
   const config = loadConnectorConfig({
@@ -5902,7 +5902,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     messageForwardSourceChannelIds: [],
     messageForwardTargetChannelIds: [],
     nativeCommandChangesEnabled: false,
-    nativeCommandName: "discord-mcp",
+    nativeCommandName: "guildcontrol",
     nativeInteractionChannelIds: [],
     nativeInteractionGuildIds: [],
     nativeInteractionMaxPending: 25,
@@ -6038,7 +6038,7 @@ test("configuration and policy isolate AutoMod audit, changes, and alert channel
 })
 
 test("configuration and policy isolate guild expression audit, changes, and local creation roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-expression-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-expression-"))
   const root = await realpath(temporary)
   try {
     const config = loadConnectorConfig({
@@ -6112,7 +6112,7 @@ test("configuration and policy isolate guild expression audit, changes, and loca
 })
 
 test("configuration and policy bind application emojis to pinned identity and local roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-application-emoji-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-application-emoji-"))
   const root = await realpath(temporary)
   try {
     const config = loadConnectorConfig({
@@ -6190,7 +6190,7 @@ test("configuration and policy isolate additive application intent changes", () 
 })
 
 test("configuration and policy isolate bot-profile reads, changes, and image roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-bot-profile-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-bot-profile-"))
   const root = await realpath(temporary)
   try {
     const config = loadConnectorConfig({
@@ -6251,7 +6251,7 @@ test("configuration and policy isolate bot-profile reads, changes, and image roo
 })
 
 test("configuration and policy isolate soundboard audit, changes, and local audio roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-soundboard-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-soundboard-"))
   const root = await realpath(temporary)
   try {
     const config = loadConnectorConfig({
@@ -6392,7 +6392,7 @@ test("configuration and policy isolate guarded soundboard playback to exact chan
 })
 
 test("configuration and policy isolate scheduled event audit, changes, and cover roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-event-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-event-"))
   const root = await realpath(temporary)
   try {
     const config = loadConnectorConfig({
@@ -6567,7 +6567,7 @@ test("configuration and policy isolate Stage instances to exact channels", () =>
 })
 
 test("configuration and policy isolate local attachments to exact channels and roots", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-config-attachment-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-config-attachment-"))
   const root = await realpath(temporary)
   try {
     const linkedTarget = join(root, "linked-target")

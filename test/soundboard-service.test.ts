@@ -439,7 +439,7 @@ test("soundboard policy separates audit, mutation, and exact guild scope", async
 })
 
 test("soundboard create binds validated audio and writes only after pending activity", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-service-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-soundboard-service-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "alert.mp3")
@@ -636,7 +636,7 @@ test("soundboard execution rejects stale plans and reserved operation keys", asy
 })
 
 test("soundboard creation detects changed local audio before reservation", async (context) => {
-  const temporary = await mkdtemp(join(tmpdir(), "discord-mcp-soundboard-replan-"))
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-soundboard-replan-"))
   context.after(() => rm(temporary, { force: true, recursive: true }))
   const root = await realpath(temporary)
   const filePath = join(root, "planned.mp3")

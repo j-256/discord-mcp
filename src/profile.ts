@@ -154,7 +154,7 @@ export function resolveProfileDirectory(
       ? configured
       : join(homeDirectory, ".config")
   }
-  return resolve(root, "discord-mcp", "profiles")
+  return resolve(root, "guildcontrol", "profiles")
 }
 
 export function profilePath(

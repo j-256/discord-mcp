@@ -50,7 +50,7 @@ const ROLE_ID = "500000000000000001"
 const TOKEN = "test-discord-token"
 const TOKEN_ALIAS = "DISCORD_SUPPORT_BOT_TOKEN"
 const HEADER_ALIAS = "HONEYCOMB_OTLP_HEADERS"
-const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "DISCORD_MCP_UNDECLARED_POLICY"
+const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "GUILDCONTROL_UNDECLARED_POLICY"
 const COMPONENT_LINK_ORIGIN = "https://docs.example.com"
 
 function document(
@@ -70,7 +70,7 @@ function document(
 }
 
 async function configRoot(context: test.TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-config-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-config-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return realpath(root)
 }
@@ -80,7 +80,7 @@ async function writeConfig(
   value: ConnectorConfigDocument = document(),
 ): Promise<string> {
   const root = await configRoot(context)
-  const file = join(root, "discord-mcp.json")
+  const file = join(root, "guildcontrol.json")
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
   return file
 }

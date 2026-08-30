@@ -3,12 +3,12 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro"
 
 export const prerender = true
 
-const NOT_FOUND_URL = "https://j-256.github.io/discord-mcp/404.html"
+const NOT_FOUND_URL = "https://j-256.github.io/guildcontrol/404.html"
 ---
 
 <StarlightPage
   frontmatter={{
-    description: "Recover from a missing Discord MCP documentation route",
+    description: "Recover from a missing GuildControl MCP documentation route",
     editUrl: false,
     head: [
       { tag: "link", attrs: { href: NOT_FOUND_URL, rel: "canonical" } },
@@ -18,13 +18,13 @@ const NOT_FOUND_URL = "https://j-256.github.io/discord-mcp/404.html"
       actions: [
         {
           icon: "right-arrow",
-          link: "/discord-mcp/start/choose/",
+          link: "/guildcontrol/start/choose/",
           text: "Choose a path",
           variant: "primary",
         },
         {
           icon: "open-book",
-          link: "/discord-mcp/",
+          link: "/guildcontrol/",
           text: "Documentation home",
         },
       ],

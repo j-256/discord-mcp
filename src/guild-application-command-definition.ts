@@ -1383,7 +1383,7 @@ export function guildApplicationCommandDefinitionDigest(
   definition: GuildApplicationCommandDefinition,
 ): string {
   return `sha256:${createHash("sha256")
-    .update("discord-mcp:guild-application-command-definition:v1\0")
+    .update("guildcontrol:guild-application-command-definition:v1\0")
     .update(stableString(definition))
     .digest("hex")}`
 }

@@ -1522,7 +1522,7 @@ export class WelcomeScreenService {
       applicationId,
       botId,
       desired,
-      domain: "discord-mcp-welcome-screen-change-plan.v1",
+      domain: "guildcontrol-welcome-screen-change-plan.v1",
       evidence,
       localLimits: LOCAL_LIMITS,
       privacy,

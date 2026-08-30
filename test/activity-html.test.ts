@@ -212,7 +212,7 @@ test("activity HTML escapes hostile local evidence before embedding it", async (
 })
 
 test("activity HTML export is deterministic, exclusive, private, and credential-free", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-activity-html-test-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-activity-html-test-"))
   const first = join(directory, "first.html")
   const second = join(directory, "second.html")
   const existing = join(directory, "existing.html")

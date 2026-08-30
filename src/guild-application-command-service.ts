@@ -595,7 +595,7 @@ function inventoryDigest(
   guildId: string,
   inventory: readonly ProjectedGuildApplicationCommand[],
 ): string {
-  return evidenceDigest("discord-mcp:guild-application-command-inventory:v1", {
+  return evidenceDigest("guildcontrol:guild-application-command-inventory:v1", {
     applicationId,
     guildId,
     inventory,
@@ -607,7 +607,7 @@ function permissionDigest(
   guildId: string,
   permissions: readonly ExactPermissionEntry[],
 ): string {
-  return evidenceDigest("discord-mcp:guild-application-command-permissions:v1", {
+  return evidenceDigest("guildcontrol:guild-application-command-permissions:v1", {
     applicationId,
     guildId,
     permissions,
@@ -627,7 +627,7 @@ function inventoryEntries(
 }
 
 function permissionEntryDigest(entry: ExactPermissionEntry): string {
-  return evidenceDigest("discord-mcp:guild-application-command-permission-entry:v1", entry)
+  return evidenceDigest("guildcontrol:guild-application-command-permission-entry:v1", entry)
 }
 
 function permissionEntries(

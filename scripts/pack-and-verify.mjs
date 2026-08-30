@@ -24,20 +24,20 @@ import {
 } from "./release-lib.mjs"
 import { containsSpecificReference } from "./neutrality.mjs"
 
-const PACKAGE_NAME = "@j-256/discord-mcp"
+const PACKAGE_NAME = "guildcontrol"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
-const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v3"
-const CATALOG_HTML_FORMAT = "discord-mcp.catalog-html.v3"
-const CONFIG_WORKBENCH_HTML_FORMAT = "discord-mcp.config-workbench-html.v1"
-const HOST_ADAPTER_CATALOG_FORMAT = "discord-mcp.host-adapters.v1"
-const HOST_ACTIVATION_FORMAT = "discord-mcp.host-activation.v1"
-const HOST_ACTIVATION_HTML_FORMAT = "discord-mcp.host-activation-html.v2"
-const HOST_CHANGE_APPLY_FORMAT = "discord-mcp.host-change-apply.v1"
-const HOST_CHANGE_PLAN_FORMAT = "discord-mcp.host-change-plan.v1"
-const HOST_INSPECTION_FORMAT = "discord-mcp.host-inspection.v1"
-const MIGRATION_CATALOG_FORMAT = "discord-mcp.migration-catalog.v1"
-const MIGRATION_PLAN_FORMAT = "discord-mcp.migration-plan.v1"
-const MIGRATION_HTML_FORMAT = "discord-mcp.migration-html.v1"
+const CATALOG_EVIDENCE_FORMAT = "guildcontrol.catalog-evidence.v3"
+const CATALOG_HTML_FORMAT = "guildcontrol.catalog-html.v3"
+const CONFIG_WORKBENCH_HTML_FORMAT = "guildcontrol.config-workbench-html.v1"
+const HOST_ADAPTER_CATALOG_FORMAT = "guildcontrol.host-adapters.v1"
+const HOST_ACTIVATION_FORMAT = "guildcontrol.host-activation.v1"
+const HOST_ACTIVATION_HTML_FORMAT = "guildcontrol.host-activation-html.v2"
+const HOST_CHANGE_APPLY_FORMAT = "guildcontrol.host-change-apply.v1"
+const HOST_CHANGE_PLAN_FORMAT = "guildcontrol.host-change-plan.v1"
+const HOST_INSPECTION_FORMAT = "guildcontrol.host-inspection.v1"
+const MIGRATION_CATALOG_FORMAT = "guildcontrol.migration-catalog.v1"
+const MIGRATION_PLAN_FORMAT = "guildcontrol.migration-plan.v1"
+const MIGRATION_HTML_FORMAT = "guildcontrol.migration-html.v1"
 const DUMMY_TOKEN = "package-verification-placeholder"
 const EXPECTED_CONFIG_RECIPES = [
   "guild-starter",
@@ -122,7 +122,7 @@ const REQUIRED_FILES = [
   "PRIVACY.md",
   "README.md",
   "SECURITY.md",
-  "discord-mcp.config.schema.json",
+  "guildcontrol.config.schema.json",
   "dist/bin.js",
   "dist/cli.js",
   "dist/host-activation-html.js",
@@ -149,7 +149,7 @@ const STATIC_FILES = new Set([
   "PRIVACY.md",
   "README.md",
   "SECURITY.md",
-  "discord-mcp.config.schema.json",
+  "guildcontrol.config.schema.json",
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
@@ -320,7 +320,7 @@ const INSTALLED_SMOKE = `
 import assert from "node:assert/strict"
 import { Client } from "@modelcontextprotocol/client"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio"
-import * as connector from "@j-256/discord-mcp"
+import * as connector from "guildcontrol"
 
 const DISCOVERY_TOOL_NAME = "discover_discord_tools"
 const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
@@ -470,7 +470,7 @@ try {
   assert.equal(listedGuard.isError, true)
   assert.equal(listedGuard.structuredContent.error.code, "CATALOG_ONLY")
   assert.equal(listedGuard.content.length, 2)
-  assert.match(listedGuard.content[1].text, /^DISCORD_MCP_RECEIPT /)
+  assert.match(listedGuard.content[1].text, /^GUILDCONTROL_RECEIPT /)
   assert.match(listedGuard.content[1].text, /CATALOG_ONLY/)
   const catalogSafety = await catalogClient.readResource({ uri: "${STATIC_RESOURCE_URI}" })
   assert.equal(catalogSafety.contents.length, 1)
@@ -502,7 +502,7 @@ try {
   })
   assert.equal(modernCatalogClient.getProtocolEra(), "modern")
   assert.equal(guard.content.length, 2)
-  assert.match(guard.content[1].text, /^DISCORD_MCP_RECEIPT /)
+  assert.match(guard.content[1].text, /^GUILDCONTROL_RECEIPT /)
   assert.match(guard.content[1].text, /CATALOG_ONLY/)
   assert.deepEqual(modernCatalogClient.getServerCapabilities().completions, {})
   assert.deepEqual(completion.completion.values, [])
@@ -622,16 +622,15 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive],
     { cwd: consumer, env: environment },
   )
-  const entrypoint = join(consumer, "node_modules", "@j-256", "discord-mcp", "dist", "bin.js")
+  const entrypoint = join(consumer, "node_modules", "guildcontrol", "dist", "bin.js")
   const libraryEntrypoint = join(
     consumer,
     "node_modules",
-    "@j-256",
-    "discord-mcp",
+    "guildcontrol",
     "dist",
     "index.js",
   )
-  const bin = join(consumer, "node_modules", ".bin", "discord-mcp")
+  const bin = join(consumer, "node_modules", ".bin", "guildcontrol")
   const versionResult = await run(bin, ["version"], {
     capture: true,
     cwd: consumer,
@@ -664,7 +663,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     libraryResult.stderr,
     /package library entrypoint does not run an MCP server/u,
   )
-  assert.match(libraryResult.stderr, /discord-mcp serve --config FILE/u)
+  assert.match(libraryResult.stderr, /guildcontrol serve --config FILE/u)
   assert.match(libraryResult.stderr, /node dist\/bin\.js serve --config FILE/u)
   invariant(
     !libraryResult.stderr.includes(DUMMY_TOKEN),
@@ -793,15 +792,15 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   })
   const packageCommand = `npx --yes ${PACKAGE_NAME}@${version}`
   assert.deepEqual(installPlan.postInstall.commands, [
-    `${packageCommand} setup --npx --config ./discord-mcp.json --preset channel-reader --guild-id 300000000000000001 --channel-id CHANNEL_ID`,
-    `${packageCommand} config validate ./discord-mcp.json`,
-    `${packageCommand} doctor --config ./discord-mcp.json --online`,
-    `${packageCommand} smoke --config ./discord-mcp.json`,
-    `${packageCommand} host --npx --config ./discord-mcp.json --html ./discord-mcp-host-activation.html`,
+    `${packageCommand} setup --npx --config ./guildcontrol.json --preset channel-reader --guild-id 300000000000000001 --channel-id CHANNEL_ID`,
+    `${packageCommand} config validate ./guildcontrol.json`,
+    `${packageCommand} doctor --config ./guildcontrol.json --online`,
+    `${packageCommand} smoke --config ./guildcontrol.json`,
+    `${packageCommand} host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html`,
   ])
   assert.deepEqual(installPlan.postInstall.firstRead, {
     guildId: "300000000000000001",
-    prompt: "Show me the channels in Discord server 300000000000000001 using Discord MCP. Do not make changes.",
+    prompt: "Show me the channels in Discord server 300000000000000001 using GuildControl MCP. Do not make changes.",
     toolNames: ["list_channels"],
     writeCapable: false,
   })
@@ -834,7 +833,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   invariant(catalog.observabilityExport === "disabled", "installed catalog enabled telemetry export")
   invariant(catalog.activityRecordsCreated === false, "installed catalog created activity records")
   invariant(
-    catalog.toolAccessManifest?.format === "discord-mcp.tool-access-manifest.v2"
+    catalog.toolAccessManifest?.format === "guildcontrol.tool-access-manifest.v2"
       && catalog.toolAccessManifest.entries?.length === catalog.toolCount
       && catalog.toolAccessManifest.requirementCoverage?.complete === true
       && catalog.toolAccessManifest.requirementCoverage?.unknownEntries === 0
@@ -1051,7 +1050,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   const secondCatalogHtml = join(consumer, "catalog-second.html")
   const catalogHtmlEnvironment = {
     ...catalogEnvironment,
-    DISCORD_MCP_CONFIG_FILE: join(consumer, "unavailable-catalog-policy.json"),
+    GUILDCONTROL_CONFIG_FILE: join(consumer, "unavailable-catalog-policy.json"),
     DISCORD_PACKAGE_BOT_TOKEN: DUMMY_TOKEN,
   }
   const firstCatalogHtmlResult = await run(bin, ["catalog", "--html", firstCatalogHtml], {
@@ -1064,8 +1063,8 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     cwd: consumer,
     env: catalogHtmlEnvironment,
   })
-  assert.match(firstCatalogHtmlResult.stdout, /Discord MCP catalog HTML: ok/)
-  assert.match(secondCatalogHtmlResult.stdout, /Discord MCP catalog HTML: ok/)
+  assert.match(firstCatalogHtmlResult.stdout, /GuildControl MCP catalog HTML: ok/)
+  assert.match(secondCatalogHtmlResult.stdout, /GuildControl MCP catalog HTML: ok/)
   const firstCatalogHtmlBytes = await readFile(firstCatalogHtml)
   const secondCatalogHtmlBytes = await readFile(secondCatalogHtml)
   invariant(firstCatalogHtmlBytes.equals(secondCatalogHtmlBytes), "installed catalog HTML is not deterministic")
@@ -1100,10 +1099,10 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   }
   invariant(!catalogHtml.includes(DUMMY_TOKEN), "installed catalog HTML captured an ambient secret")
   invariant(
-    !catalogHtml.includes(catalogHtmlEnvironment.DISCORD_MCP_CONFIG_FILE),
+    !catalogHtml.includes(catalogHtmlEnvironment.GUILDCONTROL_CONFIG_FILE),
     "installed catalog HTML captured the ambient policy selector",
   )
-  const configFile = join(consumer, "discord-mcp.json")
+  const configFile = join(consumer, "guildcontrol.json")
   const configResult = await run(bin, [
     "config",
     "init",
@@ -1211,11 +1210,11 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     const vscodeServer = adapters.vscode.configuration.servers[report.launch.serverName]
     assert.deepEqual(adapters.vscode.configuration.inputs, [{
       description: `Discord bot credential for ${credentialName}`,
-      id: "discord-mcp-credential-1",
+      id: "guildcontrol-credential-1",
       password: true,
       type: "promptString",
     }])
-    assert.equal(vscodeServer.env[credentialName], "${input:discord-mcp-credential-1}")
+    assert.equal(vscodeServer.env[credentialName], "${input:guildcontrol-credential-1}")
     invariant(vscodeServer.sandboxEnabled === undefined, "installed VS Code adapter enables auto-approving sandbox behavior")
     const geminiManifest = adapters["gemini-extension"].configuration
     assert.deepEqual(geminiManifest.settings, [{
@@ -1279,7 +1278,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
   for (const adapter of firstHostActivation.adapterCatalog.adapters) {
     invariant(hostActivationHtml.includes(adapter.adapterDigest), `installed host activation HTML omitted ${adapter.id} evidence`)
   }
-  invariant(hostActivationHtml.includes("${input:discord-mcp-credential-1}"), "installed host activation HTML omitted VS Code secure input")
+  invariant(hostActivationHtml.includes("${input:guildcontrol-credential-1}"), "installed host activation HTML omitted VS Code secure input")
   invariant(hostActivationHtml.includes("Private install URI"), "installed host activation HTML omitted the private Cursor install URI")
   invariant(!/href="cursor:/u.test(hostActivationHtml), "installed host activation HTML made the private Cursor URI navigable")
   invariant(hostActivationHtml.includes("connect-src 'none'"), "installed host activation HTML permits network connections")
@@ -1297,8 +1296,8 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     cwd: consumer,
     env: environment,
   })
-  invariant(selectedAdapter.stdout.includes("Discord MCP host adapter: Visual Studio Code (vscode)"), "installed host adapter selection did not render")
-  invariant(selectedAdapter.stdout.includes("${input:discord-mcp-credential-1}"), "installed host adapter selection omitted VS Code secure input")
+  invariant(selectedAdapter.stdout.includes("GuildControl MCP host adapter: Visual Studio Code (vscode)"), "installed host adapter selection did not render")
+  invariant(selectedAdapter.stdout.includes("${input:guildcontrol-credential-1}"), "installed host adapter selection omitted VS Code secure input")
   invariant(!selectedAdapter.stdout.includes(DUMMY_TOKEN), "installed host adapter selection captured an ambient secret")
   const hostConfigurationFile = join(consumer, "mcp-host.json")
   const expectedHostConfiguration = firstHostActivation.adapterCatalog.adapters
@@ -1777,7 +1776,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
 const outputDirectory = parseOutputDirectory(process.argv.slice(2))
 const packageJson = await readJson(join(REPOSITORY_ROOT, "package.json"))
 invariant(packageJson.name === PACKAGE_NAME, "package identity changed before pack verification")
-const temporaryWorkDirectory = await mkdtemp(join(tmpdir(), "discord-mcp-pack-"))
+const temporaryWorkDirectory = await mkdtemp(join(tmpdir(), "guildcontrol-pack-"))
 const workDirectory = await realpath(temporaryWorkDirectory)
 try {
   await run(process.execPath, ["scripts/check-release-metadata.mjs"])
@@ -1794,7 +1793,7 @@ try {
   invariant(firstBytes.equals(secondBytes), "independent npm archives are not byte-identical")
   invariant(first.integrity === sha512Integrity(firstBytes), "npm pack reported unexpected SHA-512 integrity")
   invariant(second.integrity === first.integrity, "independent npm archives report different integrity")
-  invariant(basename(first.archive) === `j-256-discord-mcp-${packageJson.version}.tgz`, "npm archive filename is invalid")
+  invariant(basename(first.archive) === `guildcontrol-${packageJson.version}.tgz`, "npm archive filename is invalid")
   const extraction = join(workDirectory, "extracted")
   await mkdir(extraction)
   await run("tar", ["-xzf", first.archive, "-C", extraction])

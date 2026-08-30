@@ -789,7 +789,7 @@ export class GuildProfileService {
       botId,
       changedFields: changed,
       desiredRequest,
-      domain: "discord-mcp-guild-profile-change-plan.v1",
+      domain: "guildcontrol-guild-profile-change-plan.v1",
       evidence,
       localConstraints: LOCAL_CONSTRAINTS,
       privacy,

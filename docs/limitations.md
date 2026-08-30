@@ -2,7 +2,7 @@
 
 [Getting started](getting-started.md) | [Migration guide](migration.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md) | [Support](../SUPPORT.md)
 
-Discord MCP is designed for an operator-owned bot, a local stdio MCP host, exact least-privilege policy, transient Discord content, and review before consequential changes. This guide helps decide whether that model fits before a token is created, a host is configured, or a write capability is enabled.
+GuildControl MCP is designed for an operator-owned bot, a local stdio MCP host, exact least-privilege policy, transient Discord content, and review before consequential changes. This guide helps decide whether that model fits before a token is created, a host is configured, or a write capability is enabled.
 
 The [complete reference](reference.md) remains authoritative for each tool's exact permissions, privacy projection, unsupported Discord states, planning evidence, and recovery behavior.
 
@@ -22,7 +22,7 @@ The [complete reference](reference.md) remains authoritative for each tool's exa
 | Use a compatible one-click MCPB host with an environment-backed token policy | Designed fit | Import one deterministic cross-platform bundle, select the complete strict policy, and enter only the token through the host's sensitive prompt |
 | Use another local MCP host or a file-backed token policy | Designed fit | `host` emits a pinned model-neutral launch contract, deterministic host adapters, and an optional private interactive activation guide |
 | Verify that one static generated host projection has not drifted | Designed fit | `host --adapter ID --inspect-host-file FILE` compares the explicitly selected JSON destination with the exact installed-release adapter and returns only fixed path- and value-free evidence |
-| Plan a switch from a scored local Discord MCP release | Designed fit | `migrate` accounts for every audited source tool and maps outcomes into target presets, recipes, tools, and trust-model changes without reading or changing either deployment |
+| Plan a switch from a scored local GuildControl MCP release | Designed fit | `migrate` accounts for every audited source tool and maps outcomes into target presets, recipes, tools, and trust-model changes without reading or changing either deployment |
 | Use read and planning tools in a host without interactive elicitation | Partial fit | Reads and plans remain usable, but reviewed writes cannot execute through that host |
 | Use a third-party shared bot or hosted remote endpoint | Not provided | Each operator runs a local process with their own bot; the project operates no bot, relay, HTTP service, or account |
 | Use a Discord user account or selfbot | Not supported | The connector accepts a Discord bot token and verifies the pinned application and bot identities |

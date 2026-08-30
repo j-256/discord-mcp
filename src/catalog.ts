@@ -51,12 +51,12 @@ import {
   type McpPolicyCompletionBinding,
 } from "./mcp-completions.js"
 import {
-  createDiscordMcpServer,
+  createGuildControlServer,
   type DiscordToolService,
 } from "./mcp.js"
 import {
-  DISCORD_MCP_RECEIPT_PREFIX,
-  DISCORD_MCP_RECEIPT_SCHEMA,
+  GUILDCONTROL_RECEIPT_PREFIX,
+  GUILDCONTROL_RECEIPT_SCHEMA,
 } from "./mcp-output.js"
 import {
   MCP_APP_EXTENSION_ID,
@@ -87,9 +87,9 @@ import {
 import type { OperationalObserver } from "./observability.js"
 import { ScopePolicy } from "./policy.js"
 
-export const CATALOG_EVIDENCE_FORMAT = "discord-mcp.catalog-evidence.v3"
+export const CATALOG_EVIDENCE_FORMAT = "guildcontrol.catalog-evidence.v3"
 
-const CATALOG_HOME_DIRECTORY = "/discord-mcp-catalog"
+const CATALOG_HOME_DIRECTORY = "/guildcontrol-catalog"
 const CATALOG_TOKEN_PLACEHOLDER = "catalog-only-placeholder"
 const CATALOG_APPLICATION_ID = "900000000000000001"
 const CATALOG_BOT_ID = "900000000000000002"
@@ -474,8 +474,8 @@ function assertCatalogOnlyResult(result: CallToolResult): void {
   const fallback = result.content[1]
   catalogInvariant(
     fallback?.type === "text"
-    && fallback.text === `${DISCORD_MCP_RECEIPT_PREFIX}${JSON.stringify({
-      receiptSchema: DISCORD_MCP_RECEIPT_SCHEMA,
+    && fallback.text === `${GUILDCONTROL_RECEIPT_PREFIX}${JSON.stringify({
+      receiptSchema: GUILDCONTROL_RECEIPT_SCHEMA,
       schemaVersion: SCHEMA_VERSION,
       status: CATALOG_ONLY_STATUS,
       error: {
@@ -489,7 +489,7 @@ function assertCatalogOnlyResult(result: CallToolResult): void {
 }
 
 export function createDiscordCatalogServer(): McpServer {
-  const server = createDiscordMcpServer({
+  const server = createGuildControlServer({
     catalogOnly: true,
     config: CATALOG_CONFIG,
     environment: CATALOG_ENVIRONMENT,
@@ -503,7 +503,7 @@ export function createDiscordCatalogServer(): McpServer {
 export async function inspectDiscordCatalog(): Promise<DiscordCatalogSnapshot> {
   const server = createDiscordCatalogServer()
   const client = new Client(
-    { name: "discord-mcp-catalog-check", version: CONNECTOR_VERSION },
+    { name: "guildcontrol-catalog-check", version: CONNECTOR_VERSION },
     { capabilities: {} },
   )
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -812,7 +812,7 @@ export async function checkDiscordCatalog(): Promise<DiscordCatalogCheckReport> 
   return (await inspectDiscordCatalog()).report
 }
 
-export function runDiscordMcpCatalog(options: DiscordCatalogRunOptions = {}) {
+export function runGuildControlCatalog(options: DiscordCatalogRunOptions = {}) {
   const stderr = options.stderr || process.stderr
   const handle = serveStdio(createDiscordCatalogServer, {
     onerror() {
@@ -823,6 +823,6 @@ export function runDiscordMcpCatalog(options: DiscordCatalogRunOptions = {}) {
       options.stdout || process.stdout,
     ),
   })
-  stderr.write("[mcp] Discord credential-free catalog stdio server ready\n")
+  stderr.write("[mcp] GuildControl MCP credential-free catalog stdio server ready\n")
   return handle
 }

@@ -955,7 +955,7 @@ export class DeletionService {
         parentId: state.channel.parent_id ?? null,
         type: state.channel.type,
       },
-      domain: "discord-mcp-message-deletion-plan.v2",
+      domain: "guildcontrol-message-deletion-plan.v2",
       guild: {
         id: state.guild.id,
         name: state.guild.name,

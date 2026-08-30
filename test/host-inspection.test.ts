@@ -34,7 +34,7 @@ import { createStdioLaunchDescriptor } from "../src/operator.js"
 const APPLICATION_ID = "100000000000000001"
 const BOT_ID = "200000000000000001"
 const GUILD_ID = "300000000000000001"
-const CONFIG_FILE = "/configuration/discord-mcp.json"
+const CONFIG_FILE = "/configuration/guildcontrol.json"
 const TOKEN_ALIAS = "DISCORD_HOST_INSPECTION_TOKEN"
 const RAW_SECRET = "host-file-secret-that-must-never-escape"
 const SERVER_NAME = "discord-inspection"
@@ -51,7 +51,7 @@ function plan() {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `@j-256/discord-mcp@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document, file: CONFIG_FILE },
@@ -94,7 +94,7 @@ function addUnrelatedState(adapter: HostAdapter): Record<string, unknown> {
 }
 
 test("host inspection matches every exact adapter and ignores unrelated shared state", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-inspection-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-inspection-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()
@@ -145,7 +145,7 @@ test("host inspection matches every exact adapter and ignores unrelated shared s
 })
 
 test("host inspection reports canonical fixed server drift without returning observed values", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-drift-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-drift-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()
@@ -178,7 +178,7 @@ test("host inspection reports canonical fixed server drift without returning obs
 })
 
 test("host inspection distinguishes missing and invalid server projections", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-structure-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-structure-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()
@@ -206,7 +206,7 @@ test("host inspection distinguishes missing and invalid server projections", asy
 })
 
 test("VS Code inspection requires each generated sensitive input exactly once", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-vscode-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-vscode-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()
@@ -233,7 +233,7 @@ test("VS Code inspection requires each generated sensitive input exactly once", 
 })
 
 test("Gemini extension inspection compares the dedicated manifest completely", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-gemini-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-gemini-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()
@@ -264,7 +264,7 @@ test("Gemini extension inspection compares the dedicated manifest completely", a
 })
 
 test("host inspection rejects unsafe or ambiguous files without leaking paths or content", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "discord-mcp-host-files-"))
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-files-"))
   context.after(() => rm(directory, { force: true, recursive: true }))
   const root = await realpath(directory)
   const activation = plan()

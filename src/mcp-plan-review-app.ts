@@ -839,7 +839,7 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
         method: "ui/initialize",
         params: {
           appCapabilities: { availableDisplayModes: ["inline"] },
-          appInfo: { name: "discord-mcp-plan-review", version: "1.0.0" },
+          appInfo: { name: "guildcontrol-plan-review", version: "1.0.0" },
           protocolVersion: APP_PROTOCOL_VERSION
         }
       });

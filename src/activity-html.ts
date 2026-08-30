@@ -15,7 +15,7 @@ import {
 } from "./exclusive-private-file.js"
 import type { WriteCoordinationClaimStatus } from "./write-coordination.js"
 
-export const ACTIVITY_HTML_FORMAT = "discord-mcp.activity-html.v1"
+export const ACTIVITY_HTML_FORMAT = "guildcontrol.activity-html.v1"
 export const ACTIVITY_HTML_SCHEMA_VERSION = 1
 
 export interface DiscordActivityHtmlExportOptions {
@@ -222,8 +222,8 @@ export function renderDiscordActivityHtml(
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; manifest-src 'none'; media-src 'none'; object-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'unsafe-inline'; worker-src 'none'; require-trusted-types-for 'script'">
-  <meta name="description" content="Private content-free Discord MCP activity review">
-  <title>Discord MCP activity review: ${report.outcome}</title>
+  <meta name="description" content="Private content-free GuildControl MCP activity review">
+  <title>GuildControl MCP activity review: ${report.outcome}</title>
   <style>
     :root{--bg:#f3f5f9;--panel:#fff;--panel-2:#f8f9fc;--ink:#182033;--muted:#5a6478;--line:#d9deea;--brand:#4455d8;--action:#3b46bf;--good:#087b61;--warn:#9a5700;--danger:#b52d45;--pending:#8a4b00;--focus:#b94b00;--shadow:0 18px 50px rgba(34,44,72,.1)}
     @media(prefers-color-scheme:dark){:root{--bg:#0c111b;--panel:#151c29;--panel-2:#101724;--ink:#eff2ff;--muted:#aab4c8;--line:#313a4c;--brand:#8d97ff;--action:#3b46bf;--good:#67d5b6;--warn:#ffc06d;--danger:#ff8798;--pending:#ffc06d;--focus:#ffd166;--shadow:0 18px 50px rgba(0,0,0,.32)}}

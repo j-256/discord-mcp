@@ -69,7 +69,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           test "$RELEASE_TAG" = "v$version"
           printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          test "$GITHUB_REPOSITORY" = "j-256/discord-mcp"
+          test "$GITHUB_REPOSITORY" = "j-256/guildcontrol"
           test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
           test "$REPOSITORY_PRIVATE" = "false"
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
@@ -87,12 +87,12 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -eu
-          public_icon="$RUNNER_TEMP/discord-mcp-icon.png"
+          public_icon="$RUNNER_TEMP/guildcontrol-icon.png"
           curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
             -fsSLo "$public_icon" \
-            "https://raw.githubusercontent.com/j-256/discord-mcp/$RELEASE_TAG/assets/discord-mcp-icon.png"
-          cmp assets/discord-mcp-icon.png "$public_icon"
+            "https://raw.githubusercontent.com/j-256/guildcontrol/$RELEASE_TAG/assets/guildcontrol-icon.png"
+          cmp assets/guildcontrol-icon.png "$public_icon"
 
       - name: Install reviewed dependencies
         run: npm run deps:locked
@@ -202,7 +202,7 @@ jobs:
             --expect-registry missing
       - name: Stage the npm candidate for human approval
         if: ${{ inputs.operation == 'stage' }}
-        run: npm stage publish "$TARBALL" --access public --provenance
+        run: npm stage publish "$TARBALL" --provenance
 
       - name: Verify promoted npm artifact and registry state
         if: ${{ inputs.operation == 'register' }}
@@ -343,7 +343,7 @@ jobs:
           test "$(node --version)" = "v24.19.0"
           version="$(node -p "require('./package.json').version")"
           test "$RELEASE_TAG" = "v$version"
-          test "$GITHUB_REPOSITORY" = "j-256/discord-mcp"
+          test "$GITHUB_REPOSITORY" = "j-256/guildcontrol"
           test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
           test "$REPOSITORY_PRIVATE" = "false"
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
@@ -351,7 +351,7 @@ jobs:
           git merge-base --is-ancestor HEAD refs/remotes/origin/main
           set -- "$RUNNER_TEMP"/release/*.tgz
           test "$#" -eq 1
-          test "$(basename "$1")" = "j-256-discord-mcp-$version.tgz"
+          test "$(basename "$1")" = "guildcontrol-$version.tgz"
           state_file="$RUNNER_TEMP/published-state.json"
           node scripts/check-published-artifacts.mjs \
             --tarball "$1" \
@@ -434,8 +434,8 @@ jobs:
           gh release upload "$RELEASE_TAG" \
             "$RUNNER_TEMP/release/SHA256SUMS" \
             "$RUNNER_TEMP/release/catalog-evidence.json" \
-            "$RUNNER_TEMP/release/discord-mcp-${RELEASE_TAG#v}.mcpb" \
-            "$RUNNER_TEMP/release/j-256-discord-mcp-${RELEASE_TAG#v}.tgz" \
+            "$RUNNER_TEMP/release/guildcontrol-${RELEASE_TAG#v}.mcpb" \
+            "$RUNNER_TEMP/release/guildcontrol-${RELEASE_TAG#v}.tgz" \
             "$RUNNER_TEMP/release/release-notes.md" \
             "$RUNNER_TEMP/release/sbom.spdx.json" \
             --repo "$GITHUB_REPOSITORY" \
@@ -502,8 +502,8 @@ jobs:
           for name in \
             SHA256SUMS \
             catalog-evidence.json \
-            "discord-mcp-${RELEASE_TAG#v}.mcpb" \
-            "j-256-discord-mcp-${RELEASE_TAG#v}.tgz" \
+            "guildcontrol-${RELEASE_TAG#v}.mcpb" \
+            "guildcontrol-${RELEASE_TAG#v}.tgz" \
             release-notes.md \
             sbom.spdx.json
           do
@@ -578,17 +578,17 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           test "$RELEASE_TAG" = "v$version"
           printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          test "$GITHUB_REPOSITORY" = "j-256/discord-mcp"
+          test "$GITHUB_REPOSITORY" = "j-256/guildcontrol"
           test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
           test "$REPOSITORY_PRIVATE" = "false"
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor HEAD refs/remotes/origin/main
-          printf 'IMAGE=%s\n' "ghcr.io/j-256/discord-mcp:$version" >> "$GITHUB_ENV"
-          printf 'IMAGE_NAME=%s\n' "ghcr.io/j-256/discord-mcp" >> "$GITHUB_ENV"
+          printf 'IMAGE=%s\n' "ghcr.io/j-256/guildcontrol:$version" >> "$GITHUB_ENV"
+          printf 'IMAGE_NAME=%s\n' "ghcr.io/j-256/guildcontrol" >> "$GITHUB_ENV"
           printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
-          printf 'image=%s\n' "ghcr.io/j-256/discord-mcp:$version" >> "$GITHUB_OUTPUT"
-          printf 'image_name=%s\n' "ghcr.io/j-256/discord-mcp" >> "$GITHUB_OUTPUT"
+          printf 'image=%s\n' "ghcr.io/j-256/guildcontrol:$version" >> "$GITHUB_OUTPUT"
+          printf 'image_name=%s\n' "ghcr.io/j-256/guildcontrol" >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify exact public documentation
@@ -667,8 +667,8 @@ jobs:
           context: .
           file: Dockerfile
           annotations: |
-            index:org.opencontainers.image.description=Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration
-            index:org.opencontainers.image.source=https://github.com/j-256/discord-mcp
+            index:org.opencontainers.image.description=Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration
+            index:org.opencontainers.image.source=https://github.com/j-256/guildcontrol
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           push: true

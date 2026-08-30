@@ -1027,7 +1027,7 @@ function createInput(request: NormalizedPollCreationRequest): CreatePollInput {
 
 export function pollNonce(channelId: string, operationKey: string): string {
   return createHash("sha256")
-    .update("discord-mcp-poll.v1\0")
+    .update("guildcontrol-poll.v1\0")
     .update(channelId)
     .update("\0")
     .update(operationKey)

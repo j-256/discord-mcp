@@ -51,7 +51,7 @@ function document(
 }
 
 async function recipeRoot(context: test.TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-config-recipe-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-config-recipe-"))
   context.after(() => rm(root, { force: true, recursive: true }))
   return realpath(root)
 }
@@ -59,7 +59,7 @@ async function recipeRoot(context: test.TestContext): Promise<string> {
 async function configFile(
   context: test.TestContext,
   value: ConnectorConfigDocument = document(),
-  name = "discord-mcp.json",
+  name = "guildcontrol.json",
 ): Promise<string> {
   const root = await recipeRoot(context)
   const file = join(root, name)
@@ -818,7 +818,7 @@ test("recipe plans emit exact immutable apply commands for every scope kind", as
         "--confirm",
         entry.name,
       ],
-      command: "discord-mcp",
+      command: "guildcontrol",
     })
     assert.equal(Object.isFrozen(plan.applyCommand), true)
     assert.equal(Object.isFrozen(plan.applyCommand.args), true)

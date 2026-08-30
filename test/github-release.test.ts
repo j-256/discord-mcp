@@ -60,8 +60,8 @@ const githubRelease = await import(modulePath) as GitHubReleaseModule
 const VERSION = "0.1.2"
 const REVISION = "a".repeat(40)
 const OCI_DIGEST = `sha256:${"b".repeat(64)}`
-const ARCHIVE_NAME = `j-256-discord-mcp-${VERSION}.tgz`
-const BUNDLE_NAME = `discord-mcp-${VERSION}.mcpb`
+const ARCHIVE_NAME = `guildcontrol-${VERSION}.tgz`
+const BUNDLE_NAME = `guildcontrol-${VERSION}.mcpb`
 const BUNDLE_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const MCPB_DIGEST = `sha256:${sha256(BUNDLE_BYTES)}`
 const NPM_INTEGRITY = `sha512-${Buffer.alloc(64, 3).toString("base64")}`
@@ -75,7 +75,7 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
     activityRecordsCreated: false,
     credentialsRequired: false,
     discordExecution: "disabled",
-    evidenceFormat: "discord-mcp.catalog-evidence.v3",
+    evidenceFormat: "guildcontrol.catalog-evidence.v3",
     gateway: "disabled",
     observabilityExport: "disabled",
     schemaVersion: 1,
@@ -83,7 +83,7 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
     status: "ok",
     toolAccessManifest: {
       entries: [{}],
-      format: "discord-mcp.tool-access-manifest.v2",
+      format: "guildcontrol.tool-access-manifest.v2",
       requirementCoverage: {
         complete: true,
         targetAccessProven: false,
@@ -97,8 +97,8 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
 
 function validSbom(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    name: `@j-256/discord-mcp@${VERSION}`,
-    packages: [{ name: "@j-256/discord-mcp", versionInfo: VERSION }],
+    name: `guildcontrol@${VERSION}`,
+    packages: [{ name: "guildcontrol", versionInfo: VERSION }],
     spdxVersion: "SPDX-2.3",
     ...overrides,
   }
@@ -119,12 +119,12 @@ function validRelease(evidence: ReleaseEvidence, notes: string, state: "draft" |
   return {
     assets: evidence.assets.map((asset) => ({
       ...asset,
-      browser_download_url: `https://github.com/j-256/discord-mcp/releases/download/${evidence.tag}/${asset.name}`,
+      browser_download_url: `https://github.com/j-256/guildcontrol/releases/download/${evidence.tag}/${asset.name}`,
       state: "uploaded",
     })),
     body: notes,
     draft: state === "draft",
-    html_url: `https://github.com/j-256/discord-mcp/releases/tag/${evidence.tag}`,
+    html_url: `https://github.com/j-256/guildcontrol/releases/tag/${evidence.tag}`,
     id: 123,
     immutable: state === "immutable",
     name: evidence.title,
@@ -139,7 +139,7 @@ async function preparedEvidence(t: test.TestContext): Promise<{
   evidence: ReleaseEvidence
   notes: string
 }> {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-github-release-test-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-github-release-test-"))
   t.after(() => rm(root, { force: true, recursive: true }))
   const directory = join(root, "input")
   const output = join(root, "evidence.json")
@@ -167,13 +167,13 @@ test("renders deterministic release notes with exact public identities and verif
     revision: REVISION,
     version: VERSION,
   })
-  assert.match(notes, new RegExp(`Discord MCP ${VERSION}`, "u"))
+  assert.match(notes, new RegExp(`GuildControl MCP ${VERSION}`, "u"))
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
   assert.match(notes, new RegExp(MCPB_DIGEST, "u"))
   assert.match(notes, /gh release verify v0\.1\.2/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.2 j-256-discord-mcp-0\.1\.2\.tgz/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.2 discord-mcp-0\.1\.2\.mcpb/u)
+  assert.match(notes, /gh release verify-asset v0\.1\.2 guildcontrol-0\.1\.2\.tgz/u)
+  assert.match(notes, /gh release verify-asset v0\.1\.2 guildcontrol-0\.1\.2\.mcpb/u)
   assert.match(notes, /gh release verify-asset v0\.1\.2 release-notes\.md/u)
   assert.match(notes, /registers MCP Registry metadata only after this immutable Release/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
@@ -239,7 +239,7 @@ test("prepares a bounded immutable release asset set from verified evidence", as
 })
 
 test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM identity", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "discord-mcp-github-release-invalid-"))
+  const root = await mkdtemp(join(tmpdir(), "guildcontrol-github-release-invalid-"))
   t.after(() => rm(root, { force: true, recursive: true }))
   const cases = [
     { catalog: validCatalog({ credentialsRequired: true }), label: "credentials" },
@@ -251,7 +251,7 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
       catalog: validCatalog({
         toolAccessManifest: {
           entries: [{}],
-          format: "discord-mcp.tool-access-manifest.v2",
+          format: "guildcontrol.tool-access-manifest.v2",
           requirementCoverage: {
             complete: true,
             targetAccessProven: false,

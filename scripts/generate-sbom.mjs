@@ -102,7 +102,7 @@ invariant(document.creationInfo && typeof document.creationInfo === "object", "S
 document.creationInfo.created = new Date(
   reproducibleBuild.sourceDateEpoch * 1_000,
 ).toISOString().replace(".000Z", "Z")
-document.creationInfo.creators = ["Tool: discord-mcp-sbom/1"]
+document.creationInfo.creators = ["Tool: guildcontrol-sbom/1"]
 
 for (const entry of document.packages) {
   invariant(entry.filesAnalyzed === false, `SBOM package ${entry.name} must not claim file analysis`)

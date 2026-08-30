@@ -35,12 +35,12 @@ import {
 } from "./host-inspection.js"
 import { stableString } from "./normalize.js"
 
-export const HOST_CHANGE_PLAN_FORMAT = "discord-mcp.host-change-plan.v1"
-export const HOST_CHANGE_APPLY_FORMAT = "discord-mcp.host-change-apply.v1"
+export const HOST_CHANGE_PLAN_FORMAT = "guildcontrol.host-change-plan.v1"
+export const HOST_CHANGE_APPLY_FORMAT = "guildcontrol.host-change-apply.v1"
 export const HOST_CHANGE_SCHEMA_VERSION = 1
 export const HOST_CHANGE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const HOST_CHANGE_PLAN_DIGEST_DOMAIN = "discord-mcp-host-change-plan-v1\0"
+const HOST_CHANGE_PLAN_DIGEST_DOMAIN = "guildcontrol-host-change-plan-v1\0"
 const PRIVATE_FILE_MODE = 0o600
 const SHARED_ADAPTER_IDS = new Set<HostAdapterId>(["cursor", "mcp-json", "vscode"])
 const HOST_CHANGE_LIMITATIONS = Object.freeze([
@@ -520,7 +520,7 @@ function withHostChangeLock<Value>(
   targetName: string,
   operation: () => Value,
 ): Value {
-  const lock = resolve(directory, `.${targetName}.discord-mcp.lock`)
+  const lock = resolve(directory, `.${targetName}.guildcontrol.lock`)
   let fileDescriptor: number | undefined
   try {
     const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0
@@ -616,7 +616,7 @@ function createBackup(
 ): string {
   const backup = resolve(
     directory,
-    `.${targetName}.discord-mcp.backup.${Date.now()}-${randomUUID()}`,
+    `.${targetName}.guildcontrol.backup.${Date.now()}-${randomUUID()}`,
   )
   writeExclusivePrivateFile(backup, snapshot.bytes, originalMode(snapshot))
   syncDirectory(directory)
@@ -771,7 +771,7 @@ export function applyHostAdapterFile(
 
       temporaryFile = resolve(
         context.directory,
-        `.${targetName}.discord-mcp.${randomUUID()}.tmp`,
+        `.${targetName}.guildcontrol.${randomUUID()}.tmp`,
       )
       writeExclusivePrivateFile(temporaryFile, prepared.desiredBytes)
       assertTargetUnchanged(prepared.snapshot)

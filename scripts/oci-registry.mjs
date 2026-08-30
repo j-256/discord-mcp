@@ -23,10 +23,10 @@ const GHCR_BLOB_REDIRECT_STATUS = 307
 const GHCR_BLOB_CDN_PATH_PATTERN = /^\/ghcr(?:blobs)?[0-9]+\/blobs\/(sha256:[a-f0-9]{64})$/u
 export const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 export const BUILDKIT_IMAGE = "moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
-export const IMAGE_NAME = "ghcr.io/j-256/discord-mcp"
-const MCP_NAME = "io.github.j-256/discord-mcp"
-export const OCI_DESCRIPTION = "Least-privilege Discord MCP for privacy-safe reads, audits, and reviewed administration"
-export const REPOSITORY_URL = "https://github.com/j-256/discord-mcp"
+export const IMAGE_NAME = "ghcr.io/j-256/guildcontrol"
+const MCP_NAME = "io.github.j-256/guildcontrol"
+export const OCI_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
+export const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 const RESPONSE_BYTE_LIMIT = 2 * 1024 * 1024
 const EVIDENCE_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
 export const SBOM_GENERATOR_IMAGE = "docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
@@ -62,11 +62,11 @@ function assertNoSensitiveValues(value, label) {
 }
 
 export function parseOciReference(reference) {
-  const match = reference.match(/^(ghcr\.io\/j-256\/discord-mcp):([0-9]+\.[0-9]+\.[0-9]+)$/u)
+  const match = reference.match(/^(ghcr\.io\/j-256\/guildcontrol):([0-9]+\.[0-9]+\.[0-9]+)$/u)
   invariant(match, "OCI image reference must use the exact semantic-versioned project path")
   return {
     name: match[1],
-    repository: "j-256/discord-mcp",
+    repository: "j-256/guildcontrol",
     tag: match[2],
   }
 }
@@ -331,7 +331,7 @@ export function validateOciConfig(configDocument, expected) {
     "org.opencontainers.image.licenses": "AGPL-3.0-only",
     "org.opencontainers.image.revision": expected.revision,
     "org.opencontainers.image.source": REPOSITORY_URL,
-    "org.opencontainers.image.title": "Discord MCP",
+    "org.opencontainers.image.title": "GuildControl MCP",
     "org.opencontainers.image.url": DOCUMENTATION_URL,
     "org.opencontainers.image.version": expected.version,
   }
@@ -466,7 +466,7 @@ export async function inspectGitHubOciTag({ reference, token }) {
     "x-github-api-version": GITHUB_API_VERSION,
   }
   for (let page = 1; page <= 10; page += 1) {
-    const url = new URL("https://api.github.com/users/j-256/packages/container/discord-mcp/versions")
+    const url = new URL("https://api.github.com/users/j-256/packages/container/guildcontrol/versions")
     url.searchParams.set("page", String(page))
     url.searchParams.set("per_page", "100")
     const response = await fetchWithTimeout(url, { headers })
