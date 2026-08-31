@@ -3,8 +3,10 @@ import test from "node:test"
 
 import {
   ONBOARD_HOST_IDS,
+  assertReusableOnboardPolicy,
   createOnboardReport,
   isOnboardHostId,
+  resolveAvailableOnboardHtmlFile,
   resolveDefaultOnboardConfigFile,
   verifyOnboardReport,
 } from "../src/onboard.js"
@@ -42,6 +44,50 @@ test("default onboarding policy follows the CLI-owned platform config root", () 
   }).endsWith("guildcontrol/guildcontrol.json"), true)
 })
 
+test("onboarding reuses only an exact existing observer policy", () => {
+  const fixture = onboardFixture("/private/guildcontrol.json")
+  assert.doesNotThrow(() => assertReusableOnboardPolicy(
+    fixture.document,
+    fixture.configFile,
+    fixture.install,
+  ))
+  assert.throws(
+    () => assertReusableOnboardPolicy(
+      {
+        ...fixture.document,
+        gateway: {
+          ...fixture.document.gateway,
+          enabled: true,
+        },
+      },
+      fixture.configFile,
+      fixture.install,
+    ),
+    /does not exactly match/,
+  )
+})
+
+test("onboarding allocates the first unoccupied private guide filename", () => {
+  const occupied = new Set([
+    "/private/guildcontrol-onboarding.html",
+    "/private/guildcontrol-onboarding-2.html",
+  ])
+  assert.equal(
+    resolveAvailableOnboardHtmlFile(
+      "/private/guildcontrol.json",
+      (file) => occupied.has(file),
+    ),
+    "/private/guildcontrol-onboarding-3.html",
+  )
+  assert.throws(
+    () => resolveAvailableOnboardHtmlFile(
+      "/private/guildcontrol.json",
+      () => true,
+    ),
+    /choose an explicit --html path/,
+  )
+})
+
 test("onboarding binds install, policy, stdio smoke, and one exact host adapter", () => {
   const fixture = onboardFixture()
   const report = createOnboardReport({
@@ -60,9 +106,18 @@ test("onboarding binds install, policy, stdio smoke, and one exact host adapter"
   )
   assert.match(report.credentialHandoff.summary, /Reuse DISCORD_BOT_TOKEN/)
   assert.equal(report.firstRead.guildId, fixture.install.guildId)
+  assert.equal(report.policyDisposition, "created")
   assert.equal(report.privacy.credentialValuesEmbedded, false)
   assert.match(report.onboardDigest, /^sha256:[a-f0-9]{64}$/)
   assert.equal(verifyOnboardReport(report), true)
+  const reused = createOnboardReport({
+    ...fixture,
+    hostId: "codex",
+    policyDisposition: "reused",
+  })
+  assert.equal(reused.policyDisposition, "reused")
+  assert.notEqual(reused.onboardDigest, report.onboardDigest)
+  assert.equal(verifyOnboardReport(reused), true)
 })
 
 test("Claude Desktop onboarding selects the exact versioned MCPB route", () => {
@@ -114,6 +169,18 @@ test("onboarding rejects credential access claims that contradict policy custody
       hostId: "codex",
     }),
     /does not match the selected host and policy/,
+  )
+})
+
+test("onboarding rejects an unknown policy disposition", () => {
+  const fixture = onboardFixture()
+  assert.throws(
+    () => createOnboardReport({
+      ...fixture,
+      hostId: "codex",
+      policyDisposition: "changed" as "created",
+    }),
+    /exact policy disposition/,
   )
 })
 

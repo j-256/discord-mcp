@@ -736,6 +736,9 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
         checkCatalog: checkDiscordCatalog,
       })
     },
+    pathExists() {
+      return false
+    },
     async prepareSetup() {
       return setupReport()
     },
@@ -863,6 +866,331 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
     installOpened: false,
   })
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("onboarding reuses an exact policy and allocates a fresh default guide", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  const defaultGuide = "/configuration/guildcontrol-onboarding.html"
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--json",
+    ],
+    dependencies: dependencies({
+      async ensureConfigDirectory() {
+        assert.fail("Reused policy must not recreate its directory")
+      },
+      loadConfig(environment) {
+        return loadConnectorConfigDocument(fixture.document, environment)
+      },
+      loadConfigDocument() {
+        return fixture.document
+      },
+      pathExists(file) {
+        return file === CONFIG_FILE || file === defaultGuide
+      },
+      async prepareSetup(options) {
+        assert.equal(options.reuseExistingConfig, true)
+        assert.equal(options.credentialFile, undefined)
+        assert.equal(options.credentialVariable, undefined)
+        return fixture.setup
+      },
+      async smoke() {
+        return fixture.smoke
+      },
+    }),
+    environment: { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("JSON onboarding must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Available policy credential must not be prompted")
+      },
+      async promptText() {
+        assert.fail("JSON onboarding must not prompt")
+      },
+    },
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  const output = JSON.parse(stdout.value())
+  assert.equal(output.policyDisposition, "reused")
+  assert.equal(
+    output.guide.file,
+    "/configuration/guildcontrol-onboarding-2.html",
+  )
+})
+
+test("interactive onboarding resumes a custom-variable policy with one cleared token", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const document = {
+    ...fixture.document,
+    credential: {
+      provider: "environment" as const,
+      variable: TOKEN_ALIAS,
+    },
+  }
+  const setup = {
+    ...fixture.setup,
+    credential: document.credential,
+    launch: {
+      ...fixture.setup.launch,
+      environment: {
+        forward: [TOKEN_ALIAS],
+        set: {},
+      },
+      secrets: {
+        environmentVariables: [TOKEN_ALIAS],
+        files: [],
+      },
+    },
+  }
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const answers = ["n"]
+  let setupEnvironment: NodeJS.ProcessEnv | undefined
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--html",
+      "/output/resumed-onboarding.html",
+    ],
+    dependencies: dependencies({
+      loadConfig(environment) {
+        assert.equal(environment[TOKEN_ALIAS], ONBOARD_TOKEN)
+        return loadConnectorConfigDocument(document, environment)
+      },
+      loadConfigDocument() {
+        return document
+      },
+      pathExists(file) {
+        return file === CONFIG_FILE
+      },
+      async prepareSetup(options) {
+        setupEnvironment = options.environment
+        assert.equal(options.environment?.[TOKEN_ALIAS], ONBOARD_TOKEN)
+        assert.equal(options.reuseExistingConfig, true)
+        return setup
+      },
+      async smoke(options) {
+        assert.equal(options.environment?.[TOKEN_ALIAS], ONBOARD_TOKEN)
+        return fixture.smoke
+      },
+    }),
+    environment: {},
+    interaction: {
+      async openExternal() {
+        assert.fail("Declined guide must not open")
+      },
+      async promptSecret(message) {
+        assert.match(message, new RegExp(TOKEN_ALIAS))
+        return ONBOARD_TOKEN
+      },
+      async promptText() {
+        const answer = answers.shift()
+        if (answer === undefined) assert.fail("Unexpected onboarding prompt")
+        return answer
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  assert.deepEqual(answers, [])
+  assert.equal(setupEnvironment?.[TOKEN_ALIAS], undefined)
+  assert.match(stdout.value(), /Policy: .* \(reused\)/)
+  assert.match(stdout.value(), /one-time setup value was cleared/)
+  assert.doesNotMatch(stdout.value(), new RegExp(ONBOARD_TOKEN))
+})
+
+test("onboarding reuses exact file custody without passing replacement options to setup", async () => {
+  const credentialFile = "/run/secrets/discord_bot_token"
+  const fixture = onboardFixture(CONFIG_FILE, credentialFile)
+  const environmentFixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "vscode",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--token-file",
+      credentialFile,
+      "--html",
+      "/output/file-resume.html",
+      "--json",
+    ],
+    dependencies: dependencies({
+      loadConfig() {
+        return loadConnectorConfigDocument(environmentFixture.document, {
+          [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN,
+        })
+      },
+      loadConfigDocument() {
+        return fixture.document
+      },
+      pathExists(file) {
+        return file === CONFIG_FILE
+      },
+      async prepareSetup(options) {
+        assert.equal(options.reuseExistingConfig, true)
+        assert.equal(options.credentialFile, undefined)
+        return fixture.setup
+      },
+      async smoke() {
+        return fixture.smoke
+      },
+    }),
+    environment: {},
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  const output = JSON.parse(stdout.value())
+  assert.equal(output.policyDisposition, "reused")
+  assert.equal(output.credentialHandoff.hostAction, "reuse-protected-file")
+  assert.equal(output.credentialHandoff.additionalTokenEntry, "not-required")
+})
+
+test("onboarding refuses a credential option that would replace existing custody", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  let setupCalls = 0
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--token-env",
+      TOKEN_ALIAS,
+      "--json",
+    ],
+    dependencies: dependencies({
+      loadConfigDocument() {
+        return fixture.document
+      },
+      pathExists(file) {
+        return file === CONFIG_FILE
+      },
+      async prepareSetup() {
+        setupCalls += 1
+        return fixture.setup
+      },
+    }),
+    environment: {
+      [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN,
+      [TOKEN_ALIAS]: TOKEN,
+    },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 2)
+  assert.equal(setupCalls, 0)
+  assert.match(
+    JSON.parse(stdout.value()).error.message,
+    /--token-env must match existing onboarding variable DISCORD_BOT_TOKEN/,
+  )
+})
+
+test("onboarding refuses policy drift before credential or setup activity", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  let setupCalls = 0
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--json",
+    ],
+    dependencies: dependencies({
+      loadConfigDocument() {
+        return {
+          ...fixture.document,
+          gateway: {
+            ...fixture.document.gateway,
+            enabled: true,
+          },
+        }
+      },
+      pathExists(file) {
+        return file === CONFIG_FILE
+      },
+      async prepareSetup() {
+        setupCalls += 1
+        return fixture.setup
+      },
+    }),
+    environment: { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Drifted onboarding must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Drifted policy must fail before credential prompting")
+      },
+      async promptText() {
+        assert.fail("JSON onboarding must not prompt")
+      },
+    },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 2)
+  assert.equal(setupCalls, 0)
+  assert.match(
+    JSON.parse(stdout.value()).error.message,
+    /Existing onboarding policy does not exactly match/,
+  )
 })
 
 test("interactive onboarding recovers from input mistakes without exposing a one-time token", async () => {
@@ -4756,6 +5084,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(onboardHelpOutput.value(), /existing environment or protected-file source can be reused/)
   assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but is cleared after smoke/)
   assert.match(onboardHelpOutput.value(), /selected host still needs its own protected credential entry/)
+  assert.match(onboardHelpOutput.value(), /revalidates it without replacement/)
+  assert.match(onboardHelpOutput.value(), /next available default guide filename/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)

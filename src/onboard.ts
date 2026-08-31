@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto"
-import { dirname, join } from "node:path"
+import {
+  basename,
+  dirname,
+  extname,
+  join,
+} from "node:path"
 
 import {
   createBotInstallPlan,
@@ -9,8 +14,12 @@ import {
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
   CONNECTOR_VERSION,
-  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
 } from "./constants.js"
+import {
+  createConnectorConfigDocument,
+  normalizeConfigName,
+  type ConnectorConfigDocument,
+} from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
   verifyHostActivationPlan,
@@ -69,6 +78,8 @@ export type OnboardCredentialAccess =
   | "one-time-prompt"
   | "protected-file"
 
+export type OnboardPolicyDisposition = "created" | "reused"
+
 export interface OnboardCredentialHandoff {
   readonly additionalTokenEntry: "not-required" | "not-required-if-inherited" | "required"
   readonly details: readonly string[]
@@ -88,6 +99,7 @@ export interface OnboardReport {
   }
   readonly install: BotInstallPlan
   readonly onboardDigest: string
+  readonly policyDisposition: OnboardPolicyDisposition
   readonly privacy: {
     readonly credentialValuesEmbedded: false
     readonly hostConfigurationChanged: false
@@ -106,12 +118,16 @@ export interface CreateOnboardReportOptions {
   readonly credentialAccess: OnboardCredentialAccess
   readonly hostId: OnboardHostId
   readonly install: BotInstallPlan
+  readonly policyDisposition: OnboardPolicyDisposition
   readonly setup: SetupReport
   readonly smoke: SmokeReport
 }
 
 const ONBOARD_DIGEST_DOMAIN = "guildcontrol-onboard-v1\0"
 const DEFAULT_CONFIG_FILE_NAME = "guildcontrol.json"
+const DEFAULT_GUIDE_FILE_NAME = "guildcontrol-onboarding.html"
+const DEFAULT_GUIDE_FILE_STEM = "guildcontrol-onboarding"
+const DEFAULT_GUIDE_FILE_LIMIT = 100
 const REUSABLE_ENVIRONMENT_STRATEGIES = new Set<HostAdapterSecretStrategy>([
   "environment-interpolation",
   "forwarded-environment",
@@ -214,12 +230,6 @@ function credentialHandoff(
   }
   if (credential.provider !== "environment") {
     throw new ConfigurationError("Environment onboarding evidence does not match the selected policy")
-  }
-  if (
-    access === "one-time-prompt"
-    && credential.variable !== DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
-  ) {
-    throw new ConfigurationError("One-time prompt evidence requires the default credential variable")
   }
   const adapterStrategy = host.route.kind === "adapter"
     ? host.route.adapter.secret.strategy
@@ -346,9 +356,55 @@ export function resolveDefaultOnboardConfigFile(
   return join(dirname(resolveProfileDirectory(options)), DEFAULT_CONFIG_FILE_NAME)
 }
 
+export function assertReusableOnboardPolicy(
+  document: ConnectorConfigDocument,
+  configFile: string,
+  install: BotInstallPlan,
+): void {
+  const preset = getSetupPreset("server-observer")
+  const expected = createConnectorConfigDocument({
+    applicationId: install.applicationId,
+    botId: document.identity.botId,
+    channelIds: [],
+    ...(document.credential.provider === "environment"
+      ? { credentialVariable: document.credential.variable }
+      : { credentialFile: document.credential.path }),
+    gatewayEnabled: preset.gatewayEnabled,
+    guildIds: [install.guildId],
+    name: normalizeConfigName(basename(configFile, extname(configFile))),
+    toolsets: preset.toolsets,
+    toolSurface: preset.toolSurface,
+  })
+  if (stableString(document) !== stableString(expected)) {
+    throw new ConfigurationError(
+      "Existing onboarding policy does not exactly match the requested application, guild, read-only preset, identity, and credential custody; choose a different --config path or review the existing policy",
+    )
+  }
+}
+
+export function resolveAvailableOnboardHtmlFile(
+  configFile: string,
+  exists: (file: string) => boolean,
+): string {
+  const directory = dirname(configFile)
+  for (let index = 1; index <= DEFAULT_GUIDE_FILE_LIMIT; index += 1) {
+    const name = index === 1
+      ? DEFAULT_GUIDE_FILE_NAME
+      : `${DEFAULT_GUIDE_FILE_STEM}-${index}.html`
+    const candidate = join(directory, name)
+    if (!exists(candidate)) return candidate
+  }
+  throw new ConfigurationError(
+    "No default onboarding guide filename is available; choose an explicit --html path",
+  )
+}
+
 export function createOnboardReport(
   options: CreateOnboardReportOptions,
 ): OnboardReport {
+  if (!["created", "reused"].includes(options.policyDisposition)) {
+    throw new ConfigurationError("Onboarding requires an exact policy disposition")
+  }
   const install = exactInstallPlan(options.install)
   assertMatchingEvidence({ ...options, install })
   const host = deepFreeze({
@@ -367,6 +423,7 @@ export function createOnboardReport(
     format: ONBOARD_REPORT_FORMAT,
     host,
     install,
+    policyDisposition: options.policyDisposition,
     privacy: {
       credentialValuesEmbedded: false as const,
       hostConfigurationChanged: false as const,
@@ -395,6 +452,7 @@ export function verifyOnboardReport(value: unknown): value is OnboardReport {
       credentialAccess: report.credentialHandoff.setupAccess,
       hostId: report.host.id,
       install: report.install,
+      policyDisposition: report.policyDisposition,
       setup: report.setup,
       smoke: report.smoke,
     }))

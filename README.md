@@ -37,9 +37,9 @@ Create an application and bot in the [Discord Developer Portal](https://discord.
 npx guildctl onboard
 ```
 
-`onboard` asks for the MCP host first, accepts a displayed menu number, host ID, or name, keeps correctable input at the same prompt, and labels each setup stage. It generates the minimum `server-observer` grant, requires exact post-install guild confirmation, verifies the token's application and installation, creates the private policy, proves a real child-process MCP handshake, and writes a host-specific activation guide. For static JSON hosts, that private guide builds copy-ready Bash, zsh, or PowerShell commands for the existing freshness-bound `host plan`, `host apply`, and inspection flow after you choose the exact host file; TOML and MCPB routes retain their host-native handoffs. It never stores the token, reads message content, enables writes, discovers a host path, or edits host configuration. A token entered through its hidden prompt is not retained, so the host still needs that credential through its protected secret facility.
+`onboard` guides host selection, creates or exactly revalidates the minimum `server-observer` policy, verifies the bot installation and a real child-process MCP handshake, and writes a private activation guide. Drift fails closed. It never stores the token, reads message content, enables writes, discovers a host path, or edits host configuration.
 
-Onboarding reports the exact credential handoff instead of treating every host alike. An existing environment variable avoids another token entry when Claude Code, Codex, Cursor, or a common MCP JSON host inherits that protected state. An externally managed protected token file is reused directly by every generated adapter route. With an environment-backed policy, Claude Desktop MCPB, VS Code secure input, Gemini CLI keychain custody, and any one-time setup prompt still require host-side entry because GuildControl will not persist or transfer the token across that trust boundary.
+The result states whether host credential entry is required or existing custody can be reused. A one-time prompt is cleared after smoke. See the [first verified read guide](docs/getting-started.md) for custody, reruns, host installation, and recovery.
 
 For unattended setup, supply every public decision and an existing secret reference:
 
