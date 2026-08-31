@@ -126,6 +126,17 @@ test("configuration files create privately, validate canonically, and preserve b
   })
   assert.deepEqual(validation.summary.secretEnvironmentVariables, [TOKEN_ALIAS])
   assert.deepEqual(validation.summary.secretFilePaths, [])
+  assert.deepEqual(validation.summary.readScope, {
+    channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
+    guildIds: [GUILD_ID],
+    guildMode: "allowlist",
+  })
+  assert.deepEqual(validation.summary.notifications, { userMentions: "disabled" })
+  assert.deepEqual(validation.summary.threads, {
+    messageWrites: "exact",
+    reads: "inherit",
+  })
   assert.deepEqual(showConnectorConfigFile(file).document, original)
 
   await assert.rejects(
@@ -256,7 +267,13 @@ test("configuration init creates a read-only preset and enforces required channe
   assert.equal(observer.source, "new")
   assert.deepEqual(observer.document.capabilities, {})
   assert.equal(observer.document.gateway.enabled, false)
-  assert.equal(observer.document.tools.surface, "full")
+  assert.deepEqual(observer.document.notifications, { userMentions: "disabled" })
+  assert.equal(observer.document.readScope.guildMode, "allowlist")
+  assert.deepEqual(observer.document.threads, {
+    messageWrites: "exact",
+    reads: "inherit",
+  })
+  assert.equal(observer.document.tools.surface, "progressive")
   assert.equal(JSON.stringify(observer).includes(TOKEN), false)
 
   const fileCredential = await initializeConnectorConfigFile({

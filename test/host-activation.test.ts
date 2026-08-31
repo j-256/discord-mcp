@@ -59,7 +59,7 @@ function withMatchingDigest(value: Record<string, unknown>) {
   return {
     ...base,
     activationDigest: `sha256:${createHash("sha256")
-      .update("guildcontrol-host-activation-v1\0")
+      .update("guildcontrol-host-activation-v2\0")
       .update(stableString(base))
       .digest("hex")}`,
   }
@@ -86,7 +86,9 @@ test("host activation plans bind one exact credential-free launch", () => {
     name: "activation-policy",
     readScope: {
       channelIds: [CHANNEL_ID],
+      channelMode: "allowlist",
       guildIds: [GUILD_ID, SECOND_GUILD_ID],
+      guildMode: "allowlist",
     },
     source: { file: CONFIG_FILE, kind: "config" },
     tools: {
@@ -115,6 +117,37 @@ test("host activation plans bind one exact credential-free launch", () => {
     processStarted: false,
   })
   assert.doesNotMatch(JSON.stringify(first), new RegExp(TOKEN))
+})
+
+test("host activation describes explicit all-visible read scope without inventing IDs", () => {
+  const policy = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [],
+    name: "visible-policy",
+    readGuildMode: "all-visible",
+    toolsets: ["guilds"],
+    toolSurface: "progressive",
+  })
+  const result = createHostActivationPlan({
+    document: policy,
+    launch: createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      config: { document: policy, file: CONFIG_FILE },
+    }),
+    source: { file: CONFIG_FILE, kind: "config" },
+  })
+
+  assert.equal(verifyHostActivationPlan(result), true)
+  assert.deepEqual(result.verification.toolNames, [
+    "discover_discord_tools",
+    "list_guilds",
+  ])
+  assert.match(result.verification.prompt, /all guilds visible to the bot/)
+  assert.match(result.verification.prompt, /all visible channels inside the guild scope/)
+  assert.doesNotMatch(result.verification.prompt, /undefined/)
 })
 
 test("host activation plans support private profiles and file credentials", () => {

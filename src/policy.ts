@@ -223,7 +223,9 @@ export interface PolicyDescription {
   threadGuildIds: string[]
   threadIds: string[]
   threadMemberUserIds: string[]
+  threadMessageWriteMode: "exact" | "inherit"
   threadParentIds: string[]
+  threadReadMode: "exact" | "inherit"
   welcomeScreenAuditEnabled: boolean
   welcomeScreenChangesEnabled: boolean
   welcomeScreenGuildIds: string[]
@@ -242,6 +244,7 @@ export interface PolicyDescription {
   widgetSettingsAuditEnabled: boolean
   widgetSettingsChangesEnabled: boolean
   widgetSettingsGuildIds: string[]
+  userMentionMode: "disabled" | "allowlist" | "reviewed"
 }
 
 const WEBHOOK_CHANNEL_TYPES: ReadonlySet<number> = new Set([
@@ -258,10 +261,18 @@ const WEBHOOK_MESSAGE_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.text,
 ])
 
+const THREAD_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcementThread,
+  DISCORD_CHANNEL_TYPES.privateThread,
+  DISCORD_CHANNEL_TYPES.publicThread,
+])
+
 export class ScopePolicy {
   readonly #adminGuildIds: ReadonlySet<string>
   readonly #allowedChannelIds: ReadonlySet<string>
   readonly #allowedGuildIds: ReadonlySet<string>
+  readonly #readChannelMode: ConnectorConfig["readChannelMode"]
+  readonly #readGuildMode: ConnectorConfig["readGuildMode"]
   readonly #allowAdministration: boolean
   readonly #allowApplicationCommandChanges: boolean
   readonly #allowGlobalApplicationCommandChanges: boolean
@@ -438,6 +449,7 @@ export class ScopePolicy {
   readonly #forumPostChannelIds: ReadonlySet<string>
   readonly #forumTagChannelIds: ReadonlySet<string>
   readonly #mentionUserIds: ReadonlySet<string>
+  readonly #userMentionMode: ConnectorConfig["userMentionMode"]
   readonly #memberDirectoryGuildIds: ReadonlySet<string>
   readonly #nicknameGuildIds: ReadonlySet<string>
   readonly #memberRoleGuildIds: ReadonlySet<string>
@@ -475,6 +487,8 @@ export class ScopePolicy {
   readonly #soundboardRoots: readonly string[]
   readonly #stageChannelIds: ReadonlySet<string>
   readonly #threadParentIds: ReadonlySet<string>
+  readonly #threadMessageWriteMode: ConnectorConfig["threadMessageWriteMode"]
+  readonly #threadReadMode: ConnectorConfig["threadReadMode"]
   readonly #threadGuildIds: ReadonlySet<string>
   readonly #threadIds: ReadonlySet<string>
   readonly #threadMemberUserIds: ReadonlySet<string>
@@ -666,6 +680,7 @@ export class ScopePolicy {
     | "inviteCreationChannelIds"
     | "inviteRoleIds"
     | "inviteGuildIds"
+    | "userMentionMode"
     | "memberDirectoryGuildIds"
     | "nicknameGuildIds"
     | "memberRoleGuildIds"
@@ -686,6 +701,8 @@ export class ScopePolicy {
     | "mcpToolsets"
     | "mcpToolSurface"
     | "mcpReadResponseMaxBytes"
+    | "readChannelMode"
+    | "readGuildMode"
     | "onboardingGuildIds"
     | "permissionOverwriteChannelIds"
     | "permissionSyncChannelIds"
@@ -704,6 +721,8 @@ export class ScopePolicy {
     | "soundboardRoots"
     | "stageChannelIds"
     | "threadParentIds"
+    | "threadMessageWriteMode"
+    | "threadReadMode"
     | "threadGuildIds"
     | "threadIds"
     | "threadMemberUserIds"
@@ -716,6 +735,10 @@ export class ScopePolicy {
     this.#adminGuildIds = config.adminGuildIds
     this.#allowedChannelIds = config.allowedChannelIds
     this.#allowedGuildIds = config.allowedGuildIds
+    this.#readChannelMode = config.readChannelMode
+      ?? (config.allowedChannelIds.size > 0 ? "allowlist" : "all-visible")
+    this.#readGuildMode = config.readGuildMode
+      ?? (config.allowedGuildIds.size > 0 ? "allowlist" : "all-visible")
     this.#allowAdministration = config.allowAdministration
     this.#allowApplicationCommandChanges = config.allowApplicationCommandChanges ?? false
     this.#allowGlobalApplicationCommandChanges =
@@ -907,6 +930,7 @@ export class ScopePolicy {
     this.#forumPostChannelIds = config.forumPostChannelIds ?? new Set()
     this.#forumTagChannelIds = config.forumTagChannelIds ?? new Set()
     this.#mentionUserIds = config.mentionUserIds
+    this.#userMentionMode = config.userMentionMode ?? "allowlist"
     this.#memberDirectoryGuildIds = config.memberDirectoryGuildIds ?? new Set()
     this.#nicknameGuildIds = config.nicknameGuildIds ?? new Set()
     this.#memberRoleGuildIds = config.memberRoleGuildIds ?? new Set()
@@ -945,6 +969,8 @@ export class ScopePolicy {
     this.#soundboardRoots = config.soundboardRoots ?? []
     this.#stageChannelIds = config.stageChannelIds ?? new Set()
     this.#threadParentIds = config.threadParentIds ?? new Set()
+    this.#threadMessageWriteMode = config.threadMessageWriteMode ?? "exact"
+    this.#threadReadMode = config.threadReadMode ?? "inherit"
     this.#threadGuildIds = config.threadGuildIds ?? new Set()
     this.#threadIds = config.threadIds ?? new Set()
     this.#threadMemberUserIds = config.threadMemberUserIds ?? new Set()
@@ -1242,6 +1268,7 @@ export class ScopePolicy {
       nativeInteractionTtlSeconds: this.#nativeInteractionTtlSeconds,
       nativeInteractionUserIds: [...this.#nativeInteractionUserIds].sort(),
       mentionUserCount: this.#mentionUserIds.size,
+      userMentionMode: this.#userMentionMode,
       mcpToolsets: MCP_TOOLSET_NAMES.filter((name) => this.#mcpToolsets.has(name)),
       mcpToolSurface: this.#mcpToolSurface,
       mcpReadResponseMaxBytes: this.#mcpReadResponseMaxBytes,
@@ -1276,8 +1303,8 @@ export class ScopePolicy {
         && this.#reactionChannelIds.size > 0,
       reactionUserAuditEnabled: this.#allowReactionUserAudit
         && this.#reactionChannelIds.size > 0,
-      readChannelScope: this.#allowedChannelIds.size > 0 ? "allowlist" : "all-visible",
-      readGuildScope: this.#allowedGuildIds.size > 0 ? "allowlist" : "all-visible",
+      readChannelScope: this.#readChannelMode,
+      readGuildScope: this.#readGuildMode,
       roleCreationEnabled: this.#allowRoleCreation
         && this.#roleCreationGuildIds.size > 0,
       roleCreationGuildIds: [...this.#roleCreationGuildIds].sort(),
@@ -1349,7 +1376,9 @@ export class ScopePolicy {
       threadGuildIds: [...this.#threadGuildIds].sort(),
       threadIds: [...this.#threadIds].sort(),
       threadMemberUserIds: [...this.#threadMemberUserIds].sort(),
+      threadMessageWriteMode: this.#threadMessageWriteMode,
       threadParentIds: [...this.#threadParentIds].sort(),
+      threadReadMode: this.#threadReadMode,
       welcomeScreenAuditEnabled: this.#allowWelcomeScreenAudit
         && this.#welcomeScreenGuildIds.size > 0,
       welcomeScreenChangesEnabled: this.#allowWelcomeScreenAudit
@@ -1400,7 +1429,7 @@ export class ScopePolicy {
   filterChannels(channels: readonly DiscordChannel[]): DiscordChannel[] {
     return channels.filter((channel) => this.channelIdReadable(
       channel.id,
-      channel.parent_id,
+      THREAD_CHANNEL_TYPES.has(channel.type) ? channel.parent_id : undefined,
     ))
   }
 
@@ -1468,7 +1497,7 @@ export class ScopePolicy {
   }
 
   guildAllowed(guildId: string): boolean {
-    return this.#allowedGuildIds.size === 0 || this.#allowedGuildIds.has(guildId)
+    return this.#readGuildMode === "all-visible" || this.#allowedGuildIds.has(guildId)
   }
 
   assertGuildAllowed(guildId: string): void {
@@ -2578,16 +2607,20 @@ export class ScopePolicy {
   }
 
   channelIdReadable(channelId: string, parentId?: string | null): boolean {
-    return this.#allowedChannelIds.size === 0
+    return this.#readChannelMode === "all-visible"
       || this.#allowedChannelIds.has(channelId)
-      || Boolean(parentId && this.#allowedChannelIds.has(parentId))
+      || Boolean(
+        this.#threadReadMode === "inherit"
+        && parentId
+        && this.#allowedChannelIds.has(parentId),
+      )
   }
 
   constrainSearchChannelIds(
     requestedChannelIds: readonly string[] | undefined,
     maximum: number,
   ): string[] | undefined {
-    if (this.#allowedChannelIds.size === 0) {
+    if (this.#readChannelMode === "all-visible") {
       return requestedChannelIds ? [...requestedChannelIds] : undefined
     }
     if (requestedChannelIds) {
@@ -2612,7 +2645,8 @@ export class ScopePolicy {
     const guildId = channel.guild_id
     if (!guildId) throw new PolicyError("Direct-message channels are outside connector scope")
     this.assertGuildAllowed(guildId)
-    if (!this.channelIdReadable(channel.id, channel.parent_id)) {
+    const parentId = THREAD_CHANNEL_TYPES.has(channel.type) ? channel.parent_id : undefined
+    if (!this.channelIdReadable(channel.id, parentId)) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the configured read scope`)
     }
     return guildId
@@ -3198,6 +3232,9 @@ export class ScopePolicy {
   }
 
   assertNotificationUsers(userIds: readonly string[]): void {
+    if (userIds.length > 0 && this.#userMentionMode === "disabled") {
+      throw new PolicyError("Discord user notifications are disabled by connector configuration")
+    }
     for (const userId of userIds) {
       if (!this.#mentionUserIds.has(userId)) {
         throw new PolicyError(`Discord user ${userId} is outside the notification scope`)

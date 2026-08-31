@@ -124,6 +124,14 @@ test("profile parsing requires one exact canonical non-secret contract", () => {
     },
     {
       ...valid,
+      readScope: {
+        ...valid.readScope,
+        guildIds: [],
+        guildMode: "all-visible",
+      },
+    },
+    {
+      ...valid,
       readScope: { ...valid.readScope, guildIds: [GUILD_ID, GUILD_ID] },
     },
     {

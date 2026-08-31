@@ -66,7 +66,7 @@ export interface SetupPresetDescriptor {
   readonly riskClasses: readonly McpToolRiskClass[]
   readonly toolNames: readonly McpToolName[]
   readonly toolsets: readonly McpToolsetName[]
-  readonly toolSurface: "full"
+  readonly toolSurface: "progressive"
   readonly writeCapable: false
 }
 
@@ -76,7 +76,7 @@ export interface AppliedSetupPreset {
     readonly gatewayEnabled: false
     readonly guildIds: readonly string[]
     readonly toolsets: readonly McpToolsetName[]
-    readonly toolSurface: "full"
+    readonly toolSurface: "progressive"
   }
   readonly preset: SetupPresetDescriptor
 }
@@ -202,7 +202,7 @@ function createSetupPresetDescriptor(
     riskClasses: READ_ONLY_RISK_CLASSES,
     toolNames: Object.freeze(toolNames),
     toolsets: Object.freeze(toolsets),
-    toolSurface: "full" as const,
+    toolSurface: "progressive" as const,
     writeCapable: false,
   })
 }

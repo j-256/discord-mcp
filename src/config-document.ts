@@ -44,6 +44,24 @@ export const CONFIG_DOCUMENT_SCHEMA_VERSION = 2
 export const CONFIG_DOCUMENT_SCHEMA_ID =
   "https://raw.githubusercontent.com/j-256/guildcontrol/main/guildcontrol.config.schema.json"
 
+export const CONFIG_READ_SCOPE_MODES = Object.freeze([
+  "all-visible",
+  "allowlist",
+] as const)
+export const CONFIG_USER_MENTION_MODES = Object.freeze([
+  "disabled",
+  "allowlist",
+  "reviewed",
+] as const)
+export const CONFIG_THREAD_SCOPE_MODES = Object.freeze([
+  "exact",
+  "inherit",
+] as const)
+
+export type ConnectorConfigReadScopeMode = typeof CONFIG_READ_SCOPE_MODES[number]
+export type ConnectorConfigUserMentionMode = typeof CONFIG_USER_MENTION_MODES[number]
+export type ConnectorConfigThreadScopeMode = typeof CONFIG_THREAD_SCOPE_MODES[number]
+
 const CONFIG_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
 const HEADER_ENVIRONMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,118}_HEADERS$/
@@ -104,15 +122,24 @@ export interface ConnectorConfigDocument {
   }
   limits: Readonly<Partial<Record<ConnectorConfigLimitName, number>>>
   name: string
+  notifications: {
+    userMentions: ConnectorConfigUserMentionMode
+  }
   observability: ConnectorConfigDocumentObservability
   readScope: {
+    channelMode: ConnectorConfigReadScopeMode
     channelIds: readonly string[]
+    guildMode: ConnectorConfigReadScopeMode
     guildIds: readonly string[]
   }
   runtime: Readonly<Partial<Record<ConnectorConfigRuntimeName, string>>>
   schemaVersion: 2
   scopes: Readonly<Partial<Record<ConnectorConfigScopeName, readonly string[]>>>
   storage: ConnectorConfigDocumentStorage
+  threads: {
+    messageWrites: ConnectorConfigThreadScopeMode
+    reads: ConnectorConfigThreadScopeMode
+  }
   tools: {
     surface: McpToolSurface
     toolsets: readonly McpToolsetName[]
@@ -861,6 +888,11 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
     .describe("Optional numeric policy limits")
     .default({}),
   name: configNameSchema.describe("Bounded lowercase identifier for this policy"),
+  notifications: z.strictObject({
+    userMentions: z.enum(CONFIG_USER_MENTION_MODES)
+      .describe("User notification policy: disabled, exact allowlist, or signed interactive review")
+      .optional(),
+  }).describe("Discord notification behavior").optional(),
   observability: z.strictObject({
     compression: z.string().min(1).max(CONFIG_STRING_CHARACTERS)
       .describe("Common OTLP compression mode")
@@ -890,9 +922,15 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
     traces: observabilitySignalSchema.optional(),
   }).describe("Optional content-free local and OTLP observability policy").default({}),
   readScope: z.strictObject({
+    channelMode: z.enum(CONFIG_READ_SCOPE_MODES)
+      .describe("Whether channel reads use exact IDs or all visible channels inside guild scope")
+      .optional(),
     channelIds: snowflakeArraySchema(0, DISCORD_LIMITS.searchChannelIds)
       .describe("Optional exact channel allowlist inside the guild boundary"),
-    guildIds: snowflakeArraySchema(1, DISCORD_LIMITS.currentUserGuilds)
+    guildMode: z.enum(CONFIG_READ_SCOPE_MODES)
+      .describe("Whether guild reads use exact IDs or every guild visible to the bot")
+      .optional(),
+    guildIds: snowflakeArraySchema(0, DISCORD_LIMITS.currentUserGuilds)
       .describe("Exact guild allowlist forming the outer read boundary"),
   }).describe("Required outer Discord read boundary"),
   runtime: z.strictObject(runtimeShape)
@@ -906,6 +944,14 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
   storage: z.strictObject(storageShape)
     .describe("Local content-free activity and owned-file paths")
     .default({}),
+  threads: z.strictObject({
+    messageWrites: z.enum(CONFIG_THREAD_SCOPE_MODES)
+      .describe("Whether message-class write scopes may inherit an exact parent channel")
+      .optional(),
+    reads: z.enum(CONFIG_THREAD_SCOPE_MODES)
+      .describe("Whether an exact parent channel read scope includes its child threads")
+      .optional(),
+  }).describe("Controlled child-thread scope inheritance").optional(),
   tools: z.strictObject({
     surface: z.enum(MCP_TOOL_SURFACES).describe("MCP tool discovery surface"),
     toolsets: z.array(z.enum(MCP_TOOLSET_NAMES))
@@ -1021,7 +1067,47 @@ export function parseConnectorConfigDocument(
   }
   const result = CONNECTOR_CONFIG_DOCUMENT_SCHEMA.safeParse(value)
   if (!result.success) throw schemaError(result.error)
-  const document = result.data as ConnectorConfigDocument
+  const parsed = result.data
+  const channelMode = parsed.readScope.channelMode
+    ?? (parsed.readScope.channelIds.length > 0 ? "allowlist" : "all-visible")
+  const guildMode = parsed.readScope.guildMode
+    ?? (parsed.readScope.guildIds.length > 0 ? "allowlist" : "all-visible")
+  if (channelMode === "allowlist" && parsed.readScope.channelIds.length === 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.channelMode allowlist requires at least one channel ID",
+    )
+  }
+  if (channelMode === "all-visible" && parsed.readScope.channelIds.length > 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.channelIds must be empty when channelMode is all-visible",
+    )
+  }
+  if (guildMode === "allowlist" && parsed.readScope.guildIds.length === 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.guildMode allowlist requires at least one guild ID",
+    )
+  }
+  if (guildMode === "all-visible" && parsed.readScope.guildIds.length > 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.guildIds must be empty when guildMode is all-visible",
+    )
+  }
+  const document = {
+    ...parsed,
+    notifications: {
+      userMentions: parsed.notifications?.userMentions ?? "allowlist",
+    },
+    readScope: {
+      channelIds: parsed.readScope.channelIds,
+      channelMode,
+      guildIds: parsed.readScope.guildIds,
+      guildMode,
+    },
+    threads: {
+      messageWrites: parsed.threads?.messageWrites ?? "exact",
+      reads: parsed.threads?.reads ?? "inherit",
+    },
+  } as ConnectorConfigDocument
   if (expectedName !== undefined && document.name !== normalizeConfigName(expectedName)) {
     throw new ConfigDocumentError("Configuration name does not match its filename")
   }
@@ -1041,11 +1127,16 @@ export function createConnectorConfigDocument(options: {
   limits?: ConnectorConfigDocument["limits"]
   name: string
   observability?: ConnectorConfigDocumentObservability
+  readChannelMode?: ConnectorConfigReadScopeMode
+  readGuildMode?: ConnectorConfigReadScopeMode
   runtime?: ConnectorConfigDocument["runtime"]
   scopes?: ConnectorConfigDocument["scopes"]
   storage?: ConnectorConfigDocumentStorage
+  threadMessageWriteMode?: ConnectorConfigThreadScopeMode
+  threadReadMode?: ConnectorConfigThreadScopeMode
   toolsets: readonly McpToolsetName[]
   toolSurface: McpToolSurface
+  userMentionMode?: ConnectorConfigUserMentionMode
 }): ConnectorConfigDocument {
   if (options.credentialFile !== undefined && options.credentialVariable !== undefined) {
     throw new ConfigDocumentError(
@@ -1074,15 +1165,28 @@ export function createConnectorConfigDocument(options: {
     },
     limits: options.limits ?? {},
     name: options.name,
+    notifications: {
+      userMentions: options.userMentionMode
+        ?? ((options.scopes?.mentionUserIds?.length ?? 0) > 0
+          ? "allowlist"
+          : "disabled"),
+    },
     observability: options.observability ?? {},
     readScope: {
+      channelMode: options.readChannelMode
+        ?? ((options.channelIds?.length ?? 0) > 0 ? "allowlist" : "all-visible"),
       channelIds: [...(options.channelIds ?? [])].sort(),
+      guildMode: options.readGuildMode ?? "allowlist",
       guildIds: [...options.guildIds].sort(),
     },
     runtime: options.runtime ?? {},
     schemaVersion: CONFIG_DOCUMENT_SCHEMA_VERSION,
     scopes: options.scopes ?? {},
     storage: options.storage ?? {},
+    threads: {
+      messageWrites: options.threadMessageWriteMode ?? "exact",
+      reads: options.threadReadMode ?? "inherit",
+    },
     tools: {
       surface: options.toolSurface,
       toolsets: MCP_TOOLSET_NAMES.filter((entry) => options.toolsets.includes(entry)),
@@ -1524,17 +1628,44 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       required: true,
     })),
     ...([
+      ["$.readScope.guildMode", "allowlist"],
       ["$.readScope.guildIds", undefined],
+      ["$.readScope.channelMode", "all-visible"],
       ["$.readScope.channelIds", []],
     ] as const).map(([path, defaultValue]) => ({
       defaultValue,
-      description: path.endsWith("guildIds")
-        ? "Exact guild allowlist forming the outer read boundary"
-        : "Optional exact channel allowlist inside the guild boundary",
-      kind: "snowflakes" as const,
+      description: path.endsWith("guildMode")
+        ? "Whether guild reads use exact IDs or every guild visible to the bot"
+        : path.endsWith("channelMode")
+          ? "Whether channel reads use exact IDs or all visible channels inside guild scope"
+          : path.endsWith("guildIds")
+            ? "Exact guild allowlist forming the outer read boundary"
+            : "Optional exact channel allowlist inside the guild boundary",
+      kind: (path.endsWith("Mode") ? "string" : "snowflakes") as "snowflakes" | "string",
       path,
       required: true,
     })),
+    {
+      defaultValue: "disabled",
+      description: "User notification policy: disabled, exact allowlist, or signed interactive review",
+      kind: "string",
+      path: "$.notifications.userMentions",
+      required: true,
+    },
+    {
+      defaultValue: "inherit",
+      description: "Whether an exact parent channel read scope includes its child threads",
+      kind: "string",
+      path: "$.threads.reads",
+      required: true,
+    },
+    {
+      defaultValue: "exact",
+      description: "Whether message-class write scopes may inherit an exact parent channel",
+      kind: "string",
+      path: "$.threads.messageWrites",
+      required: true,
+    },
     {
       defaultValue: "progressive",
       description: "MCP tool discovery surface",

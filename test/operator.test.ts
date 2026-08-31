@@ -443,7 +443,9 @@ function status(
       threadGuildIds: [],
       threadIds: [],
       threadMemberUserIds: [],
+      threadMessageWriteMode: "exact",
       threadParentIds: [],
+      threadReadMode: "inherit",
       webhookAuditEnabled: false,
       webhookChannelIds: [],
       webhookGuildIds: [],
@@ -462,6 +464,7 @@ function status(
       widgetSettingsAuditEnabled: false,
       widgetSettingsChangesEnabled: false,
       widgetSettingsGuildIds: [],
+      userMentionMode: "allowlist",
     },
     privacy: CONNECTOR_STATUS_PRIVACY,
     schemaVersion: CONNECTOR_STATUS_SCHEMA_VERSION,
@@ -5740,10 +5743,12 @@ test("preset setup saves resolved read-only authority and forwards only its cred
   assert.deepEqual(observer.preset, getSetupPreset("server-observer"))
   assert.deepEqual(observer.profile?.readScope, {
     channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
     guildIds: [GUILD_ID],
+    guildMode: "allowlist",
   })
   assert.deepEqual(observer.profile?.tools, {
-    surface: "full",
+    surface: "progressive",
     toolsets: [...getSetupPreset("server-observer").toolsets],
   })
   assert.equal(observer.profile?.gateway.enabled, false)
@@ -5855,10 +5860,12 @@ test("setup creates and verifies a preset-backed profile without persisting or r
   assert.equal(report.profile?.identity.botId, BOT_ID)
   assert.deepEqual(report.profile?.readScope, {
     channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
     guildIds: [GUILD_ID],
+    guildMode: "allowlist",
   })
   assert.deepEqual(report.profile?.tools, {
-    surface: "full",
+    surface: "progressive",
     toolsets: [...getSetupPreset("channel-reader").toolsets],
   })
   assert.deepEqual(report.profile?.gateway, {

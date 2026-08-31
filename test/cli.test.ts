@@ -3413,7 +3413,7 @@ test("CLI generates an exact host activation plan without reading ambient creden
   assert.equal(exitCode, 0)
   assert.equal(loadedFile, CONFIG_FILE)
   const report = JSON.parse(stdout.value())
-  assert.equal(report.format, "guildcontrol.host-activation.v1")
+  assert.equal(report.format, "guildcontrol.host-activation.v2")
   assert.match(report.activationDigest, /^sha256:[a-f0-9]{64}$/)
   assert.deepEqual(report.policy.source, { file: CONFIG_FILE, kind: "config" })
   assert.deepEqual(report.launch, {

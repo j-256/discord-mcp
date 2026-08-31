@@ -33,7 +33,10 @@ import {
   type ConnectorConfigCapabilityName,
   type ConnectorConfigDocument,
   type ConnectorConfigLimitName,
+  type ConnectorConfigReadScopeMode,
   type ConnectorConfigScopeName,
+  type ConnectorConfigThreadScopeMode,
+  type ConnectorConfigUserMentionMode,
 } from "./config-document.js"
 import { ConfigurationError } from "./errors.js"
 import {
@@ -48,6 +51,8 @@ export interface ConnectorConfig {
   announcementSubscriptionTargetChannelIds: ReadonlySet<string>
   allowedChannelIds: ReadonlySet<string>
   allowedGuildIds: ReadonlySet<string>
+  readChannelMode: ConnectorConfigReadScopeMode
+  readGuildMode: ConnectorConfigReadScopeMode
   allowAdministration: boolean
   allowApplicationCommandChanges: boolean
   allowGlobalApplicationCommandChanges: boolean
@@ -225,6 +230,7 @@ export interface ConnectorConfig {
   inviteRoleIds: ReadonlySet<string>
   inviteGuildIds: ReadonlySet<string>
   mentionUserIds: ReadonlySet<string>
+  userMentionMode: ConnectorConfigUserMentionMode
   memberDirectoryGuildIds: ReadonlySet<string>
   nicknameGuildIds: ReadonlySet<string>
   memberRoleGuildIds: ReadonlySet<string>
@@ -264,6 +270,8 @@ export interface ConnectorConfig {
   stageChannelIds: ReadonlySet<string>
   token: string
   threadParentIds: ReadonlySet<string>
+  threadMessageWriteMode: ConnectorConfigThreadScopeMode
+  threadReadMode: ConnectorConfigThreadScopeMode
   threadGuildIds: ReadonlySet<string>
   threadIds: ReadonlySet<string>
   threadMemberUserIds: ReadonlySet<string>
@@ -751,7 +759,10 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("webhookGuildIds"), webhookGuildIds],
   ] as const) {
     for (const guildId of guildIds) {
-      if (allowedGuildIds.has(guildId)) continue
+      if (
+        document.readScope.guildMode === "all-visible"
+        || allowedGuildIds.has(guildId)
+      ) continue
       throw new ConfigurationError(
         `${name} must be a subset of ${configPolicyPath("allowedGuildIds")}`,
       )
@@ -796,7 +807,10 @@ export function loadConnectorConfigDocument(
     [configPolicyPath("webhookMessageChannelIds"), webhookMessageChannelIds],
   ] as const) {
     for (const channelId of channelIds) {
-      if (allowedChannelIds.size === 0 || allowedChannelIds.has(channelId)) continue
+      if (
+        document.readScope.channelMode === "all-visible"
+        || allowedChannelIds.has(channelId)
+      ) continue
       throw new ConfigurationError(
         `${name} must be a subset of ${configPolicyPath("allowedChannelIds")}`,
       )
@@ -1417,6 +1431,8 @@ export function loadConnectorConfigDocument(
     announcementSubscriptionTargetChannelIds,
     allowedChannelIds,
     allowedGuildIds,
+    readChannelMode: document.readScope.channelMode,
+    readGuildMode: document.readScope.guildMode,
     allowAdministration: configCapability(document, "administration"),
     allowCrossGuildMessageForwarding,
     allowAnnouncementCrossposts: configCapability(document, "announcementCrossposts"),
@@ -1622,6 +1638,7 @@ export function loadConnectorConfigDocument(
     inviteRoleIds,
     inviteGuildIds,
     mentionUserIds,
+    userMentionMode: document.notifications.userMentions,
     memberDirectoryGuildIds,
     nicknameGuildIds,
     memberRoleGuildIds,
@@ -1692,6 +1709,8 @@ export function loadConnectorConfigDocument(
     stageChannelIds,
     token,
     threadParentIds,
+    threadMessageWriteMode: document.threads.messageWrites,
+    threadReadMode: document.threads.reads,
     threadGuildIds,
     threadIds,
     threadMemberUserIds,

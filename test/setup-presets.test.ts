@@ -58,7 +58,7 @@ test("setup presets expose deterministic exact read-only contracts", () => {
       preset.requirements.threadScope,
       "inherits-allowlisted-parent",
     )
-    assert.equal(preset.toolSurface, "full")
+    assert.equal(preset.toolSurface, "progressive")
     assert.equal(preset.writeCapable, false)
     assert.equal(preset.requirements.botPermissions.includes("ADMINISTRATOR"), false)
     assert.equal(
@@ -109,7 +109,7 @@ test("server observer materializes an immutable exact policy fragment", () => {
   assert.deepEqual(result.policy.guildIds, [GUILD_ID, SECOND_GUILD_ID])
   assert.deepEqual(result.policy.channelIds, [CHANNEL_ID, SECOND_CHANNEL_ID])
   assert.equal(result.policy.gatewayEnabled, false)
-  assert.equal(result.policy.toolSurface, "full")
+  assert.equal(result.policy.toolSurface, "progressive")
   assert.deepEqual(result.policy.toolsets, result.preset.toolsets)
   assert.equal(Object.isFrozen(result.policy), true)
   assert.equal(Object.isFrozen(result.policy.guildIds), true)

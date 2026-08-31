@@ -9446,7 +9446,9 @@ function fixturePolicy(): PolicyDescription {
     threadGuildIds: [],
     threadIds: [],
     threadMemberUserIds: [],
+    threadMessageWriteMode: "exact",
     threadParentIds: [],
+    threadReadMode: "inherit",
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookGuildIds: [],
@@ -9465,6 +9467,7 @@ function fixturePolicy(): PolicyDescription {
     widgetSettingsAuditEnabled: false,
     widgetSettingsChangesEnabled: false,
     widgetSettingsGuildIds: [],
+    userMentionMode: "allowlist",
   }
 }
 

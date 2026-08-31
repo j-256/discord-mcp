@@ -33,7 +33,7 @@ import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import { stableString } from "./normalize.js"
 import { getSetupPreset } from "./setup-presets.js"
 
-export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 3
+export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 4
 
 const FILE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
@@ -51,8 +51,13 @@ export interface ConnectorConfigSummary {
   }
   limitsConfigured: readonly string[]
   name: string
+  notifications: {
+    userMentions: ConnectorConfigDocument["notifications"]["userMentions"]
+  }
   readScope: {
+    channelMode: ConnectorConfigDocument["readScope"]["channelMode"]
     channelIds: readonly string[]
+    guildMode: ConnectorConfigDocument["readScope"]["guildMode"]
     guildIds: readonly string[]
   }
   runtimeConfigured: readonly string[]
@@ -66,6 +71,10 @@ export interface ConnectorConfigSummary {
   tools: {
     surface: string
     toolsets: readonly string[]
+  }
+  threads: {
+    messageWrites: ConnectorConfigDocument["threads"]["messageWrites"]
+    reads: ConnectorConfigDocument["threads"]["reads"]
   }
 }
 
@@ -214,8 +223,11 @@ export function summarizeConnectorConfigDocument(
     identity: { ...document.identity },
     limitsConfigured: Object.keys(document.limits).sort(),
     name: document.name,
+    notifications: { ...document.notifications },
     readScope: {
+      channelMode: document.readScope.channelMode,
       channelIds: [...document.readScope.channelIds],
+      guildMode: document.readScope.guildMode,
       guildIds: [...document.readScope.guildIds],
     },
     runtimeConfigured: Object.keys(document.runtime).sort(),
@@ -230,6 +242,7 @@ export function summarizeConnectorConfigDocument(
       surface: document.tools.surface,
       toolsets: [...document.tools.toolsets],
     },
+    threads: { ...document.threads },
   }
 }
 
