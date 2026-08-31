@@ -35,7 +35,7 @@ import {
   CONNECTOR_VERSION,
   CONNECTOR_WEBSITE_URL,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_TOOLSET_NAMES,
   SCHEMA_VERSION,
 } from "./constants.js"
@@ -125,7 +125,7 @@ const CATALOG_CONFIG = loadConnectorConfigDocument(CATALOG_DOCUMENT, CATALOG_ENV
 const CATALOG_POLICY = new ScopePolicy(CATALOG_CONFIG).describe()
 const EXPECTED_TOOL_NAMES = Object.freeze([
   ...selectedCanonicalMcpToolNames(new Set(MCP_TOOLSET_NAMES)),
-  MCP_DISCOVERY_TOOL_NAME,
+  ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
 ].sort())
 const EXPECTED_PROMPT_NAMES = Object.freeze(
   selectedMcpPromptNames(new Set(MCP_TOOLSET_NAMES)).sort(),

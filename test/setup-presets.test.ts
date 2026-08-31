@@ -3,7 +3,7 @@ import test from "node:test"
 
 import {
   DISCORD_LIMITS,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
 } from "../src/constants.js"
 import { selectedCanonicalMcpToolNames } from "../src/mcp-tool-catalog.js"
 import { MCP_TOOL_RISK_CLASSES } from "../src/observability-catalog.js"
@@ -71,7 +71,7 @@ test("setup presets expose deterministic exact read-only contracts", () => {
     assert.deepEqual(
       preset.toolNames,
       [
-        MCP_DISCOVERY_TOOL_NAME,
+        ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
         ...selectedCanonicalMcpToolNames(new Set(preset.toolsets)),
       ].sort(),
     )

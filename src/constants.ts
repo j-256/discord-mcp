@@ -1,6 +1,6 @@
 export const CONNECTOR_NAME = "guildcontrol"
 export const CONNECTOR_TITLE = "GuildControl MCP"
-export const CONNECTOR_VERSION = "0.2.0"
+export const CONNECTOR_VERSION = "0.3.0"
 export const CONNECTOR_NPM_PACKAGE = "guildctl"
 export const CONNECTOR_CLI_COMMAND = "guildctl"
 export const CONNECTOR_NPX_COMMAND = "npx"
@@ -63,6 +63,11 @@ export const DISCORD_LOCALES = Object.freeze([
 export type DiscordLocale = typeof DISCORD_LOCALES[number]
 
 export const MCP_DISCOVERY_TOOL_NAME = "discover_discord_tools"
+export const MCP_DOCUMENTATION_SEARCH_TOOL_NAME = "search_guildcontrol_docs"
+export const MCP_ALWAYS_AVAILABLE_TOOL_NAMES = Object.freeze([
+  MCP_DISCOVERY_TOOL_NAME,
+  MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
+] as const)
 
 export const MCP_TOOL_SURFACES = [
   "full",
@@ -624,6 +629,9 @@ export const CONNECTOR_LIMITS = Object.freeze({
   messageForwardChannelAllowlist: 100,
   mentionUserAllowlist: 100,
   messagePageDefault: 50,
+  documentationSearchExcerptCharacters: 4_000,
+  documentationSearchMatches: 5,
+  documentationSearchQueryCharacters: 300,
   toolDiscoveryMatches: 8,
   toolDiscoveryQueryCharacters: 200,
   toolDiscoverySummaryCharacters: 200,

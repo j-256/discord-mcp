@@ -4,7 +4,7 @@ import {
 } from "./catalog.js"
 import {
   CONNECTOR_NPM_PACKAGE,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   SCHEMA_VERSION,
 } from "./constants.js"
 import { MCP_COMPLETION_VALUE_LIMIT } from "./mcp-completions.js"
@@ -109,7 +109,7 @@ function toolMetadata(name: string): ToolMetadata {
   }
   const risk = MCP_TOOL_RISK_CLASSES[name as McpToolName]
   const access = mcpToolAccessContract(name as McpToolName)
-  if (name === MCP_DISCOVERY_TOOL_NAME) {
+  if ((MCP_ALWAYS_AVAILABLE_TOOL_NAMES as readonly string[]).includes(name)) {
     return { access, risk, toolset: "connector", workflow: "standalone" }
   }
   if (!Object.hasOwn(MCP_TOOL_CATALOG, name)) {

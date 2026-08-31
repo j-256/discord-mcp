@@ -6,7 +6,7 @@ import { z } from "zod"
 
 import {
   CONNECTOR_LIMITS,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_TOOLSET_NAMES,
   MCP_TOOL_SURFACES,
   SCHEMA_VERSION,
@@ -32,8 +32,14 @@ import {
 
 export type CanonicalMcpToolName = Exclude<
   McpToolName,
-  typeof MCP_DISCOVERY_TOOL_NAME
+  typeof MCP_ALWAYS_AVAILABLE_TOOL_NAMES[number]
 >
+
+function isAlwaysAvailableMcpToolName(
+  name: McpToolName,
+): name is typeof MCP_ALWAYS_AVAILABLE_TOOL_NAMES[number] {
+  return (MCP_ALWAYS_AVAILABLE_TOOL_NAMES as readonly string[]).includes(name)
+}
 
 export const MCP_DISCOVERY_RISKS = [
   "destructive",
@@ -1472,7 +1478,7 @@ function accessMetadata(name: McpToolName): {
   workflow: McpToolWorkflow | null
 } {
   const riskClass = MCP_TOOL_RISK_CLASSES[name]
-  if (name === MCP_DISCOVERY_TOOL_NAME) {
+  if (isAlwaysAvailableMcpToolName(name)) {
     return { riskClass, toolset: "connector", workflow: null }
   }
   const metadata: ToolCatalogMetadata = MCP_TOOL_CATALOG[name]
@@ -1598,7 +1604,7 @@ export function createMcpToolAccessManifest(
 ): McpToolAccessManifest {
   const selectedToolsets = selectedMcpToolsets(toolsets)
   const names = [
-    MCP_DISCOVERY_TOOL_NAME,
+    ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
     ...selectedCanonicalMcpToolNames(new Set(selectedToolsets)),
   ].sort() as McpToolName[]
   const expandedEntries = names.map(mcpToolAccessEntry)

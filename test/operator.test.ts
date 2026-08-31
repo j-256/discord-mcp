@@ -8,6 +8,7 @@ import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_APPLICATION_FLAGS,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_READ_RESPONSE_LIMITS,
   MCP_TOOLSET_NAMES,
 } from "../src/constants.js"
@@ -6258,10 +6259,13 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.transport, "in-memory")
   assert.match(report.protocolVersion, /^2025-/)
   assert.equal(report.serverName, "guildcontrol")
-  assert.equal(report.serverVersion, "0.2.0")
+  assert.equal(report.serverVersion, "0.3.0")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
-  assert.equal(report.toolCount, Object.keys(MCP_TOOL_CATALOG).length + 1)
+  assert.equal(
+    report.toolCount,
+    Object.keys(MCP_TOOL_CATALOG).length + MCP_ALWAYS_AVAILABLE_TOOL_NAMES.length,
+  )
   assert.equal(
     report.readOnlyTools.length + report.writeCapableTools.length,
     report.toolCount,
@@ -6500,6 +6504,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.readOnlyTools.includes("parse_discord_reference"), true)
   assert.equal(report.readOnlyTools.includes("get_observability_status"), true)
   assert.equal(report.readOnlyTools.includes("discover_discord_tools"), true)
+  assert.equal(report.readOnlyTools.includes("search_guildcontrol_docs"), true)
   assert.equal(report.readOnlyTools.includes("plan_channel_creation"), true)
   assert.equal(
     report.readOnlyTools.includes("plan_application_intent_enablement"),
@@ -6583,7 +6588,7 @@ test("MCP smoke negotiates the stable protocol through a minimized spawned stdio
   assert.equal(report.transport, "stdio")
   assert.equal(report.protocolVersion, "2026-07-28")
   assert.equal(report.serverName, "guildcontrol")
-  assert.equal(report.serverVersion, "0.2.0")
+  assert.equal(report.serverVersion, "0.3.0")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolsets.includes("connector"), true)
@@ -6671,7 +6676,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
   assert.equal(report.status, "ok")
   assert.equal(report.toolSurface, "progressive")
   assert.deepEqual(report.toolsets, ["activity", "messages"])
-  assert.equal(report.toolCount, 10)
+  assert.equal(report.toolCount, 11)
   assert.deepEqual(report.destructiveTools, [])
   assert.deepEqual(report.writeCapableTools, [])
   assert.deepEqual(report.promptNames, [
@@ -6692,6 +6697,7 @@ test("MCP smoke expands a progressive subset without broadening configured tools
     "read_message_attachment",
     "read_messages",
     "recall_conversation",
+    "search_guildcontrol_docs",
     "search_messages",
   ])
 })

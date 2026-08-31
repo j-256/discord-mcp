@@ -13,7 +13,7 @@ RUN npm run build \
   && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
-ARG VERSION=0.2.0
+ARG VERSION=0.3.0
 ARG REVISION=local
 
 LABEL org.opencontainers.image.title="GuildControl MCP" \
@@ -32,6 +32,8 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json LICENSE ./
+COPY --chown=node:node README.md PRIVACY.md SECURITY.md SUPPORT.md ./
+COPY --chown=node:node docs/comparison.md docs/getting-started.md docs/limitations.md docs/migration.md docs/reference.md docs/releasing.md ./docs/
 
 USER node
 ENTRYPOINT ["node", "--no-expose-wasm", "--lite-mode", "dist/cli.js"]

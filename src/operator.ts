@@ -49,6 +49,7 @@ import {
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_DISCOVERY_TOOL_NAME,
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
@@ -4561,7 +4562,10 @@ async function inspectSmokeClient(
   transport: SmokeReport["transport"],
 ): Promise<SmokeReport> {
   const selectedToolNames = selectedCanonicalMcpToolNames(config.mcpToolsets)
-  const expectedToolNames = [...selectedToolNames, MCP_DISCOVERY_TOOL_NAME]
+  const expectedToolNames = [
+    ...selectedToolNames,
+    ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
+  ]
   const protocolVersion = client.getNegotiatedProtocolVersion()
   const server = client.getServerVersion()
   const icon = server?.icons?.[0]
@@ -4583,7 +4587,7 @@ async function inspectSmokeClient(
   if (config.mcpToolSurface === "progressive") {
     assertExactCatalog(
       listed.tools.map(({ name }) => name),
-      [MCP_DISCOVERY_TOOL_NAME],
+      MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
       "initial progressive tool",
     )
   }

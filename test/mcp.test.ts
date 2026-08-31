@@ -44,7 +44,9 @@ import {
   GUILD_COMMUNITY_CHANGE_FIELDS,
   GUILD_PROFILE_FIELDS,
   GUILD_SETTINGS_FIELDS,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_DISCOVERY_TOOL_NAME,
+  MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
   MCP_READ_RESPONSE_LIMITS,
   MCP_TOOLSET_NAMES,
   ONBOARDING_LIMITS,
@@ -15591,6 +15593,7 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
       "execute_guild_prune",
       "list_activity",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   assert.deepEqual(
@@ -16760,6 +16763,47 @@ test("MCP tool discovery returns bounded exact contracts without contacting Disc
   assert.equal(Object.values(calls).every((count) => count === 0), true)
 })
 
+test("MCP documentation search returns version-matched local recovery guidance", async (context) => {
+  const { calls, client } = await connectedFixture(context)
+  const advertised = await client.listTools()
+  const tool = listedTool(advertised.tools, MCP_DOCUMENTATION_SEARCH_TOOL_NAME)
+
+  assert.deepEqual(tool.annotations, {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+    readOnlyHint: true,
+  })
+  assert.match(client.getInstructions() || "", /exact error text/)
+
+  const result = structuredContent(await client.callTool({
+    arguments: {
+      query: "Discord user 786955914723852309 is outside the notification scope",
+    },
+    name: MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
+  }))
+  const matches = result.matches as Array<Record<string, unknown>>
+  assert.equal(result.status, "ok")
+  assert.equal(result.authorityGranted, false)
+  assert.equal(result.credentialsRequired, false)
+  assert.equal(result.discordContacted, false)
+  assert.equal(
+    matches[0]?.source,
+    "docs/reference.md#expanding-the-user-mention-allowlist",
+  )
+  assert.match(String(matches[0]?.excerpt), /scopes\.mentionUserIds/)
+  assert.match(String(matches[0]?.excerpt), /notifyUserIds/)
+  assert.doesNotMatch(JSON.stringify(result), /786955914723852309/)
+
+  const secretQuery = structuredContent(await client.callTool({
+    arguments: { query: TOKEN },
+    name: MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
+  }))
+  assert.deepEqual(secretQuery.matches, [])
+  assert.doesNotMatch(JSON.stringify(secretQuery), new RegExp(TOKEN))
+  assert.equal(Object.values(calls).every((count) => count === 0), true)
+})
+
 test("MCP tool discovery routes representative goals and rejects unsupported weak matches", async (context) => {
   const { calls, client } = await connectedFixture(context)
   const goals: ReadonlyArray<{
@@ -16865,6 +16909,7 @@ test("progressive natural-language discovery leads with a plan and reveals its w
       "plan_channel_creation",
       "execute_channel_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   assert.equal(Object.values(calls).every((count) => count === 0), true)
@@ -16897,6 +16942,7 @@ test("progressive coordination discovery reveals only its exact read contracts",
       "list_message_replies",
       "list_message_reactions",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   assert.equal(Object.values(calls).every((count) => count === 0), true)
@@ -16938,7 +16984,12 @@ test("progressive plain-message discovery excludes broader interaction workflows
   }
   assert.deepEqual(
     new Set((await client.listTools()).tools.map(({ name }) => name)),
-    new Set(["discover_discord_tools", "edit_own_message", "send_message"]),
+    new Set([
+      "discover_discord_tools",
+      "edit_own_message",
+      "search_guildcontrol_docs",
+      "send_message",
+    ]),
   )
   assert.equal(Object.values(calls).every((count) => count === 0), true)
 })
@@ -16967,6 +17018,7 @@ test("progressive discovery reveals the complete token-private Interaction respo
       "respond_to_discord_interaction",
       "send_discord_interaction_followup",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   assert.equal(Object.values(calls).every((count) => count === 0), true)
@@ -17016,7 +17068,7 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
 
   assert.deepEqual(
     (await progressive.client.listTools()).tools.map(({ name }) => name),
-    ["discover_discord_tools"],
+    ["discover_discord_tools", "search_guildcontrol_docs"],
   )
   await assert.rejects(
     () => progressive.client.callTool({
@@ -17049,6 +17101,7 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
     "plan_message_deletion",
     "delete_messages",
     MCP_DISCOVERY_TOOL_NAME,
+    MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
   ])
   assert.deepEqual(
     listedTool(changedTools as Tool[], "plan_message_deletion")._meta,
@@ -17063,6 +17116,7 @@ test("progressive discovery enables exact reviewed workflows and emits list chan
       "plan_message_deletion",
       "delete_messages",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   for (const name of ["plan_message_deletion", "delete_messages"]) {
@@ -17103,6 +17157,7 @@ test("progressive discovery enables the complete reviewed channel-creation workf
       "plan_channel_creation",
       "execute_channel_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17127,6 +17182,7 @@ test("progressive discovery enables the complete reviewed channel-clone workflow
       "plan_channel_clone",
       "execute_channel_clone",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17157,6 +17213,7 @@ test("progressive discovery separates channel-order audit from reviewed changes"
       "plan_channel_order",
       "execute_channel_order",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17187,6 +17244,7 @@ test("progressive discovery separates role-deletion audit from reviewed changes"
       "plan_role_deletion",
       "execute_role_deletion",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17211,6 +17269,7 @@ test("progressive discovery enables the complete reviewed forum-post workflow", 
       "plan_forum_post",
       "execute_forum_post",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17235,6 +17294,7 @@ test("progressive discovery enables the complete reviewed forum-tag workflow", a
       "plan_forum_tag_change",
       "execute_forum_tag_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17259,6 +17319,7 @@ test("progressive discovery enables the complete reviewed thread-creation workfl
       "plan_thread_creation",
       "execute_thread_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17283,6 +17344,7 @@ test("progressive discovery enables the complete reviewed attachment-message wor
       "plan_attachment_message",
       "execute_attachment_message",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17313,6 +17375,7 @@ test("progressive discovery enables the complete reviewed component-message work
       "verify_component_message",
       "execute_component_message",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17343,6 +17406,7 @@ test("progressive discovery enables the complete exact-recipient private-message
       "verify_direct_message_change",
       "execute_direct_message_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17369,6 +17433,7 @@ test("progressive discovery enables the complete reviewed guild-scaffold workflo
       "execute_guild_scaffold",
       "verify_guild_scaffold",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17401,6 +17466,7 @@ test("progressive discovery enables the complete reviewed guild-blueprint workfl
       "execute_guild_blueprint",
       "verify_guild_blueprint",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17425,6 +17491,7 @@ test("progressive discovery enables the complete reviewed role-creation workflow
       "plan_role_creation",
       "execute_role_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17449,6 +17516,7 @@ test("progressive discovery enables the complete reviewed member nickname workfl
       "plan_member_nickname_change",
       "execute_member_nickname_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17473,6 +17541,7 @@ test("progressive discovery enables the complete reviewed member verification wo
       "plan_member_verification_change",
       "execute_member_verification_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17497,6 +17566,7 @@ test("progressive discovery enables the complete reviewed member-role workflow",
       "plan_member_role_change",
       "execute_member_role_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17521,6 +17591,7 @@ test("progressive discovery enables the complete reviewed bulk member-role workf
       "plan_bulk_member_role_change",
       "execute_bulk_member_role_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17545,6 +17616,7 @@ test("progressive discovery enables the complete reviewed member voice workflow"
       "plan_member_voice_change",
       "execute_member_voice_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17569,6 +17641,7 @@ test("progressive discovery enables the complete reviewed thread-governance work
       "plan_thread_change",
       "execute_thread_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17593,6 +17666,7 @@ test("progressive discovery enables the complete reviewed message-pin workflow",
       "plan_message_pin",
       "execute_message_pin",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17617,6 +17691,7 @@ test("progressive discovery enables the complete reviewed reaction-moderation wo
       "plan_reaction_moderation",
       "execute_reaction_moderation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17641,6 +17716,7 @@ test("progressive discovery enables the complete reviewed announcement-crosspost
       "plan_announcement_crosspost",
       "execute_announcement_crosspost",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17665,6 +17741,7 @@ test("progressive discovery enables the complete reviewed message-forward workfl
       "plan_message_forward",
       "execute_message_forward",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17683,7 +17760,11 @@ test("progressive discovery keeps announcement audit separate from the reviewed 
   ])
   assert.deepEqual(
     (await audit.client.listTools()).tools.map(({ name }) => name),
-    ["list_announcement_subscriptions", "discover_discord_tools"],
+    [
+      "list_announcement_subscriptions",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 
   const reviewed = await connectedFixture(context, {
@@ -17705,6 +17786,7 @@ test("progressive discovery keeps announcement audit separate from the reviewed 
       "plan_announcement_subscription",
       "execute_announcement_subscription",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17729,6 +17811,7 @@ test("progressive discovery enables the complete reviewed poll-creation workflow
       "plan_poll_creation",
       "execute_poll_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17753,6 +17836,7 @@ test("progressive discovery enables the complete reviewed poll-ending workflow",
       "plan_poll_end",
       "execute_poll_end",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17777,6 +17861,7 @@ test("progressive discovery enables the complete reviewed webhook-deletion workf
       "plan_webhook_deletion",
       "execute_webhook_deletion",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17801,6 +17886,7 @@ test("progressive discovery enables the complete reviewed webhook-message deleti
       "plan_webhook_message_deletion",
       "execute_webhook_message_deletion",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17825,6 +17911,7 @@ test("progressive discovery enables the complete reviewed webhook-creation workf
       "plan_webhook_creation",
       "execute_webhook_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17849,6 +17936,7 @@ test("progressive discovery enables the complete reviewed webhook-change workflo
       "plan_webhook_change",
       "execute_webhook_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17873,6 +17961,7 @@ test("progressive discovery enables the complete reviewed invite-creation workfl
       "plan_invite_creation",
       "execute_invite_creation",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17897,6 +17986,7 @@ test("progressive discovery enables the complete reviewed invite-deletion workfl
       "plan_invite_deletion",
       "execute_invite_deletion",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17921,6 +18011,7 @@ test("progressive discovery enables the complete reviewed onboarding workflow", 
       "plan_onboarding_change",
       "execute_onboarding_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17945,6 +18036,7 @@ test("progressive discovery enables the complete reviewed Welcome Screen workflo
       "plan_guild_welcome_screen_change",
       "execute_guild_welcome_screen_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17969,6 +18061,7 @@ test("progressive discovery enables the complete reviewed widget-settings workfl
       "plan_guild_widget_settings_change",
       "execute_guild_widget_settings_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -17993,6 +18086,7 @@ test("progressive discovery enables the complete reviewed guild-expression workf
       "plan_guild_expression_change",
       "execute_guild_expression_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18017,6 +18111,7 @@ test("progressive discovery enables the complete reviewed guild application-comm
       "plan_guild_application_command_change",
       "execute_guild_application_command_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18041,6 +18136,7 @@ test("progressive discovery enables the complete reviewed global application-com
       "plan_global_application_command_change",
       "execute_global_application_command_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18067,6 +18163,7 @@ test("progressive discovery enables the complete reviewed linked-role metadata w
       "plan_application_role_connection_metadata_change",
       "execute_application_role_connection_metadata_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18091,6 +18188,7 @@ test("progressive discovery enables the complete reviewed soundboard workflow", 
       "plan_guild_soundboard_change",
       "execute_guild_soundboard_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18117,6 +18215,7 @@ test("progressive discovery enables the complete reviewed AutoMod workflow", asy
       "verify_automod_change",
       "execute_automod_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18141,6 +18240,7 @@ test("progressive discovery enables the complete reviewed scheduled-event workfl
       "plan_scheduled_event_change",
       "execute_scheduled_event_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18165,6 +18265,7 @@ test("progressive discovery enables the complete reviewed Stage-instance workflo
       "plan_stage_instance_change",
       "execute_stage_instance_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18189,6 +18290,7 @@ test("progressive discovery enables the complete reviewed channel-metadata workf
       "plan_channel_metadata_change",
       "execute_channel_metadata_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18213,6 +18315,7 @@ test("progressive discovery enables the reviewed voice channel status pair", asy
       "plan_voice_channel_status_change",
       "execute_voice_channel_status_change",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18243,7 +18346,7 @@ test("progressive discovery exposes voice reads with reviewed channel settings",
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name).sort(),
-    [...enabled, "discover_discord_tools"].sort(),
+    [...enabled, "discover_discord_tools", "search_guildcontrol_docs"].sort(),
   )
 })
 
@@ -18267,6 +18370,7 @@ test("progressive discovery enables the complete reviewed permission-overwrite w
       "plan_channel_permission_overwrite",
       "execute_channel_permission_overwrite",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18291,6 +18395,7 @@ test("progressive discovery enables the complete reviewed parent-category permis
       "plan_channel_permission_sync",
       "execute_channel_permission_sync",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -18314,7 +18419,7 @@ test("progressive discovery exposes the complete authority-free coordination rou
   )
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["discover_discord_tools"],
+    ["discover_discord_tools", "search_guildcontrol_docs"],
   )
 
   const discovery = structuredContent(await client.callTool({
@@ -18331,7 +18436,7 @@ test("progressive discovery exposes the complete authority-free coordination rou
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name).sort(),
-    [...enabled, "discover_discord_tools"].sort(),
+    [...enabled, "discover_discord_tools", "search_guildcontrol_docs"].sort(),
   )
 })
 
@@ -18364,6 +18469,7 @@ test("MCP toolsets exclude unavailable tools from direct and discovered surfaces
       "get_message",
       "read_message_attachment",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
   assert.deepEqual(
@@ -19188,7 +19294,11 @@ test("progressive permission discovery reveals only the requested exact tool", a
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["explain_principal_permissions", "discover_discord_tools"],
+    [
+      "explain_principal_permissions",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19384,7 +19494,7 @@ test("progressive ban discovery reveals only the requested exact read", async (c
   assert.deepEqual(discovery.newlyEnabledToolNames, ["get_guild_ban"])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["get_guild_ban", "discover_discord_tools"],
+    ["get_guild_ban", "discover_discord_tools", "search_guildcontrol_docs"],
   )
 })
 
@@ -19445,7 +19555,11 @@ test("progressive audit-log discovery reveals only the requested exact read", as
   assert.deepEqual(discovery.newlyEnabledToolNames, ["get_guild_audit_entry"])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["get_guild_audit_entry", "discover_discord_tools"],
+    [
+      "get_guild_audit_entry",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19528,7 +19642,11 @@ test("progressive discovery reveals exact Discord reference parsing independentl
   assert.deepEqual(discovery.newlyEnabledToolNames, ["parse_discord_reference"])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["parse_discord_reference", "discover_discord_tools"],
+    [
+      "parse_discord_reference",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19552,7 +19670,11 @@ test("progressive discovery reveals the pinned linked-role metadata audit indepe
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["audit_application_role_connection_metadata", "discover_discord_tools"],
+    [
+      "audit_application_role_connection_metadata",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19576,7 +19698,11 @@ test("progressive discovery reveals Activity-instance verification independently
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["inspect_application_activity_instance", "discover_discord_tools"],
+    [
+      "inspect_application_activity_instance",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19600,7 +19726,11 @@ test("progressive discovery reveals the pinned application SKU audit independent
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["audit_application_skus", "discover_discord_tools"],
+    [
+      "audit_application_skus",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -19629,6 +19759,7 @@ test("progressive discovery reveals exact-beneficiary monetization audits indepe
       "audit_application_entitlements",
       "audit_application_subscriptions",
       "discover_discord_tools",
+      "search_guildcontrol_docs",
     ],
   )
 })
@@ -19651,7 +19782,11 @@ test("progressive discovery reveals guild webhook exposure audit independently",
   assert.deepEqual(discovery.newlyEnabledToolNames, ["audit_guild_webhooks"])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["audit_guild_webhooks", "discover_discord_tools"],
+    [
+      "audit_guild_webhooks",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -32436,7 +32571,11 @@ test("progressive discovery reveals the exact scheduled-event user audit", async
   assert.deepEqual(discovery.newlyEnabledToolNames, ["list_scheduled_event_users"])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    ["list_scheduled_event_users", "discover_discord_tools"],
+    [
+      "list_scheduled_event_users",
+      "discover_discord_tools",
+      "search_guildcontrol_docs",
+    ],
   )
 })
 
@@ -41158,7 +41297,7 @@ test("MCP stdio progressive discovery negotiates modern tool-list changes", asyn
   await client.connect(transport)
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
-    [MCP_DISCOVERY_TOOL_NAME],
+    [MCP_DISCOVERY_TOOL_NAME, MCP_DOCUMENTATION_SEARCH_TOOL_NAME],
   )
   const discovered = structuredContent(await client.callTool({
     arguments: { query: "plan_message_deletion" },
@@ -41186,6 +41325,7 @@ test("MCP stdio progressive discovery negotiates modern tool-list changes", asyn
     "plan_message_deletion",
     "delete_messages",
     MCP_DISCOVERY_TOOL_NAME,
+    MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
   ])
   assert.deepEqual(
     (await client.listTools()).tools.map(({ name }) => name),
@@ -41193,6 +41333,7 @@ test("MCP stdio progressive discovery negotiates modern tool-list changes", asyn
       "plan_message_deletion",
       "delete_messages",
       MCP_DISCOVERY_TOOL_NAME,
+      MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
     ],
   )
   assert.match(diagnostics, /stdio server ready/)
@@ -41258,7 +41399,10 @@ test("MCP stdio entrypoint negotiates modern catalogs without stdout noise", asy
     }),
   ])
 
-  assert.equal(tools.tools.length, Object.keys(MCP_TOOL_CATALOG).length + 1)
+  assert.equal(
+    tools.tools.length,
+    Object.keys(MCP_TOOL_CATALOG).length + MCP_ALWAYS_AVAILABLE_TOOL_NAMES.length,
+  )
   assert.equal(prompts.prompts.length, Object.keys(MCP_PROMPT_NAMES).length)
   assert.equal(resources.resources.length, Object.keys(MCP_RESOURCE_URIS).length)
   assert.equal(

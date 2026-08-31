@@ -249,7 +249,7 @@ function smokeReport(): SmokeReport {
     resourceUris: ["discord://connector/safety"],
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: "guildcontrol",
-    serverVersion: "0.2.0",
+    serverVersion: "0.3.0",
     status: "ok",
     toolCount: 3,
     toolsets: ["connector", "messages"],
@@ -265,7 +265,7 @@ function catalogReport(): DiscordCatalogCheckReport {
     accessStageCounts: {
       "guarded-write": 0,
       "live-read": 1,
-      local: 1,
+      local: 2,
       "receipt-verify": 0,
       "review-execute": 1,
       "review-plan": 0,
@@ -318,19 +318,24 @@ function catalogReport(): DiscordCatalogCheckReport {
       "destructive-write": 1,
       "discord-read": 1,
       "interaction-write": 0,
-      "local-read": 1,
+      "local-read": 2,
     },
     safetyResourceDigest: `sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     serverName: "guildcontrol",
-    serverVersion: "0.2.0",
+    serverVersion: "0.3.0",
     status: "ok",
-    toolCount: 3,
+    toolCount: 4,
     toolAccessManifest: createMcpToolAccessManifest(
       new Set(["deletion", "messages"]),
     ),
     toolAccessResourceDigest: `sha256:${"e".repeat(64)}`,
-    toolNames: ["delete_messages", "discover_discord_tools", "read_messages"],
+    toolNames: [
+      "delete_messages",
+      "discover_discord_tools",
+      "read_messages",
+      "search_guildcontrol_docs",
+    ],
     toolsetNames: ["deletion", "messages"],
   }
 }
@@ -346,7 +351,7 @@ function catalogHtmlReport(file = "/output/guildcontrol-catalog.html"): DiscordC
     format: CATALOG_HTML_FORMAT,
     schemaVersion: 1,
     status: "ok",
-    toolCount: 3,
+    toolCount: 4,
   }
 }
 
@@ -5098,7 +5103,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /GuildControl MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
-  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.2\.0/)
+  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.3\.0/)
   assert.match(smokeOutput.value(), /Write-capable tools: delete_messages, send_message/)
   assert.match(smokeOutput.value(), /Destructive subset: delete_messages/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
@@ -5155,7 +5160,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
-  assert.match(versionOutput.value(), /0\.2\.0/)
+  assert.match(versionOutput.value(), /0\.3\.0/)
 })
 
 test("CLI converts unknown failures into bounded diagnostics", async () => {

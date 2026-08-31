@@ -2,7 +2,7 @@
 
 [Getting started and first verified read](getting-started.md) | [Migration from another Discord MCP](migration.md) | [Product boundaries and host compatibility](limitations.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md)
 
-<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.2.0/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.3.0/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
 
 GuildControl MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, exact allowlisted one-to-one private messages, current-application command exposure, privacy-bounded guild profiles, complete obfuscation-safe channel layouts, named guild settings, time-bounded guild incident actions, exact channel metadata and transient voice-channel status, complete ordered forum tags, roles, threads, forums, message pins, exact-message direct replies, directed coordination notes, privacy-safe reaction aggregates, native polls, privacy-safe guild integrations, application-owned emojis, guild emojis, stickers, soundboard sounds, AutoMod rules, scheduled events, active Stage instances, exact member voice state, guild onboarding, Welcome Screens, authenticated widget settings, guild bans, and guild vanity URL state, credential-redacted webhooks and announcement subscriptions, capability-safe guild invites and native Guild Templates, channel permission overwrites, effective permissions, privacy-minimized members and guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, portable non-secret multi-bot profiles, an optional privacy-safe real-time Gateway feed, optional exact-scope native Discord Interaction ingress with authenticated request Buttons, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, a model-neutral exact-message and directed-note coordination playbook, safe idempotent message interactions, reviewed exact-recipient private-message plain-text or static Components V2 send, reply, same-format edit, deletion, and receipt verification, reviewed Components V2 and remote-free rich-embed creation and editing, opt-in reaction-user and scheduled-event-subscriber audits, reviewed reaction moderation, reviewed native command management, reviewed policy-justified privileged-intent enablement, reviewed test-entitlement creation and receipt-proven deletion, reviewed externally fulfilled consumable-entitlement consumption, reviewed native poll creation and irreversible ending, reviewed exact announcement crossposts, reviewed immutable message forwarding, reviewed announcement subscribe and exact-ID unsubscribe operations, reviewed Guild Template lifecycle, guild-integration deletion, sparse guild-profile text, named guild-settings changes, time-bounded guild incident-action changes, forum-tag, application-emoji, guild-expression, soundboard, AutoMod, scheduled-event, Stage-instance, complete onboarding, complete ordered Welcome Screen, authenticated widget-settings, member nickname, member verification-bypass, member-role, member voice, and exact thread lifecycle and membership administration, reviewed credential-safe webhook creation, rename, move, and deletion, credential-private webhook message reads, idempotent plain-text delivery and editing, and signed exact-message deletion, capability-safe invite revocation, reviewed message pin, channel metadata, voice-channel status, channel ordering, exact channel and standard-role retirement, atomic same-guild channel cloning, channel permission overwrite, exact standard-role configuration, and exact relative role-order changes, reviewed local-file attachment messages, reviewed forum posts, reviewed message-anchored and standalone public or private thread creation, caller-retained declarative guild blueprints, resumable additive guild scaffolds, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, reviewed native bulk guild bans, bounded reviewed non-exact guild pruning, and content-free local activity records.
 
@@ -22,7 +22,7 @@ The connector treats Discord permissions as its outer boundary and adds local po
 - Prompt rendering validates literal inputs without contacting Discord or invoking a service method, and reviewed write prompts stop after read-only planning
 - Credential-free catalog mode advertises the exact production tools, prompts, resources, and templates while a fixed guard rejects every tool call before argument validation or execution
 - Full mode advertises every configured canonical tool so clients with native deferred-tool search retain exact tool identity, schemas, annotations, and approvals
-- Progressive mode starts with one local discovery tool and reveals matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
+- Progressive mode keeps local tool discovery and packaged-documentation search visible while revealing matching canonical tools through standard `notifications/tools/list_changed` events; it never uses a generic execution dispatcher
 - Operational tool calls with a client-provided MCP progress token emit only fixed request-round start and finish progress; notifications contain no tool name, input, result, status, error, identifier, count, timing, credential, or plan data, while calls without a token emit no progress
 - MCP request cancellation propagates through canonical handlers into abortable connector service, REST, and Gateway work; an aborted round emits no finish progress and the protocol sends no later tool response
 - Every canonical `plan_*` tool remains model-visible and links to one optional display-only MCP App resource; the app exposes no app-callable tool, approval action, execution action, or alternate write path
@@ -390,7 +390,7 @@ GuildControl MCP is self-hosted and uses no shared application identity. Each op
 The recommended first installation is derived from the same immutable read-only preset contract used by setup. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), confirm its Bot page has a bot user, copy the public Application ID, enable Guild Install on the Installation page, copy the target Server ID with Discord Developer Mode, and run:
 
 ```sh
-npx --yes guildctl@0.2.0 preset install server-observer \
+npx --yes guildctl@0.3.0 preset install server-observer \
   --application-id APPLICATION_ID \
   --guild-id GUILD_ID \
   --html ./guildcontrol-onboarding.html
@@ -576,14 +576,14 @@ Activity and receipt records contain only application, beneficiary, SKU, and ent
 
 ## Install
 
-A compatible MCPB host can import `guildcontrol-0.2.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
+A compatible MCPB host can import `guildcontrol-0.3.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
 
 The bundle embeds its privacy policy, deterministic SPDX inventory, exact dependency notices, credential-free catalog evidence, and a single self-contained ESM server. Its verifier builds twice, checks exact ZIP structure and metadata, compares bytes, scans every entry for secrets and non-neutral branding, validates the embedded evidence, unpacks to a fresh directory, and completes a real MCP initialization and catalog handshake. Verify the downloaded file against its `SHA256SUMS` entry and GitHub Release attestation before import.
 
 After a release is published, run an exact version from npm:
 
 ```sh
-npx --yes guildctl@0.2.0 help
+npx --yes guildctl@0.3.0 help
 ```
 
 Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
@@ -599,7 +599,7 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/guildcontrol:0.2.0 catalog --check
+  ghcr.io/j-256/guildcontrol:0.3.0 catalog --check
 ```
 
 For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and supply only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
@@ -609,7 +609,7 @@ export DISCORD_BOT_TOKEN
 printf 'Discord bot token: '
 read -r -s DISCORD_BOT_TOKEN
 printf '\n'
-npx --yes guildctl@0.2.0 setup \
+npx --yes guildctl@0.3.0 setup \
   --npx \
   --config ./guildcontrol.json \
   --preset server-observer \
@@ -622,7 +622,7 @@ docker run --rm -i \
   --pids-limit=64 \
   --env DISCORD_BOT_TOKEN \
   --mount "type=bind,source=$PWD/guildcontrol.json,target=/configuration/guildcontrol.json,readonly" \
-  ghcr.io/j-256/guildcontrol:0.2.0 serve --config /configuration/guildcontrol.json
+  ghcr.io/j-256/guildcontrol:0.3.0 serve --config /configuration/guildcontrol.json
 ```
 
 For a Docker or Kubernetes secret volume, create the policy with `credential.provider` set to `file` and `credential.path` set to the exact in-container path such as `/run/secrets/discord_bot_token`, then mount both the policy and secret read-only. The projected target must be owned by root or the image's `node` user, must not be group or world writable, and must have one hard link; the common root-owned read-only secret-volume shape passes this boundary. A projected-secret symlink is accepted so atomic orchestrator rotation works without broadening ordinary config-file link policy.
@@ -729,7 +729,7 @@ Every non-passing doctor check includes one bounded next action and one package-
 
 The offline nickname diagnostics report the base self-only gate, exact guild scope, broader other-member gate, protected-user and hierarchy boundary, required `CHANGE_NICKNAME` or `MANAGE_NICKNAMES` evidence, signed approval, one-shot execution, and exact readback without reading a member or nickname or contacting Discord.
 
-`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildctl@0.2.0 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
+`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildctl@0.3.0 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
 
 The `host` generation form requires one explicit `--config FILE` or `--profile NAME` and turns the validated non-secret policy into a domain-digested activation plan without resolving a credential, contacting Discord or another network endpoint, starting a process, discovering a host, or changing policy or host configuration. The default descriptor uses the installed Node.js executable and CLI entrypoint. Add `--npx` for the exact published package version or `--command COMMAND` for an installed executable; the choices are mutually exclusive. `--name NAME` changes only the portable server label. The plan binds the pinned public application and bot identities, exact guild and channel read scope, tool surface and toolsets, exact policy selector, ordered stdio launch, named external secret references, an empty inline environment map, required-server behavior, write approval, elicitation, timeouts, and a read-only verification request. `--json` emits the same structured evidence.
 
@@ -841,6 +841,41 @@ Use `config apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTI
 
 This generic workflow can add, remove, or redistribute authority, so the impact report is evidence for operator review rather than permission by itself. A local policy replacement does not grant Discord permissions, enable Developer Portal intents, install the bot, or prove live access. Run the emitted offline validation, online doctor, and read-only smoke checks after application. Curated recipes remain preferable for supported additive workflows because they also encode Discord permissions, intents, risk, and scope relationships. No environment-policy compatibility, legacy alias, fallback parser, or migration-plan warning participates in either path.
 
+### Expanding the user mention allowlist
+
+If a write returns `Discord user USER_ID is outside the notification scope`, the selected GuildControl policy does not authorize that exact user for notifications. This policy boundary is separate from Discord roles and channel permissions, Developer Portal intents, and MCP host approval.
+
+Call `search_guildcontrol_docs` with that exact error text to retrieve this recovery section at runtime. The search is local, bounded, credential-free, and available regardless of the selected Discord toolsets. It returns excerpts from fixed public files packaged with the running GuildControl version, contacts no service, persists neither query nor result, and grants no authority.
+
+Resolve the intended recipient to one exact Discord user ID, create a distinct private candidate from the active non-secret policy, and add the ID to `scopes.mentionUserIds` without removing existing entries:
+
+```json
+{
+  "scopes": {
+    "interactionChannelIds": ["CHANNEL_ID"],
+    "mentionUserIds": ["USER_ID"]
+  }
+}
+```
+
+Names and nicknames are not policy targets. A canonical typed mention can supply its exact user ID through `parse_discord_reference`, while a separately enabled member directory can resolve a username-or-nickname prefix through `search_guild_members` followed by exact member review.
+
+Plan and apply the candidate through the reviewed configuration replacement workflow:
+
+```sh
+guildctl config plan ACTIVE_FILE CANDIDATE_FILE --json
+guildctl config apply ACTIVE_FILE CANDIDATE_FILE \
+  --plan-digest PLAN_DIGEST \
+  --confirm ACTIVE_POLICY_NAME
+guildctl config validate ACTIVE_FILE
+guildctl doctor --config ACTIVE_FILE --online
+guildctl smoke --config ACTIVE_FILE
+```
+
+Copy the plan's exact digest and required confirmation only after reviewing the complete candidate and authority expansion. Applying changes the policy file but not an already running `serve` process, so reload the MCP host after the checks pass. Call `get_connector_status` from the reloaded connection and confirm that `mentionUserCount` reflects the intended allowlist before relying on it.
+
+Allowlisting a user does not notify them by itself. The write must still target an exact configured interaction channel, include `<@USER_ID>` visibly in `content`, and list the same ID in `notifyUserIds`; omitting either suppresses the notification. A plain `@Name` is only text, and role, `@everyone`, and `@here` notifications remain suppressed.
+
 Offline `doctor` also inspects the selected policy when its referenced bot credential is missing or unreadable. Unlike `config validate`, it reports runtime, credential availability, identity pins, and the complete effective safety posture in one report. An unavailable credential fails only its credential check while independent policy checks continue. `doctor --online` requires the real credential and makes no Discord request when that credential is unavailable.
 
 Selecting a file with `--config FILE` or `GUILDCONTROL_CONFIG_FILE` makes that document the exclusive policy source. The CLI resolves a relative `--config` path, while the environment selector must contain an absolute canonical path. Startup permits only the selector and the exact secrets referenced by the document. It rejects every other populated `GUILDCONTROL_*` or `OTEL_*` variable and every undeclared Discord token variable so ambient state cannot override, extend, or ambiguously combine with file policy. A config file and profile are mutually exclusive.
@@ -950,13 +985,15 @@ Create that canonical directory before startup with ownership matching the conne
 
 The path is operational policy rather than a credential value, so it may appear in the local configuration and offline workbench. It is deliberately absent from MCP results, errors, diagnostics, telemetry, activity records, and operation receipts. Back up and permission this directory as bearer-secret storage. Moving or sharing it changes credential custody, not Discord or connector authorization; exact capability gates and channel scope remain mandatory.
 
-When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildctl@0.2.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
+When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildctl@0.3.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
 
 Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
 ## Tools
 
-The default `full` surface is recommended for clients with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `tools.surface` to `progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools`; searching an exact name returns its complete contract and enables that canonical tool. Broader bounded searches can enable several exact matches. Discovery of any private-message read, planning, verification, or execution tool enables the complete list-get-plan-verify-execute lifecycle. Discovery of any preview, planning, verification, or execution tool in the component-message workflow enables its complete preview-plan-verify-execute surface. Discovery of any preview, planning, verification, or execution tool in the static rich-embed workflow likewise enables its complete preview-plan-verify-execute surface. Discovery of any guild-blueprint capture, planning, execution, or verification tool enables its complete capture-plan-execute-verify surface. Discovery of either planning or execution tool in the native Interaction managed-command, guild application-command, announcement-crosspost, announcement-subscription, application-emoji, application privileged-intent, authenticated bot-profile, attachments, AutoMod, forum-posts, forum-tags, thread-creation, thread-governance, guild-profile, guild-settings, guild Community, guild-incident-action, guild-expression, guild-integration deletion, reaction-moderation, soundboard, scheduled-event, Stage-instance, Guild Template, onboarding, guild-scaffold, channel-creation, channel-deletion, channel-metadata, channel-ordering, role-creation, role-configuration, role-deletion, role-ordering, member-nickname, member-verification, member-role, member-voice, message-pin, poll-creation, poll-ending, webhook-creation, webhook-change, webhook-deletion, webhook-message-deletion, invite-deletion, channel-permission-overwrite, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives part of a reviewed workflow. `get_current_bot_profile`, `audit_channel_order`, channel-deletion readiness, and role-deletion readiness remain independently discoverable because their audit and mutation gates are separate.
+The default `full` surface is recommended for clients with native deferred-tool search because the client can defer context while preserving each canonical tool's name, input schema, annotations, and approval identity. Set `tools.surface` to `progressive` only for hosts that need a smaller initial catalog. Progressive mode initially lists `discover_discord_tools` and `search_guildcontrol_docs`; searching an exact tool name returns its complete contract and enables that canonical tool. Broader bounded tool searches can enable several exact matches. Discovery of any private-message read, planning, verification, or execution tool enables the complete list-get-plan-verify-execute lifecycle. Discovery of any preview, planning, verification, or execution tool in the component-message workflow enables its complete preview-plan-verify-execute surface. Discovery of any preview, planning, verification, or execution tool in the static rich-embed workflow likewise enables its complete preview-plan-verify-execute surface. Discovery of any guild-blueprint capture, planning, execution, or verification tool enables its complete capture-plan-execute-verify surface. Discovery of either planning or execution tool in the native Interaction managed-command, guild application-command, announcement-crosspost, announcement-subscription, application-emoji, application privileged-intent, authenticated bot-profile, attachments, AutoMod, forum-posts, forum-tags, thread-creation, thread-governance, guild-profile, guild-settings, guild Community, guild-incident-action, guild-expression, guild-integration deletion, reaction-moderation, soundboard, scheduled-event, Stage-instance, Guild Template, onboarding, guild-scaffold, channel-creation, channel-deletion, channel-metadata, channel-ordering, role-creation, role-configuration, role-deletion, role-ordering, member-nickname, member-verification, member-role, member-voice, message-pin, poll-creation, poll-ending, webhook-creation, webhook-change, webhook-deletion, webhook-message-deletion, invite-deletion, channel-permission-overwrite, deletion, or moderation reviewed workflow enables that complete plan-plus-execute pair, so a client never receives part of a reviewed workflow. `get_current_bot_profile`, `audit_channel_order`, channel-deletion readiness, and role-deletion readiness remain independently discoverable because their audit and mutation gates are separate.
+
+`search_guildcontrol_docs` searches a fixed allowlist of public Markdown files shipped in the installed package. Use an exact GuildControl error when one is available, or a concise policy, configuration, setup, or recovery question. Results contain bounded section excerpts and package-relative source anchors, never echo the query, read credentials, inspect arbitrary paths, contact Discord or another network service, write state, or expand configured authority. Treat the result as version-matched operator guidance: the selected policy, live Discord evidence, host approval, and each called tool's runtime checks remain authoritative.
 
 Guild-departure discovery follows the same atomic workflow rule: finding either `plan_guild_departure` or `execute_guild_departure` enables both exact contracts from the dedicated `guild-departure` toolset.
 
@@ -1003,6 +1040,7 @@ Guild jump links receive a bounded projection of the configured exact guild and 
 | Tool | Access | Purpose |
 | --- | --- | --- |
 | `discover_discord_tools` | Local read | Rank the configured exact-tool catalog through bounded token-aware capability, toolset, or risk discovery and reveal canonical contracts in progressive mode without contacting Discord |
+| `search_guildcontrol_docs` | Local read | Search fixed public documentation packaged with the running version for bounded policy, configuration, setup, and recovery excerpts without credentials, arbitrary file access, persistence, network contact, or new authority |
 | `get_connector_status` | Discord read | Verify exact application and bot IDs and report effective policy through a path-free, profile-text-free privacy projection |
 | `audit_bot_installations` | Discord read | Compare every exact configured guild with a complete bounded ID-only installed-guild inventory and report missing or unexpected installations without adding authority or changing Discord |
 | `get_current_bot_profile` | Discord read | Verify the pinned application and authenticated bot identities, then return only transient username plus avatar and banner presence and animation state through a strict privacy projection |
@@ -3536,7 +3574,7 @@ After a content-free pending activity record, the connector sends one empty non-
 
 Idempotency is intentionally bounded rather than permanent. The local result ledger retains identifiers for ten minutes, and Discord documents only a past-few-minutes nonce window. If an uncertain send is left unresolved beyond those windows, inspect `list_activity` and the target channel before retrying. Never choose a fresh key merely because a result was uncertain, since that would authorize a second message.
 
-All mention classes are suppressed by default. A call can notify only exact IDs present in `scopes.mentionUserIds`, up to ten per message, and each ID must also appear as a visible `<@user-id>` mention in the submitted content. Role, `@everyone`, and `@here` notifications remain suppressed. Reply-author notification is a separate explicit boolean; the connector fetches the exact reply target and permits that notification only when its author ID is configured. Replies use Discord's fail-if-target-missing behavior.
+All mention classes are suppressed by default. A call can notify only exact IDs present in `scopes.mentionUserIds`, up to ten per message, and each ID must also appear as a visible `<@user-id>` mention in the submitted content. Role, `@everyone`, and `@here` notifications remain suppressed. Reply-author notification is a separate explicit boolean; the connector fetches the exact reply target and permits that notification only when its author ID is configured. Replies use Discord's fail-if-target-missing behavior. See [Expanding the user mention allowlist](#expanding-the-user-mention-allowlist) for the reviewed policy-change procedure and the `outside the notification scope` error.
 
 `edit_own_message` replaces the complete plain-text content of one exact message after a fresh ownership check. Webhook messages and messages owned by anyone other than the verified bot are rejected. An exact same-content request with no notification users is a journaled no-op that consumes no write budget. `add_reaction` and `remove_own_reaction` accept one Unicode emoji or custom `name:snowflake` value and use Discord's exact own-reaction endpoints with state-aware no-op handling and post-write verification. `add_reactions` applies the same primitive sequentially to two through ten unique logical emoji after validating the whole ordered set. Use it for acknowledgements, status markers, or a small emoji menu; use a native poll when participants are casting votes and the caller needs poll-specific aggregate state.
 
@@ -3855,25 +3893,25 @@ A publisher defect embedded in an immutable release tag may be recovered only th
 To verify a downloaded release archive:
 
 ```sh
-npm pack guildctl@0.2.0
-gh attestation verify guildctl-0.2.0.tgz \
+npm pack guildctl@0.3.0
+gh attestation verify guildctl-0.3.0.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0 \
+  --source-ref refs/tags/v0.3.0 \
   --deny-self-hosted-runners
-gh attestation verify guildctl-0.2.0.tgz \
+gh attestation verify guildctl-0.3.0.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0 \
+  --source-ref refs/tags/v0.3.0 \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
-gh release download v0.2.0 --repo j-256/guildcontrol --pattern guildcontrol-0.2.0.mcpb
-gh release verify-asset v0.2.0 guildcontrol-0.2.0.mcpb --repo j-256/guildcontrol
-docker pull ghcr.io/j-256/guildcontrol:0.2.0
-gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.2.0 \
+gh release download v0.3.0 --repo j-256/guildcontrol --pattern guildcontrol-0.3.0.mcpb
+gh release verify-asset v0.3.0 guildcontrol-0.3.0.mcpb --repo j-256/guildcontrol
+docker pull ghcr.io/j-256/guildcontrol:0.3.0
+gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.3.0 \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0 \
+  --source-ref refs/tags/v0.3.0 \
   --deny-self-hosted-runners \
   --bundle-from-oci
 ```
