@@ -2134,7 +2134,7 @@ function helpText(
     return `Usage: ${CONNECTOR_CLI_COMMAND} smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments.`
   }
   if (topic === "serve") {
-    return `Usage: ${CONNECTOR_CLI_COMMAND} serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments.`
+    return `Usage: ${CONNECTOR_CLI_COMMAND} serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is the default for a zero-argument non-interactive launch; a zero-argument interactive terminal starts guided onboarding instead. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments.`
   }
   if (topic === "profile") {
     return [
@@ -2179,6 +2179,7 @@ function helpText(
     `Usage: ${CONNECTOR_CLI_COMMAND} <command> [options]`,
     `       ${CONNECTOR_CLI_COMMAND} ${STANDARD_RUNTIME_ARGUMENT} <command> [options]`,
     "",
+    "A zero-argument interactive terminal starts onboarding; a zero-argument non-interactive launch starts the stdio server.",
     "The public launcher uses a memory-optimized Node profile by default. Add --standard-runtime to favor execution speed instead.",
     "",
     "Commands:",
@@ -2186,7 +2187,7 @@ function helpText(
     "  catalog  Inspect or verify the credential-free, execution-disabled MCP contract",
     "  config   Create, validate, inspect, and review one non-secret policy file",
     "  coordination  Inspect or resolve one policy's durable reviewed-write claims",
-    "  serve    Run the stdio MCP server with a selected policy (default)",
+    "  serve    Run the stdio MCP server with a selected policy (non-interactive default)",
     "  setup    Create or verify a policy and generate a portable launch descriptor",
     "  host     Project one verified policy into safe local MCP host adapters",
     "  migrate  Plan a release-exact switch from another Discord MCP",
@@ -4028,7 +4029,11 @@ async function selectedActivityFile(
 }
 
 export async function runCli(options: CliOptions = {}): Promise<number> {
-  const args = options.args || process.argv.slice(2)
+  const suppliedArgs = options.args || process.argv.slice(2)
+  const stdin = options.stdin || process.stdin
+  const args = suppliedArgs.length === 0 && Boolean(stdin.isTTY)
+    ? ["onboard"]
+    : suppliedArgs
   const environment = options.environment || process.env
   const stdout = options.stdout || process.stdout
   const stderr = options.stderr || process.stderr

@@ -34,10 +34,10 @@ The fastest supported outcome is an owner-managed read-only bot, one strict non-
 Create an application and bot in the [Discord Developer Portal](https://discord.com/developers/applications), enable Developer Mode in Discord, and copy the Application ID and target Server ID. Then run:
 
 ```sh
-npx guildctl onboard
+npx guildctl
 ```
 
-`onboard` guides host selection, creates or exactly revalidates the minimum `server-observer` policy, verifies the bot installation and a real child-process MCP handshake, and writes a private activation guide. Drift fails closed. It never stores the token, reads message content, enables writes, discovers a host path, or edits host configuration.
+`npx guildctl` starts interactive onboarding: host selection, minimum `server-observer` policy creation or exact revalidation, live bot and MCP verification, and a private activation guide. It fails closed on drift and never stores the token, reads message content, enables writes, discovers host paths, or edits host configuration.
 
 The result states whether host credential entry is required or existing custody can be reused. A one-time prompt is cleared after smoke. See the [first verified read guide](docs/getting-started.md) for custody, reruns, host installation, and recovery.
 
@@ -150,7 +150,7 @@ Once the host is connected, the first useful request can stay natural and narrow
 Show me the channels in Discord server YOUR_GUILD_ID using GuildControl MCP. Do not make changes.
 ```
 
-`config validate`, `doctor`, and `smoke` are optional assurance and recovery tools rather than mandatory repetitions after successful setup. Offline `doctor` remains useful before a secret is mounted or when its referenced file is unavailable. Its default human output shows totals plus actionable warnings and failures; add `--verbose` for every check or `--json` for complete machine-readable evidence. `doctor --online` contacts Discord only when the real selected credential is available, while `smoke` launches a child server and verifies the MCP handshake. Doctor exits 1 when warnings need review even though it describes that state as `ready with warnings`.
+`config validate`, `doctor`, and `smoke` are optional assurance and recovery tools after successful setup. Offline `doctor` can inspect policy without an available credential; `--online` contacts Discord only when it is available, while `smoke` verifies a child MCP handshake. Human doctor output shows actionable warnings and failures; add `--verbose` for every check or `--json` for complete evidence. Doctor exits 1 for warnings, including `ready with warnings`.
 
 ```sh
 npx --yes guildctl@0.2.0 config validate ./guildcontrol.json

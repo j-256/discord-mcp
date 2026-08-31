@@ -20,8 +20,10 @@ In the [Discord Developer Portal](https://discord.com/developers/applications), 
 ## Run one command
 
 ```sh
-npx guildctl onboard
+npx guildctl
 ```
+
+A bare interactive launch enters onboarding. `guildctl onboard` remains the explicit equivalent, while MCP hosts and scripts use `guildctl serve` or a non-interactive zero-argument launch.
 
 <Steps>
 
@@ -38,6 +40,8 @@ npx guildctl onboard
 6. Open the private activation guide it creates and follow the selected host instructions.
 
 </Steps>
+
+If an exact onboarding policy already exists, rerun the same interactive command. GuildControl derives the public IDs from that policy, skips the repeated installation ceremony, then revalidates the live bot, policy, credential custody, stdio path, and host handoff. Policy drift fails closed instead of replacing the file.
 
 <Aside type="note" title="The guide does not retain a prompted token">
 
