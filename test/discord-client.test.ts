@@ -289,6 +289,35 @@ test("Discord client rejects malformed and oversized Activity-instance evidence 
   }
 })
 
+test("Discord client enforces response bounds before retrying a transient GET", async () => {
+  const applicationId = "500000000000000001"
+  const instanceId = "i-valid-instance"
+  let calls = 0
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({ private: `${TOKEN}${"x".repeat(300_000)}` }, 503)
+    },
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    client.getApplicationActivityInstance(applicationId, instanceId),
+    (error: unknown) => (
+      error instanceof Error
+      && /exceeded its local response bound/u.test(error.message)
+      && !error.message.includes(TOKEN)
+    ),
+  )
+  assert.equal(calls, 1)
+  assert.equal(sleeps, 0)
+})
+
 test("Discord client treats Activity-instance identifiers as content-sensitive failures", async () => {
   const applicationId = "500000000000000001"
   const instanceId = "private-instance-id"
@@ -1867,6 +1896,233 @@ test("Discord client retries short rate limits using Discord retry timing", asyn
   assert.equal(user.id, "1")
   assert.equal(calls, 2)
   assert.deepEqual(waits, [12])
+})
+
+test("Discord client retries replay-safe GET transport failures with bounded backoff", async () => {
+  const records: RecordedObservation[] = []
+  const waits: number[] = []
+  let calls = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      if (calls === 1) throw new Error("temporary network failure")
+      return jsonResponse({ bot: true, id: "1", username: "bot" })
+    },
+    observer: recordingObserver(records),
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds)
+    },
+    token: TOKEN,
+  })
+
+  const user = await client.getCurrentUser()
+
+  assert.equal(user.id, "1")
+  assert.equal(calls, 2)
+  assert.deepEqual(waits, [100])
+  assert.deepEqual(records, [{
+    completions: [{ outcome: "ok" }],
+    operation: "get_current_user",
+    retries: 1,
+    runs: 1,
+  }])
+})
+
+test("Discord client retries only selected transient GET responses", async (context) => {
+  for (const [status, expectedWait] of [
+    [502, 100],
+    [503, 7],
+    [504, 100],
+  ] as const) {
+    await context.test(String(status), async () => {
+      const waits: number[] = []
+      let calls = 0
+      const client = new DiscordClient({
+        apiBaseUrl: API_BASE_URL,
+        fetchImplementation: async () => {
+          calls += 1
+          if (calls === 1) {
+            return jsonResponse(
+              { message: "temporary service failure" },
+              status,
+              status === 503 ? { "Retry-After": "0.007" } : {},
+            )
+          }
+          return jsonResponse({ bot: true, id: "1", username: "bot" })
+        },
+        sleep: async (milliseconds) => {
+          waits.push(milliseconds)
+        },
+        token: TOKEN,
+      })
+
+      assert.equal((await client.getCurrentUser()).id, "1")
+      assert.equal(calls, 2)
+      assert.deepEqual(waits, [expectedWait])
+    })
+  }
+
+  let calls = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      return jsonResponse({ message: "non-selected server failure" }, 500)
+    },
+    sleep: async () => {
+      throw new Error("HTTP 500 must not be retried")
+    },
+    token: TOKEN,
+  })
+  await assert.rejects(
+    () => client.getCurrentUser(),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 500,
+  )
+  assert.equal(calls, 1)
+})
+
+test("Discord client preserves bounded final evidence after exhausted GET retries", async () => {
+  const records: RecordedObservation[] = []
+  const waits: number[] = []
+  let calls = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      throw new Error("temporary network failure")
+    },
+    maxRetries: 2,
+    observer: recordingObserver(records),
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds)
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.getCurrentUser(),
+    (error: unknown) => (
+      error instanceof Error
+      && error.message.includes("after 3 attempts")
+      && (error as { operationalCategory?: unknown }).operationalCategory === "network-error"
+    ),
+  )
+  assert.equal(calls, 3)
+  assert.deepEqual(waits, [100, 200])
+  assert.equal(records[0]?.retries, 2)
+  assert.deepEqual(records[0]?.completions, [{
+    errorCategory: "network-error",
+    outcome: "error",
+  }])
+})
+
+test("Discord client cancels an automatic GET retry during backoff", async () => {
+  const controller = new AbortController()
+  const records: RecordedObservation[] = []
+  let calls = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async () => {
+      calls += 1
+      throw new Error("temporary network failure")
+    },
+    observer: recordingObserver(records),
+    sleep: async () => {
+      controller.abort()
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.getCurrentUser({ signal: controller.signal }),
+    (error: unknown) => (
+      error instanceof Error
+      && (error as { operationalCategory?: unknown }).operationalCategory === "cancelled"
+    ),
+  )
+  assert.equal(calls, 1)
+  assert.equal(records[0]?.retries, 1)
+  assert.deepEqual(records[0]?.completions, [{
+    errorCategory: "cancelled",
+    outcome: "error",
+  }])
+})
+
+test("Discord client does not retry a rate limit without trustworthy bounded delay", async () => {
+  for (const body of [
+    { message: "missing delay" },
+    { message: "negative delay", retry_after: -1 },
+  ]) {
+    let calls = 0
+    let sleeps = 0
+    const client = new DiscordClient({
+      apiBaseUrl: API_BASE_URL,
+      fetchImplementation: async () => {
+        calls += 1
+        return jsonResponse(body, 429)
+      },
+      sleep: async () => {
+        sleeps += 1
+      },
+      token: TOKEN,
+    })
+
+    await assert.rejects(
+      () => client.getCurrentUser(),
+      (error: unknown) => (
+        error instanceof DiscordApiError
+        && error.status === 429
+        && error.retryAfterMs === undefined
+      ),
+    )
+    assert.equal(calls, 1)
+    assert.equal(sleeps, 0)
+  }
+})
+
+test("Discord client enforces non-replayable methods even without endpoint opt-outs", async () => {
+  const methods: string[] = []
+  let sleeps = 0
+  const client = new DiscordClient({
+    apiBaseUrl: API_BASE_URL,
+    fetchImplementation: async (_input, init) => {
+      methods.push(init?.method || "GET")
+      return jsonResponse({ message: "rate limited", retry_after: 0 }, 429)
+    },
+    maxRetries: 3,
+    sleep: async () => {
+      sleeps += 1
+    },
+    token: TOKEN,
+  })
+
+  await assert.rejects(
+    () => client.createMessage("200", {
+      allowedMentions: { parse: [], replied_user: false },
+      content: "one delivery only",
+      nonce: "stable-nonce",
+    }),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  await assert.rejects(
+    () => client.editMessage("200", "300", {
+      allowedMentions: { parse: [], replied_user: false },
+      content: "one edit only",
+    }),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  await assert.rejects(
+    () => client.addOwnReaction("200", "300", "ok"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+  await assert.rejects(
+    () => client.deleteOwnReaction("200", "300", "ok"),
+    (error: unknown) => error instanceof DiscordApiError && error.status === 429,
+  )
+
+  assert.deepEqual(methods, ["POST", "PATCH", "PUT", "DELETE"])
+  assert.equal(sleeps, 0)
 })
 
 test("Discord client trims a separator-heavy test transport origin once", async () => {
