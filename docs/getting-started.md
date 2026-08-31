@@ -27,8 +27,10 @@ Create the application and bot in the [Discord Developer Portal](https://discord
 Run the interactive host-first flow:
 
 ```sh
-npx guildctl onboard
+npx guildctl
 ```
+
+A bare interactive launch enters onboarding. `guildctl onboard` remains the explicit equivalent, while MCP hosts and scripts use `guildctl serve` or a non-interactive zero-argument launch.
 
 The command performs one linear sequence:
 

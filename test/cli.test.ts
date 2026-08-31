@@ -2680,7 +2680,7 @@ test("CLI parser accepts strict contextual help for every action", () => {
   }
 })
 
-test("CLI defaults to the stdio server through the selected config without writing normal output", async () => {
+test("bare non-interactive CLI defaults to the stdio server without normal output", async () => {
   let serves = 0
   const stdout = outputStream()
   const stderr = outputStream()
@@ -2696,6 +2696,7 @@ test("CLI defaults to the stdio server through the selected config without writi
       DISCORD_BOT_TOKEN: `  ${TOKEN}  `,
     },
     stderr: stderr.stream,
+    stdin: { isTTY: false },
     stdout: stdout.stream,
   })
 
@@ -2703,6 +2704,67 @@ test("CLI defaults to the stdio server through the selected config without writi
   assert.equal(serves, 1)
   assert.equal(stdout.value(), "")
   assert.equal(stderr.value(), "")
+})
+
+test("bare interactive CLI starts guided onboarding", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const answers = [
+    "codex",
+    APPLICATION_ID,
+    GUILD_ID,
+    "n",
+    GUILD_ID,
+    "",
+    "n",
+  ]
+  let fixture: ReturnType<typeof onboardFixture> | undefined
+  const exitCode = await runCli({
+    args: [],
+    dependencies: dependencies({
+      loadConfig(environment) {
+        if (!fixture) assert.fail("Setup must run before configuration loading")
+        return loadConnectorConfigDocument(fixture.document, environment)
+      },
+      loadConfigDocument(file) {
+        if (!fixture) assert.fail("Setup must run before policy loading")
+        assert.equal(file, fixture.configFile)
+        return fixture.document
+      },
+      async prepareSetup(options) {
+        fixture = onboardFixture(options.configFile)
+        assert.equal(options.expectedApplicationId, APPLICATION_ID)
+        return fixture.setup
+      },
+      async smoke() {
+        if (!fixture) assert.fail("Setup must run before smoke")
+        return fixture.smoke
+      },
+    }),
+    environment: {},
+    interaction: {
+      async openExternal() {
+        assert.fail("Declined onboarding must not open a browser")
+      },
+      async promptSecret() {
+        return ONBOARD_TOKEN
+      },
+      async promptText() {
+        const answer = answers.shift()
+        if (answer === undefined) assert.fail("Unexpected onboarding prompt")
+        return answer
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exitCode, 0)
+  assert.deepEqual(answers, [])
+  assert.match(stdout.value(), /GuildControl onboarding: ready/)
+  assert.match(stderr.value(), /Identify the MCP host and exact local policy/)
+  assert.doesNotMatch(stdout.value(), new RegExp(ONBOARD_TOKEN))
 })
 
 test("CLI rejects operational commands without a config or schema-v2 profile", async () => {
@@ -2718,6 +2780,7 @@ test("CLI rejects operational commands without a config or schema-v2 profile", a
     }),
     environment: { DISCORD_BOT_TOKEN: TOKEN },
     stderr: stderr.stream,
+    stdin: { isTTY: false },
   })
 
   assert.equal(exitCode, 1)
@@ -3309,6 +3372,7 @@ test("CLI preserves long-running startup failure status with recovery text", asy
     }),
     environment: { [CONFIG_FILE_ENVIRONMENT_VARIABLE]: CONFIG_FILE },
     stderr: stderr.stream,
+    stdin: { isTTY: false },
   })
 
   assert.equal(exitCode, 1)
@@ -4931,6 +4995,10 @@ test("CLI renders contextual action help without consulting dependencies or envi
       stdout: stdout.stream,
     }), 0)
     assert.match(stdout.value(), /^Usage: guildctl/u)
+    if (args.length === 1 && args[0] === "--help") {
+      assert.match(stdout.value(), /zero-argument interactive terminal starts onboarding/)
+      assert.match(stdout.value(), /non-interactive launch starts the stdio server/)
+    }
   }
 
   const canonical = outputStream()
