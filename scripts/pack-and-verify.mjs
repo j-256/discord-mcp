@@ -47,7 +47,16 @@ const EXPECTED_CONFIG_RECIPES = [
   "channel-publisher",
   "direct-messenger",
   "incident-response",
+  "member-directory",
+  "ban-auditor",
+  "scheduled-event-manager",
+  "webhook-administrator",
+  "guild-command-manager",
 ]
+const EXPECTED_READ_ONLY_CONFIG_RECIPES = new Set([
+  "member-directory",
+  "ban-auditor",
+])
 const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
   "coordination-channel": Object.freeze({
     evidenceConnection: "none",
@@ -80,6 +89,31 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
     intents: Object.freeze([]),
   }),
   "incident-response": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "member-directory": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "ban-auditor": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "scheduled-event-manager": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "webhook-administrator": Object.freeze({
+    evidenceConnection: "none",
+    eventFeedPolicy: "unchanged",
+    intents: Object.freeze([]),
+  }),
+  "guild-command-manager": Object.freeze({
     evidenceConnection: "none",
     eventFeedPolicy: "unchanged",
     intents: Object.freeze([]),
@@ -343,6 +377,8 @@ const PROFILE_NAME = "installed-profile"
 const PROFILE_TOKEN_VARIABLE = "DISCORD_INSTALLED_BOT_TOKEN"
 const GUILD_ID = "300000000000000001"
 const CHANNEL_ID = "400000000000000001"
+const EXPECTED_CONFIG_RECIPES = ${JSON.stringify(EXPECTED_CONFIG_RECIPES)}
+const EXPECTED_READ_ONLY_CONFIG_RECIPES = new Set(${JSON.stringify([...EXPECTED_READ_ONLY_CONFIG_RECIPES])})
 const EXPECTED_MCP_TOOL_PROGRESS = [
   { message: "Discord request round started", progress: 0, total: 1 },
   { message: "Discord request round finished", progress: 1, total: 1 },
@@ -412,21 +448,13 @@ assert.equal(typeof connector.compileGuildBlueprintStarter, "function")
 assert.deepEqual(connector.GUILD_BLUEPRINT_STARTER_NAMES, ["community", "creator", "project", "support"])
 assert.deepEqual(connector.SETUP_PRESET_NAMES, ["server-observer", "channel-reader"])
 assert.equal(connector.getSetupPreset("server-observer").writeCapable, false)
-assert.deepEqual(connector.CONFIG_RECIPE_NAMES, [
-  "guild-starter",
-  "guild-builder",
-  "coordination-channel",
-  "message-channel",
-  "channel-publisher",
-  "direct-messenger",
-  "incident-response",
-])
-assert.equal(connector.getConfigRecipe("guild-starter").writeCapable, true)
-assert.equal(connector.getConfigRecipe("guild-builder").writeCapable, true)
-assert.equal(connector.getConfigRecipe("coordination-channel").writeCapable, true)
-assert.equal(connector.getConfigRecipe("message-channel").writeCapable, true)
-assert.equal(connector.getConfigRecipe("direct-messenger").writeCapable, true)
-assert.equal(connector.getConfigRecipe("incident-response").writeCapable, true)
+assert.deepEqual(connector.CONFIG_RECIPE_NAMES, EXPECTED_CONFIG_RECIPES)
+for (const recipeName of EXPECTED_CONFIG_RECIPES) {
+  assert.equal(
+    connector.getConfigRecipe(recipeName).writeCapable,
+    !EXPECTED_READ_ONLY_CONFIG_RECIPES.has(recipeName),
+  )
+}
 assert.equal(typeof connector.planConfigRecipe, "function")
 assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")
@@ -765,7 +793,10 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     EXPECTED_CONFIG_RECIPES,
   )
   for (const recipe of recipeReport.recipes) {
-    invariant(recipe.writeCapable === true, `installed configuration recipe ${recipe.name} is not write-capable`)
+    invariant(
+      recipe.writeCapable === !EXPECTED_READ_ONLY_CONFIG_RECIPES.has(recipe.name),
+      `installed configuration recipe ${recipe.name} has unexpected write capability`,
+    )
     invariant(recipe.requirements.botPermissions.includes("ADMINISTRATOR") === false, `installed configuration recipe ${recipe.name} requests Administrator`)
     invariant(/^(0|[1-9][0-9]*)$/.test(recipe.requirements.botPermissionBitfield), `installed configuration recipe ${recipe.name} has an invalid bot permission bitfield`)
     invariant(
