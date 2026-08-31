@@ -1560,6 +1560,20 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
   return wait(milliseconds, undefined, signal ? { signal } : undefined)
 }
 
+function startRequestTimeout(milliseconds: number): {
+  clear: () => void
+  signal: AbortSignal
+} {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort(new Error("request timed out"))
+  }, milliseconds)
+  return {
+    clear: () => clearTimeout(timer),
+    signal: controller.signal,
+  }
+}
+
 function errorBody(value: unknown): DiscordErrorBody | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   return value as DiscordErrorBody
@@ -8864,7 +8878,8 @@ export class DiscordClient {
 
     const execute = async (): Promise<T> => {
       for (let attempt = 0; attempt <= this.#maxRetries; attempt += 1) {
-        const timeoutSignal = AbortSignal.timeout(this.#requestTimeoutMs)
+        const timeout = startRequestTimeout(this.#requestTimeoutMs)
+        const timeoutSignal = timeout.signal
         const signal = parameters.signal
           ? AbortSignal.any([parameters.signal, timeoutSignal])
           : timeoutSignal
@@ -8912,6 +8927,7 @@ export class DiscordClient {
           if (body !== undefined) requestInit.body = body
           response = await this.#fetch(url, requestInit)
         } catch (error) {
+          timeout.clear()
           const failure = transportFailure(error)
           if (
             automaticReadRetry
@@ -8938,6 +8954,7 @@ export class DiscordClient {
         try {
           responseText = await response.text()
         } catch (error) {
+          timeout.clear()
           const failure = transportFailure(error)
           if (
             automaticReadRetry
@@ -8952,6 +8969,7 @@ export class DiscordClient {
           }
           throw failure
         }
+        timeout.clear()
         if (
           parameters.maxResponseBytes !== undefined
           && new TextEncoder().encode(responseText).byteLength
