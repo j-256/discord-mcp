@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, realpath, rm, symlink } from "node:fs/promises"
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -18,7 +18,10 @@ import {
   loadConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
 } from "../src/config-document.js"
-import { writeConnectorConfigDocumentFile } from "../src/config-operator.js"
+import {
+  validateConnectorConfigFile,
+  writeConnectorConfigDocumentFile,
+} from "../src/config-operator.js"
 import { loadConnectorConfigDocument } from "../src/config.js"
 import { CONNECTOR_LIMITS } from "../src/constants.js"
 import { guildChannelLayoutGuildIds } from "../src/guild-channel-evidence.js"
@@ -76,6 +79,11 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "channel-publisher",
     "direct-messenger",
     "incident-response",
+    "member-directory",
+    "ban-auditor",
+    "scheduled-event-manager",
+    "webhook-administrator",
+    "guild-command-manager",
   ])
   assert.equal(Object.isFrozen(CONFIG_RECIPES), true)
 
@@ -355,6 +363,139 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     intents: [],
   })
   assert.deepEqual(incidentResponse.requirements.privilegedIntents, [])
+
+  assert.deepEqual([
+    "member-directory",
+    "ban-auditor",
+    "scheduled-event-manager",
+    "webhook-administrator",
+    "guild-command-manager",
+  ].map((name) => {
+    const recipe = getConfigRecipe(name)
+    return {
+      capabilities: recipe.capabilities,
+      name: recipe.name,
+      permissions: recipe.requirements.botPermissions,
+      privilegedIntents: recipe.requirements.privilegedIntents,
+      riskClasses: recipe.riskClasses,
+      scope: recipe.requirements.scope.targets,
+      tools: recipe.toolNames,
+      toolsets: recipe.toolsets,
+      writeCapable: recipe.writeCapable,
+    }
+  }), [
+    {
+      capabilities: ["memberDirectory"],
+      name: "member-directory",
+      permissions: [],
+      privilegedIntents: [{ name: "GUILD_MEMBERS", status: "required" }],
+      riskClasses: ["discord-read", "local-read"],
+      scope: ["$.scopes.memberDirectoryGuildIds"],
+      tools: [
+        "discover_discord_tools",
+        "get_guild_member",
+        "list_guild_members",
+        "search_guild_members",
+        "search_guildcontrol_docs",
+      ],
+      toolsets: ["members"],
+      writeCapable: false,
+    },
+    {
+      capabilities: ["banAudit"],
+      name: "ban-auditor",
+      permissions: ["BAN_MEMBERS"],
+      privilegedIntents: [],
+      riskClasses: ["discord-read", "local-read"],
+      scope: ["$.scopes.banAuditGuildIds"],
+      tools: [
+        "discover_discord_tools",
+        "get_guild_ban",
+        "list_guild_bans",
+        "search_guildcontrol_docs",
+      ],
+      toolsets: ["bans"],
+      writeCapable: false,
+    },
+    {
+      capabilities: ["scheduledEventAudit", "scheduledEventChanges"],
+      name: "scheduled-event-manager",
+      permissions: ["MANAGE_EVENTS", "CREATE_EVENTS"],
+      privilegedIntents: [],
+      riskClasses: ["destructive-write", "discord-read", "local-read"],
+      scope: ["$.scopes.scheduledEventGuildIds"],
+      tools: [
+        "discover_discord_tools",
+        "execute_scheduled_event_change",
+        "get_scheduled_event",
+        "list_scheduled_event_users",
+        "list_scheduled_events",
+        "plan_scheduled_event_change",
+        "search_guildcontrol_docs",
+      ],
+      toolsets: ["scheduled-events"],
+      writeCapable: true,
+    },
+    {
+      capabilities: ["webhookAudit", "webhookChanges", "webhookDeletions"],
+      name: "webhook-administrator",
+      permissions: ["VIEW_CHANNEL", "MANAGE_WEBHOOKS"],
+      privilegedIntents: [],
+      riskClasses: [
+        "destructive-write",
+        "discord-read",
+        "interaction-write",
+        "local-read",
+      ],
+      scope: ["$.scopes.webhookChannelIds"],
+      tools: [
+        "audit_guild_webhooks",
+        "discover_discord_tools",
+        "edit_webhook_message",
+        "execute_webhook_change",
+        "execute_webhook_creation",
+        "execute_webhook_deletion",
+        "execute_webhook_message_deletion",
+        "get_channel_webhook",
+        "get_webhook_message",
+        "list_channel_webhooks",
+        "plan_webhook_change",
+        "plan_webhook_creation",
+        "plan_webhook_deletion",
+        "plan_webhook_message_deletion",
+        "search_guildcontrol_docs",
+        "send_webhook_message",
+      ],
+      toolsets: ["webhooks"],
+      writeCapable: true,
+    },
+    {
+      capabilities: ["applicationCommandChanges"],
+      name: "guild-command-manager",
+      permissions: [],
+      privilegedIntents: [],
+      riskClasses: ["destructive-write", "discord-read", "local-read"],
+      scope: ["$.scopes.applicationCommandGuildIds"],
+      tools: [
+        "audit_application_commands",
+        "audit_application_posture",
+        "audit_application_role_connection_metadata",
+        "audit_application_skus",
+        "audit_bot_installations",
+        "discover_discord_tools",
+        "execute_global_application_command_change",
+        "execute_guild_application_command_change",
+        "get_connector_status",
+        "inspect_application_activity_instance",
+        "parse_discord_reference",
+        "plan_global_application_command_change",
+        "plan_guild_application_command_change",
+        "search_guildcontrol_docs",
+      ],
+      toolsets: ["application-commands", "connector"],
+      writeCapable: true,
+    },
+  ])
 })
 
 test("configuration recipe requests normalize exact bounded scope", () => {
@@ -738,6 +879,125 @@ test("incident-response adds only exact-guild incident policy", async (context) 
     }),
     /must remain inside readScope\.guildIds/,
   )
+})
+
+test("workflow recipes produce complete valid exact-scope policies", async (context) => {
+  const file = await configFile(context)
+  const cases = [
+    {
+      capabilities: ["memberDirectory"],
+      name: "member-directory",
+      scopeName: "memberDirectoryGuildIds",
+      selection: { guildIds: [GUILD_ID] },
+      toolsets: ["connector", "members"],
+    },
+    {
+      capabilities: ["banAudit"],
+      name: "ban-auditor",
+      scopeName: "banAuditGuildIds",
+      selection: { guildIds: [GUILD_ID] },
+      toolsets: ["bans", "connector"],
+    },
+    {
+      capabilities: ["scheduledEventAudit", "scheduledEventChanges"],
+      name: "scheduled-event-manager",
+      scopeName: "scheduledEventGuildIds",
+      selection: { guildIds: [GUILD_ID] },
+      toolsets: ["connector", "scheduled-events"],
+    },
+    {
+      capabilities: ["webhookAudit", "webhookChanges", "webhookDeletions"],
+      name: "webhook-administrator",
+      scopeName: "webhookChannelIds",
+      selection: { channelIds: [CHANNEL_ID] },
+      toolsets: ["connector", "webhooks"],
+    },
+    {
+      capabilities: ["applicationCommandChanges"],
+      name: "guild-command-manager",
+      scopeName: "applicationCommandGuildIds",
+      selection: { guildIds: [GUILD_ID] },
+      toolsets: ["application-commands", "connector"],
+    },
+  ] as const
+
+  for (const entry of cases) {
+    const plan = planConfigRecipe({
+      file,
+      name: entry.name,
+      ...entry.selection,
+    })
+    assert.equal(plan.status, "planned")
+    assert.deepEqual(
+      entry.capabilities.map((name) => plan.proposedDocument.capabilities[name]),
+      entry.capabilities.map(() => true),
+    )
+    assert.deepEqual(
+      plan.proposedDocument.scopes[entry.scopeName],
+      "guildIds" in entry.selection
+        ? entry.selection.guildIds
+        : entry.selection.channelIds,
+    )
+    assert.deepEqual(plan.proposedDocument.tools.toolsets, entry.toolsets)
+    assert.doesNotThrow(() => loadConnectorConfigDocument(
+      plan.proposedDocument,
+      { [TOKEN_ALIAS]: TOKEN },
+    ))
+  }
+})
+
+test("a preferred recipe repairs its recognized hand-authored dependency gap", async (context) => {
+  const file = await configFile(context)
+  const invalid = document({
+    capabilities: { scheduledEventChanges: true },
+    scopes: { scheduledEventGuildIds: [GUILD_ID] },
+    toolsets: ["connector", "scheduled-events"],
+  })
+  await writeFile(file, `${JSON.stringify(invalid, null, 2)}\n`)
+
+  assert.throws(
+    () => validateConnectorConfigFile(file),
+    (error: unknown) => {
+      assert.equal(error instanceof Error, true)
+      const message = error instanceof Error ? error.message : ""
+      assert.match(
+        message,
+        /\$\.capabilities\.scheduledEventChanges requires \$\.capabilities\.scheduledEventAudit/,
+      )
+      assert.match(message, /Preferred recipe: scheduled-event-manager/)
+      assert.equal(
+        message.includes(
+          `guildctl recipe plan scheduled-event-manager ${file} --guild-id ${GUILD_ID}`,
+        ),
+        true,
+      )
+      return true
+    },
+  )
+
+  const plan = planConfigRecipe({
+    file,
+    guildIds: [GUILD_ID],
+    name: "scheduled-event-manager",
+  })
+  assert.equal(plan.status, "planned")
+  assert.equal(plan.proposedDocument.capabilities.scheduledEventAudit, true)
+  const applied = await applyConfigRecipe({
+    file,
+    guildIds: [GUILD_ID],
+    name: "scheduled-event-manager",
+    confirmation: "scheduled-event-manager",
+    planDigest: plan.planDigest,
+  })
+  assert.equal(applied.status, "applied")
+  assert.equal(
+    loadConnectorConfigDocumentFile(file).capabilities.scheduledEventAudit,
+    true,
+  )
+  assert.equal(typeof applied.backupFile, "string")
+  const backup = JSON.parse(await readFile(applied.backupFile as string, "utf8"))
+  assert.equal(backup.capabilities.scheduledEventChanges, true)
+  assert.equal(backup.capabilities.scheduledEventAudit, undefined)
 })
 
 test("direct-messenger adds only exact-user private-message policy", async (context) => {

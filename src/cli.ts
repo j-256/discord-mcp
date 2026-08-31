@@ -249,6 +249,7 @@ const CLI_COMMAND_ACTIONS = Object.freeze({
     "explain",
     "workbench",
     "plan",
+    "replace",
     "apply",
   ] as const),
   coordination: Object.freeze(["list", "resolve"] as const),
@@ -256,7 +257,7 @@ const CLI_COMMAND_ACTIONS = Object.freeze({
   migrate: Object.freeze(["list", "plan"] as const),
   preset: Object.freeze(["list", "show", "install"] as const),
   profile: Object.freeze(["list", "show", "remove", "restore"] as const),
-  recipe: Object.freeze(["list", "show", "plan", "apply"] as const),
+  recipe: Object.freeze(["list", "show", "plan", "enable", "apply"] as const),
 })
 
 type CliCommand = typeof CLI_COMMANDS[number]
@@ -300,6 +301,15 @@ export type ParsedCliArguments =
     file: string
     json: boolean
     planDigest: string
+  }
+  | {
+    acceptCurrentPlan: boolean
+    action: "replace"
+    candidateFile: string
+    command: "config"
+    confirmation?: string
+    file: string
+    json: boolean
   }
   | {
     action: "explain"
@@ -488,6 +498,18 @@ export type ParsedCliArguments =
     action: "plan"
     channelIds: string[]
     command: "recipe"
+    file: string
+    guildIds: string[]
+    json: boolean
+    name: string
+    userIds: string[]
+  }
+  | {
+    acceptCurrentPlan: boolean
+    action: "enable"
+    channelIds: string[]
+    command: "recipe"
+    confirmation?: string
     file: string
     guildIds: string[]
     json: boolean
@@ -1125,10 +1147,10 @@ function parseConfigCommand(
   const action = args[0]
   if (!action || !isCliCommandAction("config", action)) {
     throw new ConfigurationError(
-      "config requires apply, explain, init, plan, show, validate, or workbench",
+      "config requires apply, explain, init, plan, replace, show, validate, or workbench",
     )
   }
-  if (action === "plan" || action === "apply") {
+  if (action === "plan" || action === "replace" || action === "apply") {
     const file = args[1]
     const candidateFile = args[2]
     if (!file || file.startsWith("--")) {
@@ -1145,6 +1167,58 @@ function parseConfigCommand(
         command: "config",
         file,
         json: options.has("--json"),
+      }
+    }
+    if (action === "replace") {
+      let acceptCurrentPlan = false
+      let confirmation: string | undefined
+      let json = false
+      const seen = new Set<string>()
+      for (let index = 3; index < args.length; index += 1) {
+        const argument = args[index]
+        if (
+          !argument
+          || !["--accept-current-plan", "--confirm", "--json"].includes(argument)
+        ) {
+          throw new ConfigurationError(`Unknown option ${argument || ""}`)
+        }
+        if (seen.has(argument)) {
+          throw new ConfigurationError(`Option ${argument} may be provided only once`)
+        }
+        seen.add(argument)
+        if (argument === "--accept-current-plan") {
+          acceptCurrentPlan = true
+          continue
+        }
+        if (argument === "--json") {
+          json = true
+          continue
+        }
+        const value = args[index + 1]
+        if (!value || value.startsWith("--")) {
+          throw new ConfigurationError("Option --confirm requires a value")
+        }
+        confirmation = value
+        index += 1
+      }
+      if (acceptCurrentPlan !== (confirmation !== undefined)) {
+        throw new ConfigurationError(
+          "config replace requires --accept-current-plan and --confirm together",
+        )
+      }
+      if (json && !acceptCurrentPlan) {
+        throw new ConfigurationError(
+          "config replace --json requires --accept-current-plan and --confirm",
+        )
+      }
+      return {
+        acceptCurrentPlan,
+        action,
+        candidateFile,
+        command: "config",
+        ...(confirmation === undefined ? {} : { confirmation }),
+        file,
+        json,
       }
     }
     let confirmation: string | undefined
@@ -1407,7 +1481,7 @@ function parseRecipeCommand(
 ): Extract<ParsedCliArguments, { command: "recipe" }> {
   const action = args[0]
   if (!action || !isCliCommandAction("recipe", action)) {
-    throw new ConfigurationError("recipe requires apply, list, plan, or show")
+    throw new ConfigurationError("recipe requires apply, enable, list, plan, or show")
   }
   if (action === "list") {
     const options = parseBooleanOptions(args.slice(1), new Set(["--json"]))
@@ -1433,6 +1507,7 @@ function parseRecipeCommand(
     throw new ConfigurationError(`recipe ${action} requires a file path`)
   }
   const channelIds: string[] = []
+  let acceptCurrentPlan = false
   let confirmation: string | undefined
   const guildIds: string[] = []
   let json = false
@@ -1445,6 +1520,7 @@ function parseRecipeCommand(
     "--json",
     "--user-id",
     ...(action === "apply" ? ["--confirm", "--plan-digest"] : []),
+    ...(action === "enable" ? ["--accept-current-plan", "--confirm"] : []),
   ])
   for (let index = 3; index < args.length; index += 1) {
     const argument = args[index]
@@ -1458,6 +1534,10 @@ function parseRecipeCommand(
       throw new ConfigurationError(`Option ${argument} may be provided only once`)
     }
     if (!repeatable) seen.add(argument)
+    if (argument === "--accept-current-plan") {
+      acceptCurrentPlan = true
+      continue
+    }
     if (argument === "--json") {
       json = true
       continue
@@ -1489,6 +1569,25 @@ function parseRecipeCommand(
   }
   if (action === "plan") {
     return { action, command: "recipe", ...selection }
+  }
+  if (action === "enable") {
+    if (acceptCurrentPlan !== (confirmation !== undefined)) {
+      throw new ConfigurationError(
+        "recipe enable requires --accept-current-plan and --confirm together",
+      )
+    }
+    if (json && !acceptCurrentPlan) {
+      throw new ConfigurationError(
+        "recipe enable --json requires --accept-current-plan and --confirm",
+      )
+    }
+    return {
+      acceptCurrentPlan,
+      action,
+      command: "recipe",
+      ...(confirmation === undefined ? {} : { confirmation }),
+      ...selection,
+    }
   }
   if (planDigest === undefined) {
     throw new ConfigurationError("recipe apply requires --plan-digest DIGEST")
@@ -1909,6 +2008,10 @@ const CLI_ACTION_HELP: CliActionHelpCatalog = Object.freeze({
       description: "Compare one active policy with one candidate, validate both complete documents, and return the exact changes plus a path-bound fresh digest without resolving credentials, contacting Discord, or changing either file.",
       synopsis: "plan ACTIVE_FILE CANDIDATE_FILE [--json]",
     },
+    replace: {
+      description: "Plan, display, confirm, recompute, and atomically replace one active policy in a single interactive command while preserving the detached plan and apply path. Non-interactive or JSON use requires both --accept-current-plan and the active-policy name; identity changes remain forbidden.",
+      synopsis: "replace ACTIVE_FILE CANDIDATE_FILE [--accept-current-plan --confirm ACTIVE_NAME] [--json]",
+    },
     apply: {
       description: "Recompute one policy-change plan, require its exact digest and active-policy name, preserve a recoverable backup, publish atomically, and verify the result. The pinned application and bot identities cannot change, and no credential or Discord endpoint is used.",
       synopsis: "apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTIVE_NAME [--json]",
@@ -1993,6 +2096,10 @@ const CLI_ACTION_HELP: CliActionHelpCatalog = Object.freeze({
       description: "Apply one recipe and its exact guild, channel, or user scope to a validated policy in memory and return the complete proposed document, changes, requirements, and fresh digest. Planning resolves no credential, contacts no Discord endpoint, and changes no file.",
       synopsis: "plan NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--json]",
     },
+    enable: {
+      description: "Plan, display, confirm, recompute, and atomically enable one additive recipe in a single interactive command. Non-interactive or JSON use requires both --accept-current-plan and the recipe name; exact scope, backup, and verification behavior remain unchanged.",
+      synopsis: "enable NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--accept-current-plan --confirm NAME] [--json]",
+    },
     apply: {
       description: "Recompute one additive recipe plan, require its exact digest and recipe-name confirmation, preserve a recoverable backup, publish atomically, and verify the policy. Application resolves no credential, contacts no Discord endpoint, and never grants Discord authority by itself.",
       synopsis: "apply NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
@@ -2045,9 +2152,10 @@ function helpText(
       "  explain [PATH] [--json]",
       "  workbench ACTIVE_FILE --html OUTPUT_FILE [--json]",
       "  plan ACTIVE_FILE CANDIDATE_FILE [--json]",
+      "  replace ACTIVE_FILE CANDIDATE_FILE [--accept-current-plan --confirm ACTIVE_NAME] [--json]",
       "  apply ACTIVE_FILE CANDIDATE_FILE --plan-digest DIGEST --confirm ACTIVE_NAME [--json]",
       "",
-      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. The private offline workbench writes only a standalone candidate editor; it cannot resolve secrets, contact Discord, or replace the active policy. Validation and change planning do not read secret values or contact Discord. Applying a reviewed change fresh-checks both files, preserves a recoverable backup, and cannot change the pinned Discord identity.",
+      "Normal operation uses one strict non-secret configuration file plus only the environment or file secrets it references. The private offline workbench writes only a standalone candidate editor; it cannot resolve secrets, contact Discord, or replace the active policy. Replace is the interactive plan-review-apply path; detached plan and apply remain available for automation and independent review. Every write fresh-checks both files, preserves a recoverable backup, and cannot change the pinned Discord identity.",
     ].join("\n")
   }
   if (topic === "doctor") {
@@ -2169,9 +2277,10 @@ function helpText(
       "  list [--json]",
       "  show NAME [--json]",
       "  plan NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--json]",
+      "  enable NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) [--accept-current-plan --confirm NAME] [--json]",
       "  apply NAME FILE (--guild-id ID... | --channel-id ID... | --user-id ID...) --plan-digest DIGEST --confirm NAME [--json]",
       "",
-      "Review and add one bounded write workflow to an existing strict policy. Planning and application do not resolve secrets or contact Discord. Application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
+      "Review and add one bounded workflow to an existing strict policy. Enable is the interactive plan-review-apply path; detached plan and apply remain available for automation and independent review. Recipe commands do not resolve secrets or contact Discord, and every application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
     ].join("\n")
   }
   if (topic === "version") return `Usage: ${CONNECTOR_CLI_COMMAND} version\n\nPrint the package version.`
@@ -2900,7 +3009,9 @@ function renderRecipe(recipe: ConfigRecipeDescriptor): string {
     `  Toolsets: ${recipe.toolsets.join(", ")}`,
     `  Tools (${recipe.toolNames.length}): ${recipe.toolNames.join(", ")}`,
     `  Risk classes: ${recipe.riskClasses.join(", ")}`,
-    "  Writes: enabled only through the underlying reviewed workflow gates",
+    recipe.writeCapable
+      ? "  Writes: enabled only through the underlying reviewed workflow gates"
+      : "  Writes: disabled; this recipe adds a bounded read workflow only",
     "  Risks:",
     ...recipe.risks.map((risk) => `    - ${risk}`),
     "  Warnings:",
@@ -2953,6 +3064,9 @@ function renderRecipePlan(
     `Required confirmation: ${report.confirmation.requiredValue}`,
     ...applyHandoff,
     `Configuration written: ${report.execution.configurationWritten ? "yes" : "no"}`,
+    ...(report.action === "plan" && report.status === "planned"
+      ? ["Write recovery: atomic replacement preserves a recoverable prior-version backup"]
+      : []),
     ...(applied?.backupFile
       ? [`Recoverable prior version: ${applied.backupFile}`]
       : []),
@@ -2965,6 +3079,7 @@ function renderRecipePlan(
     `Gateway evidence: ${report.recipe.requirements.gateway.evidenceConnection === "none"
       ? `none; event-feed policy ${report.recipe.requirements.gateway.eventFeedPolicy}`
       : `${report.recipe.requirements.gateway.evidenceConnection} with ${report.recipe.requirements.gateway.intents.join(", ")}; event-feed policy ${report.recipe.requirements.gateway.eventFeedPolicy}`}`,
+    `Risk classes: ${report.recipe.riskClasses.join(", ")}`,
     "Changes:",
     ...changes,
     "Risks:",
@@ -3182,6 +3297,9 @@ function renderConfigChange(
     `Plan digest: ${report.planDigest}`,
     `Required confirmation: ${report.confirmation.requiredValue}`,
     `Configuration written: ${report.execution.configurationWritten ? "yes" : "no"}`,
+    ...(report.action === "plan" && report.status === "planned"
+      ? ["Write recovery: atomic replacement preserves a recoverable prior-version backup"]
+      : []),
     ...(report.action === "apply" && report.backupFile
       ? [`Recoverable prior version: ${report.backupFile}`]
       : []),
@@ -3374,6 +3492,49 @@ async function promptYesNo(
     if (["n", "no"].includes(normalized)) return { ok: true, value: false }
     return { message: "Enter yes or no", ok: false }
   })
+}
+
+function integratedReviewMode(options: {
+  acceptCurrentPlan: boolean
+  command: "config replace" | "recipe enable"
+  json: boolean
+  terminal: boolean
+}): "accepted" | "interactive" {
+  if (options.acceptCurrentPlan) return "accepted"
+  if (options.json || !options.terminal) {
+    throw new ConfigurationError(
+      `${options.command} requires an interactive terminal or both --accept-current-plan and --confirm`,
+    )
+  }
+  return "interactive"
+}
+
+function acceptedCurrentPlanConfirmation(
+  value: string | undefined,
+  command: "config replace" | "recipe enable",
+): string {
+  if (value === undefined) {
+    throw new ConfigurationError(
+      `${command} requires --confirm with --accept-current-plan`,
+    )
+  }
+  return value
+}
+
+async function promptReviewedConfirmation(
+  interaction: CliInteraction,
+  requiredValue: string,
+  subject: string,
+): Promise<string> {
+  const confirmation = await interaction.promptText(
+    `Type ${requiredValue} to apply the reviewed ${subject}, or press Ctrl-C to cancel: `,
+  )
+  if (confirmation !== requiredValue) {
+    throw new ConfigurationError(
+      `Confirmation must exactly match ${requiredValue}`,
+    )
+  }
+  return confirmation
 }
 
 function matchOnboardHost(value: string): OnboardHostId | undefined {
@@ -4142,6 +4303,45 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           )
           return CLI_EXIT_CODES.success
         }
+        if (parsed.action === "replace") {
+          const mode = integratedReviewMode({
+            acceptCurrentPlan: parsed.acceptCurrentPlan,
+            command: "config replace",
+            json: parsed.json,
+            terminal: Boolean(stdin.isTTY),
+          })
+          const plan = dependencies.planConfigChange({
+            candidateFile: parsed.candidateFile,
+            file: parsed.file,
+          })
+          if (mode === "interactive") {
+            safeWrite(stdout, renderConfigChange(plan), environment)
+          }
+          const confirmation = plan.status === "already-current"
+            ? plan.confirmation.requiredValue
+            : mode === "accepted"
+              ? acceptedCurrentPlanConfirmation(
+                  parsed.confirmation,
+                  "config replace",
+                )
+              : await promptReviewedConfirmation(
+                  options.interaction || DEFAULT_CLI_INTERACTION,
+                  plan.confirmation.requiredValue,
+                  "configuration replacement",
+                )
+          const report = await dependencies.applyConfigChange({
+            candidateFile: parsed.candidateFile,
+            confirmation,
+            file: parsed.file,
+            planDigest: plan.planDigest,
+          })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderConfigChange(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
+        }
         if (parsed.action === "apply") {
           const report = await dependencies.applyConfigChange({
             candidateFile: parsed.candidateFile,
@@ -4523,6 +4723,41 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
           guildIds: parsed.guildIds,
           name: parsed.name,
           userIds: parsed.userIds,
+        }
+        if (parsed.action === "enable") {
+          const mode = integratedReviewMode({
+            acceptCurrentPlan: parsed.acceptCurrentPlan,
+            command: "recipe enable",
+            json: parsed.json,
+            terminal: Boolean(stdin.isTTY),
+          })
+          const plan = dependencies.planRecipe(selection)
+          if (mode === "interactive") {
+            safeWrite(stdout, renderRecipePlan(plan), environment)
+          }
+          const confirmation = plan.status === "already-current"
+            ? plan.confirmation.requiredValue
+            : mode === "accepted"
+              ? acceptedCurrentPlanConfirmation(
+                  parsed.confirmation,
+                  "recipe enable",
+                )
+              : await promptReviewedConfirmation(
+                  options.interaction || DEFAULT_CLI_INTERACTION,
+                  plan.confirmation.requiredValue,
+                  "recipe enablement",
+                )
+          const report = await dependencies.applyRecipe({
+            ...selection,
+            confirmation,
+            planDigest: plan.planDigest,
+          })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderRecipePlan(report),
+            environment,
+          )
+          return CLI_EXIT_CODES.success
         }
         const report = parsed.action === "plan"
           ? dependencies.planRecipe(selection)

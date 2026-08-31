@@ -747,11 +747,12 @@ function createConfigChangePlan(
     const inspection = inspectConnectorConfigDocumentFile(file)
     currentDocument = validateConnectorConfigDocumentPolicy(
       inspection.document,
+      { guidanceFile: file },
     )
     currentTargetFile = inspection.targetFile
   } catch (error) {
     throw new ConfigChangeError(
-      "The active configuration is unavailable or invalid",
+      `The active configuration is unavailable or invalid${error instanceof Error ? `: ${error.message}` : ""}`,
       "active",
       { cause: error },
     )
@@ -762,11 +763,12 @@ function createConfigChangePlan(
     const inspection = inspectConnectorConfigDocumentFile(candidateFile)
     candidateDocument = validateConnectorConfigDocumentPolicy(
       inspection.document,
+      { guidanceFile: file },
     )
     candidateTargetFile = inspection.targetFile
   } catch (error) {
     throw new ConfigChangeError(
-      "The candidate configuration is unavailable or invalid",
+      `The candidate configuration is unavailable or invalid${error instanceof Error ? `: ${error.message}` : ""}`,
       "candidate",
       { cause: error },
     )
