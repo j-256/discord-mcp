@@ -87,7 +87,14 @@ const EXPECTED_RECIPE_GATEWAY_REQUIREMENTS = Object.freeze({
 })
 const EXPECTED_REST_METHODS = ["DELETE", "GET", "PATCH", "POST", "PUT"]
 const EXPECTED_SETUP_PRESETS = ["server-observer", "channel-reader"]
-const EXPECTED_HOST_ADAPTERS = ["mcp-json", "cursor", "vscode", "gemini-extension"]
+const EXPECTED_HOST_ADAPTERS = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "vscode",
+  "gemini-extension",
+  "mcp-json",
+]
 const EXPECTED_MIGRATION_SOURCES = [
   "cappyeo@0.25.0",
   "hypark@0.1.1",
@@ -269,7 +276,8 @@ async function assertNeutralPackage(packageDirectory, files) {
       !containsSpecificReference(contents.toString("latin1"), {
         allowClientCompatibility: clientCompatibilityFiles.has(relative)
           || relative.startsWith("dist/host-adapters.")
-          || relative.startsWith("dist/host-inspection."),
+          || relative.startsWith("dist/host-inspection.")
+          || relative.startsWith("dist/host-installation."),
       }),
       `npm archive file ${relative} has model- or harness-specific branding`,
     )
@@ -418,7 +426,7 @@ assert.equal(typeof connector.applyConfigRecipe, "function")
 assert.equal(typeof connector.createBotInstallPlan, "function")
 assert.equal(typeof connector.createHostActivationPlan, "function")
 assert.equal(typeof connector.createHostAdapterCatalog, "function")
-assert.equal(connector.HOST_ADAPTER_IDS.length, 4)
+assert.deepEqual(connector.HOST_ADAPTER_IDS, ${JSON.stringify(EXPECTED_HOST_ADAPTERS)})
 assert.equal(typeof connector.inspectHostAdapterFile, "function")
 assert.equal(connector.HOST_INSPECTION_FORMAT, "${HOST_INSPECTION_FORMAT}")
 assert.equal(typeof connector.exportDiscordHostActivationHtml, "function")
@@ -1179,7 +1187,12 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
       invariant(SHA256_DIGEST_PATTERN.test(adapter.adapterDigest), `installed ${adapter.id} adapter digest is invalid`)
       invariant(!adapterDigests.has(adapter.adapterDigest), `installed ${adapter.id} adapter digest is duplicated`)
       adapterDigests.add(adapter.adapterDigest)
-      assert.equal(adapter.content, `${JSON.stringify(adapter.configuration, null, 2)}\n`, `installed ${adapter.id} adapter bytes are not canonical`)
+      if (adapter.format === "json") {
+        assert.equal(adapter.content, `${JSON.stringify(adapter.configuration, null, 2)}\n`, `installed ${adapter.id} adapter bytes are not canonical`)
+      } else {
+        invariant(adapter.format === "toml", `installed ${adapter.id} adapter format changed`)
+        invariant(adapter.content.endsWith("\n"), `installed ${adapter.id} adapter bytes are not newline terminated`)
+      }
       invariant(!adapter.content.includes(DUMMY_TOKEN), `installed ${adapter.id} adapter captured an ambient secret`)
       assert.deepEqual(adapter.requirements, {
         ...report.launch.requirements,
@@ -1189,6 +1202,26 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     const adapters = Object.fromEntries(report.adapterCatalog.adapters.map((adapter) => [adapter.id, adapter]))
     const credentialName = report.launch.secrets.environmentVariables[0]
     invariant(typeof credentialName === "string", "installed host activation omitted its credential reference")
+    const claudeCodeServer = adapters["claude-code"].configuration.mcpServers[report.launch.serverName]
+    assert.deepEqual(claudeCodeServer, {
+      args: report.launch.args,
+      command: report.launch.command,
+      env: { [credentialName]: `\${${credentialName}}` },
+      type: "stdio",
+    })
+    assert.deepEqual(adapters.codex.configuration.mcp_servers[report.launch.serverName], {
+      args: report.launch.args,
+      command: report.launch.command,
+      default_tools_approval_mode: "writes",
+      env_vars: [credentialName],
+      required: true,
+      startup_timeout_sec: report.launch.timeouts.startupSeconds,
+      tool_timeout_sec: report.launch.timeouts.toolSeconds,
+    })
+    invariant(
+      adapters.codex.content.includes(`env_vars = ["${credentialName}"]`),
+      "installed Codex adapter omitted named environment forwarding",
+    )
     const commonServer = adapters["mcp-json"].configuration.mcpServers[report.launch.serverName]
     assert.deepEqual(commonServer, {
       args: report.launch.args,

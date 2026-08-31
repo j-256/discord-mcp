@@ -862,7 +862,7 @@ async function checkDocumentation(packageJson) {
   invariant(limitations.includes("`--inspect-host-file FILE`"), "product boundaries lack host inspection limits")
   invariant(limitations.includes("`host plan --adapter ID --host-file FILE`"), "product boundaries lack host installation planning")
   invariant(limitations.includes("Native-process memory parity"), "product boundaries lack the native-memory limitation")
-  invariant(readme.includes("deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI"), "README lacks verified host adapter discovery")
+  invariant(readme.includes("deterministic adapters for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and common MCP JSON"), "README lacks verified host adapter discovery")
   invariant(readme.includes("`host plan` and `host apply`"), "README lacks reviewed host installation")
   invariant(comparison.includes("GuildControl MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")

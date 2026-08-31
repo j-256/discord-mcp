@@ -3,6 +3,7 @@ import {
   chmod,
   link,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -15,7 +16,6 @@ import test from "node:test"
 import { createConnectorConfigDocument } from "../src/config-document.js"
 import { CONNECTOR_VERSION } from "../src/constants.js"
 import {
-  HOST_ADAPTER_IDS,
   createHostAdapterCatalog,
   findHostAdapter,
   type HostAdapter,
@@ -100,8 +100,8 @@ test("host inspection matches every exact adapter and ignores unrelated shared s
   const activation = plan()
   const catalog = createHostAdapterCatalog(activation)
 
-  for (const adapterId of HOST_ADAPTER_IDS) {
-    const adapter = findHostAdapter(catalog, adapterId)
+  for (const adapter of catalog.adapters.filter((candidate) => candidate.format === "json")) {
+    const adapterId = adapter.id
     const file = join(root, `${adapterId}.json`)
     await writeJson(
       file,
@@ -142,6 +142,18 @@ test("host inspection matches every exact adapter and ignores unrelated shared s
     assert.equal(first.privacy.credentialValuesReturned, false)
     assert.equal(first.privacy.unrelatedHostStateReturned, false)
   }
+})
+
+test("host inspection rejects TOML adapters before reading a destination", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "guildcontrol-host-inspection-toml-"))
+  context.after(() => rm(directory, { force: true, recursive: true }))
+  const file = join(await realpath(directory), "missing-config.toml")
+
+  assert.throws(
+    () => inspectHostAdapterFile(plan(), "codex", file),
+    /Host adapter codex renders TOML and cannot be inspected as JSON/u,
+  )
+  await assert.rejects(readFile(file), /ENOENT/u)
 })
 
 test("host inspection reports canonical fixed server drift without returning observed values", async (context) => {

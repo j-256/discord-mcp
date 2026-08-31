@@ -100,7 +100,12 @@ test("host adapters bind deterministic exact projections to one activation", () 
   for (const adapter of first.adapters) {
     assert.equal(adapter.activationDigest, plan.activationDigest)
     assert.match(adapter.adapterDigest, /^sha256:[a-f0-9]{64}$/)
-    assert.equal(adapter.content, `${JSON.stringify(adapter.configuration, null, 2)}\n`)
+    if (adapter.format === "json") {
+      assert.equal(adapter.content, `${JSON.stringify(adapter.configuration, null, 2)}\n`)
+    } else {
+      assert.equal(adapter.format, "toml")
+      assert.equal(adapter.content.endsWith("\n"), true)
+    }
     assert.equal(Object.isFrozen(adapter), true)
     assert.equal(Object.isFrozen(adapter.configuration), true)
     assert.equal(Object.isFrozen(adapter.instructions), true)
@@ -109,6 +114,58 @@ test("host adapters bind deterministic exact projections to one activation", () 
     assert.equal(adapter.requirements.elicitation, "required-for-reviewed-writes")
   }
   assert.doesNotMatch(JSON.stringify(first), new RegExp(TOKEN_VALUE))
+})
+
+test("Claude Code adapter expands only named environment references", () => {
+  const plan = environmentPlan()
+  const adapter = findHostAdapter(createHostAdapterCatalog(plan), "claude-code")
+
+  assert.deepEqual(adapter.configuration, {
+    mcpServers: {
+      [SERVER_NAME]: {
+        args: plan.launch.args,
+        command: plan.launch.command,
+        env: { [TOKEN_ALIAS]: `\${${TOKEN_ALIAS}}` },
+        type: "stdio",
+      },
+    },
+  })
+  assert.equal(adapter.format, "json")
+  assert.equal(adapter.secret.strategy, "environment-interpolation")
+  assert.doesNotMatch(adapter.content, new RegExp(TOKEN_VALUE))
+})
+
+test("Codex adapter emits exact TOML with named environment forwarding and host gates", () => {
+  const plan = environmentPlan()
+  const adapter = findHostAdapter(createHostAdapterCatalog(plan), "codex")
+
+  assert.deepEqual(adapter.configuration, {
+    mcp_servers: {
+      [SERVER_NAME]: {
+        args: plan.launch.args,
+        command: plan.launch.command,
+        default_tools_approval_mode: "writes",
+        env_vars: [TOKEN_ALIAS],
+        required: true,
+        startup_timeout_sec: 30,
+        tool_timeout_sec: 180,
+      },
+    },
+  })
+  assert.equal(adapter.content, [
+    `[mcp_servers.${SERVER_NAME}]`,
+    'command = "npx"',
+    `args = ["--yes", "guildctl@${CONNECTOR_VERSION}", "serve", "--config", "${CONFIG_FILE}"]`,
+    `env_vars = ["${TOKEN_ALIAS}"]`,
+    "startup_timeout_sec = 30",
+    "tool_timeout_sec = 180",
+    "required = true",
+    'default_tools_approval_mode = "writes"',
+    "",
+  ].join("\n"))
+  assert.equal(adapter.format, "toml")
+  assert.equal(adapter.secret.strategy, "forwarded-environment")
+  assert.doesNotMatch(adapter.content, new RegExp(TOKEN_VALUE))
 })
 
 test("common MCP JSON preserves exact launch order without inventing secret syntax", () => {
@@ -212,6 +269,7 @@ test("file-credential plans omit every host secret field", () => {
     assert.doesNotMatch(adapter.content, /"env"|"inputs"|"settings"/)
     assert.match(adapter.instructions.join(" "), /private credential file/)
   }
+  assert.doesNotMatch(findHostAdapter(catalog, "codex").content, /env_vars/)
 })
 
 test("adapter verification rejects changed evidence and invalid activation plans", () => {

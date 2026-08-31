@@ -14,16 +14,19 @@ import { stableString } from "./normalize.js"
 export const HOST_ADAPTER_CATALOG_FORMAT = "guildcontrol.host-adapters.v1"
 export const HOST_ADAPTER_CATALOG_SCHEMA_VERSION = 1
 export const HOST_ADAPTER_IDS = Object.freeze([
-  "mcp-json",
+  "claude-code",
+  "codex",
   "cursor",
   "vscode",
   "gemini-extension",
+  "mcp-json",
 ] as const)
 
 export type HostAdapterId = typeof HOST_ADAPTER_IDS[number]
 export type HostAdapterSecretStrategy =
   | "credential-file"
   | "environment-interpolation"
+  | "forwarded-environment"
   | "inherited-environment"
   | "secure-input"
   | "system-keychain"
@@ -34,7 +37,7 @@ export interface HostAdapter {
   readonly configuration: Readonly<Record<string, unknown>>
   readonly content: string
   readonly destinations: readonly string[]
-  readonly format: "json"
+  readonly format: "json" | "toml"
   readonly hostServerName: string
   readonly id: HostAdapterId
   readonly installUri?: string
@@ -70,6 +73,14 @@ const GEMINI_EXTENSION_DIGEST_LENGTH = 12
 const JSON_INDENT = 2
 
 const HOST_ADAPTER_SPECIFICATIONS = Object.freeze({
+  claudeCode: Object.freeze({
+    title: "Claude Code MCP configuration",
+    url: "https://code.claude.com/docs/en/mcp",
+  }),
+  codex: Object.freeze({
+    title: "Codex MCP configuration",
+    url: "https://developers.openai.com/codex/mcp/",
+  }),
   cursor: Object.freeze({
     title: "Cursor MCP install links",
     url: "https://cursor.com/docs/mcp/install-links",
@@ -96,6 +107,14 @@ function deepFreeze<Value>(value: Value): Value {
 
 function jsonContent(configuration: Readonly<Record<string, unknown>>): string {
   return `${JSON.stringify(configuration, null, JSON_INDENT)}\n`
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value)
+}
+
+function tomlStringArray(values: readonly string[]): string {
+  return `[${values.map(tomlString).join(", ")}]`
 }
 
 function adapterDigest(adapter: HostAdapterBase): string {
@@ -148,6 +167,132 @@ function serverConfiguration(plan: HostActivationPlan): Readonly<Record<string, 
   return deepFreeze({
     args: [...plan.launch.args],
     command: plan.launch.command,
+  })
+}
+
+function claudeCodeEnvironment(
+  environmentVariables: readonly string[],
+): Readonly<Record<string, string>> {
+  return Object.freeze(Object.fromEntries(environmentVariables.map((name) => [
+    name,
+    `\${${name}}`,
+  ])))
+}
+
+function claudeCodeAdapter(plan: HostActivationPlan): HostAdapter {
+  const environmentVariables = plan.launch.secrets.environmentVariables
+  const server = deepFreeze({
+    ...serverConfiguration(plan),
+    ...(environmentVariables.length > 0
+      ? { env: claudeCodeEnvironment(environmentVariables) }
+      : {}),
+    type: "stdio",
+  })
+  const configuration = deepFreeze({
+    mcpServers: {
+      [plan.launch.serverName]: server,
+    },
+  })
+  const instructions = [
+    `Merge only the ${plan.launch.serverName} entry into one Claude Code .mcp.json scope; preserve unrelated servers`,
+    ...(environmentVariables.length > 0
+      ? [`Keep ${environmentVariables.join(", ")} in protected process state; Claude Code expands the generated environment references at launch`]
+      : [fileCredentialInstruction(plan)]),
+    ...commonRequirements(plan),
+  ]
+  return finalizeAdapter({
+    activationDigest: plan.activationDigest,
+    configuration,
+    content: jsonContent(configuration),
+    destinations: Object.freeze([
+      "Project .mcp.json",
+      "Claude Code local or user scope managed through its MCP configuration commands",
+    ]),
+    format: "json",
+    hostServerName: plan.launch.serverName,
+    id: "claude-code",
+    instructions: Object.freeze(instructions),
+    limitations: Object.freeze([
+      "This projection does not select a Claude Code scope or edit a host configuration",
+      "Environment expansion does not prove secret availability, write approval, elicitation support, startup, or Discord access",
+    ]),
+    requirements: exactRequirements(plan),
+    secret: deepFreeze({
+      environmentVariables: [...environmentVariables],
+      strategy: secretStrategy(plan, "environment-interpolation"),
+    }),
+    specification: HOST_ADAPTER_SPECIFICATIONS.claudeCode,
+    title: "Claude Code",
+  })
+}
+
+function codexContent(
+  plan: HostActivationPlan,
+  environmentVariables: readonly string[],
+): string {
+  return [
+    `[mcp_servers.${plan.launch.serverName}]`,
+    `command = ${tomlString(plan.launch.command)}`,
+    `args = ${tomlStringArray(plan.launch.args)}`,
+    ...(environmentVariables.length > 0
+      ? [`env_vars = ${tomlStringArray(environmentVariables)}`]
+      : []),
+    `startup_timeout_sec = ${plan.launch.timeouts.startupSeconds}`,
+    `tool_timeout_sec = ${plan.launch.timeouts.toolSeconds}`,
+    "required = true",
+    'default_tools_approval_mode = "writes"',
+    "",
+  ].join("\n")
+}
+
+function codexAdapter(plan: HostActivationPlan): HostAdapter {
+  const environmentVariables = plan.launch.secrets.environmentVariables
+  const server = deepFreeze({
+    args: [...plan.launch.args],
+    command: plan.launch.command,
+    default_tools_approval_mode: "writes",
+    ...(environmentVariables.length > 0
+      ? { env_vars: [...environmentVariables] }
+      : {}),
+    required: true,
+    startup_timeout_sec: plan.launch.timeouts.startupSeconds,
+    tool_timeout_sec: plan.launch.timeouts.toolSeconds,
+  })
+  const configuration = deepFreeze({
+    mcp_servers: {
+      [plan.launch.serverName]: server,
+    },
+  })
+  const instructions = [
+    `Merge only the ${plan.launch.serverName} table into one Codex config.toml scope; preserve unrelated configuration`,
+    ...(environmentVariables.length > 0
+      ? [`Keep ${environmentVariables.join(", ")} in protected process state; Codex forwards only the generated env_vars names`]
+      : [fileCredentialInstruction(plan)]),
+    ...commonRequirements(plan),
+  ]
+  return finalizeAdapter({
+    activationDigest: plan.activationDigest,
+    configuration,
+    content: codexContent(plan, environmentVariables),
+    destinations: Object.freeze([
+      "User ~/.codex/config.toml",
+      "Trusted project .codex/config.toml",
+    ]),
+    format: "toml",
+    hostServerName: plan.launch.serverName,
+    id: "codex",
+    instructions: Object.freeze(instructions),
+    limitations: Object.freeze([
+      "The reviewed JSON host installer and inspector cannot merge or inspect TOML; merge this exact table manually",
+      "Named environment forwarding does not prove secret availability, write approval, elicitation support, startup, or Discord access",
+    ]),
+    requirements: exactRequirements(plan),
+    secret: deepFreeze({
+      environmentVariables: [...environmentVariables],
+      strategy: secretStrategy(plan, "forwarded-environment"),
+    }),
+    specification: HOST_ADAPTER_SPECIFICATIONS.codex,
+    title: "Codex",
   })
 }
 
@@ -386,10 +531,12 @@ export function createHostAdapterCatalog(plan: HostActivationPlan): HostAdapterC
   return deepFreeze({
     activationDigest: plan.activationDigest,
     adapters: [
-      mcpJsonAdapter(plan),
+      claudeCodeAdapter(plan),
+      codexAdapter(plan),
       cursorAdapter(plan),
       vscodeAdapter(plan),
       geminiAdapter(plan),
+      mcpJsonAdapter(plan),
     ],
     format: HOST_ADAPTER_CATALOG_FORMAT,
     schemaVersion: HOST_ADAPTER_CATALOG_SCHEMA_VERSION,

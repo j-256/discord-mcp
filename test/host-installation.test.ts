@@ -19,7 +19,6 @@ import { CONNECTOR_VERSION } from "../src/constants.js"
 import {
   createHostAdapterCatalog,
   findHostAdapter,
-  HOST_ADAPTER_IDS,
 } from "../src/host-adapters.js"
 import { createHostActivationPlan } from "../src/host-activation.js"
 import {
@@ -196,12 +195,13 @@ test("host change plan and apply preserve unrelated shared JSON with a private e
   assert.equal(afterNoop.mtimeNs, beforeNoop.mtimeNs)
 })
 
-test("host apply safely creates every adapter document without a backup", async (context) => {
+test("host apply safely creates every JSON adapter document without a backup", async (context) => {
   const directory = await fixture(context, "host-install-create")
   const activation = activationPlan()
   const catalog = createHostAdapterCatalog(activation)
 
-  for (const adapterId of HOST_ADAPTER_IDS) {
+  for (const adapter of catalog.adapters.filter((candidate) => candidate.format === "json")) {
+    const adapterId = adapter.id
     const file = join(directory, `${adapterId}.json`)
     const planned = planHostAdapterFile(activation, adapterId, file)
     assert.equal(planned.fileReview.state, "absent")
@@ -223,6 +223,25 @@ test("host apply safely creates every adapter document without a backup", async 
       clone(findHostAdapter(catalog, adapterId).configuration),
     )
   }
+})
+
+test("host plan and apply reject TOML adapters before reading a destination", async (context) => {
+  const directory = await fixture(context, "host-install-toml")
+  const file = join(directory, "missing-config.toml")
+  const activation = activationPlan()
+
+  assert.throws(
+    () => planHostAdapterFile(activation, "codex", file),
+    /Host adapter codex renders TOML and cannot be installed as JSON/u,
+  )
+  assert.throws(
+    () => applyHostAdapterFile(activation, "codex", file, {
+      confirmation: SERVER_NAME,
+      planDigest: `sha256:${"0".repeat(64)}`,
+    }),
+    /Host adapter codex renders TOML and cannot be installed as JSON/u,
+  )
+  await assert.rejects(readFile(file), /ENOENT/u)
 })
 
 test("host merge treats every valid custom server name as an own JSON key", async (context) => {

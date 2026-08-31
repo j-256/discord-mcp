@@ -42,7 +42,12 @@ export const HOST_CHANGE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
 const HOST_CHANGE_PLAN_DIGEST_DOMAIN = "guildcontrol-host-change-plan-v1\0"
 const PRIVATE_FILE_MODE = 0o600
-const SHARED_ADAPTER_IDS = new Set<HostAdapterId>(["cursor", "mcp-json", "vscode"])
+const SHARED_ADAPTER_IDS = new Set<HostAdapterId>([
+  "claude-code",
+  "cursor",
+  "mcp-json",
+  "vscode",
+])
 const HOST_CHANGE_LIMITATIONS = Object.freeze([
   "A successful file change does not prove that the host loaded this path, accepted its schema, resolved its credential, started the server, negotiated MCP, or reached Discord.",
   "Existing JSON is byte-, depth-, and node-bounded; non-finite, unsafe-integer, and negative-zero values fail closed before planning.",
@@ -354,6 +359,11 @@ function prepareHostChange(
   file: string,
 ): PreparedHostChange {
   const adapter = findHostAdapter(createHostAdapterCatalog(activation), adapterId)
+  if (adapter.format !== "json") {
+    throw new ConfigurationError(
+      `Host adapter ${adapter.id} renders ${adapter.format.toUpperCase()} and cannot be installed as JSON`,
+    )
+  }
   let snapshot: HostJsonSnapshot | undefined
   let desiredBytes: Buffer | undefined
   try {
@@ -732,6 +742,11 @@ export function applyHostAdapterFile(
   options: ApplyHostChangeOptions,
 ): HostChangeApplyReport {
   const adapter = findHostAdapter(createHostAdapterCatalog(activation), adapterId)
+  if (adapter.format !== "json") {
+    throw new ConfigurationError(
+      `Host adapter ${adapter.id} renders ${adapter.format.toUpperCase()} and cannot be installed as JSON`,
+    )
+  }
   if (options.confirmation !== adapter.hostServerName) {
     throw new ConfigurationError(
       `Host configuration confirmation must exactly match ${adapter.hostServerName}`,

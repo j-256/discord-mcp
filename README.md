@@ -128,7 +128,7 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 After setup reports `ready`, compatible MCPB hosts can import `guildcontrol-0.2.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
 
-For a file-backed token or another host, `host` emits deterministic adapters for common MCP JSON, Cursor, VS Code, and Gemini CLI. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; `--inspect-host-file` reports exact drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
+For a file-backed token or another host, `host` emits deterministic adapters for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and common MCP JSON. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; Codex receives an exact reviewable TOML projection, and `--inspect-host-file` reports exact JSON drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
 
 Once the host is connected, the first useful request can stay natural and narrow:
 
