@@ -1,0 +1,65 @@
+---
+title: "Getting started: first verified Discord read"
+description: Create your bot, run one guided command, activate the selected MCP host, and complete a read-only Discord request
+editUrl: https://github.com/j-256/guildcontrol/edit/main/site/src/content/docs/start/getting-started.mdx
+sidebar:
+  label: First verified read
+  order: 2
+---
+
+import { Aside, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+This is the shortest supported route from no installation to a useful Discord read. It creates one owner-managed bot, one exact-guild read-only policy, and one private host handoff. It enables no write surface.
+
+## Before you run it
+
+You need Node.js 22 or newer, `Manage Server` authority in a Discord server you control, and Discord Developer Mode enabled so you can copy the Server ID.
+
+In the [Discord Developer Portal](https://discord.com/developers/applications), create an application and bot, copy the public Application ID, and create or reset its token. Keep the token in a protected secret source or enter it only when GuildControl shows the hidden prompt. Do not place it in a command argument, policy file, issue, or screenshot.
+
+## Run one command
+
+```sh
+npx guildctl onboard
+```
+
+<Steps>
+
+1. Choose the MCP host you want to use first.
+
+2. Enter the public Application ID and exact Server ID.
+
+3. Review the generated `server-observer` grant and let GuildControl open the guild-locked Discord installation page if you want it to.
+
+4. After installation, type the same Server ID exactly and provide the token through the selected protected route.
+
+5. Wait for GuildControl to verify the application, bot, guild installation, strict policy, and a real child-process MCP handshake.
+
+6. Open the private activation guide it creates and follow the selected host instructions.
+
+</Steps>
+
+<Aside type="note" title="The guide does not retain a prompted token">
+
+A hidden token is used only for setup and the smoke test. Your MCP host still needs the token through its own sensitive-input facility, protected environment, keychain, or supported credential file. GuildControl does not search for or silently edit host configuration.
+
+</Aside>
+
+## Complete the first read
+
+Reload the MCP host after activation, then send this request with your Server ID:
+
+```text
+Show me the channels in Discord server YOUR_GUILD_ID using GuildControl MCP. Do not make changes.
+```
+
+Success proves that the host launched the selected package, delivered the referenced credential, loaded the exact policy, negotiated the MCP tools, and completed an in-scope Discord read. It does not authorize a later write or prove access beyond the configured and Discord-effective scope.
+
+## Need more control or recovery detail?
+
+<CardGrid>
+  <LinkCard title="Use the advanced manual route" href="../manual-setup/" description="Inspect the release first, choose another preset or credential mode, capture each proof separately, and use the complete recovery ladder." />
+  <LinkCard title="Troubleshoot initialization" href="../../operate/troubleshooting/" description="Separate policy, credential, Discord, stdio, and host failures without widening authority." />
+  <LinkCard title="Check fit and boundaries" href="../../understand/boundaries/" description="Review custody, privacy, host compatibility, and deliberately unsupported behavior." />
+  <LinkCard title="Migrate from another MCP" href="../migration/" description="Map the old release's outcomes and authority before changing either installation." />
+</CardGrid>

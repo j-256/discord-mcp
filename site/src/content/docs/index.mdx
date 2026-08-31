@@ -26,6 +26,12 @@ Create an owner-managed bot, grant only the read permission selected by a preset
 
 </Aside>
 
+```sh
+npx guildctl onboard
+```
+
+The host-first guide carries the Application ID, exact guild, least-privilege install, token custody, verified policy, real stdio smoke test, selected host handoff, and first read as one fail-closed flow. It changes no host configuration and keeps the token out of its policy, report, guide, and arguments.
+
 ## What makes the boundary different
 
 <CardGrid stagger>
@@ -47,10 +53,10 @@ Create an owner-managed bot, grant only the read permission selected by a preset
 
 <ol class="proof-flow" aria-label="Verified setup flow">
   <li><strong>Create</strong><span>Make a Discord application and bot you control</span></li>
-  <li><strong>Grant</strong><span>Generate and review the minimum preset permission</span></li>
-  <li><strong>Scope</strong><span>Create one strict non-secret policy</span></li>
-  <li><strong>Prove</strong><span>Run offline validation, online doctor, and stdio smoke</span></li>
-  <li><strong>Use</strong><span>Import the verified bundle or choose an exact host adapter, then complete the first read</span></li>
+  <li><strong>Guide</strong><span>Run <code>npx guildctl onboard</code> and choose the MCP host first</span></li>
+  <li><strong>Confirm</strong><span>Install the minimum grant and type the exact guild ID</span></li>
+  <li><strong>Prove</strong><span>Verify identity, policy, installation, and the real stdio path</span></li>
+  <li><strong>Use</strong><span>Open the private host handoff and complete the first read</span></li>
 </ol>
 
 ## Choose the depth you need
@@ -59,7 +65,7 @@ Create an owner-managed bot, grant only the read permission selected by a preset
   <LinkCard title="Choose an outcome" href="./start/choose/" description="Find the shortest safe route for setup, reads, reviewed writes, recovery, or verification." />
   <LinkCard title="Switch from another Discord MCP" href="./start/migration/" description="Map every audited source tool into a supported, reviewed, or deliberately excluded outcome before changing either deployment." />
   <LinkCard title="Take the verified product tour" href="./generated/contract-explorer.html#tour" description="Walk from release inspection through scope, a first read, reviewed change, and ambiguity recovery using exact negotiated contract evidence." />
-  <LinkCard title="Connect your MCP host" href="./start/getting-started/#7-connect-the-mcp-host" description="Import the deterministic MCPB or generate digest-bound host projections without placing a credential in static configuration." />
+  <LinkCard title="Connect your MCP host" href="./start/manual-setup/#7-connect-the-mcp-host" description="Import the deterministic MCPB or generate digest-bound host projections without placing a credential in static configuration." />
   <LinkCard title="Understand the safety model" href="./understand/safety/" description="See how policy, planning, approval, coordination, readback, and evidence fit together." />
   <LinkCard title="Read the privacy policy" href="./understand/privacy/" description="See what the connector reads, returns, retains, exports, and leaves under operator control." />
   <LinkCard title="Compare the field" href="./understand/comparison/" description="Inspect the dated head-to-head matrix, rubric, release sources, and evidence behind every lead." />

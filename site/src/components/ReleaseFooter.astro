@@ -1,11 +1,11 @@
 ---
 import Default from "@astrojs/starlight/components/Footer.astro"
-import packageJson from "../../../package.json"
+import rootPackageJson from "../../../package.json"
 ---
 
 <Default />
 <p class="release-context">
-  Documentation generated for <code>guildctl@{packageJson.version}</code>. Canonical source and edit history remain in the public repository. GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
+  Documentation generated for <code>{rootPackageJson.name}@{rootPackageJson.version}</code>. Canonical source and edit history remain in the public repository. GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
 </p>
 
 <style>

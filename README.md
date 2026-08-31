@@ -27,20 +27,32 @@ Use the [first verified read guide](docs/getting-started.md) for one linear setu
 
 ## Quick start
 
-The fastest supported outcome is an operator-owned read-only bot, one non-secret policy file, a private host activation guide, and a successful host-side channel inventory. The first inventory response is a compact bounded directory page, with an authenticated continuation for larger guilds and exact metadata available only when requested. Follow the [complete getting-started guide](docs/getting-started.md) if this is your first installation; the commands below are the condensed operator path.
+The fastest supported outcome is an owner-managed read-only bot, one strict non-secret policy, one private host guide, and a successful channel inventory. You need Node.js 22 or newer, `Manage Server` authority in a Discord server you control, and a local stdio MCP host. GuildControl provides no shared bot, relay, or token store.
 
-Every command and nested action supports credential-independent `-h` and `--help`; use `guildctl FAMILY ACTION --help` or the equivalent `guildctl help FAMILY ACTION` for exact syntax and the action's authority, privacy, and side-effect boundary before supplying values.
+### Guided setup: start here
 
-Requirements:
+Create an application and bot in the [Discord Developer Portal](https://discord.com/developers/applications), enable Developer Mode in Discord, and copy the Application ID and target Server ID. Then run:
 
-- Node.js 22 or newer
-- A Discord application with a bot user
-- One strict non-secret JSON policy file
-- The bot token available through an environment variable or protected file
-- A local stdio MCP host, with one-click MCPB import available in compatible hosts
-- Only the Discord permissions needed for the selected read or reviewed-write scope
+```sh
+npx guildctl onboard
+```
 
-Each deployment uses a Discord application and bot controlled by that operator. GuildControl MCP does not provide a shared bot, hosted relay, or shared token: create your own application, invite its bot only to guilds you control, and keep its credential in the local launcher or secret store.
+`onboard` asks for the MCP host first, generates the minimum `server-observer` grant, requires exact post-install guild confirmation, verifies the token's application and installation, creates the private policy, proves a real child-process MCP handshake, and writes a host-specific activation guide. It never stores the token, reads message content, enables writes, or edits host configuration. A token entered through its hidden prompt is not retained, so the host still needs that credential through its protected secret facility.
+
+For unattended setup, supply every public decision and an existing secret reference:
+
+```sh
+npx --yes guildctl@0.2.0 onboard \
+  --host codex \
+  --application-id YOUR_APPLICATION_ID \
+  --guild-id YOUR_GUILD_ID \
+  --config /absolute/private/guildcontrol.json \
+  --confirm-installed YOUR_GUILD_ID \
+  --token-env DISCORD_BOT_TOKEN \
+  --json
+```
+
+JSON mode never prompts or opens a browser. The [first verified read guide](docs/getting-started.md) covers supported hosts, default paths, alternate credential custody, the manual route, and recovery.
 
 Do not grant the bot `Administrator`. Generate the exact initial permission grant from a read-only preset, then narrow the installed bot role with category or channel overrides. The [bot setup guide](docs/reference.md#discord-bot-setup) explains bot ownership, optional intents, and later feature-specific permissions.
 

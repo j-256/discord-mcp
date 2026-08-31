@@ -20,6 +20,61 @@ Before creating a token, use [product boundaries and host compatibility](limitat
 
 You need Node.js 22 or newer and `Manage Server` authority in a Discord server you control. Enable Discord Developer Mode so the client can copy the target Server ID. The setup process needs temporary access to the bot token, but the token must stay in a secret-capable launcher, protected process environment, or mounted credential file.
 
+Create the application and bot in the [Discord Developer Portal](https://discord.com/developers/applications), keep Public Bot disabled unless other people should be able to install it, and copy the public Application ID. Create or reset the bot token and put it directly in the secret facility you will use. The bot user ID is different and does not need to be copied; verified setup discovers and pins it.
+
+## Fast path: let `guildctl` carry the setup state
+
+Run the interactive host-first flow:
+
+```sh
+npx guildctl onboard
+```
+
+The command performs one linear sequence:
+
+1. Ask which MCP host you want to activate first.
+2. Ask for the public Application ID and exact Server ID.
+3. Generate the recommended `server-observer` grant and offer to open the guild-locked Discord install page.
+4. Require the exact Server ID after Discord shows the installation is complete.
+5. Resolve the bot token from `DISCORD_BOT_TOKEN`, another named environment variable, a protected file where the host route supports it, or a hidden one-time prompt.
+6. Verify that the token belongs to the requested application, audit the exact guild installation, and publish one strict non-secret read-only policy.
+7. Launch the exact versioned `npx` server in a child process, negotiate MCP over stdio, validate its catalogs, and call only discovery plus connector status.
+8. Create one private host-specific activation guide and print the first read-only request.
+
+The command asks for browser authorization and one exact installation confirmation. It does not ask you to reconfirm already supplied policy choices, enable a write, or approve a host-file edit. It never places the token in a command argument, policy, report, HTML guide, digest, or activity record, and it does not read Discord message content. A hidden prompt keeps the token only for setup and smoke; you must still give the MCP host access through its own protected environment, keychain, or sensitive-input facility.
+
+By default the policy and guide are created in the per-user GuildControl configuration directory:
+
+| Platform | Default policy |
+| --- | --- |
+| macOS | `~/Library/Application Support/guildcontrol/guildcontrol.json` |
+| Linux | `${XDG_CONFIG_HOME:-~/.config}/guildcontrol/guildcontrol.json` |
+| Windows | `%APPDATA%\guildcontrol\guildcontrol.json` |
+
+The guide is named `guildcontrol-onboarding.html` beside the policy. The CLI creates only this non-secret private directory. Pass `--config FILE` or `--html FILE` for explicit locations; the parent of an explicit policy path must already satisfy the canonical private-directory checks.
+
+Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. The guide explains the selected route but never searches for, reads, or edits a host configuration. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
+
+For a non-interactive terminal or CI wrapper, make every public decision explicit. JSON mode never prompts or opens a browser:
+
+```sh
+npx --yes guildctl@0.2.0 onboard \
+  --host codex \
+  --application-id YOUR_APPLICATION_ID \
+  --guild-id YOUR_GUILD_ID \
+  --config /absolute/private/guildcontrol.json \
+  --confirm-installed YOUR_GUILD_ID \
+  --token-env DISCORD_BOT_TOKEN \
+  --html /absolute/private/guildcontrol-onboarding.html \
+  --json
+```
+
+`--host`, `--application-id`, `--guild-id`, `--config`, and `--confirm-installed` are required without an interactive terminal. The confirmation must exactly equal the supplied guild ID. `--open` explicitly opens the final guide in non-interactive human mode, while JSON rejects it. A missing secret reference, wrong application, absent guild installation, existing policy target, stdio failure, or existing guide target fails the command instead of skipping that boundary.
+
+The remainder of this guide is the equivalent manual route. Use it when you want credential-free inspection before installation, a `channel-reader` policy, a protected-file deployment, individually captured evidence, or step-by-step recovery.
+
+## Manual route: inspect and execute each boundary
+
 Create a dedicated configuration directory before using the relative paths below. On macOS or Linux:
 
 ```sh
