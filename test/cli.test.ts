@@ -113,6 +113,7 @@ import {
   ProfileError,
 } from "../src/errors.js"
 import { lowMemoryNodeArguments } from "../src/node-runtime.js"
+import { CliInteractionCancelledError } from "../src/terminal-interaction.js"
 import {
   OPERATOR_REPORT_SCHEMA_VERSION,
   type DoctorReport,
@@ -859,19 +860,27 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
-test("interactive onboarding keeps a one-time prompted token out of every result", async () => {
+test("interactive onboarding recovers from input mistakes without exposing a one-time token", async () => {
   const fixture = onboardFixture(CONFIG_FILE)
   const stdout = outputStream()
   const stderr = outputStream()
   const answers = [
-    "codex",
+    "not-a-host",
+    "3",
+    "not-an-id",
     APPLICATION_ID,
-    GUILD_ID,
-    "n",
-    GUILD_ID,
     "",
+    GUILD_ID,
+    "maybe",
+    "n",
+    "999999999999999999",
+    GUILD_ID,
+    "somewhere",
+    "",
+    "perhaps",
     "n",
   ]
+  const prompts: string[] = []
   let setupEnvironment: NodeJS.ProcessEnv | undefined
   let opened = 0
   const exit = await runCli({
@@ -914,7 +923,8 @@ test("interactive onboarding keeps a one-time prompted token out of every result
       async promptSecret() {
         return ONBOARD_TOKEN
       },
-      async promptText() {
+      async promptText(message) {
+        prompts.push(message)
         const answer = answers.shift()
         if (answer === undefined) assert.fail("Unexpected onboarding prompt")
         return answer
@@ -935,6 +945,148 @@ test("interactive onboarding keeps a one-time prompted token out of every result
   assert.doesNotMatch(stderr.value(), new RegExp(ONBOARD_TOKEN))
   assert.match(stdout.value(), /GuildControl onboarding: ready/)
   assert.match(stdout.value(), /Activation guide opened: no/)
+  assert.match(prompts[0] || "", /1\. Claude Desktop \(claude-desktop\)/)
+  assert.match(prompts[1] || "", /Host was not recognized/)
+  assert.match(prompts[3] || "", /Application ID must be a Discord snowflake/)
+  assert.match(prompts[5] || "", /Guild ID must be a Discord snowflake/)
+  assert.match(prompts[7] || "", /Enter yes or no/)
+  assert.match(prompts[9] || "", /must exactly match guild/)
+  assert.match(prompts[11] || "", /Token source was not recognized/)
+  assert.match(prompts[13] || "", /Enter yes or no/)
+  assert.match(stderr.value(), /\[1\/5\] Identify the MCP host/)
+  assert.match(stderr.value(), /\[2\/5\] Install the bounded read-only bot/)
+  assert.match(stderr.value(), /\[3\/5\] Verify identity and installation/)
+  assert.match(stderr.value(), /\[4\/5\] Smoke-test the real MCP stdio path/)
+  assert.match(stderr.value(), /\[5\/5\] Create the private Codex activation handoff/)
+})
+
+test("interactive onboarding stops after three invalid host selections", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+  let setupCalls = 0
+  let promptCalls = 0
+  const exit = await runCli({
+    args: ["onboard", "--config", CONFIG_FILE],
+    dependencies: dependencies({
+      async prepareSetup() {
+        setupCalls += 1
+        return setupReport()
+      },
+    }),
+    environment: {},
+    interaction: {
+      async openExternal() {
+        assert.fail("Failed onboarding must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Failed host selection must not request a credential")
+      },
+      async promptText() {
+        promptCalls += 1
+        return "unknown"
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 2)
+  assert.equal(promptCalls, 3)
+  assert.equal(setupCalls, 0)
+  assert.equal(stdout.value(), "")
+  assert.match(stderr.value(), /No valid answer was received after 3 attempts/)
+  assert.match(stderr.value(), /guildctl help onboard/)
+  assert.match(stderr.value(), /docs\/getting-started\.md#fast-path/)
+  assert.doesNotMatch(stderr.value(), /guildctl doctor/)
+})
+
+test("interactive onboarding reports terminal cancellation without failure guidance", async () => {
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exit = await runCli({
+    args: ["onboard", "--config", CONFIG_FILE],
+    dependencies: dependencies(),
+    environment: {},
+    interaction: {
+      async openExternal() {
+        assert.fail("Canceled onboarding must not open a browser")
+      },
+      async promptSecret() {
+        throw new CliInteractionCancelledError()
+      },
+      async promptText() {
+        throw new CliInteractionCancelledError()
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 130)
+  assert.equal(stdout.value(), "")
+  assert.match(stderr.value(), /guildctl: onboard canceled/)
+  assert.doesNotMatch(stderr.value(), /Operator command failed|Next:|See:/)
+})
+
+test("interactive onboarding accepts a displayed host name", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const answers = ["Visual Studio Code", "n"]
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--html",
+      "/output/vscode-onboarding.html",
+    ],
+    dependencies: dependencies({
+      loadConfig(environment) {
+        return loadConnectorConfigDocument(fixture.document, environment)
+      },
+      loadConfigDocument() {
+        return fixture.document
+      },
+      async prepareSetup() {
+        return fixture.setup
+      },
+      async smoke() {
+        return fixture.smoke
+      },
+    }),
+    environment: { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Declined onboarding must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Available environment credentials must not be prompted")
+      },
+      async promptText() {
+        const answer = answers.shift()
+        if (answer === undefined) assert.fail("Unexpected onboarding prompt")
+        return answer
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  assert.deepEqual(answers, [])
+  assert.match(stdout.value(), /Host: Visual Studio Code/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+  assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
 
 test("onboarding fails closed before setup when confirmation or automation inputs are incomplete", async () => {
@@ -4576,10 +4728,13 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(migrateHelpOutput.value(), /migrate <action>/)
   assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
   assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)
-  assert.match(onboardHelpOutput.value(), /onboard \[--host HOST\]/)
-  assert.match(onboardHelpOutput.value(), /asks for the host first/)
+  assert.match(onboardHelpOutput.value(), /onboard \[options\]/)
+  assert.match(onboardHelpOutput.value(), /Answer menus with a number, host ID, or displayed name/)
+  assert.match(onboardHelpOutput.value(), /Five verified stages/)
   assert.match(onboardHelpOutput.value(), /--confirm-installed/)
   assert.match(onboardHelpOutput.value(), /--json never prompts or opens a browser/)
+  assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but does not persist the token/)
+  assert.match(onboardHelpOutput.value(), /supply it to the selected host separately/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)

@@ -56,6 +56,7 @@ export interface CliFailureContext {
 const OPERATOR_REFERENCES = Object.freeze({
   botSetup: "docs/reference.md#discord-bot-setup",
   configuration: "docs/reference.md#configuration",
+  firstVerifiedRead: "docs/getting-started.md#fast-path-let-guildctl-carry-the-setup-state",
   hostInstallation: "docs/reference.md#reviewed-host-configuration-installation",
   operatorCli: "docs/reference.md#operator-cli",
   verification: "docs/reference.md#verification",
@@ -190,6 +191,14 @@ export function classifyCliFailure(
     )
   }
   if (error instanceof ConfigurationError) {
+    if (context.helpTopic === "onboard") {
+      return guidance(
+        CLI_FAILURE_CATEGORIES.configuration,
+        "Read the reported onboarding error, inspect any policy or guide path it names, and correct that exact input or local state before rerunning guildctl onboard. Run guildctl help onboard to review accepted inputs and the automation form.",
+        OPERATOR_REFERENCES.firstVerifiedRead,
+        OPERATOR_RETRY.afterCorrection,
+      )
+    }
     if (context.helpTopic === "host") {
       return guidance(
         CLI_FAILURE_CATEGORIES.configuration,

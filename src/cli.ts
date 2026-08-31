@@ -89,6 +89,8 @@ import {
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   CONNECTOR_LIMITS,
   DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+  DISCORD_SNOWFLAKE_MAX,
+  DISCORD_SNOWFLAKE_PATTERN,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
 } from "./constants.js"
 import {
@@ -199,6 +201,7 @@ import {
   type SetupPresetSelection,
 } from "./setup-presets.js"
 import {
+  CliInteractionCancelledError,
   DEFAULT_CLI_INTERACTION,
   type CliInteraction,
 } from "./terminal-interaction.js"
@@ -223,6 +226,7 @@ const CLI_COMMANDS = Object.freeze([
 ] as const)
 
 const CLI_EXIT_CODES = Object.freeze({
+  canceled: 130,
   failure: 2,
   success: 0,
   warning: 1,
@@ -2068,11 +2072,39 @@ function helpText(
   }
   if (topic === "onboard") {
     return [
-      `Usage: ${CONNECTOR_CLI_COMMAND} onboard [--host HOST] [--application-id ID] [--guild-id ID] [--config FILE] [--confirm-installed ID] [--token-env VARIABLE | --token-file FILE] [--html FILE] [--open] [--json]`,
+      `Usage: ${CONNECTOR_CLI_COMMAND} onboard [options]`,
       "",
-      `Run the host-first golden path for ${ONBOARD_HOST_IDS.join(", ")}. In an interactive terminal the command asks for the host first, creates an exact guild-locked server-observer install link, waits for exact guild confirmation, verifies the token's application and installation, writes one private non-secret policy, launches a real stdio smoke test, and creates one private host-specific HTML handoff. It never writes a host configuration or reads Discord message content.`,
+      "Guided setup:",
+      `  ${CONNECTOR_CLI_COMMAND} onboard`,
+      "  Answer menus with a number, host ID, or displayed name. Invalid interactive answers can be corrected without restarting.",
       "",
-      "Without an interactive terminal, --host, --application-id, --guild-id, --config, and --confirm-installed are required. The confirmation must exactly match the guild ID. The default credential reference is DISCORD_BOT_TOKEN; --token-env selects another protected environment variable and --token-file selects an existing protected file. --json never prompts or opens a browser and cannot be combined with --open. --open is explicit browser authorization. Exit status is 0 on a fully verified handoff and 2 on invalid input, failed identity or installation verification, policy publication failure, stdio failure, or guide export failure.",
+      "Automation:",
+      `  ${CONNECTOR_CLI_COMMAND} onboard --host HOST --application-id ID --guild-id ID --config FILE --confirm-installed ID [--token-env VARIABLE | --token-file FILE] [--html FILE] [--json]`,
+      "  Every required value is strict and invalid automation input fails immediately. --json never prompts or opens a browser.",
+      "",
+      "Options:",
+      "  --host HOST             MCP host to activate first",
+      "  --application-id ID     Discord application snowflake",
+      "  --guild-id ID           Exact Discord guild snowflake",
+      "  --config FILE           Private non-secret policy file",
+      "  --confirm-installed ID  Exact guild ID after installation",
+      "  --token-env VARIABLE    Existing protected environment variable",
+      "  --token-file FILE       Existing protected token file when the host supports it",
+      "  --html FILE             Private activation guide output",
+      "  --open                  Authorize opening the install URL and activation guide",
+      "  --json                  Emit deterministic JSON for automation",
+      "",
+      "Five verified stages:",
+      "  1. Identify the host, Discord application, and exact guild",
+      "  2. Install the bounded read-only bot and confirm the guild",
+      "  3. Verify identity and installation, then publish one private policy",
+      "  4. Smoke-test the real MCP stdio path without reading message content",
+      "  5. Create a credential-free host activation handoff",
+      "",
+      `Supported hosts: ${ONBOARD_HOST_IDS.map((id) => `${onboardHostDescriptor(id).title} (${id})`).join(", ")}.`,
+      "The default credential reference is DISCORD_BOT_TOKEN. A one-time hidden prompt verifies setup but does not persist the token, so you must supply it to the selected host separately. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
+      "",
+      "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy publication failure, stdio failure, or guide export failure.",
     ].join("\n")
   }
   if (topic === "coordination") {
@@ -3230,22 +3262,113 @@ interface OnboardExecutionResult {
   readonly report: OnboardReport
 }
 
-function affirmative(value: string, defaultValue: boolean): boolean {
-  const normalized = value.trim().toLowerCase()
-  if (!normalized) return defaultValue
-  if (["y", "yes"].includes(normalized)) return true
-  if (["n", "no"].includes(normalized)) return false
-  throw new ConfigurationError("Answer yes or no")
+const ONBOARD_PROMPT_ATTEMPTS = 3
+const ONBOARD_STAGE_COUNT = 5
+
+type OnboardPromptValidation<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly message: string; readonly ok: false }
+
+async function promptValidated<Value>(
+  interaction: CliInteraction,
+  message: string,
+  validate: (value: string) => OnboardPromptValidation<Value>,
+): Promise<Value> {
+  let correction = ""
+  for (let attempt = 0; attempt < ONBOARD_PROMPT_ATTEMPTS; attempt += 1) {
+    const value = await interaction.promptText(
+      correction ? `${correction}\n${message}` : message,
+    )
+    const result = validate(value)
+    if (result.ok) return result.value
+    correction = result.message
+  }
+  throw new ConfigurationError(
+    `${correction} No valid answer was received after ${ONBOARD_PROMPT_ATTEMPTS} attempts`,
+  )
+}
+
+function requiredValue(
+  value: string,
+  label: string,
+): OnboardPromptValidation<string> {
+  const normalized = value.trim()
+  return normalized
+    ? { ok: true, value: normalized }
+    : { message: `${label} must not be empty`, ok: false }
 }
 
 async function promptRequired(
   interaction: CliInteraction,
   message: string,
+  label: string,
+): Promise<string> {
+  return promptValidated(
+    interaction,
+    message,
+    (value) => requiredValue(value, label),
+  )
+}
+
+function discordSnowflake(
+  value: string,
+  label: string,
+): OnboardPromptValidation<string> {
+  const normalized = value.trim()
+  if (
+    !DISCORD_SNOWFLAKE_PATTERN.test(normalized)
+    || BigInt(normalized) < 1n
+    || BigInt(normalized) > DISCORD_SNOWFLAKE_MAX
+  ) {
+    return {
+      message: `${label} must be a Discord snowflake containing only decimal digits`,
+      ok: false,
+    }
+  }
+  return { ok: true, value: normalized }
+}
+
+async function promptDiscordSnowflake(
+  interaction: CliInteraction,
+  message: string,
+  label: string,
   supplied: string | undefined,
 ): Promise<string> {
-  const value = supplied ?? await interaction.promptText(message)
-  if (!value.trim()) throw new ConfigurationError(`${message.trim()} requires a value`)
-  return value.trim()
+  if (supplied !== undefined) {
+    const result = discordSnowflake(supplied, label)
+    if (result.ok) return result.value
+    throw new ConfigurationError(result.message)
+  }
+  return promptValidated(
+    interaction,
+    message,
+    (value) => discordSnowflake(value, label),
+  )
+}
+
+async function promptYesNo(
+  interaction: CliInteraction,
+  message: string,
+  defaultValue: boolean,
+): Promise<boolean> {
+  return promptValidated(interaction, message, (value) => {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) return { ok: true, value: defaultValue }
+    if (["y", "yes"].includes(normalized)) return { ok: true, value: true }
+    if (["n", "no"].includes(normalized)) return { ok: true, value: false }
+    return { message: "Enter yes or no", ok: false }
+  })
+}
+
+function matchOnboardHost(value: string): OnboardHostId | undefined {
+  const normalized = value.trim().toLowerCase()
+  if (/^[0-9]+$/.test(normalized)) {
+    return ONBOARD_HOST_IDS[Number(normalized) - 1]
+  }
+  return ONBOARD_HOST_IDS.find((id) => (
+    id.toLowerCase() === normalized
+    || onboardHostDescriptor(id).title.toLowerCase() === normalized
+  ))
 }
 
 async function selectOnboardHost(
@@ -3253,17 +3376,23 @@ async function selectOnboardHost(
   supplied: OnboardHostId | undefined,
 ): Promise<OnboardHostId> {
   if (supplied) return supplied
-  const value = await interaction.promptText([
-    "Choose the MCP host to activate first:",
-    ...ONBOARD_HOST_IDS.map((id) => `  ${id} - ${onboardHostDescriptor(id).title}`),
-    "Host: ",
-  ].join("\n"))
-  if (!isOnboardHostId(value)) {
-    throw new ConfigurationError(
-      `Host must be one of ${ONBOARD_HOST_IDS.join(", ")}`,
-    )
-  }
-  return value
+  return promptValidated(
+    interaction,
+    [
+      "Choose the MCP host to activate first:",
+      ...ONBOARD_HOST_IDS.map((id, index) => `  ${index + 1}. ${onboardHostDescriptor(id).title} (${id})`),
+      "Host [number, ID, or name]: ",
+    ].join("\n"),
+    (value) => {
+      const hostId = matchOnboardHost(value)
+      return hostId
+        ? { ok: true, value: hostId }
+        : {
+            message: `Host was not recognized. Enter 1-${ONBOARD_HOST_IDS.length}, a host ID, or a displayed name`,
+            ok: false,
+          }
+    },
+  )
 }
 
 function requireAvailableCredentialVariable(
@@ -3278,6 +3407,78 @@ function requireAvailableCredentialVariable(
     throw new CredentialUnavailableError("environment", normalized)
   }
   return normalized
+}
+
+async function promptAvailableCredentialVariable(
+  interaction: CliInteraction,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  return promptValidated(
+    interaction,
+    `Environment variable [${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE}]: `,
+    (value) => {
+      const variable = value.trim() || DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
+      if (!environment[variable]?.trim()) {
+        return {
+          message: `Environment variable ${variable} is not set in this process`,
+          ok: false,
+        }
+      }
+      return { ok: true, value: variable }
+    },
+  )
+}
+
+async function promptHiddenToken(interaction: CliInteraction): Promise<string> {
+  for (let attempt = 0; attempt < ONBOARD_PROMPT_ATTEMPTS; attempt += 1) {
+    const message = attempt === 0
+      ? "Discord bot token: "
+      : "Token was empty. Discord bot token: "
+    const value = await interaction.promptSecret(message)
+    if (value.trim()) return value.trim()
+  }
+  throw new ConfigurationError(
+    `Discord bot token must not be empty. No token was received after ${ONBOARD_PROMPT_ATTEMPTS} attempts`,
+  )
+}
+
+type OnboardCredentialSource = "environment" | "file" | "prompt"
+
+async function selectOnboardCredentialSource(
+  interaction: CliInteraction,
+  credentialFileSupported: boolean,
+): Promise<OnboardCredentialSource> {
+  return promptValidated(
+    interaction,
+    [
+      "Choose how GuildControl should access the bot token:",
+      "  1. One-time hidden prompt (supply it to the host separately)",
+      "  2. Existing environment variable",
+      ...(credentialFileSupported ? ["  3. Existing protected token file"] : []),
+      "Token source [1]: ",
+    ].join("\n"),
+    (value) => {
+      const normalized = value.trim().toLowerCase()
+      if (!normalized || ["1", "prompt", "hidden", "hidden prompt"].includes(normalized)) {
+        return { ok: true, value: "prompt" }
+      }
+      if (["2", "environment", "env", "environment variable"].includes(normalized)) {
+        return { ok: true, value: "environment" }
+      }
+      if (
+        credentialFileSupported
+        && ["3", "file", "protected file", "token file"].includes(normalized)
+      ) {
+        return { ok: true, value: "file" }
+      }
+      return {
+        message: credentialFileSupported
+          ? "Token source was not recognized. Enter 1-3 or a displayed name"
+          : "Token source was not recognized. Enter 1-2 or a displayed name",
+        ok: false,
+      }
+    },
+  )
 }
 
 async function selectOnboardCredential(
@@ -3313,44 +3514,60 @@ async function selectOnboardCredential(
       DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     )
   }
-  const choices = !credentialFileSupported
-    ? "hidden prompt or environment variable [prompt]: "
-    : "hidden prompt, environment variable, or protected file [prompt]: "
-  const source = (await interaction.promptText(`Bot token source: ${choices}`))
-    .trim()
-    .toLowerCase()
-  if (!source || source === "prompt" || source === "hidden") {
-    const hiddenToken = await interaction.promptSecret("Discord bot token: ")
-    if (!hiddenToken) throw new ConfigurationError("Discord bot token must not be empty")
+  const source = await selectOnboardCredentialSource(
+    interaction,
+    credentialFileSupported,
+  )
+  if (source === "prompt") {
+    const hiddenToken = await promptHiddenToken(interaction)
     return {
       credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
       hiddenToken,
     }
   }
-  if (source === "environment" || source === "env") {
-    const variable = await interaction.promptText(
-      `Environment variable [${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE}]: `,
-    )
+  if (source === "environment") {
     return {
-      credentialVariable: requireAvailableCredentialVariable(
-        variable.trim() || DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+      credentialVariable: await promptAvailableCredentialVariable(
+        interaction,
         environment,
       ),
     }
   }
-  if (source === "file" && credentialFileSupported) {
+  if (credentialFileSupported) {
     return {
       credentialFile: await promptRequired(
         interaction,
         "Protected token file: ",
-        undefined,
+        "Protected token file",
       ),
     }
   }
-  throw new ConfigurationError(
-    !credentialFileSupported
-      ? "Bot token source must be prompt or environment"
-      : "Bot token source must be prompt, environment, or file",
+  throw new ConfigurationError("The selected host does not support protected token files")
+}
+
+async function confirmOnboardInstallation(
+  interaction: CliInteraction,
+  guildId: string,
+  supplied: string | undefined,
+): Promise<string> {
+  const validate = (value: string): OnboardPromptValidation<string> => {
+    const normalized = value.trim()
+    return normalized === guildId
+      ? { ok: true, value: normalized }
+      : {
+          message: `Installation confirmation must exactly match guild ${guildId}`,
+          ok: false,
+        }
+  }
+  if (supplied !== undefined) {
+    const result = validate(supplied)
+    if (result.ok) return result.value
+    throw new ConfigurationError(result.message)
+  }
+  return promptValidated(
+    interaction,
+    `After Discord shows the bot in guild ${guildId}, type that guild ID exactly: `,
+    validate,
   )
 }
 
@@ -3379,17 +3596,34 @@ async function executeOnboard(
 ): Promise<OnboardExecutionResult> {
   const interaction = options.interaction || DEFAULT_CLI_INTERACTION
   const interactive = !parsed.json && Boolean((options.stdin || process.stdin).isTTY)
+  const stderr = options.stderr || process.stderr
+  const progress = (
+    stage: number,
+    message: string,
+    progressEnvironment: NodeJS.ProcessEnv = environment,
+  ): void => {
+    if (interactive) {
+      safeWrite(
+        stderr,
+        `[${stage}/${ONBOARD_STAGE_COUNT}] ${message}`,
+        progressEnvironment,
+      )
+    }
+  }
   if (!interactive) assertNonInteractiveOnboardArguments(parsed)
 
+  progress(1, "Identify the MCP host, Discord application, and exact guild")
   const hostId = await selectOnboardHost(interaction, parsed.hostId)
-  const applicationId = await promptRequired(
+  const applicationId = await promptDiscordSnowflake(
     interaction,
     "Discord Application ID: ",
+    "Application ID",
     parsed.applicationId,
   )
-  const guildId = await promptRequired(
+  const guildId = await promptDiscordSnowflake(
     interaction,
     "Discord Guild ID: ",
+    "Guild ID",
     parsed.guildId,
   )
   const install = createBotInstallPlan({
@@ -3403,14 +3637,16 @@ async function executeOnboard(
     )
   }
 
+  progress(2, "Install the bounded read-only bot and confirm the exact guild")
   let installOpened = false
   if (interactive && parsed.confirmation === undefined) {
-    const shouldOpen = parsed.open || affirmative(
-      await interaction.promptText([
+    const shouldOpen = parsed.open || await promptYesNo(
+      interaction,
+      [
         "GuildControl will request only the listed read permissions, lock the grant to the exact guild, and request no Administrator permission.",
         `Install URL: ${install.installUrl}`,
         "Open Discord to install the bot? [Y/n]: ",
-      ].join("\n")),
+      ].join("\n"),
       true,
     )
     if (shouldOpen) {
@@ -3419,17 +3655,13 @@ async function executeOnboard(
     }
   }
 
-  const confirmation = await promptRequired(
+  await confirmOnboardInstallation(
     interaction,
-    `After Discord shows the bot in guild ${install.guildId}, type that guild ID exactly: `,
+    install.guildId,
     parsed.confirmation,
   )
-  if (confirmation !== install.guildId) {
-    throw new ConfigurationError(
-      `Installation confirmation must exactly match guild ${install.guildId}`,
-    )
-  }
 
+  progress(3, "Verify identity and installation, then publish the private policy")
   const defaultConfig = parsed.configFile === undefined
   const configFile = resolveConnectorConfigFile(
     parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
@@ -3452,13 +3684,6 @@ async function executeOnboard(
   const launcher = publishedPackageLaunch()
   let report: OnboardReport
   try {
-    if (interactive) {
-      safeWrite(
-        options.stderr || process.stderr,
-        "Verifying the Discord application, bot, and exact guild installation...",
-        executionEnvironment,
-      )
-    }
     const setup = await dependencies.prepareSetup({
       args: launcher.args,
       command: launcher.command,
@@ -3479,13 +3704,7 @@ async function executeOnboard(
     })
     const document = dependencies.loadConfigDocument(configFile)
     const config = dependencies.loadConfig(executionEnvironment)
-    if (interactive) {
-      safeWrite(
-        options.stderr || process.stderr,
-        "Starting a child process to verify the real MCP stdio path...",
-        executionEnvironment,
-      )
-    }
+    progress(4, "Smoke-test the real MCP stdio path", executionEnvironment)
     const smoke = await dependencies.smoke({
       config,
       environment: executionEnvironment,
@@ -3526,17 +3745,12 @@ async function executeOnboard(
   const htmlFile = parsed.htmlFile
     ? resolve(parsed.htmlFile)
     : resolve(dirname(configFile), "guildcontrol-onboarding.html")
-  if (interactive) {
-    safeWrite(
-      options.stderr || process.stderr,
-      `Creating the private ${onboardHostDescriptor(hostId).title} activation guide...`,
-      environment,
-    )
-  }
+  progress(5, `Create the private ${onboardHostDescriptor(hostId).title} activation handoff`)
   const guide = await dependencies.exportOnboardHtml(htmlFile, report)
   let guideOpened = false
-  const shouldOpenGuide = parsed.open || (interactive && affirmative(
-    await interaction.promptText("Open the private host activation guide now? [Y/n]: "),
+  const shouldOpenGuide = parsed.open || (interactive && await promptYesNo(
+    interaction,
+    "Open the private host activation guide now? [Y/n]: ",
     true,
   ))
   if (shouldOpenGuide) {
@@ -4230,6 +4444,14 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         return CLI_EXIT_CODES.success
     }
   } catch (error) {
+    if (error instanceof CliInteractionCancelledError) {
+      safeWrite(
+        stderr,
+        `${CONNECTOR_CLI_COMMAND}: ${parsed?.command || "command"} canceled`,
+        {},
+      )
+      return CLI_EXIT_CODES.canceled
+    }
     const helpTopic = args[0] && isCommand(args[0]) ? args[0] : undefined
     const context = {
       ...(helpTopic ? { helpTopic } : {}),
