@@ -247,6 +247,12 @@ export interface PolicyDescription {
   userMentionMode: "disabled" | "allowlist" | "reviewed"
 }
 
+export interface NotificationAuthorizationDecision {
+  authorization: "direct" | "reviewed"
+  allowlistedUserIds: string[]
+  reviewedUserIds: string[]
+}
+
 const WEBHOOK_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcement,
   DISCORD_CHANNEL_TYPES.forum,
@@ -3231,15 +3237,40 @@ export class ScopePolicy {
     }
   }
 
-  assertNotificationUsers(userIds: readonly string[]): void {
+  notificationAuthorization(
+    userIds: readonly string[],
+  ): NotificationAuthorizationDecision {
     if (userIds.length > 0 && this.#userMentionMode === "disabled") {
       throw new PolicyError("Discord user notifications are disabled by connector configuration")
     }
+    const allowlistedUserIds: string[] = []
+    const reviewedUserIds: string[] = []
     for (const userId of userIds) {
-      if (!this.#mentionUserIds.has(userId)) {
+      if (this.#mentionUserIds.has(userId)) {
+        allowlistedUserIds.push(userId)
+      } else if (this.#userMentionMode === "reviewed") {
+        reviewedUserIds.push(userId)
+      } else {
         throw new PolicyError(`Discord user ${userId} is outside the notification scope`)
       }
     }
+    return {
+      authorization: reviewedUserIds.length > 0 ? "reviewed" : "direct",
+      allowlistedUserIds,
+      reviewedUserIds,
+    }
+  }
+
+  assertNotificationUsers(
+    userIds: readonly string[],
+  ): NotificationAuthorizationDecision {
+    const decision = this.notificationAuthorization(userIds)
+    if (decision.authorization === "reviewed") {
+      throw new PolicyError(
+        `Discord user ${decision.reviewedUserIds[0]} requires signed interactive notification review`,
+      )
+    }
+    return decision
   }
 
   assertComponentLinkOrigins(origins: readonly string[]): void {

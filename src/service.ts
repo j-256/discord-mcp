@@ -1317,7 +1317,7 @@ export interface ConnectorServiceOptions {
   >
   interactionOptions?: Pick<
     InteractionServiceOptions,
-    "clock" | "ledgerTtlMs" | "limiter" | "randomId"
+    "clock" | "ledgerTtlMs" | "limiter" | "planKey" | "randomId"
   >
   nativeInteractionCommandOptions?: Pick<
     NativeInteractionCommandServiceOptions,
@@ -2333,6 +2333,10 @@ export class ConnectorService {
 
   describePolicy() {
     return this.#policy.describe()
+  }
+
+  messageNotificationAuthorization(userIds: readonly string[]) {
+    return this.#policy.notificationAuthorization(userIds)
   }
 
   #webhookMessages(): WebhookMessageService {
@@ -7289,6 +7293,32 @@ export class ConnectorService {
     return this.#interactionService.sendMessage(identity.bot.id, request, options)
   }
 
+  async planSendMessageNotifications(
+    request: SendMessageRequest,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.planSendMessageNotifications(
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async executeReviewedSendMessage(
+    request: SendMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.executeReviewedSendMessage(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
+  }
+
   async sendCoordinationNote(
     request: CoordinationNoteSendRequest,
     options: RequestOptions = {},
@@ -7340,6 +7370,32 @@ export class ConnectorService {
   ) {
     const identity = await this.#verifyIdentity(options)
     return this.#interactionService.editOwnMessage(identity.bot.id, request, options)
+  }
+
+  async planEditOwnMessageNotifications(
+    request: EditOwnMessageRequest,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.planEditOwnMessageNotifications(
+      identity.bot.id,
+      request,
+      options,
+    )
+  }
+
+  async executeReviewedEditOwnMessage(
+    request: EditOwnMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ) {
+    const identity = await this.#verifyIdentity(options)
+    return this.#interactionService.executeReviewedEditOwnMessage(
+      identity.bot.id,
+      request,
+      planDigest,
+      options,
+    )
   }
 
   async addReaction(

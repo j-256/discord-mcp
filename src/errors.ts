@@ -2566,6 +2566,18 @@ export class InteractionIdentityError extends Error {
   override name = "InteractionIdentityError"
 }
 
+export class InteractionNotificationPlanChangedError extends Error {
+  readonly actualDigest: string
+  readonly expectedDigest: string
+
+  constructor(expectedDigest: string, actualDigest: string) {
+    super("The fresh Discord message notification evidence does not match the reviewed plan")
+    this.name = "InteractionNotificationPlanChangedError"
+    this.actualDigest = actualDigest
+    this.expectedDigest = expectedDigest
+  }
+}
+
 export class InteractionRateLimitError extends Error {
   readonly retryAfterMs: number
 

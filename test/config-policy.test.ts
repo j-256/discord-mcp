@@ -6717,6 +6717,28 @@ test("scope policy requires exact interaction channels and exact notification us
     () => disabled.assertNotificationUsers([USER_ID]),
     /notifications are disabled/,
   )
+  assert.deepEqual(disabled.notificationAuthorization([]), {
+    allowlistedUserIds: [],
+    authorization: "direct",
+    reviewedUserIds: [],
+  })
+  const reviewed = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    notifications: { userMentions: "reviewed" },
+    scopes: { mentionUserIds: [USER_ID] },
+  }, { homeDirectory: "/test/home" }))
+  assert.deepEqual(
+    reviewed.notificationAuthorization([USER_ID, "400000000000000002"]),
+    {
+      allowlistedUserIds: [USER_ID],
+      authorization: "reviewed",
+      reviewedUserIds: ["400000000000000002"],
+    },
+  )
+  assert.throws(
+    () => reviewed.assertNotificationUsers(["400000000000000002"]),
+    /requires signed interactive notification review/,
+  )
   policy.assertComponentLinkOrigins(["https://docs.example.com"])
   assert.throws(
     () => policy.assertComponentLinkOrigins(["https://example.com"]),

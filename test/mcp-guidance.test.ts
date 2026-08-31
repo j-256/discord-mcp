@@ -361,6 +361,7 @@ function guidanceService(options: {
     throw new Error("Unexpected service call")
   }
   const service: DiscordToolService = {
+    messageNotificationAuthorization: unexpectedSync,
     addReaction: unexpected,
     addReactions: unexpected,
     catchUpMessages: unexpected,
@@ -2509,6 +2510,8 @@ function guidanceService(options: {
       }
     },
     editOwnMessage: unexpected,
+    executeReviewedEditOwnMessage: unexpected,
+    executeReviewedSendMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeEmbedMessage: unexpected,
@@ -3086,6 +3089,8 @@ function guidanceService(options: {
     planBulkGuildBan: unexpected,
     planGuildPrune: unexpected,
     planMessageDeletion: unexpected,
+    planEditOwnMessageNotifications: unexpected,
+    planSendMessageNotifications: unexpected,
     planMessagePin: unexpected,
     planPollCreation: unexpected,
     planPollEnd: unexpected,

@@ -116,6 +116,8 @@ function policy(overrides: {
   deletions?: boolean
   delivery?: boolean
   messageChannels?: readonly string[]
+  notifyIds?: readonly string[]
+  userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): ScopePolicy {
   return new ScopePolicy({
     adminGuildIds: new Set(),
@@ -132,8 +134,9 @@ function policy(overrides: {
     interactionChannelIds: new Set(),
     interactionMaxWritesPerMinute: 10,
     interactionMinWriteIntervalMs: 0,
-    mentionUserIds: new Set([USER_ID]),
+    mentionUserIds: new Set(overrides.notifyIds ?? [USER_ID]),
     protectedUserIds: new Set(),
+    userMentionMode: overrides.userMentionMode ?? "allowlist",
     webhookMessageChannelIds: new Set(overrides.messageChannels ?? [CHANNEL_ID]),
   })
 }
@@ -579,6 +582,21 @@ test("webhook message send allows only explicit visible scoped user notification
       && (error.result as { status: string }).status === "uncertain"
     ),
   )
+
+  const reviewedOnly = fixture({
+    policy: policy({
+      notifyIds: [],
+      userMentionMode: "reviewed",
+    }),
+  })
+  await assert.rejects(
+    reviewedOnly.service.send(sendRequest({
+      content: `Deployment complete <@${USER_ID}>`,
+      notifyUserIds: [USER_ID],
+    })),
+    /requires signed interactive notification review/,
+  )
+  assert.equal(reviewedOnly.sendCount, 0)
 })
 
 test("webhook message writes distinguish known rejection from uncertain delivery", async () => {

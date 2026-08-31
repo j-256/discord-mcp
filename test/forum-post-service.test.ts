@@ -172,6 +172,7 @@ function policy(options: {
   allowedForumIds?: readonly string[]
   enabled?: boolean
   notifyIds?: readonly string[]
+  userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): ScopePolicy {
   return new ScopePolicy({
     adminGuildIds: new Set(),
@@ -188,6 +189,7 @@ function policy(options: {
     interactionMinWriteIntervalMs: 0,
     mentionUserIds: new Set(options.notifyIds || [NOTIFY_USER_ID]),
     protectedUserIds: new Set(),
+    userMentionMode: options.userMentionMode ?? "allowlist",
   })
 }
 
@@ -423,6 +425,31 @@ test("forum-post planning binds exact tags, permissions, content, and private ke
     administratorPlan.warnings.some((warning) => warning.includes("ADMINISTRATOR")),
     true,
   )
+})
+
+test("forum-post plans bind reviewed authorization for unlisted exact notifications", async () => {
+  const configured = policy({
+    notifyIds: [],
+    userMentionMode: "reviewed",
+  })
+  const { service, state } = fixture({ policy: configured })
+  const input = request()
+  const plan = await service.plan(BOT_ID, input)
+  await service.execute(BOT_ID, input, plan.digest)
+
+  assert.deepEqual(plan.notificationAuthorization, {
+    replyAuthor: null,
+    reviewRequired: true,
+    userMentions: {
+      allowlistedUserIds: [],
+      authorization: "reviewed",
+      reviewedUserIds: [NOTIFY_USER_ID],
+    },
+  })
+  assert.deepEqual(state.createInput?.allowedMentions, {
+    replied_user: false,
+    users: [NOTIFY_USER_ID],
+  })
 })
 
 test("forum-post policy, tag, and permission evidence fail closed", async () => {

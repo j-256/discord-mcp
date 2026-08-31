@@ -6,11 +6,23 @@ import {
 } from "./constants.js"
 import type { DiscordAllowedMentions } from "./discord-client.js"
 import { InteractionIdentityError } from "./errors.js"
-import type { ScopePolicy } from "./policy.js"
+import type {
+  NotificationAuthorizationDecision,
+  ScopePolicy,
+} from "./policy.js"
 import type { DiscordMessage } from "./types.js"
 
 const MESSAGE_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u
 const MESSAGE_USER_MENTION_PATTERN = /<@!?([0-9]{1,20})>/gu
+
+export interface DiscordNotificationAuthorization {
+  replyAuthor: {
+    authorization: NotificationAuthorizationDecision["authorization"]
+    userId: string
+  } | null
+  reviewRequired: boolean
+  userMentions: NotificationAuthorizationDecision
+}
 
 export function discordMentionedUserIds(content: string): string[] {
   return [...new Set(
@@ -88,6 +100,29 @@ export function discordNotificationUserIds(
   const userIds = canonicalDiscordNotificationUserIds(content, requested)
   policy.assertNotificationUsers(userIds)
   return userIds
+}
+
+export function discordReviewedNotificationAuthorization(
+  userIds: readonly string[],
+  policy: ScopePolicy,
+  replyAuthorId?: string,
+): DiscordNotificationAuthorization {
+  const userMentions = policy.notificationAuthorization(userIds)
+  const replyAuthorDecision = replyAuthorId === undefined
+    ? null
+    : policy.notificationAuthorization([replyAuthorId])
+  const replyAuthor = replyAuthorDecision === null || replyAuthorId === undefined
+    ? null
+    : {
+        authorization: replyAuthorDecision.authorization,
+        userId: replyAuthorId,
+      }
+  return {
+    replyAuthor,
+    reviewRequired: userMentions.authorization === "reviewed"
+      || replyAuthor?.authorization === "reviewed",
+    userMentions,
+  }
 }
 
 export function discordAllowedMentions(

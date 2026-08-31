@@ -212,6 +212,7 @@ function configuredPolicy(options: {
   mentionUserIds?: readonly string[]
   permissions?: bigint
   readChannelIds?: readonly string[]
+  userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): { policy: ScopePolicy; roles: DiscordRole[] } {
   const permissions = options.permissions ?? (
     DISCORD_PERMISSIONS.VIEW_CHANNEL
@@ -237,6 +238,7 @@ function configuredPolicy(options: {
       interactionMinWriteIntervalMs: 0,
       mentionUserIds: new Set(options.mentionUserIds ?? [REPLY_AUTHOR_ID]),
       protectedUserIds: new Set(),
+      userMentionMode: options.userMentionMode ?? "allowlist",
     }),
     roles: [role(GUILD_ID, 0n), role(BOT_ROLE_ID, permissions)],
   }
@@ -588,6 +590,39 @@ test("embed-message planning binds exact identity, permissions, and transient la
     EmbedMessageEvidenceError,
   )
   assert.equal(intentMissing.events.some((event) => event.startsWith("read:")), false)
+})
+
+test("embed-message plans bind reviewed authorization for unlisted exact notifications", async () => {
+  const current = fixture({
+    policyOptions: {
+      mentionUserIds: [],
+      userMentionMode: "reviewed",
+    },
+  })
+  const request = createRequest()
+  const plan = await current.service.plan(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+  )
+  await current.service.execute(
+    APPLICATION_ID,
+    BOT_ID,
+    "enabled",
+    request,
+    plan.digest,
+  )
+
+  assert.equal(plan.notificationAuthorization.reviewRequired, true)
+  assert.deepEqual(
+    plan.notificationAuthorization.userMentions.reviewedUserIds,
+    [REPLY_AUTHOR_ID],
+  )
+  assert.deepEqual(current.createInput?.allowedMentions, {
+    replied_user: false,
+    users: [REPLY_AUTHOR_ID],
+  })
 })
 
 test("embed-message planning rejects incomplete legacy and unsafe mention evidence", async () => {
