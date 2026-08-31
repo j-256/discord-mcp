@@ -121,6 +121,7 @@ export function createConnectorProfile(options: {
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
+  groups?: ConnectorConfigDocument["groups"]
   guildIds: readonly string[]
   limits?: Readonly<Record<string, number>>
   name: string

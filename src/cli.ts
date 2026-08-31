@@ -3063,6 +3063,11 @@ function renderConfigSummary(report: ConfigValidationReport): string {
       .map((entry) => `${entry.name}=${entry.count}`)
       .join(", ")
     : "none"
+  const configuredGroups = summary.groupsConfigured.length > 0
+    ? summary.groupsConfigured
+      .map((entry) => `${entry.type}=${entry.groupCount} groups/${entry.exactIdCount} exact IDs`)
+      .join(", ")
+    : "none"
   return [
     `Configuration: ${summary.name}`,
     `File: ${report.file}`,
@@ -3076,6 +3081,7 @@ function renderConfigSummary(report: ConfigValidationReport): string {
     `Gateway: ${summary.gateway.enabled ? "enabled" : "disabled"}`,
     `Credential: ${summary.credential.provider} ${summary.credential.provider === "environment" ? summary.credential.variable : summary.credential.path}`,
     `Enabled capabilities: ${summary.capabilitiesEnabled.join(", ") || "none"}`,
+    `Scope groups: ${configuredGroups}`,
     `Configured feature scopes: ${configuredScopes}`,
     `Referenced secret environment variables: ${summary.secretEnvironmentVariables.join(", ") || "none"}`,
     `Referenced secret files: ${summary.secretFilePaths.join(", ") || "none"}`,

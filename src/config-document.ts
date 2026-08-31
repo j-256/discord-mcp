@@ -71,6 +71,11 @@ const CONFIG_STRING_CHARACTERS = 4_096
 const CONFIG_SCOPE_ENTRIES = 1_000
 const CONFIG_ROOT_ENTRIES = 32
 
+export const CONFIG_SCOPE_GROUP_LIMITS = Object.freeze({
+  groupsPerType: 100,
+  idsPerGroup: CONFIG_SCOPE_ENTRIES,
+} as const)
+
 export interface EnvironmentSecretReference {
   provider: "environment"
   variable: string
@@ -116,6 +121,7 @@ export interface ConnectorConfigDocument {
     enabled: boolean
     eventBufferSize: number
   }
+  groups: ConnectorConfigDocumentScopeGroups
   identity: {
     applicationId: string
     botId: string
@@ -147,9 +153,9 @@ export interface ConnectorConfigDocument {
 }
 
 export interface ConfigDocumentField {
-  defaultValue: boolean | number | string | readonly string[] | undefined
+  defaultValue: boolean | number | string | readonly string[] | Readonly<Record<string, readonly string[]>> | undefined
   description: string
-  kind: "boolean" | "integer" | "number" | "path" | "paths" | "secret-reference" | "snowflake" | "snowflakes" | "string" | "strings"
+  kind: "boolean" | "group-map" | "integer" | "number" | "path" | "paths" | "scope-entries" | "secret-reference" | "snowflake" | "snowflakes" | "string" | "strings"
   path: string
   required: boolean
 }
@@ -370,6 +376,13 @@ export const CONFIG_SCOPE_NAMES = Object.freeze([
   "widgetSettingsGuildIds",
 ] as const)
 
+export const CONFIG_SCOPE_GROUP_TYPES = Object.freeze([
+  "channels",
+  "guilds",
+  "roles",
+  "users",
+] as const)
+
 export const CONFIG_LIMIT_NAMES = Object.freeze([
   "attachmentMaxBytes",
   "guildPruneMaxMembers",
@@ -400,6 +413,115 @@ export type ConnectorConfigCapabilityName = (typeof CONFIG_CAPABILITY_NAMES)[num
 export type ConnectorConfigLimitName = (typeof CONFIG_LIMIT_NAMES)[number]
 export type ConnectorConfigRuntimeName = (typeof CONFIG_RUNTIME_NAMES)[number]
 export type ConnectorConfigScopeName = (typeof CONFIG_SCOPE_NAMES)[number]
+export type ConnectorConfigScopeGroupType = (typeof CONFIG_SCOPE_GROUP_TYPES)[number]
+
+export interface ConnectorConfigDocumentScopeGroups {
+  channels?: Readonly<Record<string, readonly string[]>>
+  guilds?: Readonly<Record<string, readonly string[]>>
+  roles?: Readonly<Record<string, readonly string[]>>
+  users?: Readonly<Record<string, readonly string[]>>
+}
+
+const GUILD_SCOPE_NAMES = Object.freeze([
+  "adminGuildIds",
+  "applicationCommandGuildIds",
+  "applicationEntitlementGuildIds",
+  "applicationTestEntitlementGuildIds",
+  "automodGuildIds",
+  "banAuditGuildIds",
+  "bulkBanGuildIds",
+  "bulkMemberRoleGuildIds",
+  "channelCreationGuildIds",
+  "channelCloneGuildIds",
+  "channelOrderingGuildIds",
+  "guildCommunityGuildIds",
+  "guildDepartureGuildIds",
+  "guildExpressionGuildIds",
+  "guildIncidentGuildIds",
+  "guildProfileGuildIds",
+  "guildPruneGuildIds",
+  "guildScaffoldGuildIds",
+  "guildSettingsGuildIds",
+  "guildTemplateGuildIds",
+  "integrationGuildIds",
+  "inviteGuildIds",
+  "memberDirectoryGuildIds",
+  "memberRoleGuildIds",
+  "memberVerificationGuildIds",
+  "memberVoiceGuildIds",
+  "nativeInteractionGuildIds",
+  "nicknameGuildIds",
+  "onboardingGuildIds",
+  "roleCreationGuildIds",
+  "roleOrderingGuildIds",
+  "scheduledEventGuildIds",
+  "soundboardGuildIds",
+  "soundboardPlaybackSourceGuildIds",
+  "threadGuildIds",
+  "webhookGuildIds",
+  "welcomeScreenGuildIds",
+  "widgetSettingsGuildIds",
+] satisfies readonly ConnectorConfigScopeName[])
+
+const CHANNEL_SCOPE_NAMES = Object.freeze([
+  "announcementCrosspostChannelIds",
+  "announcementSubscriptionSourceChannelIds",
+  "announcementSubscriptionTargetChannelIds",
+  "attachmentChannelIds",
+  "automodAlertChannelIds",
+  "channelCloneSourceIds",
+  "channelDeletionIds",
+  "channelMetadataIds",
+  "deleteChannelIds",
+  "embedMessageChannelIds",
+  "forumPostChannelIds",
+  "forumTagChannelIds",
+  "interactionChannelIds",
+  "inviteCreationChannelIds",
+  "memberVoiceChannelIds",
+  "messageForwardSourceChannelIds",
+  "messageForwardTargetChannelIds",
+  "nativeInteractionChannelIds",
+  "permissionOverwriteChannelIds",
+  "permissionSyncChannelIds",
+  "pinChannelIds",
+  "pollChannelIds",
+  "reactionChannelIds",
+  "soundboardPlaybackChannelIds",
+  "stageChannelIds",
+  "threadIds",
+  "threadParentIds",
+  "webhookChannelIds",
+  "webhookMessageChannelIds",
+] satisfies readonly ConnectorConfigScopeName[])
+
+const ROLE_SCOPE_NAMES = Object.freeze([
+  "bulkMemberRoleIds",
+  "guildPruneIncludeRoleIds",
+  "inviteRoleIds",
+  "memberRoleIds",
+  "roleConfigurationIds",
+  "roleDeletionIds",
+] satisfies readonly ConnectorConfigScopeName[])
+
+const USER_SCOPE_NAMES = Object.freeze([
+  "applicationConsumableEntitlementUserIds",
+  "applicationEntitlementUserIds",
+  "applicationSubscriptionUserIds",
+  "applicationTestEntitlementUserIds",
+  "directMessageUserIds",
+  "mentionUserIds",
+  "nativeInteractionUserIds",
+  "protectedUserIds",
+  "threadMemberUserIds",
+] satisfies readonly ConnectorConfigScopeName[])
+
+export const CONFIG_SCOPE_RESOURCE_TYPES = Object.freeze(Object.fromEntries([
+  ...GUILD_SCOPE_NAMES.map((name) => [name, "guilds"] as const),
+  ...CHANNEL_SCOPE_NAMES.map((name) => [name, "channels"] as const),
+  ...ROLE_SCOPE_NAMES.map((name) => [name, "roles"] as const),
+  ...USER_SCOPE_NAMES.map((name) => [name, "users"] as const),
+]) as Readonly<Partial<Record<ConnectorConfigScopeName, ConnectorConfigScopeGroupType>>>)
 
 export interface ConnectorConfigDocumentStorage {
   applicationEmojiRoots?: readonly string[]
@@ -427,6 +549,17 @@ function canonicalArray<T extends string>(
 const snowflakeSchema = z.string()
   .regex(DISCORD_SNOWFLAKE_PATTERN, "must be a Discord snowflake")
 
+const scopeGroupNameSchema = z.string()
+  .regex(CONFIG_NAME_PATTERN, "must be a bounded lowercase group name")
+
+const scopeGroupReferenceSchema = z.string()
+  .regex(/^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/, "must be an @group reference")
+
+const scopedIdSchema = z.union([
+  snowflakeSchema,
+  scopeGroupReferenceSchema,
+])
+
 const absolutePathSchema = z.string()
   .min(1)
   .max(CONFIG_STRING_CHARACTERS)
@@ -446,6 +579,42 @@ function snowflakeArraySchema(minimum: number, maximum: number): z.ZodType<strin
     .max(maximum, `must contain at most ${maximum} unique IDs`)
     .refine((values) => canonicalArray(values), "must contain unique sorted Discord snowflakes")
 }
+
+function scopedIdArraySchema(minimum: number, maximum: number): z.ZodType<string[]> {
+  return z.array(scopedIdSchema)
+    .min(minimum)
+    .max(maximum, `must contain at most ${maximum} unique IDs or group references`)
+    .refine(
+      (values) => canonicalArray(values),
+      "must contain unique sorted Discord snowflakes and @group references",
+    )
+}
+
+const scopeGroupMapSchema = z.record(
+  scopeGroupNameSchema,
+  snowflakeArraySchema(1, CONFIG_SCOPE_GROUP_LIMITS.idsPerGroup),
+).superRefine((value, context) => {
+  const names = Object.keys(value)
+  if (names.length > CONFIG_SCOPE_GROUP_LIMITS.groupsPerType) {
+    context.addIssue({
+      code: "custom",
+      message: `must define at most ${CONFIG_SCOPE_GROUP_LIMITS.groupsPerType} groups`,
+    })
+  }
+  if (!canonicalArray(names)) {
+    context.addIssue({
+      code: "custom",
+      message: "must define groups in canonical name order",
+    })
+  }
+})
+
+const scopeGroupsSchema = z.strictObject({
+  channels: scopeGroupMapSchema.optional(),
+  guilds: scopeGroupMapSchema.optional(),
+  roles: scopeGroupMapSchema.optional(),
+  users: scopeGroupMapSchema.optional(),
+})
 
 const rootArraySchema = z.array(absolutePathSchema)
   .max(CONFIG_ROOT_ENTRIES)
@@ -736,6 +905,13 @@ function scopeDescription(documentKey: string): string {
   return `Exact Discord ID allowlist for ${humanizeConfigKey(documentKey)}`
 }
 
+function authoredScopeDescription(name: ConnectorConfigScopeName): string {
+  const type = CONFIG_SCOPE_RESOURCE_TYPES[name]
+  return type === undefined
+    ? scopeDescription(name)
+    : `${scopeDescription(name)}; exact ${type} groups may be referenced as @name`
+}
+
 function storageDescription(documentKey: string): string {
   if (documentKey === "botProfileRoots") {
     return BOT_PROFILE_ROOT_DESCRIPTION
@@ -773,6 +949,33 @@ const componentLinkOriginSchema = z.string()
     }
   }, "must be an exact canonical HTTPS origin without a path, query, fragment, credentials, or trailing slash")
 
+function scopeEntryMaximum(name: ConnectorConfigScopeName): number {
+  if (name === "directMessageUserIds") {
+    return CONNECTOR_LIMITS.directMessageUserAllowlist
+  }
+  if (
+    name === "applicationEntitlementGuildIds"
+    || name === "applicationEntitlementUserIds"
+    || name === "applicationSubscriptionUserIds"
+    || name === "applicationConsumableEntitlementUserIds"
+    || name === "applicationTestEntitlementGuildIds"
+    || name === "applicationTestEntitlementUserIds"
+  ) {
+    return CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
+  }
+  if (
+    name === "applicationMonetizationSkuIds"
+    || name === "applicationConsumableEntitlementSkuIds"
+    || name === "applicationTestEntitlementSkuIds"
+  ) {
+    return CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
+  }
+  if (name === "memberRoleIds" || name === "bulkMemberRoleIds") {
+    return CONNECTOR_LIMITS.memberRoleAllowlist
+  }
+  return CONFIG_SCOPE_ENTRIES
+}
+
 const scopeShape = Object.fromEntries(
   CONFIG_SCOPE_NAMES.map((name) => [
     name,
@@ -783,26 +986,10 @@ const scopeShape = Object.fromEntries(
           (values) => canonicalArray(values),
           "must contain unique origins in canonical order",
         )
-      : snowflakeArraySchema(
-        0,
-        name === "directMessageUserIds"
-          ? CONNECTOR_LIMITS.directMessageUserAllowlist
-          : name === "applicationEntitlementGuildIds"
-            || name === "applicationEntitlementUserIds"
-            || name === "applicationSubscriptionUserIds"
-            || name === "applicationConsumableEntitlementUserIds"
-            || name === "applicationTestEntitlementGuildIds"
-            || name === "applicationTestEntitlementUserIds"
-            ? CONNECTOR_LIMITS.applicationMonetizationSubjectAllowlist
-            : name === "applicationMonetizationSkuIds"
-              || name === "applicationConsumableEntitlementSkuIds"
-              || name === "applicationTestEntitlementSkuIds"
-              ? CONNECTOR_LIMITS.applicationMonetizationSkuAllowlist
-              : name === "memberRoleIds" || name === "bulkMemberRoleIds"
-                ? CONNECTOR_LIMITS.memberRoleAllowlist
-                : CONFIG_SCOPE_ENTRIES,
-      ))
-      .describe(scopeDescription(name))
+      : CONFIG_SCOPE_RESOURCE_TYPES[name] === undefined
+        ? snowflakeArraySchema(0, scopeEntryMaximum(name))
+        : scopedIdArraySchema(0, scopeEntryMaximum(name)))
+      .describe(authoredScopeDescription(name))
       .optional(),
   ]),
 ) as Record<string, z.ZodOptional<z.ZodType<string[]>>>
@@ -880,6 +1067,9 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
     eventBufferSize: z.number().int().min(1).max(CONNECTOR_LIMITS.gatewayEventBufferSize)
       .describe("Maximum bounded Gateway event buffer size"),
   }).describe("Optional Discord Gateway policy"),
+  groups: scopeGroupsSchema
+    .describe("Reusable typed aliases whose members are exact Discord IDs")
+    .optional(),
   identity: z.strictObject({
     applicationId: snowflakeSchema.describe("Expected Discord application identity"),
     botId: snowflakeSchema.describe("Expected Discord bot user identity"),
@@ -925,13 +1115,13 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
     channelMode: z.enum(CONFIG_READ_SCOPE_MODES)
       .describe("Whether channel reads use exact IDs or all visible channels inside guild scope")
       .optional(),
-    channelIds: snowflakeArraySchema(0, DISCORD_LIMITS.searchChannelIds)
-      .describe("Optional exact channel allowlist inside the guild boundary"),
+    channelIds: scopedIdArraySchema(0, DISCORD_LIMITS.searchChannelIds)
+      .describe("Optional exact channel IDs and channel-group references inside the guild boundary"),
     guildMode: z.enum(CONFIG_READ_SCOPE_MODES)
       .describe("Whether guild reads use exact IDs or every guild visible to the bot")
       .optional(),
-    guildIds: snowflakeArraySchema(0, DISCORD_LIMITS.currentUserGuilds)
-      .describe("Exact guild allowlist forming the outer read boundary"),
+    guildIds: scopedIdArraySchema(0, DISCORD_LIMITS.currentUserGuilds)
+      .describe("Exact guild IDs and guild-group references forming the outer read boundary"),
   }).describe("Required outer Discord read boundary"),
   runtime: z.strictObject(runtimeShape)
     .describe("Optional non-secret runtime settings")
@@ -939,7 +1129,7 @@ export const CONNECTOR_CONFIG_DOCUMENT_SCHEMA = z.strictObject({
   schemaVersion: z.literal(CONFIG_DOCUMENT_SCHEMA_VERSION)
     .describe("Configuration format version"),
   scopes: z.strictObject(scopeShape)
-    .describe("Exact per-feature Discord ID and HTTPS origin allowlists")
+    .describe("Exact per-feature Discord ID, compatible typed-group, and HTTPS origin allowlists")
     .default({}),
   storage: z.strictObject(storageShape)
     .describe("Local content-free activity and owned-file paths")
@@ -1056,6 +1246,116 @@ export function connectorConfigSecretFilePaths(
     : [])
 }
 
+function referencedScopeGroupName(value: string): string | undefined {
+  return value.startsWith("@") ? value.slice(1) : undefined
+}
+
+function scopeGroupDefinitionPath(
+  document: ConnectorConfigDocument,
+  name: string,
+): string | undefined {
+  for (const type of CONFIG_SCOPE_GROUP_TYPES) {
+    const groups = document.groups[type]
+    if (groups && Object.hasOwn(groups, name)) {
+      return `$.groups.${type}[${JSON.stringify(name)}]`
+    }
+  }
+  return undefined
+}
+
+function scopeGroupValues(
+  document: ConnectorConfigDocument,
+  type: ConnectorConfigScopeGroupType,
+  name: string,
+): readonly string[] | undefined {
+  const groups = document.groups[type]
+  return groups && Object.hasOwn(groups, name) ? groups[name] : undefined
+}
+
+export function expandConnectorConfigIdEntries(
+  document: ConnectorConfigDocument,
+  type: ConnectorConfigScopeGroupType,
+  entries: readonly string[],
+  path: string,
+  maximum: number,
+): readonly string[] {
+  const expanded: string[] = []
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    const groupName = referencedScopeGroupName(entry)
+    const values = groupName === undefined
+      ? [entry]
+      : scopeGroupValues(document, type, groupName)
+    if (groupName !== undefined && values === undefined) {
+      const definedAt = scopeGroupDefinitionPath(document, groupName)
+      throw new ConfigDocumentError(definedAt === undefined
+        ? `Configuration document ${path} references unknown ${type} group @${groupName}`
+        : `Configuration document ${path} references @${groupName} as ${type}, but it is defined at ${definedAt}`)
+    }
+    for (const value of values || []) {
+      if (seen.has(value)) {
+        throw new ConfigDocumentError(
+          `Configuration document ${path} expands to duplicate Discord ID ${value}`,
+        )
+      }
+      seen.add(value)
+      expanded.push(value)
+      if (expanded.length > maximum) {
+        throw new ConfigDocumentError(
+          `Configuration document ${path} must contain at most ${maximum} unique IDs after group expansion`,
+        )
+      }
+    }
+  }
+  return Object.freeze(expanded.sort())
+}
+
+export function expandedConnectorReadScope(
+  document: ConnectorConfigDocument,
+): Readonly<{
+  channelIds: readonly string[]
+  guildIds: readonly string[]
+}> {
+  return Object.freeze({
+    channelIds: expandConnectorConfigIdEntries(
+      document,
+      "channels",
+      document.readScope.channelIds,
+      "$.readScope.channelIds",
+      DISCORD_LIMITS.searchChannelIds,
+    ),
+    guildIds: expandConnectorConfigIdEntries(
+      document,
+      "guilds",
+      document.readScope.guildIds,
+      "$.readScope.guildIds",
+      DISCORD_LIMITS.currentUserGuilds,
+    ),
+  })
+}
+
+export function expandedConnectorScope(
+  document: ConnectorConfigDocument,
+  name: ConnectorConfigScopeName,
+  maximum = scopeEntryMaximum(name),
+): readonly string[] {
+  const entries = document.scopes[name] ?? []
+  const type = CONFIG_SCOPE_RESOURCE_TYPES[name]
+  if (type === undefined) return Object.freeze([...entries])
+  return expandConnectorConfigIdEntries(
+    document,
+    type,
+    entries,
+    `$.scopes.${name}`,
+    maximum,
+  )
+}
+
+function validateConnectorConfigScopeGroups(document: ConnectorConfigDocument): void {
+  expandedConnectorReadScope(document)
+  for (const name of CONFIG_SCOPE_NAMES) expandedConnectorScope(document, name)
+}
+
 export function parseConnectorConfigDocument(
   value: unknown,
   expectedName?: string,
@@ -1072,28 +1372,9 @@ export function parseConnectorConfigDocument(
     ?? (parsed.readScope.channelIds.length > 0 ? "allowlist" : "all-visible")
   const guildMode = parsed.readScope.guildMode
     ?? (parsed.readScope.guildIds.length > 0 ? "allowlist" : "all-visible")
-  if (channelMode === "allowlist" && parsed.readScope.channelIds.length === 0) {
-    throw new ConfigDocumentError(
-      "Configuration document $.readScope.channelMode allowlist requires at least one channel ID",
-    )
-  }
-  if (channelMode === "all-visible" && parsed.readScope.channelIds.length > 0) {
-    throw new ConfigDocumentError(
-      "Configuration document $.readScope.channelIds must be empty when channelMode is all-visible",
-    )
-  }
-  if (guildMode === "allowlist" && parsed.readScope.guildIds.length === 0) {
-    throw new ConfigDocumentError(
-      "Configuration document $.readScope.guildMode allowlist requires at least one guild ID",
-    )
-  }
-  if (guildMode === "all-visible" && parsed.readScope.guildIds.length > 0) {
-    throw new ConfigDocumentError(
-      "Configuration document $.readScope.guildIds must be empty when guildMode is all-visible",
-    )
-  }
   const document = {
     ...parsed,
+    groups: parsed.groups ?? {},
     notifications: {
       userMentions: parsed.notifications?.userMentions ?? "allowlist",
     },
@@ -1108,6 +1389,28 @@ export function parseConnectorConfigDocument(
       reads: parsed.threads?.reads ?? "inherit",
     },
   } as ConnectorConfigDocument
+  const expandedReadScope = expandedConnectorReadScope(document)
+  if (channelMode === "allowlist" && expandedReadScope.channelIds.length === 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.channelMode allowlist requires at least one channel ID",
+    )
+  }
+  if (channelMode === "all-visible" && parsed.readScope.channelIds.length > 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.channelIds must be empty when channelMode is all-visible",
+    )
+  }
+  if (guildMode === "allowlist" && expandedReadScope.guildIds.length === 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.guildMode allowlist requires at least one guild ID",
+    )
+  }
+  if (guildMode === "all-visible" && parsed.readScope.guildIds.length > 0) {
+    throw new ConfigDocumentError(
+      "Configuration document $.readScope.guildIds must be empty when guildMode is all-visible",
+    )
+  }
+  validateConnectorConfigScopeGroups(document)
   if (expectedName !== undefined && document.name !== normalizeConfigName(expectedName)) {
     throw new ConfigDocumentError("Configuration name does not match its filename")
   }
@@ -1123,6 +1426,7 @@ export function createConnectorConfigDocument(options: {
   credentialVariable?: string
   gatewayEnabled?: boolean
   gatewayEventBufferSize?: number
+  groups?: ConnectorConfigDocumentScopeGroups
   guildIds: readonly string[]
   limits?: ConnectorConfigDocument["limits"]
   name: string
@@ -1159,6 +1463,7 @@ export function createConnectorConfigDocument(options: {
       enabled: options.gatewayEnabled ?? false,
       eventBufferSize: options.gatewayEventBufferSize ?? GATEWAY_DEFAULTS.eventBufferSize,
     },
+    groups: options.groups ?? {},
     identity: {
       applicationId: options.applicationId,
       botId: options.botId,
@@ -1627,6 +1932,13 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
       path,
       required: true,
     })),
+    ...CONFIG_SCOPE_GROUP_TYPES.map((type) => ({
+      defaultValue: {},
+      description: `Named ${type} groups whose members are exact Discord IDs`,
+      kind: "group-map" as const,
+      path: `$.groups.${type}`,
+      required: false,
+    })),
     ...([
       ["$.readScope.guildMode", "allowlist"],
       ["$.readScope.guildIds", undefined],
@@ -1641,7 +1953,7 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
           : path.endsWith("guildIds")
             ? "Exact guild allowlist forming the outer read boundary"
             : "Optional exact channel allowlist inside the guild boundary",
-      kind: (path.endsWith("Mode") ? "string" : "snowflakes") as "snowflakes" | "string",
+      kind: (path.endsWith("Mode") ? "string" : "scope-entries") as "scope-entries" | "string",
       path,
       required: true,
     })),
@@ -1703,8 +2015,12 @@ export function connectorConfigFields(): readonly ConfigDocumentField[] {
     })),
     ...CONFIG_SCOPE_NAMES.map((name) => ({
       defaultValue: [],
-      description: scopeDescription(name),
-      kind: name === "componentLinkOrigins" ? "strings" as const : "snowflakes" as const,
+      description: authoredScopeDescription(name),
+      kind: name === "componentLinkOrigins"
+        ? "strings" as const
+        : CONFIG_SCOPE_RESOURCE_TYPES[name] === undefined
+          ? "snowflakes" as const
+          : "scope-entries" as const,
       path: `$.scopes.${name}`,
       required: false,
     })),

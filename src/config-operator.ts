@@ -17,11 +17,14 @@ import {
 import { loadConnectorConfigDocument } from "./config.js"
 import {
   CONFIG_DOCUMENT_SCHEMA_ID,
+  CONFIG_SCOPE_GROUP_TYPES,
   connectorConfigFields,
   connectorConfigJsonSchema,
   connectorConfigSecretEnvironmentNames,
   connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
+  expandedConnectorReadScope,
+  expandedConnectorScope,
   loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
   type ConfigDocumentField,
@@ -33,7 +36,7 @@ import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import { stableString } from "./normalize.js"
 import { getSetupPreset } from "./setup-presets.js"
 
-export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 4
+export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 5
 
 const FILE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
@@ -55,15 +58,23 @@ export interface ConnectorConfigSummary {
     userMentions: ConnectorConfigDocument["notifications"]["userMentions"]
   }
   readScope: {
+    channelEntries?: readonly string[]
     channelMode: ConnectorConfigDocument["readScope"]["channelMode"]
     channelIds: readonly string[]
+    guildEntries?: readonly string[]
     guildMode: ConnectorConfigDocument["readScope"]["guildMode"]
     guildIds: readonly string[]
   }
+  groupsConfigured: readonly {
+    exactIdCount: number
+    groupCount: number
+    type: string
+  }[]
   runtimeConfigured: readonly string[]
   secretEnvironmentVariables: readonly string[]
   secretFilePaths: readonly string[]
   scopesConfigured: readonly {
+    authoredCount: number
     count: number
     name: string
   }[]
@@ -212,6 +223,7 @@ export function summarizeConnectorConfigDocument(
   documentValue: ConnectorConfigDocument,
 ): ConnectorConfigSummary {
   const document = parseConnectorConfigDocument(documentValue)
+  const expandedReadScope = expandedConnectorReadScope(document)
   return {
     capabilitiesEnabled: Object.entries(document.capabilities)
       .filter(([, enabled]) => enabled)
@@ -220,22 +232,43 @@ export function summarizeConnectorConfigDocument(
     configSchemaVersion: document.schemaVersion,
     credential: { ...document.credential },
     gateway: { ...document.gateway },
+    groupsConfigured: CONFIG_SCOPE_GROUP_TYPES
+      .flatMap((type) => {
+        const groups = document.groups[type]
+        if (!groups || Object.keys(groups).length === 0) return []
+        return [{
+          exactIdCount: new Set(Object.values(groups).flat()).size,
+          groupCount: Object.keys(groups).length,
+          type,
+        }]
+      })
+      .sort((left, right) => left.type.localeCompare(right.type)),
     identity: { ...document.identity },
     limitsConfigured: Object.keys(document.limits).sort(),
     name: document.name,
     notifications: { ...document.notifications },
     readScope: {
+      ...(document.readScope.channelIds.some((entry) => entry.startsWith("@"))
+        ? { channelEntries: [...document.readScope.channelIds] }
+        : {}),
       channelMode: document.readScope.channelMode,
-      channelIds: [...document.readScope.channelIds],
+      channelIds: [...expandedReadScope.channelIds],
+      ...(document.readScope.guildIds.some((entry) => entry.startsWith("@"))
+        ? { guildEntries: [...document.readScope.guildIds] }
+        : {}),
       guildMode: document.readScope.guildMode,
-      guildIds: [...document.readScope.guildIds],
+      guildIds: [...expandedReadScope.guildIds],
     },
     runtimeConfigured: Object.keys(document.runtime).sort(),
     secretEnvironmentVariables: [...connectorConfigSecretEnvironmentNames(document)].sort(),
     secretFilePaths: [...connectorConfigSecretFilePaths(document)].sort(),
     scopesConfigured: Object.entries(document.scopes)
       .filter(([, ids]) => ids.length > 0)
-      .map(([name, ids]) => ({ count: ids.length, name }))
+      .map(([name, ids]) => ({
+        authoredCount: ids.length,
+        count: expandedConnectorScope(document, name as keyof ConnectorConfigDocument["scopes"]).length,
+        name,
+      }))
       .sort((left, right) => left.name.localeCompare(right.name)),
     storageConfigured: Object.keys(document.storage).sort(),
     tools: {

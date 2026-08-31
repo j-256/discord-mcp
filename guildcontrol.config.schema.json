@@ -544,6 +544,77 @@
       "additionalProperties": false,
       "description": "Optional Discord Gateway policy"
     },
+    "groups": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            }
+          }
+        },
+        "guilds": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            }
+          }
+        },
+        "roles": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            }
+          }
+        },
+        "users": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "minItems": 1,
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Reusable typed aliases whose members are exact Discord IDs"
+    },
     "identity": {
       "type": "object",
       "properties": {
@@ -830,10 +901,18 @@
           "maxItems": 500,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Optional exact channel allowlist inside the guild boundary"
+          "description": "Optional exact channel IDs and channel-group references inside the guild boundary"
         },
         "guildMode": {
           "type": "string",
@@ -848,10 +927,18 @@
           "maxItems": 200,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild allowlist forming the outer read boundary"
+          "description": "Exact guild IDs and guild-group references forming the outer read boundary"
         }
       },
       "required": [
@@ -889,20 +976,36 @@
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for admin guild ids"
+          "description": "Exact Discord ID allowlist for admin guild ids; exact guilds groups may be referenced as @name"
         },
         "applicationCommandGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed application-command changes"
+          "description": "Exact guild ID allowlist for reviewed application-command changes; exact guilds groups may be referenced as @name"
         },
         "applicationConsumableEntitlementSkuIds": {
           "minItems": 0,
@@ -919,30 +1022,54 @@
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact user beneficiary ID allowlist for reviewed entitlement consumption"
+          "description": "Exact user beneficiary ID allowlist for reviewed entitlement consumption; exact users groups may be referenced as @name"
         },
         "applicationEntitlementGuildIds": {
           "minItems": 0,
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild beneficiary ID allowlist for application entitlement audit"
+          "description": "Exact guild beneficiary ID allowlist for application entitlement audit; exact guilds groups may be referenced as @name"
         },
         "applicationEntitlementUserIds": {
           "minItems": 0,
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact user beneficiary ID allowlist for application entitlement audit"
+          "description": "Exact user beneficiary ID allowlist for application entitlement audit; exact users groups may be referenced as @name"
         },
         "applicationMonetizationSkuIds": {
           "minItems": 0,
@@ -959,20 +1086,36 @@
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact user ID allowlist for application subscription lifecycle audit"
+          "description": "Exact user ID allowlist for application subscription lifecycle audit; exact users groups may be referenced as @name"
         },
         "applicationTestEntitlementGuildIds": {
           "minItems": 0,
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild beneficiary ID allowlist for reviewed subscription test entitlements"
+          "description": "Exact guild beneficiary ID allowlist for reviewed subscription test entitlements; exact guilds groups may be referenced as @name"
         },
         "applicationTestEntitlementSkuIds": {
           "minItems": 0,
@@ -989,170 +1132,306 @@
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact user beneficiary ID allowlist for reviewed subscription test entitlements"
+          "description": "Exact user beneficiary ID allowlist for reviewed subscription test entitlements; exact users groups may be referenced as @name"
         },
         "announcementCrosspostChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for announcement crosspost channel ids"
+          "description": "Exact Discord ID allowlist for announcement crosspost channel ids; exact channels groups may be referenced as @name"
         },
         "announcementSubscriptionSourceChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for announcement subscription source channel ids"
+          "description": "Exact Discord ID allowlist for announcement subscription source channel ids; exact channels groups may be referenced as @name"
         },
         "announcementSubscriptionTargetChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for announcement subscription target channel ids"
+          "description": "Exact Discord ID allowlist for announcement subscription target channel ids; exact channels groups may be referenced as @name"
         },
         "attachmentChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for attachment channel ids"
+          "description": "Exact Discord ID allowlist for attachment channel ids; exact channels groups may be referenced as @name"
         },
         "automodAlertChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for automod alert channel ids"
+          "description": "Exact Discord ID allowlist for automod alert channel ids; exact channels groups may be referenced as @name"
         },
         "automodGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for automod guild ids"
+          "description": "Exact Discord ID allowlist for automod guild ids; exact guilds groups may be referenced as @name"
         },
         "banAuditGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for ban audit guild ids"
+          "description": "Exact Discord ID allowlist for ban audit guild ids; exact guilds groups may be referenced as @name"
         },
         "bulkBanGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution"
+          "description": "Exact guild ID allowlist for reviewed Bulk Guild Ban planning and execution; exact guilds groups may be referenced as @name"
         },
         "bulkMemberRoleGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed bulk member-role changes"
+          "description": "Exact guild ID allowlist for reviewed bulk member-role changes; exact guilds groups may be referenced as @name"
         },
         "bulkMemberRoleIds": {
           "minItems": 0,
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact role ID allowlist for reviewed bulk member-role changes"
+          "description": "Exact role ID allowlist for reviewed bulk member-role changes; exact roles groups may be referenced as @name"
         },
         "channelCreationGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for channel creation guild ids"
+          "description": "Exact Discord ID allowlist for channel creation guild ids; exact guilds groups may be referenced as @name"
         },
         "channelDeletionIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for channel deletion ids"
+          "description": "Exact Discord ID allowlist for channel deletion ids; exact channels groups may be referenced as @name"
         },
         "channelCloneGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for channel clone guild ids"
+          "description": "Exact Discord ID allowlist for channel clone guild ids; exact guilds groups may be referenced as @name"
         },
         "channelCloneSourceIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for channel clone source ids"
+          "description": "Exact Discord ID allowlist for channel clone source ids; exact channels groups may be referenced as @name"
         },
         "channelMetadataIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status"
+          "description": "Exact Discord ID allowlist for reviewed channel metadata and ordinary voice-channel status; exact channels groups may be referenced as @name"
         },
         "channelOrderingGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for channel ordering guild ids"
+          "description": "Exact Discord ID allowlist for channel ordering guild ids; exact guilds groups may be referenced as @name"
         },
         "componentLinkOrigins": {
           "maxItems": 100,
@@ -1169,160 +1448,288 @@
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for delete channel ids"
+          "description": "Exact Discord ID allowlist for delete channel ids; exact channels groups may be referenced as @name"
         },
         "directMessageUserIds": {
           "minItems": 0,
           "maxItems": 25,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access"
+          "description": "Exact ordinary Discord user ID allowlist for isolated one-to-one direct-message access; exact users groups may be referenced as @name"
         },
         "embedMessageChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages"
+          "description": "Exact Discord channel or thread ID allowlist for reviewed static rich-embed messages; exact channels groups may be referenced as @name"
         },
         "forumPostChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for forum post channel ids"
+          "description": "Exact Discord ID allowlist for forum post channel ids; exact channels groups may be referenced as @name"
         },
         "forumTagChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for forum tag channel ids"
+          "description": "Exact Discord ID allowlist for forum tag channel ids; exact channels groups may be referenced as @name"
         },
         "guildScaffoldGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild scaffold guild ids"
+          "description": "Exact Discord ID allowlist for guild scaffold guild ids; exact guilds groups may be referenced as @name"
         },
         "guildCommunityGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for Discord Community audit and reviewed changes"
+          "description": "Exact guild ID allowlist for Discord Community audit and reviewed changes; exact guilds groups may be referenced as @name"
         },
         "guildDepartureGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed connector departure"
+          "description": "Exact guild ID allowlist for reviewed connector departure; exact guilds groups may be referenced as @name"
         },
         "guildExpressionGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild expression guild ids"
+          "description": "Exact Discord ID allowlist for guild expression guild ids; exact guilds groups may be referenced as @name"
         },
         "guildIncidentGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild incident guild ids"
+          "description": "Exact Discord ID allowlist for guild incident guild ids; exact guilds groups may be referenced as @name"
         },
         "guildProfileGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild profile guild ids"
+          "description": "Exact Discord ID allowlist for guild profile guild ids; exact guilds groups may be referenced as @name"
         },
         "guildPruneGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed guild prune planning and execution"
+          "description": "Exact guild ID allowlist for reviewed guild prune planning and execution; exact guilds groups may be referenced as @name"
         },
         "guildPruneIncludeRoleIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact role ID allowlist for optional reviewed guild prune cohort widening"
+          "description": "Exact role ID allowlist for optional reviewed guild prune cohort widening; exact roles groups may be referenced as @name"
         },
         "guildSettingsGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild settings guild ids"
+          "description": "Exact Discord ID allowlist for guild settings guild ids; exact guilds groups may be referenced as @name"
         },
         "guildTemplateGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for guild template guild ids"
+          "description": "Exact Discord ID allowlist for guild template guild ids; exact guilds groups may be referenced as @name"
         },
         "integrationGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for integration guild ids"
+          "description": "Exact Discord ID allowlist for integration guild ids; exact guilds groups may be referenced as @name"
         },
         "integrationIds": {
           "minItems": 0,
@@ -1339,424 +1746,760 @@
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for interaction channel ids"
+          "description": "Exact Discord ID allowlist for interaction channel ids; exact channels groups may be referenced as @name"
         },
         "inviteCreationChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact direct guild-channel ID allowlist for reviewed finite invite creation"
+          "description": "Exact direct guild-channel ID allowlist for reviewed finite invite creation; exact channels groups may be referenced as @name"
         },
         "inviteRoleIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact role ID allowlist for reviewed persistent invite role assignment"
+          "description": "Exact role ID allowlist for reviewed persistent invite role assignment; exact roles groups may be referenced as @name"
         },
         "inviteGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for invite guild ids"
+          "description": "Exact Discord ID allowlist for invite guild ids; exact guilds groups may be referenced as @name"
         },
         "mentionUserIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for mention user ids"
+          "description": "Exact Discord ID allowlist for mention user ids; exact users groups may be referenced as @name"
         },
         "memberDirectoryGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for member directory guild ids"
+          "description": "Exact Discord ID allowlist for member directory guild ids; exact guilds groups may be referenced as @name"
         },
         "nicknameGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for nickname guild ids"
+          "description": "Exact Discord ID allowlist for nickname guild ids; exact guilds groups may be referenced as @name"
         },
         "memberRoleGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for member role guild ids"
+          "description": "Exact Discord ID allowlist for member role guild ids; exact guilds groups may be referenced as @name"
         },
         "memberRoleIds": {
           "minItems": 0,
           "maxItems": 100,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for member role ids"
+          "description": "Exact Discord ID allowlist for member role ids; exact roles groups may be referenced as @name"
         },
         "memberVerificationGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact guild ID allowlist for reviewed member verification-bypass changes"
+          "description": "Exact guild ID allowlist for reviewed member verification-bypass changes; exact guilds groups may be referenced as @name"
         },
         "memberVoiceChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for member voice channel ids"
+          "description": "Exact Discord ID allowlist for member voice channel ids; exact channels groups may be referenced as @name"
         },
         "memberVoiceGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for member voice guild ids"
+          "description": "Exact Discord ID allowlist for member voice guild ids; exact guilds groups may be referenced as @name"
         },
         "messageForwardSourceChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for message forward source channel ids"
+          "description": "Exact Discord ID allowlist for message forward source channel ids; exact channels groups may be referenced as @name"
         },
         "messageForwardTargetChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for message forward target channel ids"
+          "description": "Exact Discord ID allowlist for message forward target channel ids; exact channels groups may be referenced as @name"
         },
         "nativeInteractionChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for native interaction channel ids"
+          "description": "Exact Discord ID allowlist for native interaction channel ids; exact channels groups may be referenced as @name"
         },
         "nativeInteractionGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for native interaction guild ids"
+          "description": "Exact Discord ID allowlist for native interaction guild ids; exact guilds groups may be referenced as @name"
         },
         "nativeInteractionUserIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for native interaction user ids"
+          "description": "Exact Discord ID allowlist for native interaction user ids; exact users groups may be referenced as @name"
         },
         "onboardingGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for onboarding guild ids"
+          "description": "Exact Discord ID allowlist for onboarding guild ids; exact guilds groups may be referenced as @name"
         },
         "protectedUserIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for protected user ids"
+          "description": "Exact Discord ID allowlist for protected user ids; exact users groups may be referenced as @name"
         },
         "pinChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for pin channel ids"
+          "description": "Exact Discord ID allowlist for pin channel ids; exact channels groups may be referenced as @name"
         },
         "pollChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for poll channel ids"
+          "description": "Exact Discord ID allowlist for poll channel ids; exact channels groups may be referenced as @name"
         },
         "reactionChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for reaction channel ids"
+          "description": "Exact Discord ID allowlist for reaction channel ids; exact channels groups may be referenced as @name"
         },
         "permissionOverwriteChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for permission overwrite channel ids"
+          "description": "Exact Discord ID allowlist for permission overwrite channel ids; exact channels groups may be referenced as @name"
         },
         "permissionSyncChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact direct child channel ID allowlist for reviewed parent-category permission synchronization"
+          "description": "Exact direct child channel ID allowlist for reviewed parent-category permission synchronization; exact channels groups may be referenced as @name"
         },
         "roleCreationGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for role creation guild ids"
+          "description": "Exact Discord ID allowlist for role creation guild ids; exact guilds groups may be referenced as @name"
         },
         "roleConfigurationIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for role configuration ids"
+          "description": "Exact Discord ID allowlist for role configuration ids; exact roles groups may be referenced as @name"
         },
         "roleDeletionIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for role deletion ids"
+          "description": "Exact Discord ID allowlist for role deletion ids; exact roles groups may be referenced as @name"
         },
         "roleOrderingGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for role ordering guild ids"
+          "description": "Exact Discord ID allowlist for role ordering guild ids; exact guilds groups may be referenced as @name"
         },
         "scheduledEventGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for scheduled event guild ids"
+          "description": "Exact Discord ID allowlist for scheduled event guild ids; exact guilds groups may be referenced as @name"
         },
         "soundboardGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for soundboard guild ids"
+          "description": "Exact Discord ID allowlist for soundboard guild ids; exact guilds groups may be referenced as @name"
         },
         "soundboardPlaybackChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact ordinary voice-channel ID allowlist for guarded soundboard playback"
+          "description": "Exact ordinary voice-channel ID allowlist for guarded soundboard playback; exact channels groups may be referenced as @name"
         },
         "soundboardPlaybackSourceGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact custom-sound source guild ID allowlist for guarded soundboard playback"
+          "description": "Exact custom-sound source guild ID allowlist for guarded soundboard playback; exact guilds groups may be referenced as @name"
         },
         "stageChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for stage channel ids"
+          "description": "Exact Discord ID allowlist for stage channel ids; exact channels groups may be referenced as @name"
         },
         "threadParentIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for thread parent ids"
+          "description": "Exact Discord ID allowlist for thread parent ids; exact channels groups may be referenced as @name"
         },
         "threadGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for thread guild ids"
+          "description": "Exact Discord ID allowlist for thread guild ids; exact guilds groups may be referenced as @name"
         },
         "threadIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for thread ids"
+          "description": "Exact Discord ID allowlist for thread ids; exact channels groups may be referenced as @name"
         },
         "threadMemberUserIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for thread member user ids"
+          "description": "Exact Discord ID allowlist for thread member user ids; exact users groups may be referenced as @name"
         },
         "welcomeScreenGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for welcome screen guild ids"
+          "description": "Exact Discord ID allowlist for welcome screen guild ids; exact guilds groups may be referenced as @name"
         },
         "webhookChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for webhook channel ids"
+          "description": "Exact Discord ID allowlist for webhook channel ids; exact channels groups may be referenced as @name"
         },
         "webhookGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for webhook guild ids"
+          "description": "Exact Discord ID allowlist for webhook guild ids; exact guilds groups may be referenced as @name"
         },
         "webhookMessageChannelIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access"
+          "description": "Exact direct text or announcement channel ID allowlist for privately credentialed Incoming-webhook message access; exact channels groups may be referenced as @name"
         },
         "widgetSettingsGuildIds": {
           "minItems": 0,
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,20}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "string",
+                "pattern": "^@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$"
+              }
+            ]
           },
-          "description": "Exact Discord ID allowlist for widget settings guild ids"
+          "description": "Exact Discord ID allowlist for widget settings guild ids; exact guilds groups may be referenced as @name"
         }
       },
       "additionalProperties": false,
-      "description": "Exact per-feature Discord ID and HTTPS origin allowlists"
+      "description": "Exact per-feature Discord ID, compatible typed-group, and HTTPS origin allowlists"
     },
     "storage": {
       "default": {},

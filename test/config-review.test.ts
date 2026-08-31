@@ -317,6 +317,59 @@ test("configuration change plans retain explicit default representation as metad
   assert.equal(report.impact.total, report.impact.metadataOnly)
 })
 
+test("configuration change plans expose typed-group authoring and exact authority deltas", async (context) => {
+  const current = document({
+    groups: {
+      guilds: { managed: [GUILD_ID] },
+      users: { protected: [USER_ID] },
+    },
+    guildIds: ["@managed"],
+    scopes: { protectedUserIds: ["@protected"] },
+  })
+  const candidate = document({
+    groups: {
+      guilds: { managed: [GUILD_ID, OTHER_GUILD_ID] },
+      users: { protected: [USER_ID, OTHER_USER_ID] },
+    },
+    guildIds: ["@managed"],
+    scopes: { protectedUserIds: ["@protected"] },
+  })
+  const paths = await configPair(context, current, candidate)
+  const report = planConfigChange(paths)
+
+  assert.equal(change(report, '$.groups.guilds["managed"]').impact, "metadata-only")
+  assert.equal(change(report, '$.groups.users["protected"]').impact, "metadata-only")
+  assert.deepEqual(change(report, "$.effective.readScope.guildIds"), {
+    after: [GUILD_ID, OTHER_GUILD_ID],
+    before: [GUILD_ID],
+    category: "read-scope",
+    impact: "authority-expansion",
+    path: "$.effective.readScope.guildIds",
+  })
+  assert.deepEqual(change(report, "$.effective.scopes.protectedUserIds"), {
+    after: [USER_ID, OTHER_USER_ID],
+    before: [USER_ID],
+    category: "feature-scope",
+    impact: "authority-reduction",
+    path: "$.effective.scopes.protectedUserIds",
+  })
+  assert.deepEqual(report.currentSummary.readScope, {
+    channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
+    guildEntries: ["@managed"],
+    guildIds: [GUILD_ID],
+    guildMode: "allowlist",
+  })
+  assert.deepEqual(report.candidateSummary.groupsConfigured, [
+    { exactIdCount: 2, groupCount: 1, type: "guilds" },
+    { exactIdCount: 2, groupCount: 1, type: "users" },
+  ])
+  assert.deepEqual(report.candidateSummary.scopesConfigured, [
+    { authoredCount: 1, count: 2, name: "protectedUserIds" },
+  ])
+  assert.ok(report.warnings.some((warning) => warning.includes("one group can affect multiple policy fields")))
+})
+
 test("configuration change planning rejects same-file, unsafe, and identity-changing candidates", async (context) => {
   const root = await reviewRoot(context)
   const file = join(root, "active.json")

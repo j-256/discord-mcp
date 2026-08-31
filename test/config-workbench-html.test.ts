@@ -26,6 +26,7 @@ import {
 } from "../src/config-workbench-html.js"
 import {
   CONFIG_DOCUMENT_SCHEMA_ID,
+  CONFIG_SCOPE_GROUP_LIMITS,
   connectorConfigFields,
   createConnectorConfigDocument,
   type ConnectorConfigDocument,
@@ -118,6 +119,7 @@ test("configuration workbench renders a deterministic complete offline editor", 
   assert.equal(payload.format, CONFIG_WORKBENCH_HTML_FORMAT)
   assert.equal(payload.schemaVersion, CONFIG_WORKBENCH_HTML_SCHEMA_VERSION)
   assert.equal(payload.schemaId, CONFIG_DOCUMENT_SCHEMA_ID)
+  assert.deepEqual(payload.scopeGroupLimits, CONFIG_SCOPE_GROUP_LIMITS)
   assert.equal(payload.platform, "darwin")
   assert.equal(payload.activeFile, "/configuration/guildcontrol.json")
   assert.equal(payload.candidateFilename, "guildcontrol.candidate.json")
@@ -127,6 +129,28 @@ test("configuration workbench renders a deterministic complete offline editor", 
     payload.fields.map((field) => field.path),
     connectorConfigFields().map((field) => field.path),
   )
+  assert.deepEqual(payload.topLevelOrder, [
+    "$schema",
+    "capabilities",
+    "credential",
+    "gateway",
+    "groups",
+    "identity",
+    "limits",
+    "name",
+    "notifications",
+    "observability",
+    "readScope",
+    "runtime",
+    "schemaVersion",
+    "scopes",
+    "storage",
+    "threads",
+    "tools",
+  ])
+  assert.equal(payload.fields.find((field) => field.path === "$.groups.channels")?.kind, "group-map")
+  assert.equal(payload.fields.find((field) => field.path === "$.readScope.guildIds")?.kind, "scope-entries")
+  assert.equal(payload.fields.find((field) => field.path === "$.scopes.mentionUserIds")?.kind, "scope-entries")
   assert.equal(payload.fields.find((field) => field.path === "$.$schema")?.editable, false)
   assert.equal(payload.fields.find((field) => field.path === "$.schemaVersion")?.editable, false)
   assert.equal(payload.fields.find((field) => field.path === "$.identity.applicationId")?.editable, false)
@@ -154,6 +178,8 @@ test("configuration workbench renders a deterministic complete offline editor", 
     },
   )
   assert.match(html, /Every entry must be an exact canonical HTTPS origin/)
+  assert.match(html, /Enter valid JSON for this group map/)
+  assert.match(html, /Discord snowflake or @group reference/)
 })
 
 test("configuration workbench base64 payload contains hostile non-secret paths without HTML execution", () => {

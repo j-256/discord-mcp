@@ -150,6 +150,41 @@ test("host activation describes explicit all-visible read scope without inventin
   assert.doesNotMatch(result.verification.prompt, /undefined/)
 })
 
+test("host activation expands scope groups and omits authoring aliases", () => {
+  const policy = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: ["@support"],
+    credentialVariable: TOKEN_ALIAS,
+    groups: {
+      channels: { support: [CHANNEL_ID] },
+      guilds: { managed: [GUILD_ID, SECOND_GUILD_ID] },
+    },
+    guildIds: ["@managed"],
+    name: "grouped-policy",
+    toolsets: ["connector", "guilds"],
+    toolSurface: "progressive",
+  })
+  const result = createHostActivationPlan({
+    document: policy,
+    launch: createStdioLaunchDescriptor({
+      applicationId: APPLICATION_ID,
+      botId: BOT_ID,
+      config: { document: policy, file: CONFIG_FILE },
+    }),
+    source: { file: CONFIG_FILE, kind: "config" },
+  })
+
+  assert.deepEqual(result.policy.readScope, {
+    channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
+    guildIds: [GUILD_ID, SECOND_GUILD_ID],
+    guildMode: "allowlist",
+  })
+  assert.doesNotMatch(JSON.stringify(result), /@support|@managed|"groups"/)
+  assert.equal(verifyHostActivationPlan(result), true)
+})
+
 test("host activation plans support private profiles and file credentials", () => {
   const credentialFile = "/run/secrets/discord-bot-token"
   const profile = createConnectorConfigDocument({

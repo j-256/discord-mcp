@@ -17,6 +17,7 @@ import {
   CONFIG_DOCUMENT_SCHEMA_ID,
   CONFIG_LIMIT_NAMES,
   CONFIG_RUNTIME_NAMES,
+  CONFIG_SCOPE_GROUP_TYPES,
   CONFIG_SCOPE_NAMES,
   CONFIG_STORAGE_NAMES,
   connectorConfigFields,
@@ -24,6 +25,8 @@ import {
   connectorConfigSecretEnvironmentNames,
   connectorConfigSecretFilePaths,
   createConnectorConfigDocument,
+  expandedConnectorReadScope,
+  expandedConnectorScope,
   loadConnectorCredentialFile,
   loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
@@ -57,7 +60,7 @@ const UNDECLARED_POLICY_ENVIRONMENT_VARIABLE = "GUILDCONTROL_UNDECLARED_POLICY"
 const COMPONENT_LINK_ORIGIN = "https://docs.example.com"
 
 function document(
-  overrides: Partial<ConnectorConfigDocument> = {},
+  overrides: Partial<Parameters<typeof createConnectorConfigDocument>[0]> = {},
 ): ConnectorConfigDocument {
   return createConnectorConfigDocument({
     applicationId: APPLICATION_ID,
@@ -299,6 +302,126 @@ test("configuration behavior modes normalize legacy policy and reject contradict
       ConfigDocumentError,
     )
   }
+})
+
+test("typed scope groups expand to exact runtime authority and reject ambiguous aliases", () => {
+  const secondChannelId = "200000000000000002"
+  const secondGuildId = "100000000000000002"
+  const secondRoleId = "500000000000000002"
+  const userId = "600000000000000001"
+  const grouped = document({
+    channelIds: [CHANNEL_ID, "@support"],
+    groups: {
+      channels: { support: [secondChannelId] },
+      guilds: { managed: [GUILD_ID, secondGuildId] },
+      roles: { helpers: [ROLE_ID, secondRoleId] },
+      users: { operators: [userId] },
+    },
+    guildIds: ["@managed"],
+    scopes: {
+      attachmentChannelIds: ["@support"],
+      mentionUserIds: ["@operators"],
+      memberRoleIds: ["@helpers"],
+    },
+  })
+
+  assert.deepEqual(expandedConnectorReadScope(grouped), {
+    channelIds: [CHANNEL_ID, secondChannelId],
+    guildIds: [GUILD_ID, secondGuildId],
+  })
+  assert.deepEqual(expandedConnectorScope(grouped, "attachmentChannelIds"), [secondChannelId])
+  assert.deepEqual(expandedConnectorScope(grouped, "mentionUserIds"), [userId])
+  assert.deepEqual(expandedConnectorScope(grouped, "memberRoleIds"), [ROLE_ID, secondRoleId])
+  const loaded = loadConnectorConfigDocument(grouped, { [TOKEN_ALIAS]: TOKEN })
+  assert.deepEqual([...loaded.allowedChannelIds], [CHANNEL_ID, secondChannelId])
+  assert.deepEqual([...loaded.allowedGuildIds], [GUILD_ID, secondGuildId])
+  assert.deepEqual([...loaded.attachmentChannelIds], [secondChannelId])
+  assert.deepEqual([...loaded.mentionUserIds], [userId])
+  assert.deepEqual([...loaded.memberRoleIds], [ROLE_ID, secondRoleId])
+
+  assert.throws(
+    () => document({
+      channelIds: ["@missing"],
+      groups: { channels: { support: [CHANNEL_ID] } },
+    }),
+    /references unknown channels group @missing/,
+  )
+  assert.throws(
+    () => document({
+      channelIds: ["@constructor"],
+      groups: { channels: { support: [CHANNEL_ID] } },
+    }),
+    /references unknown channels group @constructor/,
+  )
+  assert.throws(
+    () => document({
+      channelIds: ["@operators"],
+      groups: { users: { operators: [userId] } },
+    }),
+    /references @operators as channels, but it is defined at \$\.groups\.users\["operators"\]/,
+  )
+  assert.throws(
+    () => document({
+      channelIds: ["@first", "@second"],
+      groups: {
+        channels: {
+          first: [CHANNEL_ID],
+          second: [CHANNEL_ID],
+        },
+      },
+    }),
+    /expands to duplicate Discord ID/,
+  )
+  assert.throws(
+    () => document({
+      channelIds: [CHANNEL_ID, "@support"],
+      groups: { channels: { support: [CHANNEL_ID] } },
+    }),
+    /expands to duplicate Discord ID/,
+  )
+  assert.throws(
+    () => document({
+      groups: { channels: { empty: [] } },
+    }),
+    ConfigDocumentError,
+  )
+  assert.throws(
+    () => document({
+      groups: {
+        channels: {
+          zulu: [CHANNEL_ID],
+          alpha: [secondChannelId],
+        },
+      },
+    }),
+    /canonical name order/,
+  )
+  assert.throws(
+    () => document({
+      groups: { channels: { support: [CHANNEL_ID] } },
+      scopes: { integrationIds: ["@support"] },
+    }),
+    ConfigDocumentError,
+  )
+  const generatedIds = (count: number) => Array.from(
+    { length: count },
+    (_, index) => String(700000000000000000n + BigInt(index)),
+  )
+  assert.throws(
+    () => document({
+      groups: { guilds: { managed: generatedIds(201) } },
+      guildIds: ["@managed"],
+    }),
+    /readScope\.guildIds must contain at most 200 unique IDs after group expansion/,
+  )
+  const tooManyMentionUsers = document({
+    groups: { users: { operators: generatedIds(101) } },
+    scopes: { mentionUserIds: ["@operators"] },
+  })
+  assert.throws(
+    () => loadConnectorConfigDocument(tooManyMentionUsers, { [TOKEN_ALIAS]: TOKEN }),
+    /mentionUserIds must contain at most 100 unique IDs after group expansion/,
+  )
 })
 
 test("configuration JSON rejects duplicate keys, truncation, NULs, and deep nesting", () => {
@@ -571,6 +694,9 @@ test("configuration metadata covers every runtime field and emits a strict schem
   for (const name of CONFIG_RUNTIME_NAMES) {
     assert.equal(paths.has(`$.runtime.${name}`), true)
   }
+  for (const type of CONFIG_SCOPE_GROUP_TYPES) {
+    assert.equal(paths.has(`$.groups.${type}`), true)
+  }
 
   const schema = connectorConfigJsonSchema()
   assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema")
@@ -583,6 +709,13 @@ test("configuration metadata covers every runtime field and emits a strict schem
   assert.equal(schemaVersion?.type, "number")
   assert.equal(schemaVersion?.description, "Configuration format version")
   const properties = schema.properties as Record<string, Record<string, unknown>>
+  assert.equal((schema.required as readonly string[]).includes("groups"), false)
+  const groups = properties.groups as {
+    additionalProperties?: boolean
+    properties?: Record<string, Record<string, unknown>>
+  }
+  assert.equal(groups.additionalProperties, false)
+  assert.deepEqual(Object.keys(groups.properties || {}), CONFIG_SCOPE_GROUP_TYPES)
   const credential = properties.credential as {
     oneOf?: Array<{ properties?: Record<string, Record<string, unknown>> }>
   }
