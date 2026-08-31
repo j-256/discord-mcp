@@ -29,6 +29,7 @@ const GITHUB_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
 const RECOVERY_ARTIFACT_BYTE_LIMIT = 32 * 1024 * 1024
 const RELEASE_PAGE_SIZE = 100
 const RELEASE_PAGE_LIMIT = 1000
+const DRAFT_RELEASE_IDENTIFIER_PATTERN = /^untagged-[0-9a-f]{20}$/
 
 function assertVersion(version) {
   invariant(/^\d+\.\d+\.\d+$/.test(version), `Invalid stable version ${version}`)
@@ -302,6 +303,18 @@ function validateReleaseUrl(value, expectedPath, label) {
   invariant(!url.search && !url.hash, `${label} URL contains unsupported components`)
 }
 
+function validateDraftReleaseUrl(value, label) {
+  invariant(typeof value === "string", `${label} URL is invalid`)
+  const url = new URL(value)
+  invariant(url.origin === "https://github.com" && !url.username && !url.password, `${label} origin is invalid`)
+  const prefix = `/${GITHUB_REPOSITORY}/releases/tag/`
+  invariant(url.pathname.startsWith(prefix), `${label} path is invalid`)
+  const identifier = url.pathname.slice(prefix.length)
+  invariant(DRAFT_RELEASE_IDENTIFIER_PATTERN.test(identifier), `${label} path is invalid`)
+  invariant(!url.search && !url.hash, `${label} URL contains unsupported components`)
+  return identifier
+}
+
 function validateEvidence(evidence) {
   invariant(evidence?.format === RELEASE_EVIDENCE_FORMAT, "GitHub Release evidence format is invalid")
   invariant(evidence?.schemaVersion === RELEASE_EVIDENCE_SCHEMA_VERSION, "GitHub Release evidence schema is invalid")
@@ -365,7 +378,12 @@ export function validateGitHubRelease({ evidence, expectedState, notes, release,
     invariant(typeof release.published_at === "string" && release.published_at.length > 0, "Immutable GitHub Release publication time is missing")
   }
 
-  validateReleaseUrl(release.html_url, `/${GITHUB_REPOSITORY}/releases/tag/${evidence.tag}`, "GitHub Release")
+  const releaseIdentifier = expectedState === "draft"
+    ? validateDraftReleaseUrl(release.html_url, "GitHub Release")
+    : evidence.tag
+  if (expectedState === "immutable") {
+    validateReleaseUrl(release.html_url, `/${GITHUB_REPOSITORY}/releases/tag/${releaseIdentifier}`, "GitHub Release")
+  }
   invariant(Array.isArray(release.assets), "GitHub Release assets are missing")
   const actualAssets = release.assets.map((asset) => {
     invariant(asset?.state === "uploaded", `GitHub Release asset ${asset?.name || "unknown"} is not uploaded`)
@@ -374,7 +392,7 @@ export function validateGitHubRelease({ evidence, expectedState, notes, release,
     invariant(/^sha256:[0-9a-f]{64}$/.test(asset.digest), `GitHub Release asset ${asset.name} digest is invalid`)
     validateReleaseUrl(
       asset.browser_download_url,
-      `/${GITHUB_REPOSITORY}/releases/download/${evidence.tag}/${asset.name}`,
+      `/${GITHUB_REPOSITORY}/releases/download/${releaseIdentifier}/${asset.name}`,
       `GitHub Release asset ${asset.name}`,
     )
     return { digest: asset.digest, name: asset.name, size: asset.size }

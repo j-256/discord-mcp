@@ -80,6 +80,7 @@ const MCPB_DIGEST = `sha256:${sha256(BUNDLE_BYTES)}`
 const NPM_INTEGRITY = `sha512-${Buffer.alloc(64, 3).toString("base64")}`
 const RECOVERY_RUN_ID = 33409582869
 const REPOSITORY_ID = 1334461127
+const DRAFT_RELEASE_IDENTIFIER = "untagged-e716f676f8a4d8ed324c"
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex")
@@ -166,15 +167,16 @@ async function writeEvidenceInputs(
 }
 
 function validRelease(evidence: ReleaseEvidence, notes: string, state: "draft" | "immutable"): Record<string, unknown> {
+  const releaseIdentifier = state === "draft" ? DRAFT_RELEASE_IDENTIFIER : evidence.tag
   return {
     assets: evidence.assets.map((asset) => ({
       ...asset,
-      browser_download_url: `https://github.com/j-256/guildcontrol/releases/download/${evidence.tag}/${asset.name}`,
+      browser_download_url: `https://github.com/j-256/guildcontrol/releases/download/${releaseIdentifier}/${asset.name}`,
       state: "uploaded",
     })),
     body: notes,
     draft: state === "draft",
-    html_url: `https://github.com/j-256/guildcontrol/releases/tag/${evidence.tag}`,
+    html_url: `https://github.com/j-256/guildcontrol/releases/tag/${releaseIdentifier}`,
     id: 123,
     immutable: state === "immutable",
     name: evidence.title,
@@ -514,6 +516,7 @@ test("validates exact draft and immutable GitHub Release records", async (t) => 
   })
   assert.equal(draft.state, "draft")
   assert.equal(draft.releaseId, 123)
+  assert.equal(draft.url, `https://github.com/j-256/guildcontrol/releases/tag/${DRAFT_RELEASE_IDENTIFIER}`)
 
   const immutable = githubRelease.validateGitHubRelease({
     evidence,
@@ -527,6 +530,37 @@ test("validates exact draft and immutable GitHub Release records", async (t) => 
   assert.equal(immutable.assets.length, 6)
 })
 
+test("fails closed on inconsistent or malformed draft release identifiers", async (t) => {
+  const { evidence, notes } = await preparedEvidence(t)
+  const cases: Array<{ label: RegExp; mutate: (release: Record<string, any>) => void }> = [
+    {
+      label: /path/u,
+      mutate: (release) => { release.html_url = `https://github.com/j-256/guildcontrol/releases/tag/${evidence.tag}` },
+    },
+    {
+      label: /path/u,
+      mutate: (release) => { release.html_url = "https://github.com/j-256/guildcontrol/releases/tag/untagged-invalid" },
+    },
+    {
+      label: /path/u,
+      mutate: (release) => {
+        release.assets[0].browser_download_url = `https://github.com/j-256/guildcontrol/releases/download/untagged-${"f".repeat(20)}/${release.assets[0].name}`
+      },
+    },
+  ]
+  for (const entry of cases) {
+    const release = structuredClone(validRelease(evidence, notes, "draft")) as Record<string, any>
+    entry.mutate(release)
+    assert.throws(() => githubRelease.validateGitHubRelease({
+      evidence,
+      expectedState: "draft",
+      notes,
+      release,
+      tagRevision: REVISION,
+    }), entry.label)
+  }
+})
+
 test("fails closed on release identity, content, asset, URL, or immutability drift", async (t) => {
   const { evidence, notes } = await preparedEvidence(t)
   const cases: Array<{ label: RegExp; mutate: (release: Record<string, any>) => void }> = [
@@ -536,6 +570,7 @@ test("fails closed on release identity, content, asset, URL, or immutability dri
     { label: /assets/u, mutate: (release) => { release.assets.pop() } },
     { label: /assets/u, mutate: (release) => { release.assets[0].digest = `sha256:${"f".repeat(64)}` } },
     { label: /URL/u, mutate: (release) => { release.html_url += "?unexpected=true" } },
+    { label: /path/u, mutate: (release) => { release.html_url = `https://github.com/j-256/guildcontrol/releases/tag/${DRAFT_RELEASE_IDENTIFIER}` } },
     { label: /URL/u, mutate: (release) => { release.assets[0].browser_download_url += "#unexpected" } },
     { label: /immutable/u, mutate: (release) => { release.immutable = false } },
   ]
