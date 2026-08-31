@@ -38,6 +38,29 @@ export class ConfigDocumentError extends ConfigurationError {
   override name = "ConfigDocumentError"
 }
 
+export type CredentialUnavailableProvider = "environment" | "file"
+
+export class CredentialUnavailableError extends ConfigDocumentError {
+  readonly credentialReference: string
+  readonly provider: CredentialUnavailableProvider
+
+  constructor(
+    provider: CredentialUnavailableProvider,
+    credentialReference: string,
+    options?: ErrorOptions,
+  ) {
+    super(
+      provider === "environment"
+        ? `Credential environment variable ${credentialReference} is unavailable`
+        : "Configuration credential file was not found",
+      options,
+    )
+    this.name = "CredentialUnavailableError"
+    this.credentialReference = credentialReference
+    this.provider = provider
+  }
+}
+
 export class RuntimeConfigurationRequiredError extends ConfigurationError {
   override name = "RuntimeConfigurationRequiredError"
 }

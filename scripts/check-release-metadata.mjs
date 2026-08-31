@@ -158,11 +158,15 @@ async function checkNeutrality() {
     "src/host-adapters.ts",
     "src/host-inspection.ts",
     "src/host-installation.ts",
+    "src/onboard-html.ts",
+    "src/onboard.ts",
     "test/cli.test.ts",
     "test/host-activation-html.test.ts",
     "test/host-adapters.test.ts",
     "test/host-inspection.test.ts",
     "test/host-installation.test.ts",
+    "test/onboard-html.test.ts",
+    "test/onboard.test.ts",
   ])
   const { stdout } = await run(
     "git",

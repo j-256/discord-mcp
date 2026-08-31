@@ -62,7 +62,7 @@ test("configuration requires the dedicated Discord bot token", () => {
     () => loadConnectorConfig({}, { homeDirectory: "/test/home" }),
     (error: unknown) => (
       error instanceof ConfigDocumentError
-      && /\.credential requires DISCORD_BOT_TOKEN/.test(error.message)
+      && /Credential environment variable DISCORD_BOT_TOKEN is unavailable/.test(error.message)
     ),
   )
 })

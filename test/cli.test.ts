@@ -124,6 +124,10 @@ import {
   type ConnectorProfile,
 } from "../src/profile.js"
 import { getSetupPreset } from "../src/setup-presets.js"
+import {
+  ONBOARD_TOKEN,
+  onboardFixture,
+} from "./onboard-fixture.js"
 
 const TOKEN = "test-discord-token"
 const APPLICATION_ID = "100000000000000001"
@@ -663,11 +667,30 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async exportMigrationHtml(file, plan) {
       return migrationHtmlReport(plan, file)
     },
+    async exportOnboardHtml(file, report) {
+      return {
+        automaticNetwork: "disabled",
+        browserOpened: false,
+        bytes: 1,
+        credentialsEmbedded: false,
+        file,
+        format: "guildcontrol.onboard-html.v1",
+        hostConfigurationChanged: false,
+        htmlDigest: `sha256:${"b".repeat(64)}`,
+        onboardDigest: report.onboardDigest,
+        schemaVersion: 1,
+        statePersistence: "disabled",
+        status: "ok",
+      }
+    },
     async exportOnboardingHtml(file) {
       return onboardingHtmlReport(file)
     },
     async diagnose() {
       return doctorReport()
+    },
+    async ensureConfigDirectory(directory) {
+      return directory
     },
     explainConfig(path) {
       return explainConnectorConfig(path)
@@ -748,6 +771,265 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     ...overrides,
   }
 }
+
+test("non-interactive onboarding verifies setup and stdio without prompting or opening", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  const stderr = outputStream()
+  let setupCalled = false
+  let smokeCalled = false
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--html",
+      "/output/onboarding.html",
+      "--json",
+    ],
+    dependencies: dependencies({
+      loadConfig(environment) {
+        return loadConnectorConfigDocument(fixture.document, environment)
+      },
+      loadConfigDocument() {
+        return fixture.document
+      },
+      async prepareSetup(options) {
+        setupCalled = true
+        assert.equal(options.expectedApplicationId, APPLICATION_ID)
+        assert.deepEqual(options.preset, {
+          channelIds: [],
+          guildIds: [GUILD_ID],
+          name: "server-observer",
+        })
+        assert.deepEqual(options.args, [
+          "--yes",
+          `guildctl@${CONNECTOR_VERSION}`,
+          "serve",
+        ])
+        return fixture.setup
+      },
+      async smoke(options) {
+        smokeCalled = true
+        assert.deepEqual(options.launch, {
+          args: fixture.setup.launch.args,
+          command: fixture.setup.launch.command,
+        })
+        return fixture.smoke
+      },
+    }),
+    environment: {
+      [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN,
+    },
+    interaction: {
+      async openExternal() {
+        assert.fail("JSON onboarding must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("JSON onboarding must not prompt")
+      },
+      async promptText() {
+        assert.fail("JSON onboarding must not prompt")
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+  assert.equal(exit, 0)
+  assert.equal(setupCalled, true)
+  assert.equal(smokeCalled, true)
+  assert.equal(stderr.value(), "")
+  const output = JSON.parse(stdout.value())
+  assert.equal(output.host.id, "codex")
+  assert.equal(output.host.route.kind, "adapter")
+  assert.equal(output.guide.file, "/output/onboarding.html")
+  assert.deepEqual(output.browser, {
+    guideOpened: false,
+    installOpened: false,
+  })
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("interactive onboarding keeps a one-time prompted token out of every result", async () => {
+  const fixture = onboardFixture(CONFIG_FILE)
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const answers = [
+    "codex",
+    APPLICATION_ID,
+    GUILD_ID,
+    "n",
+    GUILD_ID,
+    "",
+    "n",
+  ]
+  let setupEnvironment: NodeJS.ProcessEnv | undefined
+  let opened = 0
+  const exit = await runCli({
+    args: [
+      "onboard",
+      "--config",
+      CONFIG_FILE,
+      "--html",
+      "/output/interactive-onboarding.html",
+    ],
+    dependencies: dependencies({
+      loadConfig(environment) {
+        assert.equal(environment[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE], ONBOARD_TOKEN)
+        return loadConnectorConfigDocument(fixture.document, environment)
+      },
+      loadConfigDocument() {
+        return fixture.document
+      },
+      async prepareSetup(options) {
+        setupEnvironment = options.environment
+        assert.equal(
+          options.environment?.[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
+          ONBOARD_TOKEN,
+        )
+        return fixture.setup
+      },
+      async smoke(options) {
+        assert.equal(
+          options.environment?.[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
+          ONBOARD_TOKEN,
+        )
+        return fixture.smoke
+      },
+    }),
+    environment: {},
+    interaction: {
+      async openExternal() {
+        opened += 1
+      },
+      async promptSecret() {
+        return ONBOARD_TOKEN
+      },
+      async promptText() {
+        const answer = answers.shift()
+        if (answer === undefined) assert.fail("Unexpected onboarding prompt")
+        return answer
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+  assert.equal(exit, 0)
+  assert.equal(opened, 0)
+  assert.deepEqual(answers, [])
+  assert.equal(
+    setupEnvironment?.[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
+    undefined,
+  )
+  assert.doesNotMatch(stdout.value(), new RegExp(ONBOARD_TOKEN))
+  assert.doesNotMatch(stderr.value(), new RegExp(ONBOARD_TOKEN))
+  assert.match(stdout.value(), /GuildControl onboarding: ready/)
+  assert.match(stdout.value(), /Activation guide opened: no/)
+})
+
+test("onboarding fails closed before setup when confirmation or automation inputs are incomplete", async () => {
+  let setupCalls = 0
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const failedConfirmation = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      "999999999999999999",
+      "--json",
+    ],
+    dependencies: dependencies({
+      async prepareSetup() {
+        setupCalls += 1
+        return setupReport()
+      },
+    }),
+    environment: {
+      [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN,
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: false },
+    stdout: stdout.stream,
+  })
+  assert.equal(failedConfirmation, 2)
+  assert.equal(setupCalls, 0)
+  assert.match(stdout.value(), /must exactly match guild/)
+
+  const missingStdout = outputStream()
+  const missing = await runCli({
+    args: ["onboard", "--json"],
+    dependencies: dependencies(),
+    environment: {},
+    stderr: stderr.stream,
+    stdin: { isTTY: false },
+    stdout: missingStdout.stream,
+  })
+  assert.equal(missing, 2)
+  assert.match(missingStdout.value(), /Non-interactive onboarding requires/)
+  assert.match(missingStdout.value(), /--host/)
+
+  const credentialStdout = outputStream()
+  const credentialStderr = outputStream()
+  const missingCredential = await runCli({
+    args: [
+      "onboard",
+      "--host",
+      "codex",
+      "--application-id",
+      APPLICATION_ID,
+      "--guild-id",
+      GUILD_ID,
+      "--config",
+      CONFIG_FILE,
+      "--confirm-installed",
+      GUILD_ID,
+      "--json",
+    ],
+    dependencies: dependencies({
+      async prepareSetup() {
+        setupCalls += 1
+        return setupReport()
+      },
+    }),
+    environment: {},
+    stderr: credentialStderr.stream,
+    stdin: { isTTY: false },
+    stdout: credentialStdout.stream,
+  })
+  assert.equal(missingCredential, 2)
+  assert.equal(setupCalls, 0)
+  assert.equal(credentialStderr.value(), "")
+  const credentialFailure = JSON.parse(credentialStdout.value())
+  assert.equal(credentialFailure.error.category, "configuration")
+  assert.equal(
+    credentialFailure.error.message,
+    `Credential environment variable ${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE} is unavailable`,
+  )
+  assert.match(
+    credentialFailure.error.recovery.action,
+    new RegExp(DEFAULT_TOKEN_ENVIRONMENT_VARIABLE),
+  )
+  assert.match(credentialFailure.error.recovery.action, /protected token file/)
+  assert.doesNotMatch(credentialFailure.error.recovery.action, /doctor/)
+})
 
 test("CLI parser defaults to serve and strictly parses operator commands", () => {
   assert.deepEqual(parseCliArguments([]), { command: "serve" })
@@ -1012,6 +1294,48 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     packageLaunch: true,
     serverName: undefined,
   })
+  assert.deepEqual(parseCliArguments([
+    "onboard",
+    "--host",
+    "codex",
+    "--application-id",
+    APPLICATION_ID,
+    "--guild-id",
+    GUILD_ID,
+    "--config",
+    CONFIG_FILE,
+    "--confirm-installed",
+    GUILD_ID,
+    "--token-env",
+    TOKEN_ALIAS,
+    "--html",
+    "/output/onboarding.html",
+    "--json",
+  ]), {
+    applicationId: APPLICATION_ID,
+    command: "onboard",
+    configFile: CONFIG_FILE,
+    confirmation: GUILD_ID,
+    credentialVariable: TOKEN_ALIAS,
+    guildId: GUILD_ID,
+    hostId: "codex",
+    htmlFile: "/output/onboarding.html",
+    json: true,
+    open: false,
+  })
+  assert.deepEqual(parseCliArguments(["onboard"]), {
+    command: "onboard",
+    json: false,
+    open: false,
+  })
+  assert.throws(
+    () => parseCliArguments(["onboard", "--host", "unknown"]),
+    /must be one of/,
+  )
+  assert.throws(
+    () => parseCliArguments(["onboard", "--json", "--open"]),
+    /mutually exclusive/,
+  )
   assert.deepEqual(parseCliArguments([
     "host",
     "--config",
@@ -4140,6 +4464,7 @@ test("CLI renders smoke, help, and version output", async () => {
   const configHelpOutput = outputStream()
   const hostHelpOutput = outputStream()
   const migrateHelpOutput = outputStream()
+  const onboardHelpOutput = outputStream()
   const recipeHelpOutput = outputStream()
   const setupHelpOutput = outputStream()
   const smokeHelpOutput = outputStream()
@@ -4184,6 +4509,11 @@ test("CLI renders smoke, help, and version output", async () => {
     args: ["migrate", "--help"],
     dependencies: dependencies(),
     stdout: migrateHelpOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["onboard", "--help"],
+    dependencies: dependencies(),
+    stdout: onboardHelpOutput.stream,
   }), 0)
   assert.equal(await runCli({
     args: ["setup", "--help"],
@@ -4246,6 +4576,10 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(migrateHelpOutput.value(), /migrate <action>/)
   assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
   assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)
+  assert.match(onboardHelpOutput.value(), /onboard \[--host HOST\]/)
+  assert.match(onboardHelpOutput.value(), /asks for the host first/)
+  assert.match(onboardHelpOutput.value(), /--confirm-installed/)
+  assert.match(onboardHelpOutput.value(), /--json never prompts or opens a browser/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
