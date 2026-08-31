@@ -370,9 +370,9 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
     </section>
 
     <section class="summary-grid" aria-label="Plan summary">
-      <div class="metric"><span class="metric-label">Plan status</span><span class="metric-value" id="metric-status">Waiting</span></div>
-      <div class="metric"><span class="metric-label">Exact scope</span><span class="metric-value" id="metric-scope">No plan received</span></div>
-      <div class="metric"><span class="metric-label">Review digest</span><span class="metric-value mono" id="metric-digest">Unavailable</span></div>
+      <div class="metric"><span class="metric-label">Change impact</span><span class="metric-value" id="metric-impact">Waiting</span></div>
+      <div class="metric"><span class="metric-label">Exact target</span><span class="metric-value mono" id="metric-target">No plan received</span></div>
+      <div class="metric"><span class="metric-label">Review decision</span><span class="metric-value" id="metric-decision">Waiting</span></div>
     </section>
 
     <section class="workspace">
@@ -421,9 +421,9 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
       var content = document.getElementById("review-content");
       var empty = document.getElementById("empty-state");
       var filter = document.getElementById("filter");
-      var metricDigest = document.getElementById("metric-digest");
-      var metricScope = document.getElementById("metric-scope");
-      var metricStatus = document.getElementById("metric-status");
+      var metricDecision = document.getElementById("metric-decision");
+      var metricImpact = document.getElementById("metric-impact");
+      var metricTarget = document.getElementById("metric-target");
       var panel = document.getElementById("review-panel");
       var tabs = Array.prototype.slice.call(document.querySelectorAll("[role=tab]"));
       var toolName = document.getElementById("tool-name");
@@ -540,6 +540,39 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
           || /(^|\.)(.*Ids|.*Id)(\.|$)/.test(field.key);
       }
 
+      function digestField(field) {
+        return /(digest|hash)/i.test(field.key);
+      }
+
+      function humanIdentityField(field) {
+        return /(^|\.)(displayName|label|name|title)$/i.test(field.key);
+      }
+
+      function impactField(field) {
+        return /(action|change|effect|impact|kind|mode|requestedFields|strategy)/i.test(field.key)
+          && !digestField(field);
+      }
+
+      function decisionField(field) {
+        return /(approval|authority|blocker|destructive|hierarchy|permission|requiresApproval|status|warning|writeRequired)/i.test(field.key)
+          && !digestField(field);
+      }
+
+      function coordinationField(field) {
+        return digestField(field)
+          || /(coordination|evidence|fresh|operation|receipt|reservation)/i.test(field.key);
+      }
+
+      function unshown(fields, seen, predicate, limit) {
+        var selected = [];
+        fields.forEach(function (field) {
+          if (selected.length >= limit || seen.has(field.key) || !predicate(field)) return;
+          seen.add(field.key);
+          selected.push(field);
+        });
+        return selected;
+      }
+
       function renderFieldGrid(parent, fields, emptyMessage) {
         var visible = fields.filter(matchesFilter);
         if (visible.length === 0) {
@@ -596,36 +629,40 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
 
       function renderOverview(plan, fields) {
         var root = document.createDocumentFragment();
-        var keyFields = [];
         var seen = new Set();
-        [
-          [/^status$/i],
-          [/^(action|change|kind|mode|strategy)$/i],
-          [/^(writeRequired|requiresApproval|destructive)$/i],
-          [/^(digest|planDigest|requestDigest|operationKeyHash)$/i]
-        ].forEach(function (patterns) {
-          var match = findField(fields, patterns);
-          if (match && !seen.has(match.key)) {
-            seen.add(match.key);
-            keyFields.push(match);
-          }
-        });
-        fields.filter(idField).slice(0, 16).forEach(function (field) {
-          if (!seen.has(field.key)) {
-            seen.add(field.key);
-            keyFields.push(field);
-          }
-        });
-        var essentials = section("Decision essentials");
-        renderFieldGrid(essentials, keyFields, "No matching essential fields in this plan");
-        root.appendChild(essentials);
+        var impact = section("Change impact");
+        renderFieldGrid(
+          impact,
+          unshown(fields, seen, impactField, 16),
+          "No explicit impact fields were reported; review the complete plan below"
+        );
+        root.appendChild(impact);
 
-        var reviewFields = fields.filter(evidenceField).filter(function (field) {
-          return !seen.has(field.key);
-        });
-        var review = section("Review signals");
-        renderFieldGrid(review, reviewFields.slice(0, 36), "No matching risk, authority, or evidence fields");
-        root.appendChild(review);
+        var targets = section("Exact targets and names");
+        renderFieldGrid(
+          targets,
+          unshown(fields, seen, function (field) {
+            return idField(field) || humanIdentityField(field);
+          }, 28),
+          "No exact target identifiers or transient names were reported"
+        );
+        root.appendChild(targets);
+
+        var decision = section("Permission and decision");
+        renderFieldGrid(
+          decision,
+          unshown(fields, seen, decisionField, 36),
+          "No matching permission, blocker, warning, or decision fields were reported"
+        );
+        root.appendChild(decision);
+
+        var coordination = section("Evidence and coordination details");
+        renderFieldGrid(
+          coordination,
+          unshown(fields, seen, coordinationField, 36),
+          "No matching digest, freshness, receipt, or coordination fields were reported"
+        );
+        root.appendChild(coordination);
 
         var complete = section("Complete plan");
         renderTree(complete, flattened(plan), "No plan fields match the current filter");
@@ -671,16 +708,29 @@ export const MCP_PLAN_REVIEW_APP_HTML = String.raw`<!doctype html>
 
       function updateSummary(plan, fields) {
         var status = findField(fields, [/^status$/i]);
-        var digest = findField(fields, [/^planDigest$/i, /^digest$/i, /digest$/i, /hash$/i]);
+        var impact = findField(fields, [
+          /^(action|change|impact|strategy)$/i,
+          /^(kind|mode)$/i,
+          /^writeRequired$/i
+        ]);
         var ids = fields.filter(idField);
-        metricStatus.textContent = state.cancelled
+        var firstId = ids[0];
+        metricDecision.textContent = state.cancelled
           ? "Cancelled"
           : status ? scalarText(status.value) : plan === undefined ? "Waiting" : "Review ready";
-        metricScope.textContent = ids.length === 0
+        metricImpact.textContent = impact
+          ? impact.key.toLowerCase().endsWith("writerequired")
+            ? impact.value === true ? "Discord change" : "No write required"
+            : scalarText(impact.value)
+          : plan === undefined ? "Waiting" : "Review the exact change";
+        metricTarget.textContent = ids.length === 0
           ? plan === undefined ? "No plan received" : "No exact IDs reported"
-          : ids.length + (ids.length === 1 ? " exact ID field" : " exact ID fields");
-        metricDigest.textContent = digest ? scalarText(digest.value) : "Unavailable";
-        metricDigest.title = digest ? scalarText(digest.value) : "";
+          : ids.length === 1 && firstId
+            ? firstId.key + ": " + scalarText(firstId.value)
+            : ids.length + " exact ID fields";
+        metricTarget.title = ids.map(function (field) {
+          return field.key + ": " + scalarText(field.value);
+        }).join("\n");
       }
 
       function render() {

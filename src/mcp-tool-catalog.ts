@@ -150,6 +150,46 @@ export const MCP_TOOL_ACCESS_STAGES = Object.freeze([
 
 export type McpToolAccessStage = typeof MCP_TOOL_ACCESS_STAGES[number]
 
+export const MCP_TOOL_IMPACT_CLASSES = Object.freeze([
+  "administrative-discord-write",
+  "destructive-or-high-impact-discord-write",
+  "discord-read",
+  "local-only",
+  "visible-discord-write",
+] as const)
+
+export type McpToolImpactClass = typeof MCP_TOOL_IMPACT_CLASSES[number]
+
+export const MCP_TOOL_REVIEW_REQUIREMENTS = Object.freeze([
+  "host-write-approval",
+  "none",
+  "signed-interactive-review",
+] as const)
+
+export type McpToolReviewRequirement =
+  typeof MCP_TOOL_REVIEW_REQUIREMENTS[number]
+
+export const MCP_TOOL_WORKFLOW_ROLES = Object.freeze([
+  "execute",
+  "plan",
+  "standalone",
+  "support",
+  "verify",
+] as const)
+
+export type McpToolWorkflowRole = typeof MCP_TOOL_WORKFLOW_ROLES[number]
+
+export interface McpToolUseGuidance {
+  impact: McpToolImpactClass
+  impactLabel: string
+  impactSummary: string
+  preferredNextAction: "call-tool"
+  preferredNextTool: McpToolName
+  preferredNextToolReason: string
+  reviewRequirement: McpToolReviewRequirement
+  workflowRole: McpToolWorkflowRole
+}
+
 export const MCP_TOOL_ACCESS_MANIFEST_FORMAT =
   "guildcontrol.tool-access-manifest.v2"
 
@@ -172,6 +212,7 @@ export interface McpToolAccessContract {
     | "target-bound-plan"
   companions: McpToolWorkflowCompanions
   discordRequest: "none" | "read" | "write"
+  guidance: McpToolUseGuidance
   planDigestInput:
     | "computed-by-execute-or-explicit"
     | "not-applicable"
@@ -188,7 +229,7 @@ export interface McpToolWorkflowCompanions {
 
 export type McpToolAccessStageContract = Omit<
   McpToolAccessContract,
-  "companions" | "requirements" | "stage"
+  "companions" | "guidance" | "requirements" | "stage"
 >
 
 export interface McpToolAccessEntry extends McpToolAccessContract {
@@ -456,7 +497,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "message-forward",
   },
   execute_channel_creation: {
-    keywords: ["category", "channel", "create", "execute", "forum", "text"],
+    keywords: ["category", "channel", "create", "execute", "forum", "make channel", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
   },
@@ -1103,7 +1144,7 @@ export const MCP_TOOL_CATALOG = Object.freeze({
     workflow: "direct-message-change",
   },
   plan_channel_creation: {
-    keywords: ["category", "channel", "create", "forum", "plan", "review", "text"],
+    keywords: ["category", "channel", "create", "forum", "make channel", "plan", "review", "text"],
     toolset: "channel-creation",
     workflow: "channel-creation",
   },
@@ -1462,6 +1503,38 @@ export const MCP_TOOL_CATALOG = Object.freeze({
 
 const RECEIPT_VERIFY_TOOL_PREFIX = "verify_"
 
+const MCP_TOOL_RISK_GUIDANCE = Object.freeze({
+  "administrative-write": Object.freeze({
+    impact: "administrative-discord-write",
+    impactLabel: "Administrative Discord change",
+    impactSummary: "Changes Discord configuration or structure without being classified as destructive",
+  }),
+  "destructive-write": Object.freeze({
+    impact: "destructive-or-high-impact-discord-write",
+    impactLabel: "Destructive or high-impact Discord change",
+    impactSummary: "Performs a destructive, authority-changing, or otherwise high-impact Discord mutation",
+  }),
+  "discord-read": Object.freeze({
+    impact: "discord-read",
+    impactLabel: "Discord read",
+    impactSummary: "Reads bounded Discord state without requesting a mutation",
+  }),
+  "interaction-write": Object.freeze({
+    impact: "visible-discord-write",
+    impactLabel: "Visible Discord write",
+    impactSummary: "Creates or changes user-visible Discord interaction content",
+  }),
+  "local-read": Object.freeze({
+    impact: "local-only",
+    impactLabel: "Local only",
+    impactSummary: "Uses local connector state without contacting Discord",
+  }),
+} satisfies Record<McpToolRiskClass, {
+  impact: McpToolImpactClass
+  impactLabel: string
+  impactSummary: string
+}>)
+
 function accessStage(
   name: McpToolName,
   riskClass: McpToolRiskClass,
@@ -1515,6 +1588,78 @@ function workflowCompanions(
   }
 }
 
+function workflowRole(
+  stage: McpToolAccessStage,
+  workflow: McpToolWorkflow | null,
+): McpToolWorkflowRole {
+  if (workflow === null) return "standalone"
+  if (stage === "review-execute") return "execute"
+  if (stage === "review-plan") return "plan"
+  if (stage === "receipt-verify") return "verify"
+  return "support"
+}
+
+function reviewRequirement(
+  stage: McpToolAccessStage,
+): McpToolReviewRequirement {
+  if (stage === "review-execute") return "signed-interactive-review"
+  if (stage === "guarded-write") return "host-write-approval"
+  return "none"
+}
+
+function preferredNextToolReason(stage: McpToolAccessStage): string {
+  if (stage === "review-plan") {
+    return "The execute tool prepares a fresh plan internally and requests signed review before any write"
+  }
+  if (stage === "review-execute") {
+    return "This workflow entry point prepares fresh evidence and requests signed review before any write"
+  }
+  if (stage === "receipt-verify") {
+    return "This verification tool checks the exact outcome without writing"
+  }
+  if (stage === "guarded-write") {
+    return "This tool performs the bounded write after MCP host write approval"
+  }
+  if (stage === "live-read") return "This tool performs the bounded Discord read"
+  return "This tool performs the bounded local operation"
+}
+
+function createMcpToolUseGuidance(
+  name: McpToolName,
+  metadata: ReturnType<typeof accessMetadata>,
+  companions: McpToolWorkflowCompanions,
+): McpToolUseGuidance {
+  const stage = accessStage(name, metadata.riskClass, metadata.workflow)
+  const preferredNextTool = stage === "review-plan"
+    ? companions.execute[0] ?? name
+    : name
+  const preferredMetadata = accessMetadata(preferredNextTool)
+  const preferredStage = accessStage(
+    preferredNextTool,
+    preferredMetadata.riskClass,
+    preferredMetadata.workflow,
+  )
+  return {
+    ...MCP_TOOL_RISK_GUIDANCE[preferredMetadata.riskClass],
+    preferredNextAction: "call-tool",
+    preferredNextTool,
+    preferredNextToolReason: preferredNextToolReason(stage),
+    reviewRequirement: reviewRequirement(preferredStage),
+    workflowRole: workflowRole(stage, metadata.workflow),
+  }
+}
+
+export function mcpToolUseGuidance(
+  name: McpToolName,
+): McpToolUseGuidance {
+  const metadata = accessMetadata(name)
+  return createMcpToolUseGuidance(
+    name,
+    metadata,
+    workflowCompanions(metadata.workflow),
+  )
+}
+
 function accessStageContract(
   stage: McpToolAccessStage,
 ): McpToolAccessStageContract {
@@ -1552,9 +1697,11 @@ export function mcpToolAccessContract(
 ): McpToolAccessContract {
   const metadata = accessMetadata(name)
   const stage = accessStage(name, metadata.riskClass, metadata.workflow)
+  const companions = workflowCompanions(metadata.workflow)
   return {
     ...accessStageContract(stage),
-    companions: workflowCompanions(metadata.workflow),
+    companions,
+    guidance: createMcpToolUseGuidance(name, metadata, companions),
     requirements: mcpToolStaticRequirements(name, metadata.toolset),
     stage,
   }
@@ -1756,7 +1903,7 @@ export const discoverDiscordToolsInputSchema = z.strictObject({
     .max(CONNECTOR_LIMITS.toolDiscoveryQueryCharacters)
     .refine((value) => value.trim().length > 0, "query must not be blank")
     .optional()
-    .describe("Capability or exact canonical tool name to find"),
+    .describe("Ordinary-language outcome, capability, or exact canonical tool name to find"),
   risk: z.enum(MCP_DISCOVERY_RISKS)
     .optional()
     .describe("Optional exact MCP risk class"),
@@ -1808,6 +1955,7 @@ const SEARCH_RESULT_PRIORITIES = Object.freeze({
   mutation: 0,
   readOnly: 1,
   reviewedPlan: 2,
+  reviewedExecute: 3,
 })
 
 const SEARCH_FIELD_WEIGHTS = Object.freeze({
@@ -1832,8 +1980,15 @@ const SEARCH_CONFIGURE_VARIANTS = Object.freeze([
   "set",
   "update",
 ])
+const SEARCH_CREATE_VARIANTS = Object.freeze([
+  "build",
+  "create",
+  "provision",
+])
 const SEARCH_FIND_VARIANTS = Object.freeze(["lookup", "search"])
 const SEARCH_SEMANTIC_VARIANTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  build: SEARCH_CREATE_VARIANTS,
+  built: SEARCH_CREATE_VARIANTS,
   change: SEARCH_CHANGE_VARIANTS,
   changed: SEARCH_CHANGE_VARIANTS,
   changing: SEARCH_CHANGE_VARIANTS,
@@ -1841,6 +1996,9 @@ const SEARCH_SEMANTIC_VARIANTS: Readonly<Record<string, readonly string[]>> = Ob
   configure: SEARCH_CONFIGURE_VARIANTS,
   configured: SEARCH_CONFIGURE_VARIANTS,
   configuring: SEARCH_CONFIGURE_VARIANTS,
+  create: SEARCH_CREATE_VARIANTS,
+  created: SEARCH_CREATE_VARIANTS,
+  creating: SEARCH_CREATE_VARIANTS,
   find: SEARCH_FIND_VARIANTS,
   finding: SEARCH_FIND_VARIANTS,
   found: SEARCH_FIND_VARIANTS,
@@ -1848,6 +2006,9 @@ const SEARCH_SEMANTIC_VARIANTS: Readonly<Record<string, readonly string[]>> = Ob
   lookup: SEARCH_FIND_VARIANTS,
   many: ["bulk"],
   multiple: ["bulk"],
+  provision: SEARCH_CREATE_VARIANTS,
+  provisioned: SEARCH_CREATE_VARIANTS,
+  provisioning: SEARCH_CREATE_VARIANTS,
   reorder: ["order"],
   reordered: ["order"],
   reordering: ["order"],
@@ -1879,6 +2040,7 @@ const SEARCH_STOP_WORDS = new Set([
   "may",
   "me",
   "my",
+  "new",
   "of",
   "on",
   "or",
@@ -1889,6 +2051,7 @@ const SEARCH_STOP_WORDS = new Set([
   "to",
   "tool",
   "using",
+  "up",
   "want",
   "what",
   "which",
@@ -2226,34 +2389,38 @@ function qualifiesSearchScore(result: SearchScore): boolean {
 }
 
 function searchResultPriority(entry: SearchableMcpTool): number {
-  if (entry.name.startsWith(REVIEWED_PLAN_TOOL_PREFIX)) {
-    return SEARCH_RESULT_PRIORITIES.reviewedPlan
+  if (entry.access.stage === "review-execute") {
+    return SEARCH_RESULT_PRIORITIES.reviewedExecute
   }
+  if (entry.access.stage === "review-plan") return SEARCH_RESULT_PRIORITIES.reviewedPlan
   return entry.annotations.readOnlyHint
     ? SEARCH_RESULT_PRIORITIES.readOnly
     : SEARCH_RESULT_PRIORITIES.mutation
 }
 
-function promoteReviewedPlans(
+function promoteReviewedEntryPoints(
   eligibleEntries: readonly SearchableMcpTool[],
   ranked: readonly RankedSearchTool[],
 ): RankedSearchTool[] {
-  const planners = new Map<McpToolWorkflow, SearchableMcpTool>()
+  const executors = new Map<McpToolWorkflow, SearchableMcpTool>()
   for (const entry of eligibleEntries) {
     if (
       entry.workflow
-      && entry.name.startsWith(REVIEWED_PLAN_TOOL_PREFIX)
-      && !planners.has(entry.workflow)
-    ) planners.set(entry.workflow, entry)
+      && entry.access.stage === "review-execute"
+      && !executors.has(entry.workflow)
+    ) executors.set(entry.workflow, entry)
   }
   const promoted = new Map(ranked.map((candidate) => [candidate.entry.name, candidate]))
   for (const candidate of ranked) {
-    if (candidate.entry.annotations.readOnlyHint || !candidate.entry.workflow) continue
-    const planner = planners.get(candidate.entry.workflow)
-    if (!planner) continue
-    const existing = promoted.get(planner.name)
+    if (
+      !candidate.entry.workflow
+      || !["review-execute", "review-plan"].includes(candidate.entry.access.stage)
+    ) continue
+    const executor = executors.get(candidate.entry.workflow)
+    if (!executor) continue
+    const existing = promoted.get(executor.name)
     if (!existing || existing.result.score < candidate.result.score) {
-      promoted.set(planner.name, { entry: planner, result: candidate.result })
+      promoted.set(executor.name, { entry: executor, result: candidate.result })
     }
   }
   return [...promoted.values()]
@@ -2343,7 +2510,7 @@ export function discoverDiscordTools(
     : []
   const ranked = (query === ""
     ? directRanked
-    : promoteReviewedPlans(eligibleEntries, directRanked)
+    : promoteReviewedEntryPoints(eligibleEntries, directRanked)
   ).sort((left, right) => {
     const scoreDifference = right.result.score - left.result.score
     if (scoreDifference !== 0) return scoreDifference

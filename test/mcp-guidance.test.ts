@@ -4257,6 +4257,16 @@ test("MCP local resources expose safety, policy, and content-free activity witho
   )
   const exactAccessEntry = exactToolAccessData.entry as Record<string, unknown>
   assert.equal(exactAccessEntry.name, "execute_channel_order")
+  assert.deepEqual(exactAccessEntry.guidance, {
+    impact: "destructive-or-high-impact-discord-write",
+    impactLabel: "Destructive or high-impact Discord change",
+    impactSummary: "Performs a destructive, authority-changing, or otherwise high-impact Discord mutation",
+    preferredNextAction: "call-tool",
+    preferredNextTool: "execute_channel_order",
+    preferredNextToolReason: "This workflow entry point prepares fresh evidence and requests signed review before any write",
+    reviewRequirement: "signed-interactive-review",
+    workflowRole: "execute",
+  })
   const exactRequirements = exactAccessEntry.requirements as Record<string, unknown>
   assert.equal(exactRequirements.authentication, "bot")
   assert.equal(exactRequirements.source, "toolset")

@@ -20,6 +20,7 @@ import {
   discoverDiscordTools,
   mcpToolAccessEntry,
   mcpToolAccessContract,
+  mcpToolUseGuidance,
   type CanonicalMcpToolName,
   type TrackedMcpTool,
 } from "../src/mcp-tool-catalog.js"
@@ -187,7 +188,7 @@ test("tool discovery normalizes safe variants while rejecting weak multi-term ma
     limit: 1,
     query: "reorder roles",
   }, catalog)
-  assert.equal(variants.matches[0]?.name, "plan_role_order")
+  assert.equal(variants.matches[0]?.name, "execute_role_order")
 
   const terse = discoverDiscordTools({
     detail: "compact",
@@ -257,7 +258,7 @@ test("tool discovery routes Discord task handoffs to bounded direct replies", ()
   assert.equal(result.matches[0]?.name, "list_message_replies")
 })
 
-test("tool discovery promotes reviewed planners without crossing exact risk filters", () => {
+test("tool discovery promotes reviewed execute entry points without crossing exact risk filters", () => {
   const catalog = createDiscordToolDiscoveryCatalog([
     trackedTool({
       name: "plan_message_deletion",
@@ -275,7 +276,15 @@ test("tool discovery promotes reviewed planners without crossing exact risk filt
     limit: 1,
     query: "delete a message",
   }, catalog)
-  assert.equal(natural.matches[0]?.name, "plan_message_deletion")
+  assert.equal(natural.matches[0]?.name, "delete_messages")
+
+  const readOnly = discoverDiscordTools({
+    detail: "compact",
+    limit: 1,
+    query: "delete a message",
+    risk: "external-read",
+  }, catalog)
+  assert.equal(readOnly.matches[0]?.name, "plan_message_deletion")
 
   const destructiveOnly = discoverDiscordTools({
     detail: "compact",
@@ -291,6 +300,17 @@ test("tool discovery promotes reviewed planners without crossing exact risk filt
     query: "delete_messages",
   }, catalog)
   assert.deepEqual(exact.matches.map(({ name }) => name), ["delete_messages"])
+
+  const exactPlan = discoverDiscordTools({
+    detail: "compact",
+    limit: 5,
+    query: "plan_message_deletion",
+  }, catalog)
+  assert.deepEqual(exactPlan.matches.map(({ name }) => name), ["plan_message_deletion"])
+  assert.equal(
+    exactPlan.matches[0]?.access.guidance.preferredNextTool,
+    "delete_messages",
+  )
 })
 
 test("tool access manifest classifies every tool and binds reviewed companions", () => {
@@ -422,6 +442,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     authorizationEvidence: "none",
     companions: { execute: [], plan: [], verify: [] },
     discordRequest: "none",
+    guidance: mcpToolUseGuidance("get_gateway_status"),
     planDigestInput: "not-applicable",
     readiness: "not-applicable",
     requirements: mcpToolStaticRequirements("get_gateway_status", "gateway"),
@@ -436,6 +457,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
       verify: [],
     },
     discordRequest: "read",
+    guidance: mcpToolUseGuidance("plan_message_deletion"),
     planDigestInput: "not-applicable",
     readiness: "target-specific",
     requirements: mcpToolStaticRequirements("plan_message_deletion", "deletion"),
@@ -450,6 +472,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
       verify: [],
     },
     discordRequest: "write",
+    guidance: mcpToolUseGuidance("delete_messages"),
     planDigestInput: "computed-by-execute-or-explicit",
     readiness: "target-specific",
     requirements: mcpToolStaticRequirements("delete_messages", "deletion"),
@@ -464,10 +487,31 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     authorizationEvidence: "operation-runtime",
     companions: { execute: [], plan: [], verify: [] },
     discordRequest: "write",
+    guidance: mcpToolUseGuidance("send_message"),
     planDigestInput: "not-applicable",
     readiness: "target-specific",
     requirements: mcpToolStaticRequirements("send_message", "message-writes"),
     stage: "guarded-write",
+  })
+  assert.deepEqual(mcpToolUseGuidance("plan_message_deletion"), {
+    impact: "destructive-or-high-impact-discord-write",
+    impactLabel: "Destructive or high-impact Discord change",
+    impactSummary: "Performs a destructive, authority-changing, or otherwise high-impact Discord mutation",
+    preferredNextAction: "call-tool",
+    preferredNextTool: "delete_messages",
+    preferredNextToolReason: "The execute tool prepares a fresh plan internally and requests signed review before any write",
+    reviewRequirement: "signed-interactive-review",
+    workflowRole: "plan",
+  })
+  assert.deepEqual(mcpToolUseGuidance("send_message"), {
+    impact: "visible-discord-write",
+    impactLabel: "Visible Discord write",
+    impactSummary: "Creates or changes user-visible Discord interaction content",
+    preferredNextAction: "call-tool",
+    preferredNextTool: "send_message",
+    preferredNextToolReason: "This tool performs the bounded write after MCP host write approval",
+    reviewRequirement: "host-write-approval",
+    workflowRole: "standalone",
   })
 })
 

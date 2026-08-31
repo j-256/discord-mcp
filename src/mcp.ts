@@ -175,6 +175,7 @@ import {
 import {
   normalizeGuildScaffoldRequest,
   type GuildScaffoldRequest,
+  type GuildScaffoldResult,
 } from "./guild-scaffold-service.js"
 import {
   type GuildBlueprintCaptureRequest,
@@ -19524,6 +19525,30 @@ function guildScaffoldConfirmationOutcome(
   }
 }
 
+const GUILD_SCAFFOLD_EXECUTE_TOOL_NAME = "execute_guild_scaffold" as const
+
+function guildScaffoldExecutionOutput(result: GuildScaffoldResult) {
+  const paused = result.status === "paused"
+  return {
+    ...result,
+    continuation: paused
+      ? {
+          planDigest: "omit-for-fresh-plan" as const,
+          preferredNextTool: GUILD_SCAFFOLD_EXECUTE_TOOL_NAME,
+          reuseOperationKey: true as const,
+          reuseRequest: true as const,
+          status: "fresh-plan-required" as const,
+        }
+      : {
+          planDigest: "not-applicable" as const,
+          preferredNextTool: null,
+          reuseOperationKey: false as const,
+          reuseRequest: false as const,
+          status: "complete" as const,
+        },
+  }
+}
+
 function guildBlueprintAutoModerationAction(
   action: z.infer<typeof guildBlueprintAutoModerationActionSchema>,
 ): GuildBlueprintAutoModerationActionInput {
@@ -32275,7 +32300,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
     "execute_guild_scaffold",
     {
       annotations: WRITE_ANNOTATIONS,
-      description: "Execute only the ready frontier of one exact reviewed additive Discord guild scaffold after a fresh matching plan and signed interactive approval. Each bounded role or channel step has a derived one-shot reservation, pending content-free audit, one non-retried mutation, exact readback, and durable checkpoint. New categories force a pause before child creation; the workflow never edits, deletes, reorders, assigns, publishes messages, or rolls back.",
+      description: "Execute only the ready frontier of one exact reviewed additive Discord guild scaffold after a fresh matching plan and signed interactive approval. Each bounded role or channel step has a derived one-shot reservation, pending content-free audit, one non-retried mutation, exact readback, and durable checkpoint. New categories force a pause before child creation; a paused result gives a stable continuation that reuses the unchanged request and operation key through this same execute entry point while omitting the stale plan digest to obtain fresh review. The workflow never predicts child IDs, edits, deletes, reorders, assigns, publishes messages, or rolls back.",
       inputSchema: guildScaffoldExecuteInputSchema,
       outputSchema: toolOutputSchema,
       title: "Execute reviewed Discord guild scaffold",
@@ -32343,9 +32368,12 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           planDigest,
           { signal: context.mcpReq.signal },
         )
+        const output = guildScaffoldExecutionOutput(result)
         return toolResult(
-          result,
-          `Discord guild scaffold ${result.status} in guild ${result.guildId} after resolving ${result.executedSteps.length} reviewed steps`,
+          output,
+          result.status === "paused"
+            ? `Discord guild scaffold paused in guild ${result.guildId} after resolving ${result.executedSteps.length} reviewed steps; call ${GUILD_SCAFFOLD_EXECUTE_TOOL_NAME} again with the unchanged request and operation key and omit the stale plan digest`
+            : `Discord guild scaffold ${result.status} in guild ${result.guildId} after resolving ${result.executedSteps.length} reviewed steps`,
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
@@ -32391,8 +32419,9 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           planDigest,
           { signal: context.mcpReq.signal },
         )
+        const output = guildScaffoldExecutionOutput(result)
         return toolResult(
-          result,
+          output,
           `Discord guild scaffold is ${result.status} in guild ${result.guildId} with no new mutation required`,
         )
       }
@@ -35068,7 +35097,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
     MCP_DISCOVERY_TOOL_NAME,
     {
       annotations: READ_ONLY_LOCAL_ANNOTATIONS,
-      description: "Search the configured GuildControl MCP tool catalog by capability, toolset, or exact risk. In progressive mode, matching canonical tools become visible through a standard tools/list_changed notification with their original schemas and annotations. Discovery never contacts Discord or expands configured toolsets.",
+      description: "Search the configured GuildControl MCP tool catalog by ordinary-language outcome, capability, toolset, or exact risk. Reviewed workflows lead with the execute entry point because it prepares fresh evidence and requests signed review internally; exact tool-name searches remain exact. Results explain impact, workflow role, review requirements, companions, and the preferred next tool. In progressive mode, only matching configured tools and their complete configured workflow companions become visible through a standard tools/list_changed notification with their original schemas and annotations. Discovery never contacts Discord or expands configured toolsets.",
       inputSchema: discoverDiscordToolsInputSchema,
       outputSchema: toolOutputSchema,
       title: "Discover Discord tools",
