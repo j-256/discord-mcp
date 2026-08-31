@@ -35,6 +35,7 @@ import {
 } from "./config-operator.js"
 import {
   CONNECTOR_DESCRIPTION,
+  CONNECTOR_CLI_COMMAND,
   CONNECTOR_ICON_MIME_TYPE,
   CONNECTOR_ICON_SIZES,
   CONNECTOR_ICON_URL,
@@ -303,7 +304,7 @@ export const DOCTOR_CHECK_IDS = Object.freeze({
   webhookMessageDeliveryPolicy: "webhook-message-delivery-policy",
 })
 
-const DEFAULT_CLI_COMMAND = "guildcontrol"
+const DEFAULT_CLI_COMMAND = CONNECTOR_CLI_COMMAND
 const DEFAULT_MCP_SERVER_NAME = "discord"
 const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 const STARTUP_TIMEOUT_SECONDS = 30
@@ -4175,7 +4176,7 @@ export async function prepareSetup(
   }
   if (!options.preset && !targetExists) {
     throw new ConfigurationError(
-      "Setup target was not found; create it with --preset or guildcontrol config init",
+      "Setup target was not found; create it with --preset or guildctl config init",
     )
   }
   if (

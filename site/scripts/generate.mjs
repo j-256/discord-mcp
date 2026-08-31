@@ -692,7 +692,7 @@ Documentation: ${DOCUMENTATION_URL}/
 
 async function main() {
   const packageJson = JSON.parse(await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"))
-  invariant(packageJson.name === "guildcontrol", "Unexpected package identity")
+  invariant(packageJson.name === "guildctl", "Unexpected package identity")
   invariant(STABLE_VERSION.test(packageJson.version), "Documentation requires a stable package version")
 
   const documentationSources = await documentationSourcePaths()

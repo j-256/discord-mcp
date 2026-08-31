@@ -24,7 +24,7 @@ import {
 } from "./release-lib.mjs"
 import { containsSpecificReference } from "./neutrality.mjs"
 
-const PACKAGE_NAME = "guildcontrol"
+const PACKAGE_NAME = "guildctl"
 const CATALOG_EVIDENCE_FILENAME = "catalog-evidence.json"
 const CATALOG_EVIDENCE_FORMAT = "guildcontrol.catalog-evidence.v3"
 const CATALOG_HTML_FORMAT = "guildcontrol.catalog-html.v3"
@@ -320,7 +320,7 @@ const INSTALLED_SMOKE = `
 import assert from "node:assert/strict"
 import { Client } from "@modelcontextprotocol/client"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio"
-import * as connector from "guildcontrol"
+import * as connector from "guildctl"
 
 const DISCOVERY_TOOL_NAME = "discover_discord_tools"
 const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
@@ -622,15 +622,15 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", archive],
     { cwd: consumer, env: environment },
   )
-  const entrypoint = join(consumer, "node_modules", "guildcontrol", "dist", "bin.js")
+  const entrypoint = join(consumer, "node_modules", "guildctl", "dist", "bin.js")
   const libraryEntrypoint = join(
     consumer,
     "node_modules",
-    "guildcontrol",
+    "guildctl",
     "dist",
     "index.js",
   )
-  const bin = join(consumer, "node_modules", ".bin", "guildcontrol")
+  const bin = join(consumer, "node_modules", ".bin", "guildctl")
   const versionResult = await run(bin, ["version"], {
     capture: true,
     cwd: consumer,
@@ -663,7 +663,7 @@ async function verifyInstalledPackage(archive, workDirectory, version) {
     libraryResult.stderr,
     /package library entrypoint does not run an MCP server/u,
   )
-  assert.match(libraryResult.stderr, /guildcontrol serve --config FILE/u)
+  assert.match(libraryResult.stderr, /guildctl serve --config FILE/u)
   assert.match(libraryResult.stderr, /node dist\/bin\.js serve --config FILE/u)
   invariant(
     !libraryResult.stderr.includes(DUMMY_TOKEN),
@@ -1793,7 +1793,7 @@ try {
   invariant(firstBytes.equals(secondBytes), "independent npm archives are not byte-identical")
   invariant(first.integrity === sha512Integrity(firstBytes), "npm pack reported unexpected SHA-512 integrity")
   invariant(second.integrity === first.integrity, "independent npm archives report different integrity")
-  invariant(basename(first.archive) === `guildcontrol-${packageJson.version}.tgz`, "npm archive filename is invalid")
+  invariant(basename(first.archive) === `guildctl-${packageJson.version}.tgz`, "npm archive filename is invalid")
   const extraction = join(workDirectory, "extracted")
   await mkdir(extraction)
   await run("tar", ["-xzf", first.archive, "-C", extraction])

@@ -19,6 +19,7 @@ import {
   type ConfigWriteOutcome,
 } from "./config-operator.js"
 import {
+  CONNECTOR_CLI_COMMAND,
   DISCORD_LIMITS,
   GUILD_PRUNE_DEFAULTS,
   INTERACTION_DEFAULTS,
@@ -74,7 +75,7 @@ export interface ConfigChangeImpactSummary {
 
 export interface ConfigChangeCommand {
   readonly args: readonly string[]
-  readonly command: "guildcontrol"
+  readonly command: typeof CONNECTOR_CLI_COMMAND
 }
 
 export interface ConfigChangePlanOptions {
@@ -538,15 +539,15 @@ function nextChecks(file: string): readonly ConfigChangeCommand[] {
   return Object.freeze([
     Object.freeze({
       args: Object.freeze(["config", "validate", file]),
-      command: "guildcontrol" as const,
+      command: CONNECTOR_CLI_COMMAND,
     }),
     Object.freeze({
       args: Object.freeze(["doctor", "--config", file, "--online"]),
-      command: "guildcontrol" as const,
+      command: CONNECTOR_CLI_COMMAND,
     }),
     Object.freeze({
       args: Object.freeze(["smoke", "--config", file]),
-      command: "guildcontrol" as const,
+      command: CONNECTOR_CLI_COMMAND,
     }),
   ])
 }

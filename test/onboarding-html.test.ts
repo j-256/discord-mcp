@@ -113,7 +113,7 @@ test("onboarding HTML renders an exact client-neutral owner-managed setup", () =
   assert.match(verificationCommands, / config validate /)
   assert.match(verificationCommands, / doctor /)
   assert.match(verificationCommands, / smoke /)
-  assert.match(verificationCommands, /npx --yes guildcontrol@/)
+  assert.match(verificationCommands, /npx --yes guildctl@/)
   assert.match(html, / host /)
   assert.match(html, /--html \.\/guildcontrol-host-activation\.html/)
 

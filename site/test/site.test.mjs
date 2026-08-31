@@ -90,7 +90,7 @@ test("documentation generation is deterministic and source-bound", async () => {
   const after = JSON.parse(await readFile(manifestFile, "utf8"))
   assert.deepEqual(generatedSnapshot(after), generatedSnapshot(before))
   assert.equal(after.format, "guildcontrol.docs-manifest.v1")
-  assert.equal(after.package.name, "guildcontrol")
+  assert.equal(after.package.name, "guildctl")
   assert.match(after.package.version, STABLE_VERSION)
   assert.equal(new Set(after.outputs.map(({ path }) => path)).size, after.outputs.length)
   assert.equal(new Set(after.sources.map(({ path }) => path)).size, after.sources.length)

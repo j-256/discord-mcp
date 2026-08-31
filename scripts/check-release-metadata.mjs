@@ -22,7 +22,7 @@ import {
   documentationSourcePaths,
 } from "./documentation-manifest.mjs"
 
-const PACKAGE_NAME = "guildcontrol"
+const PACKAGE_NAME = "guildctl"
 const MCP_NAME = "io.github.j-256/guildcontrol"
 const MCP_TITLE = "GuildControl MCP"
 const MCP_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
@@ -35,7 +35,7 @@ const ICON_SIZE = "1254x1254"
 const REGISTRY_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 const NPM_REGISTRY = "https://registry.npmjs.org"
 const NPM_CONFIGURATION = "registry=https://registry.npmjs.org/\nreplace-registry-host=never\n"
-const FIRST_PUBLICATION_COMMAND = "npm publish ./guildcontrol-MAJOR.MINOR.PATCH.tgz --provenance=false"
+const FIRST_PUBLICATION_COMMAND = "npm publish ./guildctl-MAJOR.MINOR.PATCH.tgz --provenance=false"
 const OCI_IMAGE_NAME = "ghcr.io/j-256/guildcontrol"
 const NODE_IMAGE = "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
 const BINFMT_IMAGE = "tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
@@ -304,7 +304,7 @@ async function checkPackageAndLock() {
   invariant(packageJson.engines?.node === ">=22", "package Node.js floor must remain 22")
   invariant(packageJson.main === "./dist/index.js", "package main entrypoint is invalid")
   invariant(packageJson.types === "./dist/index.d.ts", "package types entrypoint is invalid")
-  invariant(packageJson.bin?.["guildcontrol"] === "dist/bin.js", "package CLI entrypoint is invalid")
+  invariant(packageJson.bin?.guildctl === "dist/bin.js", "package CLI entrypoint is invalid")
   assertEqual(packageJson.exports, {
     ".": {
       import: "./dist/index.js",
@@ -619,7 +619,7 @@ async function checkDocumentation(packageJson) {
     "utf8",
   )
   const documentation = `${readme}\n${gettingStarted}\n${migration}\n${limitations}\n${comparison}\n${reference}`
-  const documentedVersions = [...documentation.matchAll(/\bguildcontrol@([0-9]+\.[0-9]+\.[0-9]+)/g)]
+  const documentedVersions = [...documentation.matchAll(/\bguildctl@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
   invariant(documentedVersions.every((version) => version === packageJson.version), "documentation npm versions are out of sync")
@@ -823,8 +823,8 @@ async function checkDocumentation(packageJson) {
   invariant(migration.startsWith("# Migrate from another Discord MCP\n"), "migration guide heading is invalid")
   for (const required of [
     "## Supported source releases",
-    "guildcontrol migrate list",
-    "guildcontrol migrate plan cappyeo@0.25.0",
+    "guildctl migrate list",
+    "guildctl migrate plan cappyeo@0.25.0",
     "## Read the dispositions correctly",
     "## Follow the staged path",
     "## Configuration remains a clean break",
@@ -969,12 +969,12 @@ async function checkCommunityFiles() {
     "private GitHub Security Advisory",
     "no response-time guarantee",
     "guild-installation-drift",
-    "guildcontrol migrate plan SOURCE --html PRIVATE_FILE",
+    "guildctl migrate plan SOURCE --html PRIVATE_FILE",
   ]) {
     invariant(support.includes(required), `support guide is missing ${required}`)
   }
   invariant(support.includes("[product boundaries and host compatibility](docs/limitations.md)"), "support guide lacks the product-boundaries route")
-  invariant(support.includes("guildcontrol host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
+  invariant(support.includes("guildctl host --npx --config FILE --html PRIVATE_FILE"), "support guide lacks private host activation recovery")
   invariant(support.includes("node dist/bin.js serve --config FILE"), "support guide lacks the public source launcher")
   invariant(support.includes("Node.js 22 through 26"), "support guide lacks the exact MCPB runtime range")
   invariant(privacy.startsWith("# Privacy policy\n"), "privacy policy heading is invalid")

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { once } from "node:events"
-import { rm } from "node:fs/promises"
+import { readFile, rm } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -10,6 +10,8 @@ import { chromium } from "playwright"
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const SITE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..")
+const PACKAGE = JSON.parse(await readFile(resolve(SITE_DIRECTORY, "..", "package.json"), "utf8"))
+const EXPECTED_RELEASE_CONTEXT = `guildctl@${PACKAGE.version}`
 const HOST = "127.0.0.1"
 const PORT = 4327
 const ORIGIN = `http://${HOST}:${PORT}`
@@ -160,7 +162,7 @@ async function main() {
       assert.equal(await page.getByRole("link", { name: "Switch from another Discord MCP" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Take the verified product tour" }).count(), 1)
       const releaseContext = await page.locator(".release-context").innerText()
-      assert.match(releaseContext, /guildcontrol@[0-9]+\.[0-9]+\.[0-9]+/u)
+      assert.ok(releaseContext.includes(EXPECTED_RELEASE_CONTEXT))
       assert.match(releaseContext, /not affiliated with or endorsed by Discord Inc\./u)
       await page.keyboard.press("Tab")
       assert.equal(await page.locator(":focus").innerText(), "Skip to content")

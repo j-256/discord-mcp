@@ -26,7 +26,7 @@ Before any publication:
 5. Enable private vulnerability reporting and its maintainer notifications. Enable and verify Dependabot alerts, secret scanning, push protection, and code scanning; a skipped private-repository CodeQL run is not public-release evidence.
 6. Create a repository ruleset protecting `v*` tags from deletion, update, or unreviewed creation. Enable repository-level immutable Releases before publishing any GitHub Release. Create a GitHub Actions environment named `release`, require a human reviewer, prevent self-review when the repository plan supports it, allow deployments only from protected tags, and do not allow administrators to bypass the review gate.
 7. Enable two-factor authentication on the npm maintainer account.
-8. Confirm that the unscoped npm name `guildcontrol` is either available for the first publication or already owned by the `j-256` maintainer account for later releases.
+8. Confirm that the unscoped npm name `guildctl` is either available for the first publication or already owned by the `j-256` maintainer account for later releases.
 9. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
 10. Confirm that the repository owner can administer the `guildcontrol` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
@@ -48,12 +48,12 @@ gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=candidate -f t
 
 ```sh
 gh run download RUN_ID --name release-evidence-candidate-vMAJOR.MINOR.PATCH
-gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+gh attestation verify guildctl-MAJOR.MINOR.PATCH.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+gh attestation verify guildctl-MAJOR.MINOR.PATCH.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
@@ -77,14 +77,14 @@ gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.mcpb \
 ```sh
 npm login --auth-type=web
 npm whoami
-npm publish ./guildcontrol-MAJOR.MINOR.PATCH.tgz --provenance=false
+npm publish ./guildctl-MAJOR.MINOR.PATCH.tgz --provenance=false
 ```
 
 6. After npm makes the version available, require its published SHA-512 integrity to match the candidate before any OCI or MCP Registry operation:
 
 ```sh
 node scripts/check-published-artifacts.mjs \
-  --tarball ./guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --tarball ./guildctl-MAJOR.MINOR.PATCH.tgz \
   --expect-package matching \
   --expect-npm matching \
   --expect-oci missing \
@@ -92,6 +92,12 @@ node scripts/check-published-artifacts.mjs \
 ```
 
 The first version's public provenance is the GitHub artifact attestation bound to the protected workflow, tag, and source commit. Publishing the exact tarball preserves that byte identity. npm OIDC provenance begins with later stage-only trusted publications because npm cannot configure that trust relationship before the package exists.
+
+7. After the published `guildctl` package passes the matching checks, deprecate the superseded package without removing its release:
+
+```sh
+npm deprecate 'guildcontrol@*' 'Package renamed to guildctl. Run npx guildctl to get started.'
+```
 
 ## Configure trusted staged publishing
 
@@ -146,7 +152,7 @@ gh workflow run release.yml --ref vMAJOR.MINOR.PATCH -f operation=stage -f tag=v
 3. Inspect the private npm stage from a maintainer workstation:
 
 ```sh
-npm stage list guildcontrol
+npm stage list guildctl
 npm stage view STAGE_ID
 npm stage download STAGE_ID
 ```
@@ -190,7 +196,7 @@ The read-only release job reconstructs the npm archive, MCPB, catalog evidence, 
 
 An absent Release is created as a draft. An existing draft may be reconciled only for the exact asset set below, then its tag, title, notes, asset names, sizes, SHA-256 digests, download URLs, and source commit are verified before publication:
 
-- `guildcontrol-MAJOR.MINOR.PATCH.tgz`
+- `guildctl-MAJOR.MINOR.PATCH.tgz`
 - `guildcontrol-MAJOR.MINOR.PATCH.mcpb`
 - `catalog-evidence.json`
 - `release-notes.md`
@@ -219,7 +225,7 @@ Verify the immutable GitHub Release, download its exact assets, verify each loca
 mkdir guildcontrol-release
 gh release verify vMAJOR.MINOR.PATCH --repo j-256/guildcontrol
 gh release download vMAJOR.MINOR.PATCH --repo j-256/guildcontrol --dir guildcontrol-release
-gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.tgz --repo j-256/guildcontrol
+gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/guildctl-MAJOR.MINOR.PATCH.tgz --repo j-256/guildcontrol
 gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.mcpb --repo j-256/guildcontrol
 gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/release-notes.md --repo j-256/guildcontrol
 (cd guildcontrol-release && shasum -a 256 -c SHA256SUMS)
@@ -230,13 +236,13 @@ gh release verify-asset vMAJOR.MINOR.PATCH guildcontrol-release/release-notes.md
 Download the exact npm package and verify both provenance and its SBOM attestation:
 
 ```sh
-npm pack guildcontrol@MAJOR.MINOR.PATCH
-gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+npm pack guildctl@MAJOR.MINOR.PATCH
+gh attestation verify guildctl-MAJOR.MINOR.PATCH.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
   --deny-self-hosted-runners
-gh attestation verify guildcontrol-MAJOR.MINOR.PATCH.tgz \
+gh attestation verify guildctl-MAJOR.MINOR.PATCH.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
   --source-ref refs/tags/vMAJOR.MINOR.PATCH \
@@ -263,8 +269,8 @@ gh attestation verify guildcontrol-release/guildcontrol-MAJOR.MINOR.PATCH.mcpb \
 From an isolated consumer directory, install the downloaded archive without lifecycle scripts and save the credential-free catalog evidence:
 
 ```sh
-npm install --ignore-scripts ./guildcontrol-MAJOR.MINOR.PATCH.tgz
-./node_modules/.bin/guildcontrol catalog --check --json > catalog-evidence.json
+npm install --ignore-scripts ./guildctl-MAJOR.MINOR.PATCH.tgz
+./node_modules/.bin/guildctl catalog --check --json > catalog-evidence.json
 ```
 
 The evidence must be identical across repeated runs of the same installed archive. Review its exact inventories and accounting fields, including complete per-tool authentication, connector policy, Discord permission, conditional case, Gateway intent, hierarchy, curated setup, access-lifecycle, and live-verification contracts with zero unknown requirement entries. Preserve its `contractDigest` for contract comparison and its separate `safetyResourceDigest` for focused safety-guidance comparison. The report must state that credentials, Discord execution, Gateway access, telemetry export, activity persistence, authority grants, and target-readiness claims are disabled.
@@ -294,7 +300,7 @@ From a checkout of the same tag, compare npm and MCP Registry state with the sam
 
 ```sh
 node scripts/check-published-artifacts.mjs \
-  --tarball guildcontrol-MAJOR.MINOR.PATCH.tgz \
+  --tarball guildctl-MAJOR.MINOR.PATCH.tgz \
   --expect-package matching \
   --expect-npm matching \
   --expect-oci matching \

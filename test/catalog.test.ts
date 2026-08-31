@@ -231,7 +231,7 @@ test("catalog guards listed, invalid, discovery, and unknown tool calls identica
       error: {
         category: "client",
         code: CATALOG_ONLY_ERROR_CODE,
-        recoveryHint: "Use guildcontrol serve with credentialed configuration to execute tools",
+        recoveryHint: "Use guildctl serve with credentialed configuration to execute tools",
         retriable: false,
       },
       schemaVersion: 1,

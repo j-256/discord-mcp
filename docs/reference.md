@@ -2,7 +2,7 @@
 
 [Getting started and first verified read](getting-started.md) | [Migration from another Discord MCP](migration.md) | [Product boundaries and host compatibility](limitations.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md)
 
-<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.1.2/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.2.0/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
 
 GuildControl MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, exact allowlisted one-to-one private messages, current-application command exposure, privacy-bounded guild profiles, complete obfuscation-safe channel layouts, named guild settings, time-bounded guild incident actions, exact channel metadata and transient voice-channel status, complete ordered forum tags, roles, threads, forums, message pins, exact-message direct replies, directed coordination notes, privacy-safe reaction aggregates, native polls, privacy-safe guild integrations, application-owned emojis, guild emojis, stickers, soundboard sounds, AutoMod rules, scheduled events, active Stage instances, exact member voice state, guild onboarding, Welcome Screens, authenticated widget settings, guild bans, and guild vanity URL state, credential-redacted webhooks and announcement subscriptions, capability-safe guild invites and native Guild Templates, channel permission overwrites, effective permissions, privacy-minimized members and guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, portable non-secret multi-bot profiles, an optional privacy-safe real-time Gateway feed, optional exact-scope native Discord Interaction ingress with authenticated request Buttons, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, a model-neutral exact-message and directed-note coordination playbook, safe idempotent message interactions, reviewed exact-recipient private-message plain-text or static Components V2 send, reply, same-format edit, deletion, and receipt verification, reviewed Components V2 and remote-free rich-embed creation and editing, opt-in reaction-user and scheduled-event-subscriber audits, reviewed reaction moderation, reviewed native command management, reviewed policy-justified privileged-intent enablement, reviewed test-entitlement creation and receipt-proven deletion, reviewed externally fulfilled consumable-entitlement consumption, reviewed native poll creation and irreversible ending, reviewed exact announcement crossposts, reviewed immutable message forwarding, reviewed announcement subscribe and exact-ID unsubscribe operations, reviewed Guild Template lifecycle, guild-integration deletion, sparse guild-profile text, named guild-settings changes, time-bounded guild incident-action changes, forum-tag, application-emoji, guild-expression, soundboard, AutoMod, scheduled-event, Stage-instance, complete onboarding, complete ordered Welcome Screen, authenticated widget-settings, member nickname, member verification-bypass, member-role, member voice, and exact thread lifecycle and membership administration, reviewed credential-safe webhook creation, rename, move, and deletion, credential-private webhook message reads, idempotent plain-text delivery and editing, and signed exact-message deletion, capability-safe invite revocation, reviewed message pin, channel metadata, voice-channel status, channel ordering, exact channel and standard-role retirement, atomic same-guild channel cloning, channel permission overwrite, exact standard-role configuration, and exact relative role-order changes, reviewed local-file attachment messages, reviewed forum posts, reviewed message-anchored and standalone public or private thread creation, caller-retained declarative guild blueprints, resumable additive guild scaffolds, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, reviewed native bulk guild bans, bounded reviewed non-exact guild pruning, and content-free local activity records.
 
@@ -390,7 +390,7 @@ GuildControl MCP is self-hosted and uses no shared application identity. Each op
 The recommended first installation is derived from the same immutable read-only preset contract used by setup. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), confirm its Bot page has a bot user, copy the public Application ID, enable Guild Install on the Installation page, copy the target Server ID with Discord Developer Mode, and run:
 
 ```sh
-npx --yes guildcontrol@0.1.2 preset install server-observer \
+npx --yes guildctl@0.2.0 preset install server-observer \
   --application-id APPLICATION_ID \
   --guild-id GUILD_ID \
   --html ./guildcontrol-onboarding.html
@@ -576,14 +576,14 @@ Activity and receipt records contain only application, beneficiary, SKU, and ent
 
 ## Install
 
-A compatible MCPB host can import `guildcontrol-0.1.2.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
+A compatible MCPB host can import `guildcontrol-0.2.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
 
 The bundle embeds its privacy policy, deterministic SPDX inventory, exact dependency notices, credential-free catalog evidence, and a single self-contained ESM server. Its verifier builds twice, checks exact ZIP structure and metadata, compares bytes, scans every entry for secrets and non-neutral branding, validates the embedded evidence, unpacks to a fresh directory, and completes a real MCP initialization and catalog handshake. Verify the downloaded file against its `SHA256SUMS` entry and GitHub Release attestation before import.
 
 After a release is published, run an exact version from npm:
 
 ```sh
-npx --yes guildcontrol@0.1.2 help
+npx --yes guildctl@0.2.0 help
 ```
 
 Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
@@ -599,7 +599,7 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/guildcontrol:0.1.2 catalog --check
+  ghcr.io/j-256/guildcontrol:0.2.0 catalog --check
 ```
 
 For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and supply only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
@@ -609,7 +609,7 @@ export DISCORD_BOT_TOKEN
 printf 'Discord bot token: '
 read -r -s DISCORD_BOT_TOKEN
 printf '\n'
-npx --yes guildcontrol@0.1.2 setup \
+npx --yes guildctl@0.2.0 setup \
   --npx \
   --config ./guildcontrol.json \
   --preset server-observer \
@@ -622,7 +622,7 @@ docker run --rm -i \
   --pids-limit=64 \
   --env DISCORD_BOT_TOKEN \
   --mount "type=bind,source=$PWD/guildcontrol.json,target=/configuration/guildcontrol.json,readonly" \
-  ghcr.io/j-256/guildcontrol:0.1.2 serve --config /configuration/guildcontrol.json
+  ghcr.io/j-256/guildcontrol:0.2.0 serve --config /configuration/guildcontrol.json
 ```
 
 For a Docker or Kubernetes secret volume, create the policy with `credential.provider` set to `file` and `credential.path` set to the exact in-container path such as `/run/secrets/discord_bot_token`, then mount both the policy and secret read-only. The projected target must be owned by root or the image's `node` user, must not be group or world writable, and must have one hard link; the common root-owned read-only secret-volume shape passes this boundary. A projected-secret symlink is accepted so atomic orchestrator rotation works without broadening ordinary config-file link policy.
@@ -638,15 +638,15 @@ npm test
 npm run build
 ```
 
-The source build's public CLI launcher is `dist/bin.js`; `dist/cli.js` is its internal executable module. The package's `dist/index.js` is its import-only library entrypoint; executing it directly fails with a fixed credential-free correction to use `guildcontrol serve --config FILE` or `node dist/bin.js serve --config FILE` instead of closing silently during MCP initialization. The npm and source CLI launchers select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
+The source build's public CLI launcher is `dist/bin.js`; `dist/cli.js` is its internal executable module. The package's `dist/index.js` is its import-only library entrypoint; executing it directly fails with a fixed credential-free correction to use `guildctl serve --config FILE` or `node dist/bin.js serve --config FILE` instead of closing silently during MCP initialization. The npm and source CLI launchers select `serve` when no command is supplied, then fail closed unless a configuration file or schema-v2 profile is selected. The OCI image deliberately defaults to the safe catalog and requires an explicit `serve` command plus its mounted configuration for Discord access.
 
-The public launcher favors lower resident memory by starting verified Node 22 through 26 lines with V8's `--lite-mode` before connector code loads. That profile disables WebAssembly; the connector and its pinned dependencies require none, and Discord work is normally network-bound, so the principal tradeoff is lower execution throughput. Node 22 and 23 descriptors also pass `--no-expose-wasm` to suppress those lines' conflicting-default warning, while Node 24 through 26 reject the obsolete flag and receive only `--lite-mode`. Unknown future lines continue through the standard profile until the optimization is release-verified. MCPB uses the universal flag and therefore declares the exact `>=22 <27` range; its single static argument list means Node 22 and 23 emit one expected V8 compatibility warning before readiness, and bundle verification rejects any other stderr. The Node-22-pinned OCI image uses both flags. Smoke and generated direct-Node descriptors select the exact version-compatible profile themselves. On runtimes that expose POSIX process replacement, a bare or `npx` package launch replaces its tiny bootstrap in the same PID while preserving standard streams, Node arguments, CLI arguments, and the inherited environment; runtimes without that facility continue through the standard profile. Use `guildcontrol --standard-runtime COMMAND` when CPU throughput is more important than the memory profile. Custom `--command` launchers are never assumed to be Node and receive no injected runtime flags.
+The public launcher favors lower resident memory by starting verified Node 22 through 26 lines with V8's `--lite-mode` before connector code loads. That profile disables WebAssembly; the connector and its pinned dependencies require none, and Discord work is normally network-bound, so the principal tradeoff is lower execution throughput. Node 22 and 23 descriptors also pass `--no-expose-wasm` to suppress those lines' conflicting-default warning, while Node 24 through 26 reject the obsolete flag and receive only `--lite-mode`. Unknown future lines continue through the standard profile until the optimization is release-verified. MCPB uses the universal flag and therefore declares the exact `>=22 <27` range; its single static argument list means Node 22 and 23 emit one expected V8 compatibility warning before readiness, and bundle verification rejects any other stderr. The Node-22-pinned OCI image uses both flags. Smoke and generated direct-Node descriptors select the exact version-compatible profile themselves. On runtimes that expose POSIX process replacement, a bare or `npx` package launch replaces its tiny bootstrap in the same PID while preserving standard streams, Node arguments, CLI arguments, and the inherited environment; runtimes without that facility continue through the standard profile. Use `guildctl --standard-runtime COMMAND` when CPU throughput is more important than the memory profile. Custom `--command` launchers are never assumed to be Node and receive no injected runtime flags.
 
 ## Operator CLI
 
 The CLI provides a safe path from one non-secret configuration document to a verified MCP connection:
 
-Every command and nested action accepts `-h` and `--help`, writes help to stdout, returns status 0, reads no environment or credential, and invokes no operator dependency. Use `guildcontrol FAMILY --help` for the complete family catalog, `guildcontrol FAMILY ACTION --help` for one exact action, or `guildcontrol help FAMILY ACTION` for the same contextual result. Unknown actions and extra arguments remain usage errors even when a help flag is present, so a typo cannot silently select broader documentation.
+Every command and nested action accepts `-h` and `--help`, writes help to stdout, returns status 0, reads no environment or credential, and invokes no operator dependency. Use `guildctl FAMILY --help` for the complete family catalog, `guildctl FAMILY ACTION --help` for one exact action, or `guildctl help FAMILY ACTION` for the same contextual result. Unknown actions and extra arguments remain usage errors even when a help flag is present, so a typo cannot silently select broader documentation.
 
 ```sh
 node dist/bin.js catalog --check
@@ -721,7 +721,7 @@ Every non-passing doctor check includes one bounded next action and one package-
 
 The offline nickname diagnostics report the base self-only gate, exact guild scope, broader other-member gate, protected-user and hierarchy boundary, required `CHANGE_NICKNAME` or `MANAGE_NICKNAMES` evidence, signed approval, one-shot execution, and exact readback without reading a member or nickname or contacting Discord.
 
-`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildcontrol@0.1.2 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
+`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildctl@0.2.0 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
 
 The `host` generation form requires one explicit `--config FILE` or `--profile NAME` and turns the validated non-secret policy into a domain-digested activation plan without resolving a credential, contacting Discord or another network endpoint, starting a process, discovering a host, or changing policy or host configuration. The default descriptor uses the installed Node.js executable and CLI entrypoint. Add `--npx` for the exact published package version or `--command COMMAND` for an installed executable; the choices are mutually exclusive. `--name NAME` changes only the portable server label. The plan binds the pinned public application and bot identities, exact guild and channel read scope, tool surface and toolsets, exact policy selector, ordered stdio launch, named external secret references, an empty inline environment map, required-server behavior, write approval, elicitation, timeouts, and a read-only verification request. `--json` emits the same structured evidence.
 
@@ -802,13 +802,13 @@ export DISCORD_BOT_TOKEN
 printf 'Discord bot token: '
 read -r -s DISCORD_BOT_TOKEN
 printf '\n'
-guildcontrol setup \
+guildctl setup \
   --config ./guildcontrol.json \
   --preset server-observer \
   --guild-id YOUR_GUILD_ID
-guildcontrol config validate ./guildcontrol.json
-guildcontrol doctor --config ./guildcontrol.json --online
-guildcontrol smoke --config ./guildcontrol.json
+guildctl config validate ./guildcontrol.json
+guildctl doctor --config ./guildcontrol.json --online
+guildctl smoke --config ./guildcontrol.json
 ```
 
 `config init FILE` creates a preset-backed file from caller-supplied public IDs without contacting Discord. `config validate FILE` uses placeholder secrets to check strict structure and every cross-field policy without reading a token or contacting Discord. `config show FILE` returns the canonical document and a bounded summary; `config explain [PATH]` returns schema-backed descriptions for the whole document or one field. Add `--json` for versioned reports. `--force` retains a recoverable hidden backup and cannot replace the pinned application or bot identity. There is no environment-policy or automatic configuration-import command; `migrate` emits offline guidance only.
@@ -837,7 +837,7 @@ Offline `doctor` also inspects the selected policy when its referenced bot crede
 
 Selecting a file with `--config FILE` or `GUILDCONTROL_CONFIG_FILE` makes that document the exclusive policy source. The CLI resolves a relative `--config` path, while the environment selector must contain an absolute canonical path. Startup permits only the selector and the exact secrets referenced by the document. It rejects every other populated `GUILDCONTROL_*` or `OTEL_*` variable and every undeclared Discord token variable so ambient state cannot override, extend, or ambiguously combine with file policy. A config file and profile are mutually exclusive.
 
-Run `guildcontrol host --npx --config FILE --html PRIVATE_FILE` for a stable exact-version package launch and private interactive activation guide. The descriptor supplies the server name, pinned command and ordered arguments, exact secret environment variables and file paths, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Never copy a secret value into the JSON document or another static host configuration.
+Run `guildctl host --npx --config FILE --html PRIVATE_FILE` for a stable exact-version package launch and private interactive activation guide. The descriptor supplies the server name, pinned command and ordered arguments, exact secret environment variables and file paths, and recommended startup and tool timeouts. It also declares that the server should be required, writes should require host approval, and reviewed writes require MCP elicitation. Never copy a secret value into the JSON document or another static host configuration.
 
 The command always projects that verified activation plan into a deterministic `guildcontrol.host-adapters.v1` catalog in this fixed order: `mcp-json`, `cursor`, `vscode`, and `gemini-extension`. Every entry includes the activation digest, its own domain-separated adapter digest, exact canonical JSON and newline-terminated rendered bytes, host server name, destinations, secret strategy and variable names, required-server, approval, elicitation, and timeout contract, instructions, limitations, and the official host-schema source. Verification regenerates the complete catalog from the activation plan and requires canonical equality. No adapter accepts or reads a credential value.
 
@@ -857,8 +857,8 @@ For a file-backed credential policy, every projection omits `env`, input, and ex
 Use `host plan` and `host apply` when the selected host stores one supported static JSON document and the operator wants a reviewed merge instead of manual editing:
 
 ```sh
-guildcontrol host plan --npx --config ./guildcontrol.json --adapter mcp-json --host-file /absolute/path/to/mcp.json
-guildcontrol host apply --npx --config ./guildcontrol.json --adapter mcp-json --host-file /absolute/path/to/mcp.json --plan-digest PLAN_DIGEST --confirm HOST_SERVER_NAME
+guildctl host plan --npx --config ./guildcontrol.json --adapter mcp-json --host-file /absolute/path/to/mcp.json
+guildctl host apply --npx --config ./guildcontrol.json --adapter mcp-json --host-file /absolute/path/to/mcp.json --plan-digest PLAN_DIGEST --confirm HOST_SERVER_NAME
 ```
 
 Both actions regenerate the exact activation and adapter from the selected installed release, launcher, policy, optional server name, and adapter. They accept only the explicit host path; neither searches user directories, chooses a host, creates a parent, resolves a connector credential, contacts Discord or another network endpoint, starts a process, creates activity state, or changes connector policy. The parent must already be a canonical directory owned by the process user and not writable by group or world where portable metadata exists. A target may be absent. An existing target must pass the same canonical, regular, single-link, byte- and structure-bounded, stable, duplicate-free strict-JSON, trusted-owner, and private-mode checks as inspection. Non-finite numbers, unsafe integers, and negative zero fail closed because native JSON rewriting cannot preserve them safely.
@@ -879,7 +879,7 @@ After manual merge or reviewed installation, compare the destination file with t
 
 ```sh
 chmod 600 /absolute/path/to/mcp.json
-guildcontrol host --npx --config ./guildcontrol.json --adapter mcp-json --inspect-host-file /absolute/path/to/mcp.json
+guildctl host --npx --config ./guildcontrol.json --adapter mcp-json --inspect-host-file /absolute/path/to/mcp.json
 ```
 
 Replace `mcp-json` and the destination with the adapter actually installed. `--inspect-host-file` requires `--adapter`; it never searches a home directory, chooses a host, or changes the selected file. The default launcher checks the installed entrypoint, `--npx` checks the package's exact current version, and `--command COMMAND` checks that exact custom launcher. A file produced for another release, policy selection, server name, command, or argument order therefore reports drift rather than being compared with a mutable registry tag.
@@ -940,7 +940,7 @@ Create that canonical directory before startup with ownership matching the conne
 
 The path is operational policy rather than a credential value, so it may appear in the local configuration and offline workbench. It is deliberately absent from MCP results, errors, diagnostics, telemetry, activity records, and operation receipts. Back up and permission this directory as bearer-secret storage. Moving or sharing it changes credential custody, not Discord or connector authorization; exact capability gates and channel scope remain mandatory.
 
-When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildcontrol@0.1.2`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
+When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildctl@0.2.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
 
 Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
@@ -3843,25 +3843,25 @@ After npm and OCI identities agree, an immutable GitHub Release operation recons
 To verify a downloaded release archive:
 
 ```sh
-npm pack guildcontrol@0.1.2
-gh attestation verify guildcontrol-0.1.2.tgz \
+npm pack guildctl@0.2.0
+gh attestation verify guildctl-0.2.0.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.2 \
+  --source-ref refs/tags/v0.2.0 \
   --deny-self-hosted-runners
-gh attestation verify guildcontrol-0.1.2.tgz \
+gh attestation verify guildctl-0.2.0.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.2 \
+  --source-ref refs/tags/v0.2.0 \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
-gh release download v0.1.2 --repo j-256/guildcontrol --pattern guildcontrol-0.1.2.mcpb
-gh release verify-asset v0.1.2 guildcontrol-0.1.2.mcpb --repo j-256/guildcontrol
-docker pull ghcr.io/j-256/guildcontrol:0.1.2
-gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.1.2 \
+gh release download v0.2.0 --repo j-256/guildcontrol --pattern guildcontrol-0.2.0.mcpb
+gh release verify-asset v0.2.0 guildcontrol-0.2.0.mcpb --repo j-256/guildcontrol
+docker pull ghcr.io/j-256/guildcontrol:0.2.0
+gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.2.0 \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.1.2 \
+  --source-ref refs/tags/v0.2.0 \
   --deny-self-hosted-runners \
   --bundle-from-oci
 ```

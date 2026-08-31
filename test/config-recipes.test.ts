@@ -818,7 +818,7 @@ test("recipe plans emit exact immutable apply commands for every scope kind", as
         "--confirm",
         entry.name,
       ],
-      command: "guildcontrol",
+      command: "guildctl",
     })
     assert.equal(Object.isFrozen(plan.applyCommand), true)
     assert.equal(Object.isFrozen(plan.applyCommand.args), true)

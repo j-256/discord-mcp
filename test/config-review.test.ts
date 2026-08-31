@@ -116,9 +116,9 @@ test("configuration change plans are deterministic, credential-free, and exact n
   assert.equal(first.execution.discordContacted, false)
   assert.equal(first.execution.secretValuesRead, false)
   assert.deepEqual(first.nextChecks, [
-    { args: ["config", "validate", paths.file], command: "guildcontrol" },
-    { args: ["doctor", "--config", paths.file, "--online"], command: "guildcontrol" },
-    { args: ["smoke", "--config", paths.file], command: "guildcontrol" },
+    { args: ["config", "validate", paths.file], command: "guildctl" },
+    { args: ["doctor", "--config", paths.file, "--online"], command: "guildctl" },
+    { args: ["smoke", "--config", paths.file], command: "guildctl" },
   ])
   assert.equal(JSON.stringify(first).includes("test-discord-token"), false)
 
