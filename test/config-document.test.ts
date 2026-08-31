@@ -222,6 +222,85 @@ test("configuration document is strict, typed, canonical, and non-secret", () =>
   }
 })
 
+test("configuration behavior modes normalize legacy policy and reject contradictions", () => {
+  const explicit = document()
+  const {
+    notifications: _notifications,
+    threads: _threads,
+    ...legacyRoot
+  } = explicit
+  const legacy = {
+    ...legacyRoot,
+    readScope: {
+      channelIds: explicit.readScope.channelIds,
+      guildIds: explicit.readScope.guildIds,
+    },
+  }
+  const normalized = parseConnectorConfigDocument(legacy)
+  assert.deepEqual(normalized.notifications, { userMentions: "allowlist" })
+  assert.deepEqual(normalized.readScope, {
+    channelIds: [CHANNEL_ID],
+    channelMode: "allowlist",
+    guildIds: [GUILD_ID],
+    guildMode: "allowlist",
+  })
+  assert.deepEqual(normalized.threads, {
+    messageWrites: "exact",
+    reads: "inherit",
+  })
+
+  const legacyBroad = parseConnectorConfigDocument({
+    ...legacyRoot,
+    readScope: { channelIds: [], guildIds: [] },
+  })
+  assert.equal(legacyBroad.readScope.channelMode, "all-visible")
+  assert.equal(legacyBroad.readScope.guildMode, "all-visible")
+
+  const allVisible = parseConnectorConfigDocument({
+    ...explicit,
+    readScope: {
+      channelIds: [],
+      channelMode: "all-visible",
+      guildIds: [],
+      guildMode: "all-visible",
+    },
+  })
+  assert.equal(allVisible.readScope.channelMode, "all-visible")
+  assert.equal(allVisible.readScope.guildMode, "all-visible")
+
+  for (const readScope of [
+    {
+      channelIds: [],
+      channelMode: "allowlist",
+      guildIds: [GUILD_ID],
+      guildMode: "allowlist",
+    },
+    {
+      channelIds: [CHANNEL_ID],
+      channelMode: "all-visible",
+      guildIds: [GUILD_ID],
+      guildMode: "allowlist",
+    },
+    {
+      channelIds: [CHANNEL_ID],
+      channelMode: "allowlist",
+      guildIds: [],
+      guildMode: "allowlist",
+    },
+    {
+      channelIds: [CHANNEL_ID],
+      channelMode: "allowlist",
+      guildIds: [GUILD_ID],
+      guildMode: "all-visible",
+    },
+  ]) {
+    assert.throws(
+      () => parseConnectorConfigDocument({ ...explicit, readScope }),
+      ConfigDocumentError,
+    )
+  }
+})
+
 test("configuration JSON rejects duplicate keys, truncation, NULs, and deep nesting", () => {
   const valid = JSON.stringify(document())
   assert.deepEqual(parseConnectorConfigJson(`${valid}\n`), document())

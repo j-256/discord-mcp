@@ -43,10 +43,12 @@ export type ConfigChangeCategory =
   | "gateway"
   | "limits"
   | "metadata"
+  | "notifications"
   | "observability"
   | "read-scope"
   | "runtime"
   | "storage"
+  | "threads"
   | "tool-surface"
 
 export type ConfigChangeImpact =
@@ -249,19 +251,16 @@ function setImpact(
   return inverse ? "authority-expansion" : "authority-reduction"
 }
 
-function readChannelScopeImpact(
+function orderedModeImpact(
   before: RawValue,
   after: RawValue,
+  modes: readonly string[],
 ): ConfigChangeImpact {
-  const beforeValues = arrayValues(before)
-  const afterValues = arrayValues(after)
-  if (beforeValues.length === 0 && afterValues.length > 0) {
-    return "authority-reduction"
-  }
-  if (beforeValues.length > 0 && afterValues.length === 0) {
-    return "authority-expansion"
-  }
-  return setImpact(before, after)
+  if (sameRaw(before, after)) return "metadata-only"
+  const beforeIndex = modes.indexOf(String(before.value))
+  const afterIndex = modes.indexOf(String(after.value))
+  if (beforeIndex < 0 || afterIndex < 0) return "operational-change"
+  return afterIndex > beforeIndex ? "authority-expansion" : "authority-reduction"
 }
 
 function numberImpact(
@@ -346,6 +345,19 @@ function configChanges(
     ownValue(candidateRecord, "credential"),
   )
 
+  for (const name of ["guildMode", "channelMode"] as const) {
+    const before = ownValue(current.readScope, name)
+    const after = ownValue(candidate.readScope, name)
+    addChange(
+      changes,
+      `$.readScope.${name}`,
+      "read-scope",
+      orderedModeImpact(before, after, ["allowlist", "all-visible"]),
+      before,
+      after,
+    )
+  }
+
   for (const name of ["guildIds", "channelIds"] as const) {
     const before = ownValue(current.readScope, name)
     const after = ownValue(candidate.readScope, name)
@@ -353,9 +365,39 @@ function configChanges(
       changes,
       `$.readScope.${name}`,
       "read-scope",
-      name === "channelIds"
-        ? readChannelScopeImpact(before, after)
-        : setImpact(before, after),
+      setImpact(before, after),
+      before,
+      after,
+    )
+  }
+
+  const currentNotifications = current.notifications as Readonly<Record<string, unknown>>
+  const candidateNotifications = candidate.notifications as Readonly<Record<string, unknown>>
+  const currentUserMentions = ownValue(currentNotifications, "userMentions")
+  const candidateUserMentions = ownValue(candidateNotifications, "userMentions")
+  addChange(
+    changes,
+    "$.notifications.userMentions",
+    "notifications",
+    orderedModeImpact(
+      currentUserMentions,
+      candidateUserMentions,
+      ["disabled", "allowlist", "reviewed"],
+    ),
+    currentUserMentions,
+    candidateUserMentions,
+  )
+
+  const currentThreads = current.threads as Readonly<Record<string, unknown>>
+  const candidateThreads = candidate.threads as Readonly<Record<string, unknown>>
+  for (const name of ["reads", "messageWrites"] as const) {
+    const before = ownValue(currentThreads, name)
+    const after = ownValue(candidateThreads, name)
+    addChange(
+      changes,
+      `$.threads.${name}`,
+      "threads",
+      orderedModeImpact(before, after, ["exact", "inherit"]),
       before,
       after,
     )
@@ -588,8 +630,19 @@ function planWarnings(
   if (changes.some(({ category }) => category === "credential")) {
     warnings.push("The candidate references a different external credential source; planning does not read or verify that secret")
   }
-  if (candidate.readScope.channelIds.length === 0) {
-    warnings.push("The candidate has no channel allowlist, so channel reads rely on Discord visibility inside the exact guild boundary")
+  if (candidate.readScope.channelMode === "all-visible") {
+    warnings.push(candidate.readScope.guildMode === "allowlist"
+      ? "The candidate has no channel allowlist, so channel reads rely on Discord visibility inside the exact guild boundary"
+      : "The candidate has no channel allowlist, so channel reads rely on Discord visibility across every visible guild")
+  }
+  if (candidate.readScope.guildMode === "all-visible") {
+    warnings.push("The candidate reads every guild visible to the bot instead of an exact guild allowlist")
+  }
+  if (changes.some(({ category, impact }) => (
+    (category === "notifications" || category === "threads")
+    && impact === "authority-expansion"
+  ))) {
+    warnings.push("The candidate broadens reviewed notification or child-thread behavior")
   }
   return Object.freeze(warnings)
 }

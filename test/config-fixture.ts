@@ -24,6 +24,7 @@ export interface FixtureConfigOverrides {
   identity?: Partial<ConnectorConfigDocument["identity"]>
   limits?: ConnectorConfigDocument["limits"]
   name?: string
+  notifications?: Partial<ConnectorConfigDocument["notifications"]>
   observability?: ConnectorConfigDocument["observability"]
   readScope?: Partial<ConnectorConfigDocument["readScope"]>
   runtime?: ConnectorConfigDocument["runtime"]
@@ -31,6 +32,7 @@ export interface FixtureConfigOverrides {
   secretEnvironment?: NodeJS.ProcessEnv
   stateHome?: string
   storage?: ConnectorConfigDocument["storage"]
+  threads?: Partial<ConnectorConfigDocument["threads"]>
   token?: string
   tools?: Partial<ConnectorConfigDocument["tools"]>
 }
@@ -54,6 +56,9 @@ export function fixtureConfigInput(
       ? {}
       : { capabilities: overrides.capabilities }),
     channelIds: overrides.readScope?.channelIds ?? [],
+    ...(overrides.readScope?.channelMode === undefined
+      ? {}
+      : { readChannelMode: overrides.readScope.channelMode }),
     ...(credential.provider === "file"
       ? { credentialFile: credential.path }
       : { credentialVariable: credential.variable }),
@@ -64,6 +69,9 @@ export function fixtureConfigInput(
       ? {}
       : { gatewayEventBufferSize: overrides.gateway.eventBufferSize }),
     guildIds: overrides.readScope?.guildIds ?? [FIXTURE_GUILD_ID],
+    ...(overrides.readScope?.guildMode === undefined
+      ? {}
+      : { readGuildMode: overrides.readScope.guildMode }),
     ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
     name: overrides.name ?? "test-policy",
     ...(overrides.observability === undefined
@@ -72,8 +80,17 @@ export function fixtureConfigInput(
     ...(overrides.runtime === undefined ? {} : { runtime: overrides.runtime }),
     ...(overrides.scopes === undefined ? {} : { scopes: overrides.scopes }),
     ...(overrides.storage === undefined ? {} : { storage: overrides.storage }),
+    ...(overrides.threads?.messageWrites === undefined
+      ? {}
+      : { threadMessageWriteMode: overrides.threads.messageWrites }),
+    ...(overrides.threads?.reads === undefined
+      ? {}
+      : { threadReadMode: overrides.threads.reads }),
     toolsets: overrides.tools?.toolsets ?? MCP_TOOLSET_NAMES,
     toolSurface: overrides.tools?.surface ?? "full",
+    ...(overrides.notifications?.userMentions === undefined
+      ? {}
+      : { userMentionMode: overrides.notifications.userMentions }),
   })
   const environment: NodeJS.ProcessEnv = {
     ...(credential.provider === "environment" && overrides.token !== undefined

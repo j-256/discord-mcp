@@ -2484,7 +2484,9 @@ function guidanceService(options: {
         threadGuildIds: [],
         threadIds: [],
         threadMemberUserIds: [],
+        threadMessageWriteMode: "exact",
         threadParentIds: [],
+        threadReadMode: "inherit",
         webhookAuditEnabled: (options.webhookGuildIds?.length ?? 0) > 0,
         webhookChannelIds: [],
         webhookGuildIds: [...(options.webhookGuildIds ?? [])],
@@ -2503,6 +2505,7 @@ function guidanceService(options: {
         widgetSettingsAuditEnabled: false,
         widgetSettingsChangesEnabled: false,
         widgetSettingsGuildIds: [],
+        userMentionMode: "allowlist",
       }
     },
     editOwnMessage: unexpected,

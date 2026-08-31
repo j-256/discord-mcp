@@ -173,6 +173,9 @@ test("configuration change plans classify exact authority and operating changes"
     storage: { attachmentRoots: [secondRoot] },
     toolsets: toolsets("connector", "gateway", "roles"),
     toolSurface: "full",
+    threadMessageWriteMode: "inherit",
+    threadReadMode: "exact",
+    userMentionMode: "reviewed",
     gatewayEnabled: true,
     gatewayEventBufferSize: 200,
   })
@@ -187,7 +190,8 @@ test("configuration change plans classify exact authority and operating changes"
     new Set(report.changes.map(({ path }) => path)).size,
     report.changes.length,
   )
-  assert.equal(change(report, "$.readScope.channelIds").impact, "authority-expansion")
+  assert.equal(change(report, "$.readScope.channelIds").impact, "authority-reduction")
+  assert.equal(change(report, "$.readScope.channelMode").impact, "authority-expansion")
   assert.equal(change(report, "$.readScope.guildIds").impact, "authority-expansion")
   assert.equal(change(report, "$.capabilities.interactions").impact, "authority-reduction")
   assert.equal(change(report, "$.scopes.interactionChannelIds").impact, "authority-redistribution")
@@ -204,6 +208,12 @@ test("configuration change plans classify exact authority and operating changes"
   assert.equal(change(report, "$.runtime.nativeCommandName").impact, "operational-change")
   assert.equal(change(report, "$.credential").impact, "authority-redistribution")
   assert.equal(change(report, "$.name").impact, "metadata-only")
+  assert.equal(
+    change(report, "$.notifications.userMentions").impact,
+    "authority-expansion",
+  )
+  assert.equal(change(report, "$.threads.messageWrites").impact, "authority-expansion")
+  assert.equal(change(report, "$.threads.reads").impact, "authority-reduction")
   assert.ok(report.impact.authorityExpansions > 0)
   assert.ok(report.impact.authorityReductions > 0)
   assert.ok(report.impact.authorityRedistributions > 0)

@@ -620,6 +620,22 @@
       "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
       "description": "Bounded lowercase identifier for this policy"
     },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "userMentions": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "allowlist",
+            "reviewed"
+          ],
+          "description": "User notification policy: disabled, exact allowlist, or signed interactive review"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Discord notification behavior"
+    },
     "observability": {
       "default": {},
       "type": "object",
@@ -801,6 +817,14 @@
     "readScope": {
       "type": "object",
       "properties": {
+        "channelMode": {
+          "type": "string",
+          "enum": [
+            "all-visible",
+            "allowlist"
+          ],
+          "description": "Whether channel reads use exact IDs or all visible channels inside guild scope"
+        },
         "channelIds": {
           "minItems": 0,
           "maxItems": 500,
@@ -811,8 +835,16 @@
           },
           "description": "Optional exact channel allowlist inside the guild boundary"
         },
+        "guildMode": {
+          "type": "string",
+          "enum": [
+            "all-visible",
+            "allowlist"
+          ],
+          "description": "Whether guild reads use exact IDs or every guild visible to the bot"
+        },
         "guildIds": {
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 200,
           "type": "array",
           "items": {
@@ -1815,6 +1847,29 @@
       },
       "additionalProperties": false,
       "description": "Local content-free activity and owned-file paths"
+    },
+    "threads": {
+      "type": "object",
+      "properties": {
+        "messageWrites": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "inherit"
+          ],
+          "description": "Whether message-class write scopes may inherit an exact parent channel"
+        },
+        "reads": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "inherit"
+          ],
+          "description": "Whether an exact parent channel read scope includes its child threads"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Controlled child-thread scope inheritance"
     },
     "tools": {
       "type": "object",

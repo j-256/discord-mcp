@@ -97,7 +97,11 @@ export function parseConnectorProfile(
 ): ConnectorProfile {
   if (!isRecord(value)) throw new ProfileError("Profile must be a JSON object")
   try {
-    return parseConnectorConfigDocument(value, expectedName)
+    const profile = parseConnectorConfigDocument(value, expectedName)
+    if (profile.readScope.guildMode !== "allowlist") {
+      throw new ProfileError("Profiles require an exact guild read allowlist")
+    }
+    return profile
   } catch (error) {
     if (error instanceof ConfigDocumentError) {
       throw new ProfileError(error.message.replace("Configuration", "Profile"), {
@@ -127,7 +131,7 @@ export function createConnectorProfile(options: {
   toolsets: readonly McpToolsetName[]
   toolSurface: McpToolSurface
 }): ConnectorProfile {
-  return createConnectorConfigDocument(options)
+  return parseConnectorProfile(createConnectorConfigDocument(options))
 }
 
 export function resolveProfileDirectory(

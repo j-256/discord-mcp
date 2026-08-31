@@ -135,10 +135,13 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.token, TOKEN)
   assert.deepEqual([...config.allowedChannelIds], [CHANNEL_ID, OTHER_CHANNEL_ID])
   assert.deepEqual([...config.allowedGuildIds], [GUILD_ID])
+  assert.equal(config.readChannelMode, "allowlist")
+  assert.equal(config.readGuildMode, "allowlist")
   assert.deepEqual([...config.adminGuildIds], [GUILD_ID])
   assert.deepEqual([...config.deleteChannelIds], [CHANNEL_ID])
   assert.deepEqual([...config.interactionChannelIds], [OTHER_CHANNEL_ID])
   assert.deepEqual([...config.mentionUserIds], [USER_ID])
+  assert.equal(config.userMentionMode, "allowlist")
   assert.deepEqual([...config.protectedUserIds], [USER_ID])
   assert.equal(config.allowAdministration, true)
   assert.equal(config.allowAnnouncementCrossposts, true)
@@ -179,6 +182,8 @@ test("configuration parses bounded scope and deletion controls", () => {
   assert.equal(config.gatewayEventBufferSize, 100)
   assert.equal(config.mcpToolSurface, "full")
   assert.equal(config.mcpReadResponseMaxBytes, 1_048_576)
+  assert.equal(config.threadMessageWriteMode, "exact")
+  assert.equal(config.threadReadMode, "inherit")
   assert.deepEqual([...config.mcpToolsets], MCP_TOOLSET_NAMES)
   assert.deepEqual(config.observability, {
     export: undefined,
@@ -383,6 +388,7 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     nativeInteractionTtlSeconds: 600,
     nativeInteractionUserIds: [],
     mentionUserCount: 0,
+    userMentionMode: "disabled",
     mcpToolsets: ["connector", "messages"],
     mcpToolSurface: "progressive",
     mcpReadResponseMaxBytes: 1_048_576,
@@ -419,7 +425,9 @@ test("configuration strictly parses the MCP tool surface and risk-separated tool
     threadGuildIds: [],
     threadIds: [],
     threadMemberUserIds: [],
+    threadMessageWriteMode: "exact",
     threadParentIds: [],
+    threadReadMode: "inherit",
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookGuildIds: [],
@@ -1904,6 +1912,7 @@ test("configuration and policy require an exact administration guild and protect
     nativeInteractionTtlSeconds: 600,
     nativeInteractionUserIds: [],
     mentionUserCount: 0,
+    userMentionMode: "disabled",
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
     mcpReadResponseMaxBytes: 1_048_576,
@@ -1940,7 +1949,9 @@ test("configuration and policy require an exact administration guild and protect
     threadGuildIds: [],
     threadIds: [],
     threadMemberUserIds: [],
+    threadMessageWriteMode: "exact",
     threadParentIds: [],
+    threadReadMode: "inherit",
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookGuildIds: [],
@@ -5910,6 +5921,7 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     nativeInteractionTtlSeconds: 600,
     nativeInteractionUserIds: [],
     mentionUserCount: 0,
+    userMentionMode: "disabled",
     mcpToolsets: [...MCP_TOOLSET_NAMES],
     mcpToolSurface: "full",
     mcpReadResponseMaxBytes: 1_048_576,
@@ -5946,7 +5958,9 @@ test("scope policy enforces guild, read channel, and deletion channel allowlists
     threadGuildIds: [],
     threadIds: [],
     threadMemberUserIds: [],
+    threadMessageWriteMode: "exact",
     threadParentIds: [],
+    threadReadMode: "inherit",
     webhookAuditEnabled: false,
     webhookChannelIds: [],
     webhookGuildIds: [],
@@ -6690,9 +6704,18 @@ test("scope policy requires exact interaction channels and exact notification us
     /outside the interaction scope/,
   )
   policy.assertNotificationUsers([USER_ID])
+  assert.equal(policy.describe().userMentionMode, "allowlist")
   assert.throws(
     () => policy.assertNotificationUsers(["400000000000000002"]),
     /outside the notification scope/,
+  )
+  const disabled = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    notifications: { userMentions: "disabled" },
+  }, { homeDirectory: "/test/home" }))
+  assert.throws(
+    () => disabled.assertNotificationUsers([USER_ID]),
+    /notifications are disabled/,
   )
   policy.assertComponentLinkOrigins(["https://docs.example.com"])
   assert.throws(
@@ -6724,9 +6747,34 @@ test("scope policy inherits parent read scope for threads but keeps deletion exa
 
   assert.equal(policy.assertChannelReadable(thread), GUILD_ID)
   assert.deepEqual(policy.filterChannels([channel(), thread]), [channel(), thread])
+  assert.equal(policy.describe().threadReadMode, "inherit")
   assert.throws(
     () => policy.assertChannelDeletable(thread),
     /outside the deletion scope/,
+  )
+
+  const ordinaryChild = channel({
+    id: "200000000000000003",
+    parent_id: CHANNEL_ID,
+    type: DISCORD_CHANNEL_TYPES.text,
+  })
+  assert.throws(
+    () => policy.assertChannelReadable(ordinaryChild),
+    /outside the configured read scope/,
+  )
+
+  const exact = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    threads: { reads: "exact" },
+  }, { homeDirectory: "/test/home" }))
+  assert.equal(exact.describe().threadReadMode, "exact")
+  assert.throws(
+    () => exact.assertChannelReadable(thread),
+    /outside the configured read scope/,
   )
 })
 
