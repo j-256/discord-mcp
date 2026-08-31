@@ -9,6 +9,10 @@ updates:
     open-pull-requests-limit: 10
   - package-ecosystem: github-actions
     directory: /
+    groups:
+      codeql-actions:
+        patterns:
+          - "github/codeql-action/*"
     cooldown:
       default-days: 7
     schedule:
