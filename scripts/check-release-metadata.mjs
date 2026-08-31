@@ -1228,6 +1228,8 @@ async function checkAutomation() {
     "image",
     "register",
     "github-release",
+    "github-release-recovery",
+    "evidence_run_id",
     "Require a clean first-publication candidate",
     "npm stage publish",
     "--provenance",
@@ -1251,6 +1253,10 @@ async function checkAutomation() {
     "Verify complete public distribution for GitHub Release",
     "Verify exact immutable GitHub Release before registration",
     "Verify exact tag and prepare immutable release evidence",
+    "Verify protected recovery provenance",
+    "Verify recovered artifact attestations",
+    "Retain recovery source verification",
+    ".release-recovery-control/scripts/github-release.mjs verify-recovery-run",
     "Create an absent release as an editable draft",
     "Reconcile and verify the editable draft",
     "Publish the exact draft immutably",
@@ -1259,6 +1265,7 @@ async function checkAutomation() {
     "scripts/github-release.mjs prepare",
     "scripts/github-release.mjs inspect",
     "scripts/github-release.mjs verify",
+    "scripts/github-release.mjs verify-recovery-run",
     "gh release create",
     "gh release upload",
     "gh release verify",
@@ -1271,6 +1278,7 @@ async function checkAutomation() {
     "subject-name: ${{ steps.release.outputs.image_name }}",
     "catalog-evidence.json",
     "guildcontrol-${RELEASE_TAG#v}.mcpb",
+    "guildctl-${RELEASE_TAG#v}.tgz",
     "container-evidence.json",
     "ghcr.io/j-256/guildcontrol:$version",
     "linux/amd64,linux/arm64",
@@ -1292,6 +1300,7 @@ async function checkAutomation() {
     "_authToken",
     "operation == 'bootstrap'",
     'npm publish "$TARBALL"',
+    "guildcontrol-${RELEASE_TAG#v}.tgz",
   ]) {
     invariant(!release.includes(forbidden), `release workflow contains forbidden first-publication automation ${forbidden}`)
   }
