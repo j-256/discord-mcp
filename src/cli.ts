@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 
 import {
   exportDiscordActivityHtml,
@@ -27,6 +28,20 @@ import {
   exportDiscordOnboardingHtml,
   type DiscordOnboardingHtmlExportReport,
 } from "./onboarding-html.js"
+import {
+  exportOnboardHtml,
+  type OnboardHtmlExportReport,
+} from "./onboard-html.js"
+import {
+  ONBOARD_HOST_IDS,
+  createOnboardReport,
+  isOnboardHostId,
+  onboardHostDescriptor,
+  onboardHostSupportsCredentialFile,
+  resolveDefaultOnboardConfigFile,
+  type OnboardHostId,
+  type OnboardReport,
+} from "./onboard.js"
 import {
   exportDiscordHostActivationHtml,
   type DiscordHostActivationHtmlExportReport,
@@ -73,6 +88,7 @@ import {
   CONNECTOR_VERSION,
   CONFIG_FILE_ENVIRONMENT_VARIABLE,
   CONNECTOR_LIMITS,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
   DISCORD_TOKEN_ENVIRONMENT_PATTERN,
 } from "./constants.js"
 import {
@@ -98,6 +114,7 @@ import {
 } from "./config-document.js"
 import {
   explainConnectorConfig,
+  ensureConnectorConfigDirectory,
   initializeConnectorConfigFile,
   resolveConnectorConfigFile,
   showConnectorConfigFile,
@@ -123,6 +140,7 @@ import {
 } from "./config-recipes.js"
 import {
   ConfigurationError,
+  CredentialUnavailableError,
   redactText,
   RuntimeConfigurationRequiredError,
 } from "./errors.js"
@@ -180,6 +198,10 @@ import {
   type SetupPresetDescriptor,
   type SetupPresetSelection,
 } from "./setup-presets.js"
+import {
+  DEFAULT_CLI_INTERACTION,
+  type CliInteraction,
+} from "./terminal-interaction.js"
 
 const CLI_COMMANDS = Object.freeze([
   "activity",
@@ -190,6 +212,7 @@ const CLI_COMMANDS = Object.freeze([
   "help",
   "host",
   "migrate",
+  "onboard",
   "preset",
   "profile",
   "recipe",
@@ -389,6 +412,19 @@ export type ParsedCliArguments =
     sourceId: string
   }
   | {
+    applicationId?: string
+    command: "onboard"
+    configFile?: string
+    confirmation?: string
+    credentialFile?: string
+    credentialVariable?: string
+    guildId?: string
+    hostId?: OnboardHostId
+    htmlFile?: string
+    json: boolean
+    open: boolean
+  }
+  | {
     action: "install"
     applicationId: string
     command: "preset"
@@ -509,11 +545,16 @@ export interface CliDependencies {
     file: string,
     plan: MigrationPlanReport,
   ): Promise<DiscordMigrationHtmlExportReport>
+  exportOnboardHtml(
+    file: string,
+    report: OnboardReport,
+  ): Promise<OnboardHtmlExportReport>
   exportOnboardingHtml(
     file: string,
     plan: BotInstallPlan,
   ): Promise<DiscordOnboardingHtmlExportReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
+  ensureConfigDirectory(directory: string): Promise<string>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
   inspectHostFile(
@@ -564,8 +605,10 @@ export interface CliOptions {
   entrypointPath?: string
   environment?: NodeJS.ProcessEnv
   executablePath?: string
+  interaction?: CliInteraction
   nodeVersion?: string
   stderr?: Pick<NodeJS.WriteStream, "write">
+  stdin?: Pick<NodeJS.ReadStream, "isTTY">
   stdout?: Pick<NodeJS.WriteStream, "write">
 }
 
@@ -588,11 +631,13 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   catalog: runGuildControlCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
+  ensureConfigDirectory: ensureConnectorConfigDirectory,
   exportActivityHtml: exportDiscordActivityHtml,
   exportCatalogHtml: exportDiscordCatalogHtml,
   exportConfigWorkbenchHtml: exportDiscordConfigWorkbenchHtml,
   exportHostActivationHtml: exportDiscordHostActivationHtml,
   exportMigrationHtml: exportDiscordMigrationHtml,
+  exportOnboardHtml,
   exportOnboardingHtml: exportDiscordOnboardingHtml,
   explainConfig: explainConnectorConfig,
   initializeConfig: initializeConnectorConfigFile,
@@ -768,6 +813,91 @@ function parseSetupOptions(args: readonly string[]): Extract<ParsedCliArguments,
       : {}),
     ...(profileName ? { profileName } : {}),
     serverName,
+  }
+}
+
+function parseOnboardOptions(
+  args: readonly string[],
+): Extract<ParsedCliArguments, { command: "onboard" }> {
+  let applicationId: string | undefined
+  let configFile: string | undefined
+  let confirmation: string | undefined
+  let credentialFile: string | undefined
+  let credentialVariable: string | undefined
+  let guildId: string | undefined
+  let hostId: OnboardHostId | undefined
+  let htmlFile: string | undefined
+  let json = false
+  let open = false
+  const seen = new Set<string>()
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (!argument?.startsWith("--")) {
+      throw new ConfigurationError(`Unexpected onboard argument ${argument || ""}`)
+    }
+    if (seen.has(argument)) {
+      throw new ConfigurationError(`Option ${argument} may be provided only once`)
+    }
+    seen.add(argument)
+    if (argument === "--json") {
+      json = true
+      continue
+    }
+    if (argument === "--open") {
+      open = true
+      continue
+    }
+    if (![
+      "--application-id",
+      "--config",
+      "--confirm-installed",
+      "--guild-id",
+      "--host",
+      "--html",
+      "--token-env",
+      "--token-file",
+    ].includes(argument)) {
+      throw new ConfigurationError(`Unknown option ${argument}`)
+    }
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) {
+      throw new ConfigurationError(`Option ${argument} requires a value`)
+    }
+    index += 1
+    if (argument === "--application-id") applicationId = value
+    if (argument === "--config") configFile = value
+    if (argument === "--confirm-installed") confirmation = value
+    if (argument === "--guild-id") guildId = value
+    if (argument === "--host") {
+      if (!isOnboardHostId(value)) {
+        throw new ConfigurationError(
+          `Option --host must be one of ${ONBOARD_HOST_IDS.join(", ")}`,
+        )
+      }
+      hostId = value
+    }
+    if (argument === "--html") htmlFile = value
+    if (argument === "--token-env") credentialVariable = value
+    if (argument === "--token-file") credentialFile = value
+  }
+  if (credentialFile !== undefined && credentialVariable !== undefined) {
+    throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
+  }
+  if (json && open) {
+    throw new ConfigurationError("Onboarding options --json and --open are mutually exclusive")
+  }
+  return {
+    ...(applicationId ? { applicationId } : {}),
+    command: "onboard",
+    ...(configFile ? { configFile } : {}),
+    ...(confirmation ? { confirmation } : {}),
+    ...(credentialFile ? { credentialFile } : {}),
+    ...(credentialVariable ? { credentialVariable } : {}),
+    ...(guildId ? { guildId } : {}),
+    ...(hostId ? { hostId } : {}),
+    ...(htmlFile ? { htmlFile } : {}),
+    json,
+    open,
   }
 }
 
@@ -1715,6 +1845,7 @@ export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (command === "coordination") return parseCoordinationCommand(rest)
   if (command === "host") return parseHostOptions(rest)
   if (command === "migrate") return parseMigrationCommand(rest)
+  if (command === "onboard") return parseOnboardOptions(rest)
   if (command === "setup") return parseSetupOptions(rest)
   if (command === "preset") return parsePresetCommand(rest)
   if (command === "profile") return parseProfileCommand(rest)
@@ -1935,6 +2066,15 @@ function helpText(
       "Generate a release-exact, complete outcome map from one scored GuildControl MCP source release into this connector's strict presets, recipes, tools, and reviewed lifecycles. SOURCE must be a versioned ID shown by migrate list. Planning reads no source checkout, configuration, host setting, credential, environment value, network, or Discord endpoint and changes nothing. It does not rewrite prompts, arguments, configuration, credentials, or host settings. Optional HTML exclusively creates a mode-0600 standalone interactive guide without replacing an existing file.",
     ].join("\n")
   }
+  if (topic === "onboard") {
+    return [
+      `Usage: ${CONNECTOR_CLI_COMMAND} onboard [--host HOST] [--application-id ID] [--guild-id ID] [--config FILE] [--confirm-installed ID] [--token-env VARIABLE | --token-file FILE] [--html FILE] [--open] [--json]`,
+      "",
+      `Run the host-first golden path for ${ONBOARD_HOST_IDS.join(", ")}. In an interactive terminal the command asks for the host first, creates an exact guild-locked server-observer install link, waits for exact guild confirmation, verifies the token's application and installation, writes one private non-secret policy, launches a real stdio smoke test, and creates one private host-specific HTML handoff. It never writes a host configuration or reads Discord message content.`,
+      "",
+      "Without an interactive terminal, --host, --application-id, --guild-id, --config, and --confirm-installed are required. The confirmation must exactly match the guild ID. The default credential reference is DISCORD_BOT_TOKEN; --token-env selects another protected environment variable and --token-file selects an existing protected file. --json never prompts or opens a browser and cannot be combined with --open. --open is explicit browser authorization. Exit status is 0 on a fully verified handoff and 2 on invalid input, failed identity or installation verification, policy publication failure, stdio failure, or guide export failure.",
+    ].join("\n")
+  }
   if (topic === "coordination") {
     return [
       `Usage: ${CONNECTOR_CLI_COMMAND} coordination <action> [options]`,
@@ -2009,6 +2149,7 @@ function helpText(
     "  setup    Create or verify a policy and generate a portable launch descriptor",
     "  host     Project one verified policy into safe local MCP host adapters",
     "  migrate  Plan a release-exact switch from another Discord MCP",
+    "  onboard  Install, verify, smoke-test, and activate the host-first golden path",
     "  preset   Inspect presets or generate an exact bot installation plan",
     "  profile  Inspect, recoverably remove, or restore non-secret profiles",
     "  recipe   Review and add a bounded workflow to an existing policy",
@@ -2313,6 +2454,31 @@ function renderSetup(report: SetupReport): string {
     "Translate the requirements into the MCP host's required-server, write-approval, elicitation, and timeout settings.",
   )
   return lines.join("\n")
+}
+
+function renderOnboard(
+  report: OnboardReport,
+  guide: OnboardHtmlExportReport,
+  browser: { guideOpened: boolean; installOpened: boolean },
+): string {
+  return [
+    "GuildControl onboarding: ready",
+    `Host: ${report.host.title}`,
+    `Verified application: ${report.setup.applicationId}`,
+    `Verified bot: ${report.setup.botId}`,
+    `Exact guild: ${report.install.guildId}`,
+    `Policy: ${report.configFile}`,
+    `MCP smoke test: ${report.smoke.transport} passed with ${report.smoke.toolCount} tools`,
+    `Private activation guide: ${guide.file}`,
+    `Install page opened: ${browser.installOpened ? "yes" : "no"}`,
+    `Activation guide opened: ${browser.guideOpened ? "yes" : "no"}`,
+    `Evidence digest: ${report.onboardDigest}`,
+    "",
+    "First read-only request:",
+    report.firstRead.prompt,
+    "",
+    "No token value was written to the policy, guide, report, or command arguments. No host configuration was changed.",
+  ].join("\n")
 }
 
 function renderHostActivation(
@@ -3049,6 +3215,341 @@ function publishedPackageLaunch(): {
   }
 }
 
+interface OnboardCredentialSelection {
+  readonly credentialFile?: string
+  readonly credentialVariable?: string
+  readonly hiddenToken?: string
+}
+
+interface OnboardExecutionResult {
+  readonly browser: {
+    readonly guideOpened: boolean
+    readonly installOpened: boolean
+  }
+  readonly guide: OnboardHtmlExportReport
+  readonly report: OnboardReport
+}
+
+function affirmative(value: string, defaultValue: boolean): boolean {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return defaultValue
+  if (["y", "yes"].includes(normalized)) return true
+  if (["n", "no"].includes(normalized)) return false
+  throw new ConfigurationError("Answer yes or no")
+}
+
+async function promptRequired(
+  interaction: CliInteraction,
+  message: string,
+  supplied: string | undefined,
+): Promise<string> {
+  const value = supplied ?? await interaction.promptText(message)
+  if (!value.trim()) throw new ConfigurationError(`${message.trim()} requires a value`)
+  return value.trim()
+}
+
+async function selectOnboardHost(
+  interaction: CliInteraction,
+  supplied: OnboardHostId | undefined,
+): Promise<OnboardHostId> {
+  if (supplied) return supplied
+  const value = await interaction.promptText([
+    "Choose the MCP host to activate first:",
+    ...ONBOARD_HOST_IDS.map((id) => `  ${id} - ${onboardHostDescriptor(id).title}`),
+    "Host: ",
+  ].join("\n"))
+  if (!isOnboardHostId(value)) {
+    throw new ConfigurationError(
+      `Host must be one of ${ONBOARD_HOST_IDS.join(", ")}`,
+    )
+  }
+  return value
+}
+
+function requireAvailableCredentialVariable(
+  variable: string,
+  environment: NodeJS.ProcessEnv,
+): string {
+  const normalized = variable.trim()
+  if (!normalized) {
+    throw new ConfigurationError("Credential environment variable name must not be empty")
+  }
+  if (!environment[normalized]?.trim()) {
+    throw new CredentialUnavailableError("environment", normalized)
+  }
+  return normalized
+}
+
+async function selectOnboardCredential(
+  parsed: Extract<ParsedCliArguments, { command: "onboard" }>,
+  hostId: OnboardHostId,
+  interactive: boolean,
+  interaction: CliInteraction,
+  environment: NodeJS.ProcessEnv,
+): Promise<OnboardCredentialSelection> {
+  const credentialFileSupported = onboardHostSupportsCredentialFile(hostId)
+  if (parsed.credentialFile) {
+    if (!credentialFileSupported) {
+      throw new ConfigurationError(
+        "The selected MCPB host requires an environment-backed policy; use a protected environment variable or hidden prompt",
+      )
+    }
+    return { credentialFile: parsed.credentialFile }
+  }
+  if (parsed.credentialVariable) {
+    return {
+      credentialVariable: requireAvailableCredentialVariable(
+        parsed.credentialVariable,
+        environment,
+      ),
+    }
+  }
+  if (environment[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()) {
+    return { credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE }
+  }
+  if (!interactive) {
+    throw new CredentialUnavailableError(
+      "environment",
+      DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+    )
+  }
+  const choices = !credentialFileSupported
+    ? "hidden prompt or environment variable [prompt]: "
+    : "hidden prompt, environment variable, or protected file [prompt]: "
+  const source = (await interaction.promptText(`Bot token source: ${choices}`))
+    .trim()
+    .toLowerCase()
+  if (!source || source === "prompt" || source === "hidden") {
+    const hiddenToken = await interaction.promptSecret("Discord bot token: ")
+    if (!hiddenToken) throw new ConfigurationError("Discord bot token must not be empty")
+    return {
+      credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+      hiddenToken,
+    }
+  }
+  if (source === "environment" || source === "env") {
+    const variable = await interaction.promptText(
+      `Environment variable [${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE}]: `,
+    )
+    return {
+      credentialVariable: requireAvailableCredentialVariable(
+        variable.trim() || DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+        environment,
+      ),
+    }
+  }
+  if (source === "file" && credentialFileSupported) {
+    return {
+      credentialFile: await promptRequired(
+        interaction,
+        "Protected token file: ",
+        undefined,
+      ),
+    }
+  }
+  throw new ConfigurationError(
+    !credentialFileSupported
+      ? "Bot token source must be prompt or environment"
+      : "Bot token source must be prompt, environment, or file",
+  )
+}
+
+function assertNonInteractiveOnboardArguments(
+  parsed: Extract<ParsedCliArguments, { command: "onboard" }>,
+): void {
+  const missing = [
+    ["--host", parsed.hostId],
+    ["--application-id", parsed.applicationId],
+    ["--guild-id", parsed.guildId],
+    ["--config", parsed.configFile],
+    ["--confirm-installed", parsed.confirmation],
+  ].filter(([, value]) => !value).map(([name]) => name)
+  if (missing.length > 0) {
+    throw new ConfigurationError(
+      `Non-interactive onboarding requires ${missing.join(", ")}`,
+    )
+  }
+}
+
+async function executeOnboard(
+  parsed: Extract<ParsedCliArguments, { command: "onboard" }>,
+  options: CliOptions,
+  dependencies: CliDependencies,
+  environment: NodeJS.ProcessEnv,
+): Promise<OnboardExecutionResult> {
+  const interaction = options.interaction || DEFAULT_CLI_INTERACTION
+  const interactive = !parsed.json && Boolean((options.stdin || process.stdin).isTTY)
+  if (!interactive) assertNonInteractiveOnboardArguments(parsed)
+
+  const hostId = await selectOnboardHost(interaction, parsed.hostId)
+  const applicationId = await promptRequired(
+    interaction,
+    "Discord Application ID: ",
+    parsed.applicationId,
+  )
+  const guildId = await promptRequired(
+    interaction,
+    "Discord Guild ID: ",
+    parsed.guildId,
+  )
+  const install = createBotInstallPlan({
+    applicationId,
+    guildId,
+    preset: "server-observer",
+  })
+  if (!onboardHostSupportsCredentialFile(hostId) && parsed.credentialFile) {
+    throw new ConfigurationError(
+      "The selected MCPB host requires an environment-backed policy; use --token-env or the hidden prompt",
+    )
+  }
+
+  let installOpened = false
+  if (interactive && parsed.confirmation === undefined) {
+    const shouldOpen = parsed.open || affirmative(
+      await interaction.promptText([
+        "GuildControl will request only the listed read permissions, lock the grant to the exact guild, and request no Administrator permission.",
+        `Install URL: ${install.installUrl}`,
+        "Open Discord to install the bot? [Y/n]: ",
+      ].join("\n")),
+      true,
+    )
+    if (shouldOpen) {
+      await interaction.openExternal(install.installUrl)
+      installOpened = true
+    }
+  }
+
+  const confirmation = await promptRequired(
+    interaction,
+    `After Discord shows the bot in guild ${install.guildId}, type that guild ID exactly: `,
+    parsed.confirmation,
+  )
+  if (confirmation !== install.guildId) {
+    throw new ConfigurationError(
+      `Installation confirmation must exactly match guild ${install.guildId}`,
+    )
+  }
+
+  const defaultConfig = parsed.configFile === undefined
+  const configFile = resolveConnectorConfigFile(
+    parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
+  )
+  const credential = await selectOnboardCredential(
+    parsed,
+    hostId,
+    interactive,
+    interaction,
+    environment,
+  )
+  if (defaultConfig) await dependencies.ensureConfigDirectory(dirname(configFile))
+  const executionEnvironment = {
+    ...environment,
+    [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile,
+    ...(credential.hiddenToken
+      ? { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: credential.hiddenToken }
+      : {}),
+  }
+  const launcher = publishedPackageLaunch()
+  let report: OnboardReport
+  try {
+    if (interactive) {
+      safeWrite(
+        options.stderr || process.stderr,
+        "Verifying the Discord application, bot, and exact guild installation...",
+        executionEnvironment,
+      )
+    }
+    const setup = await dependencies.prepareSetup({
+      args: launcher.args,
+      command: launcher.command,
+      configFile,
+      ...(credential.credentialFile
+        ? { credentialFile: credential.credentialFile }
+        : {}),
+      ...(credential.credentialVariable
+        ? { credentialVariable: credential.credentialVariable }
+        : {}),
+      environment: executionEnvironment,
+      expectedApplicationId: install.applicationId,
+      preset: {
+        channelIds: [],
+        guildIds: [install.guildId],
+        name: "server-observer",
+      },
+    })
+    const document = dependencies.loadConfigDocument(configFile)
+    const config = dependencies.loadConfig(executionEnvironment)
+    if (interactive) {
+      safeWrite(
+        options.stderr || process.stderr,
+        "Starting a child process to verify the real MCP stdio path...",
+        executionEnvironment,
+      )
+    }
+    const smoke = await dependencies.smoke({
+      config,
+      environment: executionEnvironment,
+      launch: {
+        args: setup.launch.args,
+        command: setup.launch.command,
+      },
+    })
+    const activation = createHostActivationPlan({
+      document,
+      launch: setup.launch,
+      source: { file: configFile, kind: "config" },
+    })
+    report = createOnboardReport({
+      activation,
+      configFile,
+      hostId,
+      install,
+      setup,
+      smoke,
+    })
+    if (
+      credential.hiddenToken
+      && JSON.stringify(report).includes(credential.hiddenToken)
+    ) {
+      throw new ConfigurationError("Onboarding evidence unexpectedly contained a credential value")
+    }
+  } catch (error) {
+    if (!credential.hiddenToken) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    throw new ConfigurationError(redactText(message, [credential.hiddenToken]))
+  } finally {
+    if (credential.hiddenToken) {
+      delete executionEnvironment[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]
+    }
+  }
+
+  const htmlFile = parsed.htmlFile
+    ? resolve(parsed.htmlFile)
+    : resolve(dirname(configFile), "guildcontrol-onboarding.html")
+  if (interactive) {
+    safeWrite(
+      options.stderr || process.stderr,
+      `Creating the private ${onboardHostDescriptor(hostId).title} activation guide...`,
+      environment,
+    )
+  }
+  const guide = await dependencies.exportOnboardHtml(htmlFile, report)
+  let guideOpened = false
+  const shouldOpenGuide = parsed.open || (interactive && affirmative(
+    await interaction.promptText("Open the private host activation guide now? [Y/n]: "),
+    true,
+  ))
+  if (shouldOpenGuide) {
+    await interaction.openExternal(pathToFileURL(guide.file).href)
+    guideOpened = true
+  }
+  return {
+    browser: { guideOpened, installOpened },
+    guide,
+    report,
+  }
+}
+
 function configSelectionEnvironment(
   file: string | undefined,
   environment: NodeJS.ProcessEnv,
@@ -3481,6 +3982,26 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
                 ...(guide ? [renderMigrationHtmlExport(guide)] : []),
               ].join("\n\n"),
           {},
+        )
+        return CLI_EXIT_CODES.success
+      }
+      case "onboard": {
+        const result = await executeOnboard(
+          parsed,
+          options,
+          dependencies,
+          environment,
+        )
+        safeWrite(
+          stdout,
+          parsed.json
+            ? jsonReport({
+                ...result.report,
+                browser: result.browser,
+                guide: result.guide,
+              })
+            : renderOnboard(result.report, result.guide, result.browser),
+          environment,
         )
         return CLI_EXIT_CODES.success
       }

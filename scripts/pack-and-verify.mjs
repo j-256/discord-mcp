@@ -141,6 +141,8 @@ const REQUIRED_FILES = [
   "dist/migration-html.js",
   "dist/migration-manifests.js",
   "dist/migration-planner.js",
+  "dist/onboard-html.js",
+  "dist/onboard.js",
   "docs/comparison.md",
   "docs/getting-started.md",
   "docs/limitations.md",
@@ -277,7 +279,9 @@ async function assertNeutralPackage(packageDirectory, files) {
         allowClientCompatibility: clientCompatibilityFiles.has(relative)
           || relative.startsWith("dist/host-adapters.")
           || relative.startsWith("dist/host-inspection.")
-          || relative.startsWith("dist/host-installation."),
+          || relative.startsWith("dist/host-installation.")
+          || relative.startsWith("dist/onboard-html.")
+          || relative.startsWith("dist/onboard."),
       }),
       `npm archive file ${relative} has model- or harness-specific branding`,
     )

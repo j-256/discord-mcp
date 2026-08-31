@@ -5,6 +5,7 @@ import {
   ConfigChangeError,
   ConfigDocumentError,
   ConfigurationError,
+  CredentialUnavailableError,
   DiscordApiError,
   ProfileError,
   WriteCoordinationConflictError,
@@ -72,6 +73,33 @@ test("operator recovery distinguishes configuration, profile, and usage correcti
   assert.equal(safeCliFailureMessage(profile, COMMAND_CONTEXT), "Profile not found")
   assert.equal(safeCliFailureMessage(configuration, COMMAND_CONTEXT), "Configuration is invalid")
   assert.equal(safeCliFailureMessage(new Error("argument secret"), usage), "Invalid command usage")
+})
+
+test("operator recovery gives missing credentials source-specific next actions", () => {
+  const environment = new CredentialUnavailableError(
+    "environment",
+    "DISCORD_TEAM_BOT_TOKEN",
+  )
+  const file = new CredentialUnavailableError(
+    "file",
+    "/private/discord-token",
+  )
+  const environmentGuidance = classifyCliFailure(environment, COMMAND_CONTEXT)
+  const fileGuidance = classifyCliFailure(file, COMMAND_CONTEXT)
+  assert.match(environmentGuidance.recovery.action, /DISCORD_TEAM_BOT_TOKEN/)
+  assert.match(environmentGuidance.recovery.action, /protected token file/)
+  assert.doesNotMatch(environmentGuidance.recovery.action, /doctor/)
+  assert.match(fileGuidance.recovery.action, /Restore the protected credential file/)
+  assert.match(fileGuidance.recovery.action, /credential environment variable/)
+  assert.doesNotMatch(fileGuidance.recovery.action, /doctor/)
+  assert.equal(
+    environmentGuidance.recovery.reference,
+    "docs/reference.md#credential-delivery",
+  )
+  assert.equal(
+    safeCliFailureMessage(environment, COMMAND_CONTEXT),
+    "Credential environment variable DISCORD_TEAM_BOT_TOKEN is unavailable",
+  )
 })
 
 test("operator recovery routes host configuration failures through fresh inspection", () => {

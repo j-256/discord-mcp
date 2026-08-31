@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import {
   link,
   lstat,
+  mkdir,
   open,
   realpath,
   rename,
@@ -385,6 +386,35 @@ async function assertConfigDirectory(directory: string): Promise<void> {
       "Configuration directory must not be group or world writable",
     )
   }
+}
+
+export async function ensureConnectorConfigDirectory(
+  directory: string,
+): Promise<string> {
+  const normalized = directory.trim()
+  if (!normalized || FILE_CONTROL_CHARACTER_PATTERN.test(normalized)) {
+    throw new ConfigDocumentError(
+      "Configuration directory path must not be empty or contain control characters",
+    )
+  }
+  const target = resolve(normalized)
+  try {
+    await mkdir(target, { mode: 0o700, recursive: true })
+  } catch (error) {
+    throw new ConfigDocumentError("Unable to create private configuration directory", {
+      cause: error,
+    })
+  }
+  await assertConfigDirectory(target)
+  if (process.platform !== "win32") {
+    const metadata = await lstat(target)
+    if ((metadata.mode & 0o077) !== 0) {
+      throw new ConfigDocumentError(
+        "CLI-owned configuration directory must be accessible only to the process user",
+      )
+    }
+  }
+  return target
 }
 
 async function pathExists(path: string): Promise<boolean> {

@@ -14,6 +14,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 import {
+  ensureConnectorConfigDirectory,
   explainConnectorConfig,
   initializeConnectorConfigFile,
   showConnectorConfigFile,
@@ -90,6 +91,20 @@ test("configuration policy validation is offline, secret-free, and cross-field c
     validateConnectorConfigDocumentPolicy(fileCredential),
     fileCredential,
   )
+})
+
+test("CLI-owned configuration directory is created privately and rejects public state", async (context) => {
+  const root = await operatorRoot(context)
+  const directory = join(root, "nested", "guildcontrol")
+  assert.equal(await ensureConnectorConfigDirectory(directory), directory)
+  if (process.platform !== "win32") {
+    assert.equal((await lstat(directory)).mode & 0o777, 0o700)
+    await chmod(directory, 0o755)
+    await assert.rejects(
+      ensureConnectorConfigDirectory(directory),
+      /accessible only to the process user/,
+    )
+  }
 })
 
 test("configuration files create privately, validate canonically, and preserve backups", async (context) => {

@@ -424,6 +424,7 @@ export interface SetupOptions {
   credentialFile?: string
   credentialVariable?: string
   environment?: NodeJS.ProcessEnv
+  expectedApplicationId?: string
   overwriteConfig?: boolean
   overwriteProfile?: boolean
   profileDirectory?: string
@@ -4136,6 +4137,19 @@ export async function prepareSetup(
   if (options.credentialFile !== undefined && options.credentialVariable !== undefined) {
     throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
   }
+  const expectedApplicationId = options.expectedApplicationId?.trim()
+  if (expectedApplicationId !== undefined && (
+    !DISCORD_SNOWFLAKE_PATTERN.test(expectedApplicationId)
+    || BigInt(expectedApplicationId) < 1n
+    || BigInt(expectedApplicationId) > DISCORD_SNOWFLAKE_MAX
+  )) {
+    throw new ConfigurationError("Expected Discord application ID must be a snowflake")
+  }
+  if (expectedApplicationId !== undefined && !options.preset) {
+    throw new ConfigurationError(
+      "Expected Discord application binding is available only while creating a preset policy",
+    )
+  }
   const configFile = options.configFile === undefined
     ? undefined
     : resolveConnectorConfigFile(options.configFile)
@@ -4230,7 +4244,7 @@ export async function prepareSetup(
     })
     config = {
       ...loadConnectorConfigDocument(bootstrapDocument, environment),
-      expectedApplicationId: undefined,
+      expectedApplicationId,
       expectedBotId: undefined,
     }
   } else if (configFile) {
@@ -4250,6 +4264,14 @@ export async function prepareSetup(
     status = await service.getStatus()
   } catch (error) {
     throw redactedSetupVerificationError(error, environment, config.token)
+  }
+  if (
+    expectedApplicationId !== undefined
+    && status.application.id !== expectedApplicationId
+  ) {
+    throw new ConfigurationError(
+      `Discord token belongs to application ${status.application.id}, expected ${expectedApplicationId}`,
+    )
   }
   if (status.installationAudit.drift.missingConfiguredGuildIds.length > 0) {
     throw new ConfigurationError(

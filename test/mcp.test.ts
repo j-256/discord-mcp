@@ -41379,7 +41379,7 @@ test("MCP stdio startup fails before reporting ready when the referenced token i
         },
       },
     }),
-    /requires DISCORD_BOT_TOKEN/,
+    /Credential environment variable DISCORD_BOT_TOKEN is unavailable/,
   )
   assert.equal(diagnostics, "")
 })

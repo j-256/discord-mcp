@@ -1,6 +1,7 @@
 import {
   ConfigChangeError,
   ConfigurationError,
+  CredentialUnavailableError,
   DiscordApiError,
   errorMessage,
   ProfileError,
@@ -102,6 +103,17 @@ export function classifyCliFailure(
       CLI_FAILURE_CATEGORIES.configuration,
       "Create a policy with guildctl config init or setup --preset, then select it with --config or --profile.",
       OPERATOR_REFERENCES.configuration,
+      OPERATOR_RETRY.afterCorrection,
+    )
+  }
+  if (error instanceof CredentialUnavailableError) {
+    const action = error.provider === "environment"
+      ? `Set ${error.credentialReference} in guildctl's protected environment, or select an existing protected token file in the command or reviewed policy, then retry.`
+      : "Restore the protected credential file referenced by the policy, or select an available credential environment variable in the command or reviewed policy, then retry."
+    return guidance(
+      CLI_FAILURE_CATEGORIES.configuration,
+      action,
+      "docs/reference.md#credential-delivery",
       OPERATOR_RETRY.afterCorrection,
     )
   }

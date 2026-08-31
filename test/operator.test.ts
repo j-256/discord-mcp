@@ -5755,6 +5755,26 @@ test("preset setup saves resolved read-only authority and forwards only its cred
     observer.profile,
   )
 
+  await assert.rejects(
+    () => prepareSetup({
+      credentialVariable: TOKEN_ALIAS,
+      environment: source,
+      expectedApplicationId: "999999999999999999",
+      profileDirectory,
+      profileName: "wrong-application",
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
+      service: {
+        async getStatus() {
+          return status()
+        },
+      },
+    }),
+    /belongs to application .* expected 999999999999999999/,
+  )
+
   const reader = await prepareSetup({
     credentialVariable: TOKEN_ALIAS,
     environment: source,

@@ -408,7 +408,7 @@ test("profile activation loads complete policy and rejects ambient policy", asyn
 
   await assert.rejects(
     () => activateProfile(candidate.name, { directory, environment: {} }),
-    new RegExp(`requires ${ALIAS}`),
+    new RegExp(`Credential environment variable ${ALIAS} is unavailable`),
   )
   await assert.rejects(
     () => activateProfile(candidate.name, {

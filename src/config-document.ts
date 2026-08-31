@@ -35,7 +35,10 @@ import {
   type McpToolsetName,
   type McpToolSurface,
 } from "./constants.js"
-import { ConfigDocumentError } from "./errors.js"
+import {
+  ConfigDocumentError,
+  CredentialUnavailableError,
+} from "./errors.js"
 
 export const CONFIG_DOCUMENT_SCHEMA_VERSION = 2
 export const CONFIG_DOCUMENT_SCHEMA_ID =
@@ -1437,10 +1440,15 @@ export function loadConnectorCredentialFile(
     return token
   } catch (error) {
     if (error instanceof ConfigDocumentError) throw error
-    const message = isNodeError(error, "ENOENT")
-      ? "Configuration credential file was not found"
-      : "Unable to inspect or read configuration credential file"
-    throw new ConfigDocumentError(message, { cause: error })
+    if (isNodeError(error, "ENOENT")) {
+      throw new CredentialUnavailableError("file", reference.path, {
+        cause: error,
+      })
+    }
+    throw new ConfigDocumentError(
+      "Unable to inspect or read configuration credential file",
+      { cause: error },
+    )
   } finally {
     if (handle !== undefined) closeSync(handle)
   }
@@ -1456,9 +1464,7 @@ export function resolveConnectorCredential(
   }
   const value = nonEmptyEnvironmentValue(source, reference.variable)
   if (!value) {
-    throw new ConfigDocumentError(
-      `Configuration document $.credential requires ${reference.variable}`,
-    )
+    throw new CredentialUnavailableError("environment", reference.variable)
   }
   return value
 }

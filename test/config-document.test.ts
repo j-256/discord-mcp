@@ -40,7 +40,10 @@ import {
   MCP_READ_RESPONSE_DEFAULTS,
   MCP_READ_RESPONSE_LIMITS,
 } from "../src/constants.js"
-import { ConfigDocumentError } from "../src/errors.js"
+import {
+  ConfigDocumentError,
+  CredentialUnavailableError,
+} from "../src/errors.js"
 
 const APPLICATION_ID = "300000000000000001"
 const BOT_ID = "400000000000000001"
@@ -382,7 +385,13 @@ test("credential files allow projected-secret symlinks and reject unsafe storage
 
   assert.throws(
     () => loadConnectorCredentialFile(join(root, "missing-token")),
-    /was not found/,
+    (error) => {
+      assert.ok(error instanceof CredentialUnavailableError)
+      assert.equal(error.provider, "file")
+      assert.equal(error.credentialReference, join(root, "missing-token"))
+      assert.equal(error.message, "Configuration credential file was not found")
+      return true
+    },
   )
 })
 
