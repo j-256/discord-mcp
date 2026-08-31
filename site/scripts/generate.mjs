@@ -281,8 +281,9 @@ const FULL_DOCUMENTS = Object.freeze([
   },
   {
     description: "Create an owner-managed bot and complete one verified read through a compatible MCP host",
-    route: "start/getting-started",
+    route: "start/manual-setup",
     source: "docs/getting-started.md",
+    title: "Advanced manual setup and verification",
   },
   {
     description: "Map an audited GuildControl MCP release into least-privilege setup, policy, verification, and retirement steps",
@@ -743,7 +744,7 @@ async function main() {
       frontmatter({
         description: document.description,
         editUrl: sourceEditUrl(document.source),
-        title: h1[0].title,
+        title: document.title ?? h1[0].title,
       }),
       rewriteMarkdown(body, document.source, document.route, resolveLink),
       "",

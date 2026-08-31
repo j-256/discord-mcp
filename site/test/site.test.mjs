@@ -144,6 +144,7 @@ test("built documentation has complete local navigation and no remote runtime as
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "contract-evidence.json")))
   assert.ok(await exists(join(DIST_DIRECTORY, "generated", "guildcontrol.config.schema.json")))
   assert.ok(await exists(join(DIST_DIRECTORY, "contribute", "documentation-portal", "index.html")))
+  assert.ok(await exists(join(DIST_DIRECTORY, "start", "manual-setup", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "start", "migration", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms.txt")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms-full.txt")))

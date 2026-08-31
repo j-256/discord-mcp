@@ -7,7 +7,7 @@ site/dist/
 site/public/generated/
 site/public/llms-full.txt
 site/public/llms.txt
-site/src/content/docs/start/getting-started.md
+site/src/content/docs/start/manual-setup.md
 site/src/content/docs/start/migration.md
 site/src/content/docs/understand/boundaries.md
 site/src/content/docs/understand/privacy.md

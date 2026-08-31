@@ -11,7 +11,7 @@ import { chromium } from "playwright"
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const SITE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..")
 const PACKAGE = JSON.parse(await readFile(resolve(SITE_DIRECTORY, "..", "package.json"), "utf8"))
-const EXPECTED_RELEASE_CONTEXT = `guildctl@${PACKAGE.version}`
+const EXPECTED_RELEASE_CONTEXT = `${PACKAGE.name}@${PACKAGE.version}`
 const HOST = "127.0.0.1"
 const PORT = 4327
 const ORIGIN = `http://${HOST}:${PORT}`
@@ -25,6 +25,7 @@ const EXPECTED_NOT_FOUND_CONSOLE = "error: Failed to load resource: the server r
 const TEST_PATHS = [
   "/",
   "/start/getting-started/",
+  "/start/manual-setup/",
   "/start/migration/",
   "/understand/boundaries/",
   "/understand/comparison/",
@@ -161,8 +162,9 @@ async function main() {
       assert.equal(await page.getByRole("link", { name: "Get a verified read" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Switch from another Discord MCP" }).count(), 1)
       assert.equal(await page.getByRole("link", { name: "Take the verified product tour" }).count(), 1)
+      const releaseIdentity = await page.locator(".release-context code").innerText()
+      assert.equal(releaseIdentity, EXPECTED_RELEASE_CONTEXT)
       const releaseContext = await page.locator(".release-context").innerText()
-      assert.ok(releaseContext.includes(EXPECTED_RELEASE_CONTEXT))
       assert.match(releaseContext, /not affiliated with or endorsed by Discord Inc\./u)
       await page.keyboard.press("Tab")
       assert.equal(await page.locator(":focus").innerText(), "Skip to content")
