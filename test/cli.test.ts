@@ -968,14 +968,8 @@ test("interactive onboarding resumes a custom-variable policy with one cleared t
       "onboard",
       "--host",
       "codex",
-      "--application-id",
-      APPLICATION_ID,
-      "--guild-id",
-      GUILD_ID,
       "--config",
       CONFIG_FILE,
-      "--confirm-installed",
-      GUILD_ID,
       "--html",
       "/output/resumed-onboarding.html",
     ],
@@ -1027,6 +1021,9 @@ test("interactive onboarding resumes a custom-variable policy with one cleared t
   assert.match(stdout.value(), /Policy: .* \(reused\)/)
   assert.match(stdout.value(), /one-time setup value was cleared/)
   assert.doesNotMatch(stdout.value(), new RegExp(ONBOARD_TOKEN))
+  assert.match(stderr.value(), /Identify the MCP host and exact local policy/)
+  assert.match(stderr.value(), /Reverify the bounded bot installation pinned by the existing policy/)
+  assert.doesNotMatch(stderr.value(), /Install URL:/)
 })
 
 test("onboarding reuses exact file custody without passing replacement options to setup", async () => {
@@ -5084,7 +5081,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(onboardHelpOutput.value(), /existing environment or protected-file source can be reused/)
   assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but is cleared after smoke/)
   assert.match(onboardHelpOutput.value(), /selected host still needs its own protected credential entry/)
-  assert.match(onboardHelpOutput.value(), /revalidates it without replacement/)
+  assert.match(onboardHelpOutput.value(), /derives its public IDs from that policy/)
+  assert.match(onboardHelpOutput.value(), /Automation remains fully explicit/)
   assert.match(onboardHelpOutput.value(), /next available default guide filename/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)

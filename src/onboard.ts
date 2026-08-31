@@ -128,6 +128,8 @@ const DEFAULT_CONFIG_FILE_NAME = "guildcontrol.json"
 const DEFAULT_GUIDE_FILE_NAME = "guildcontrol-onboarding.html"
 const DEFAULT_GUIDE_FILE_STEM = "guildcontrol-onboarding"
 const DEFAULT_GUIDE_FILE_LIMIT = 100
+const REUSABLE_POLICY_MISMATCH_MESSAGE =
+  "Existing onboarding policy does not exactly match the requested application, guild, read-only preset, identity, and credential custody; choose a different --config path or review the existing policy"
 const REUSABLE_ENVIRONMENT_STRATEGIES = new Set<HostAdapterSecretStrategy>([
   "environment-interpolation",
   "forwarded-environment",
@@ -376,10 +378,25 @@ export function assertReusableOnboardPolicy(
     toolSurface: preset.toolSurface,
   })
   if (stableString(document) !== stableString(expected)) {
-    throw new ConfigurationError(
-      "Existing onboarding policy does not exactly match the requested application, guild, read-only preset, identity, and credential custody; choose a different --config path or review the existing policy",
-    )
+    throw new ConfigurationError(REUSABLE_POLICY_MISMATCH_MESSAGE)
   }
+}
+
+export function reusableOnboardInstallPlan(
+  document: ConnectorConfigDocument,
+  configFile: string,
+): BotInstallPlan {
+  const [guildId, ...additionalGuildIds] = document.readScope.guildIds
+  if (!guildId || additionalGuildIds.length > 0) {
+    throw new ConfigurationError(REUSABLE_POLICY_MISMATCH_MESSAGE)
+  }
+  const install = createBotInstallPlan({
+    applicationId: document.identity.applicationId,
+    guildId,
+    preset: "server-observer",
+  })
+  assertReusableOnboardPolicy(document, configFile, install)
+  return install
 }
 
 export function resolveAvailableOnboardHtmlFile(

@@ -8,6 +8,7 @@ import {
   isOnboardHostId,
   resolveAvailableOnboardHtmlFile,
   resolveDefaultOnboardConfigFile,
+  reusableOnboardInstallPlan,
   verifyOnboardReport,
 } from "../src/onboard.js"
 import { onboardFixture } from "./onboard-fixture.js"
@@ -46,6 +47,10 @@ test("default onboarding policy follows the CLI-owned platform config root", () 
 
 test("onboarding reuses only an exact existing observer policy", () => {
   const fixture = onboardFixture("/private/guildcontrol.json")
+  assert.deepEqual(
+    reusableOnboardInstallPlan(fixture.document, fixture.configFile),
+    fixture.install,
+  )
   assert.doesNotThrow(() => assertReusableOnboardPolicy(
     fixture.document,
     fixture.configFile,
@@ -62,6 +67,19 @@ test("onboarding reuses only an exact existing observer policy", () => {
       },
       fixture.configFile,
       fixture.install,
+    ),
+    /does not exactly match/,
+  )
+  assert.throws(
+    () => reusableOnboardInstallPlan(
+      {
+        ...fixture.document,
+        readScope: {
+          ...fixture.document.readScope,
+          guildIds: [fixture.install.guildId, "222222222222222222"],
+        },
+      },
+      fixture.configFile,
     ),
     /does not exactly match/,
   )
