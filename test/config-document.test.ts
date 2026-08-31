@@ -27,6 +27,7 @@ import {
   createConnectorConfigDocument,
   expandedConnectorReadScope,
   expandedConnectorScope,
+  inspectConnectorConfigDocumentFile,
   loadConnectorCredentialFile,
   loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
@@ -613,25 +614,88 @@ test("configuration file loading is canonical, bounded, and usable by the connec
     await chmod(file, 0o622)
     assert.throws(
       () => loadConnectorConfigDocumentFile(file),
-      /non-writable regular file/,
+      /no group or world write access/,
     )
     await chmod(file, 0o600)
   }
 
   const hardlink = join(file, "..", "hardlink.json")
   await link(file, hardlink)
-  assert.throws(
-    () => loadConnectorConfigDocumentFile(file),
-    /non-writable regular file/,
-  )
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), document())
+  assert.deepEqual(loadConnectorConfigDocumentFile(hardlink), document())
+  assert.equal(inspectConnectorConfigDocumentFile(file).hardLinkCount, 2)
   await rm(hardlink)
 
   const symlinkPath = join(file, "..", "linked.json")
   await symlink(file, symlinkPath)
+  assert.deepEqual(loadConnectorConfigDocumentFile(symlinkPath), document())
+  assert.deepEqual(inspectConnectorConfigDocumentFile(symlinkPath), {
+    document: document(),
+    file: symlinkPath,
+    hardLinkCount: 1,
+    symbolicLink: true,
+    targetFile: file,
+  })
+
+  const chainedSymlink = join(file, "..", "chained.json")
+  await symlink(symlinkPath, chainedSymlink)
+  assert.deepEqual(loadConnectorConfigDocumentFile(chainedSymlink), document())
+
+  const linkedDirectory = join(file, "..", "linked-directory")
+  await symlink(join(file, ".."), linkedDirectory)
   assert.throws(
-    () => loadConnectorConfigDocumentFile(symlinkPath),
-    ConfigDocumentError,
+    () => loadConnectorConfigDocumentFile(join(linkedDirectory, "guildcontrol.json")),
+    /only one explicit final symlink/,
   )
+
+  const dangling = join(file, "..", "dangling.json")
+  await symlink(join(file, "..", "missing.json"), dangling)
+  assert.throws(() => loadConnectorConfigDocumentFile(dangling), /not found/)
+
+  const linkedDirectoryTarget = join(file, "..")
+  const directoryLink = join(file, "..", "directory.json")
+  await symlink(linkedDirectoryTarget, directoryLink)
+  assert.throws(
+    () => loadConnectorConfigDocumentFile(directoryLink),
+    /target must be a bounded regular file/,
+  )
+
+  const oversizedTarget = join(file, "..", "oversized.json")
+  const oversizedLink = join(file, "..", "oversized-link.json")
+  await writeFile(
+    oversizedTarget,
+    "x".repeat(CONNECTOR_LIMITS.configBytes + 1),
+    { mode: 0o600 },
+  )
+  await symlink(oversizedTarget, oversizedLink)
+  assert.throws(
+    () => loadConnectorConfigDocumentFile(oversizedLink),
+    /target must be a bounded regular file/,
+  )
+
+  const malformedTarget = join(file, "..", "malformed.json")
+  await writeFile(
+    malformedTarget,
+    Uint8Array.from([0xc3, 0x28, 0x0a]),
+    { mode: 0o600 },
+  )
+  assert.throws(
+    () => loadConnectorConfigDocumentFile(malformedTarget),
+    /must contain valid UTF-8/,
+  )
+
+  const processUserId = typeof process.getuid === "function"
+    ? process.getuid()
+    : undefined
+  if (processUserId !== undefined && processUserId !== 0) {
+    assert.throws(
+      () => loadConnectorConfigDocumentFile(file, {
+        platform: "linux",
+        processUserId: processUserId + 1,
+      }),
+      /owned by the process user or root/,
+    )
+  }
 })
 
 test("configuration file is the complete role-deletion policy surface", async (context) => {

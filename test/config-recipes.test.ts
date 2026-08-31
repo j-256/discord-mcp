@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -804,6 +804,39 @@ test("recipe plans bind the exact request and normalized file path", async (cont
   assert.notEqual(first.planDigest, otherRequest.planDigest)
   assert.notEqual(first.planDigest, otherFile.planDigest)
   assert.notEqual(first.proposedDocumentDigest, otherRequest.proposedDocumentDigest)
+})
+
+test("recipe review binds a policy symlink to its resolved target", async (context) => {
+  const root = await recipeRoot(context)
+  const targetFile = join(root, "managed-policy.json")
+  const alternateTargetFile = join(root, "alternate-policy.json")
+  const file = join(root, "guildcontrol.json")
+  const original = document({ channelIds: [CHANNEL_ID, OTHER_CHANNEL_ID] })
+  await writeConnectorConfigDocumentFile(targetFile, original)
+  await writeConnectorConfigDocumentFile(alternateTargetFile, original)
+  await symlink(targetFile, file)
+  const selection = {
+    channelIds: [CHANNEL_ID],
+    file,
+    name: "channel-publisher",
+  } as const
+
+  const plan = planConfigRecipe(selection)
+  assert.equal(plan.file, file)
+  assert.equal(plan.targetFile, targetFile)
+
+  await rm(file)
+  await symlink(alternateTargetFile, file)
+  await assert.rejects(
+    () => applyConfigRecipe({
+      ...selection,
+      confirmation: "channel-publisher",
+      planDigest: plan.planDigest,
+    }),
+    /plan is stale or does not match/,
+  )
+  assert.deepEqual(loadConnectorConfigDocumentFile(targetFile), original)
+  assert.deepEqual(loadConnectorConfigDocumentFile(alternateTargetFile), original)
 })
 
 test("recipe plans emit exact immutable apply commands for every scope kind", async (context) => {

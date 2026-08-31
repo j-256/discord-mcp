@@ -5,7 +5,7 @@ import {
   CONFIG_SCOPE_NAMES,
   expandedConnectorReadScope,
   expandedConnectorScope,
-  loadConnectorConfigDocumentFile,
+  inspectConnectorConfigDocumentFile,
   type ConnectorConfigCapabilityName,
   type ConnectorConfigDocument,
   type ConnectorConfigScopeName,
@@ -44,10 +44,10 @@ import {
   type DiscordPermissionName,
 } from "./permissions.js"
 
-export const CONFIG_RECIPE_REPORT_SCHEMA_VERSION = 1
+export const CONFIG_RECIPE_REPORT_SCHEMA_VERSION = 2
 export const CONFIG_RECIPE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const CONFIG_RECIPE_PLAN_FORMAT = "guildcontrol.config-recipe-plan.v1"
+const CONFIG_RECIPE_PLAN_FORMAT = "guildcontrol.config-recipe-plan.v2"
 
 export const CONFIG_RECIPE_NAMES = Object.freeze([
   "guild-starter",
@@ -167,6 +167,7 @@ export interface ConfigRecipePlanReport {
   readonly risks: readonly string[]
   readonly schemaVersion: typeof CONFIG_RECIPE_REPORT_SCHEMA_VERSION
   readonly status: "already-current" | "planned"
+  readonly targetFile: string
   readonly warnings: readonly string[]
 }
 
@@ -874,8 +875,9 @@ interface InternalRecipePlan {
 
 function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan {
   const file = resolveConnectorConfigFile(options.file)
+  const inspection = inspectConnectorConfigDocumentFile(file)
   const currentDocument = validateConnectorConfigDocumentPolicy(
-    loadConnectorConfigDocumentFile(file),
+    inspection.document,
   )
   const request = normalizeConfigRecipeRequest(options)
   const recipe = getConfigRecipe(request.name)
@@ -901,6 +903,7 @@ function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan 
     proposedDocumentDigest,
     recipeContractDigest,
     request,
+    targetFile: inspection.targetFile,
     warnings,
   })
   const report: ConfigRecipePlanReport = {
@@ -927,6 +930,7 @@ function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan 
     risks: recipe.risks,
     schemaVersion: CONFIG_RECIPE_REPORT_SCHEMA_VERSION,
     status: changes.length === 0 ? "already-current" : "planned",
+    targetFile: inspection.targetFile,
     warnings,
   }
   return { currentDocument, report }
@@ -974,6 +978,7 @@ export async function applyConfigRecipe(
     report.proposedDocument,
     {
       expectedCurrent: planned.currentDocument,
+      expectedTargetFile: report.targetFile,
       overwrite: true,
     },
   )

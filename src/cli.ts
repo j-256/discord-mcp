@@ -2944,6 +2944,7 @@ function renderRecipePlan(
   return [
     `GuildControl MCP configuration recipe ${report.action}: ${report.recipe.name} (${report.status})`,
     `File: ${report.file}`,
+    `Resolved target: ${report.targetFile}`,
     `Exact ${scope.kind} scope: ${scope.ids.join(", ")}`,
     `Current document digest: ${report.currentDocumentDigest}`,
     `Proposed document digest: ${report.proposedDocumentDigest}`,
@@ -3071,6 +3072,7 @@ function renderConfigSummary(report: ConfigValidationReport): string {
   return [
     `Configuration: ${summary.name}`,
     `File: ${report.file}`,
+    ...(report.targetFile === report.file ? [] : [`Resolved target: ${report.targetFile}`]),
     `Document schema: ${summary.configSchemaVersion}`,
     `Application: ${summary.identity.applicationId}`,
     `Bot: ${summary.identity.botId}`,
@@ -3172,7 +3174,9 @@ function renderConfigChange(
   return [
     `GuildControl MCP configuration change ${report.action}: ${report.status}`,
     `Active file: ${report.file}`,
+    `Active target: ${report.targetFile}`,
     `Candidate file: ${report.candidateFile}`,
+    `Candidate target: ${report.candidateTargetFile}`,
     `Current document digest: ${report.currentDocumentDigest}`,
     `Candidate document digest: ${report.candidateDocumentDigest}`,
     `Plan digest: ${report.planDigest}`,

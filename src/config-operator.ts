@@ -25,7 +25,7 @@ import {
   createConnectorConfigDocument,
   expandedConnectorReadScope,
   expandedConnectorScope,
-  loadConnectorConfigDocumentFile,
+  inspectConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
   type ConfigDocumentField,
   type ConnectorCredentialReference,
@@ -36,7 +36,7 @@ import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import { stableString } from "./normalize.js"
 import { getSetupPreset } from "./setup-presets.js"
 
-export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 5
+export const CONFIG_OPERATOR_REPORT_SCHEMA_VERSION = 6
 
 const FILE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
@@ -94,6 +94,7 @@ export interface ConfigValidationReport {
   schemaVersion: number
   status: "ok"
   summary: ConnectorConfigSummary
+  targetFile: string
   validation: {
     crossFieldPolicy: true
     discordContacted: false
@@ -126,6 +127,7 @@ export interface ConfigWriteReport extends ConfigShowReport {
 
 export interface ConfigWriteOptions {
   expectedCurrent?: ConnectorConfigDocument
+  expectedTargetFile?: string
   overwrite?: boolean
 }
 
@@ -146,6 +148,7 @@ export interface ConfigWriteOutcome {
   created: boolean
   document: ConnectorConfigDocument
   file: string
+  targetFile: string
 }
 
 function isNodeError(error: unknown, code: string): boolean {
@@ -282,12 +285,14 @@ export function summarizeConnectorConfigDocument(
 function validationReport(
   file: string,
   document: ConnectorConfigDocument,
+  targetFile = file,
 ): ConfigValidationReport {
   return {
     file,
     schemaVersion: CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
     summary: summarizeConnectorConfigDocument(document),
+    targetFile,
     validation: {
       crossFieldPolicy: true,
       discordContacted: false,
@@ -298,19 +303,21 @@ function validationReport(
 
 export function validateConnectorConfigFile(file: string): ConfigValidationReport {
   const normalized = resolveConnectorConfigFile(file)
+  const inspection = inspectConnectorConfigDocumentFile(normalized)
   const document = validateConnectorConfigDocumentPolicy(
-    loadConnectorConfigDocumentFile(normalized),
+    inspection.document,
   )
-  return validationReport(normalized, document)
+  return validationReport(normalized, document, inspection.targetFile)
 }
 
 export function showConnectorConfigFile(file: string): ConfigShowReport {
   const normalized = resolveConnectorConfigFile(file)
+  const inspection = inspectConnectorConfigDocumentFile(normalized)
   const document = validateConnectorConfigDocumentPolicy(
-    loadConnectorConfigDocumentFile(normalized),
+    inspection.document,
   )
   return {
-    ...validationReport(normalized, document),
+    ...validationReport(normalized, document, inspection.targetFile),
     document,
   }
 }
@@ -554,16 +561,49 @@ export async function writeConnectorConfigDocumentFile(
   documentValue: ConnectorConfigDocument,
   options: ConfigWriteOptions = {},
 ): Promise<ConfigWriteOutcome> {
-  const target = resolveConnectorConfigFile(file)
-  const directory = dirname(target)
-  const targetName = basename(target)
-  await assertConfigDirectory(directory)
+  const requestedFile = resolveConnectorConfigFile(file)
+  const requestedDirectory = dirname(requestedFile)
+  await assertConfigDirectory(requestedDirectory)
   const document = validateConnectorConfigDocumentPolicy(documentValue)
-  return withConfigLock(directory, targetName, async () => {
-    const exists = await pathExists(target)
+  const initiallyExists = await pathExists(requestedFile)
+  const initialInspection = initiallyExists
+    ? inspectConnectorConfigDocumentFile(requestedFile)
+    : undefined
+  const targetFile = initialInspection?.targetFile ?? requestedFile
+  const targetDirectory = dirname(targetFile)
+  const targetName = basename(targetFile)
+  await assertConfigDirectory(targetDirectory)
+  if (
+    options.expectedTargetFile !== undefined
+    && resolveConnectorConfigFile(options.expectedTargetFile) !== targetFile
+  ) {
+    throw new ConfigDocumentError(
+      "Configuration file target changed after the reviewed source was read",
+    )
+  }
+  return withConfigLock(targetDirectory, targetName, async () => {
+    const exists = await pathExists(requestedFile)
+    if (exists !== initiallyExists) {
+      throw new ConfigDocumentError(exists
+        ? "Configuration file was created by another operation"
+        : "Configuration file was removed after the reviewed source was read")
+    }
+    const inspection = exists
+      ? inspectConnectorConfigDocumentFile(requestedFile)
+      : undefined
+    if (inspection && inspection.targetFile !== targetFile) {
+      throw new ConfigDocumentError(
+        "Configuration file symlink was retargeted after inspection",
+      )
+    }
     let backupFile: string | undefined
     if (exists) {
-      const current = loadConnectorConfigDocumentFile(target)
+      if (!inspection) {
+        throw new ConfigDocumentError(
+          "Configuration file could not be inspected after locking",
+        )
+      }
+      const current = inspection.document
       if (
         options.expectedCurrent !== undefined
         && stableString(current) !== stableString(
@@ -591,21 +631,21 @@ export async function writeConnectorConfigDocumentFile(
       )
     }
 
-    const temporary = await writeTemporaryConfig(directory, targetName, document)
+    const temporary = await writeTemporaryConfig(targetDirectory, targetName, document)
     let published = false
     try {
       if (exists) {
         backupFile = resolve(
-          directory,
+          targetDirectory,
           `.${targetName}.backup.${Date.now()}-${randomUUID()}`,
         )
-        await rename(target, backupFile)
+        await rename(targetFile, backupFile)
         try {
-          await rename(temporary, target)
+          await rename(temporary, targetFile)
           published = true
         } catch (error) {
           try {
-            await rename(backupFile, target)
+            await rename(backupFile, targetFile)
             backupFile = undefined
           } catch (rollbackError) {
             throw new ConfigDocumentError(
@@ -623,14 +663,14 @@ export async function writeConnectorConfigDocumentFile(
       } else {
         let linked = false
         try {
-          await link(temporary, target)
+          await link(temporary, targetFile)
           linked = true
           await unlink(temporary)
           published = true
         } catch (error) {
           if (linked) {
             try {
-              await unlink(target)
+              await unlink(targetFile)
             } catch (rollbackError) {
               throw new ConfigDocumentError(
                 "Unable to roll back partial configuration publication",
@@ -646,7 +686,7 @@ export async function writeConnectorConfigDocumentFile(
           throw error
         }
       }
-      await syncDirectory(directory)
+      await syncDirectory(targetDirectory)
     } catch (error) {
       if (!published) await unlink(temporary).catch(() => undefined)
       if (!exists && isNodeError(error, "EEXIST")) {
@@ -660,9 +700,13 @@ export async function writeConnectorConfigDocumentFile(
       })
     }
 
-    const verified = validateConnectorConfigDocumentPolicy(
-      loadConnectorConfigDocumentFile(target),
-    )
+    const verifiedInspection = inspectConnectorConfigDocumentFile(requestedFile)
+    if (verifiedInspection.targetFile !== targetFile) {
+      throw new ConfigDocumentError(
+        "Configuration file symlink changed during publication",
+      )
+    }
+    const verified = validateConnectorConfigDocumentPolicy(verifiedInspection.document)
     if (JSON.stringify(verified) !== JSON.stringify(document)) {
       throw new ConfigDocumentError("Published configuration did not verify exactly")
     }
@@ -670,7 +714,8 @@ export async function writeConnectorConfigDocumentFile(
       ...(backupFile ? { backupFile } : {}),
       created: !exists,
       document,
-      file: target,
+      file: requestedFile,
+      targetFile,
     }
   })
 }
@@ -685,7 +730,7 @@ function writeReport(
     ...(outcome.backupFile ? { backupFile: outcome.backupFile } : {}),
     created: outcome.created,
     document: outcome.document,
-    ...validationReport(outcome.file, outcome.document),
+    ...validationReport(outcome.file, outcome.document, outcome.targetFile),
     source,
   }
 }
