@@ -42,6 +42,7 @@ import {
   onboardHostSupportsCredentialFile,
   resolveAvailableOnboardHtmlFile,
   resolveDefaultOnboardConfigFile,
+  reusableOnboardInstallPlan,
   type OnboardCredentialAccess,
   type OnboardHostId,
   type OnboardReport,
@@ -2103,14 +2104,14 @@ function helpText(
       "  --json                  Emit deterministic JSON for automation",
       "",
       "Five verified stages:",
-      "  1. Identify the host, Discord application, and exact guild",
-      "  2. Install the bounded read-only bot and confirm the guild",
+      "  1. Identify the host and exact local policy",
+      "  2. Install or reverify the bounded read-only bot",
       "  3. Verify identity and installation, then create or revalidate one private policy",
       "  4. Smoke-test the real MCP stdio path without reading message content",
       "  5. Create a credential-free host activation handoff",
       "",
       `Supported hosts: ${ONBOARD_HOST_IDS.map((id) => `${onboardHostDescriptor(id).title} (${id})`).join(", ")}.`,
-      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. Rerunning with an exact existing onboarding policy revalidates it without replacement and chooses the next available default guide filename; drift fails closed. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
+      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. An interactive rerun with an exact existing onboarding policy derives its public IDs from that policy, skips repeated installation ceremony, revalidates it and the live bot without replacement, and chooses the next available default guide filename; drift fails closed. Automation remains fully explicit. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
       "",
       "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy creation or revalidation failure, stdio failure, or guide export failure.",
     ].join("\n")
@@ -3725,34 +3726,53 @@ async function executeOnboard(
   }
   if (!interactive) assertNonInteractiveOnboardArguments(parsed)
 
-  progress(1, "Identify the MCP host, Discord application, and exact guild")
+  progress(1, "Identify the MCP host and exact local policy")
   const hostId = await selectOnboardHost(interaction, parsed.hostId)
+  const defaultConfig = parsed.configFile === undefined
+  const configFile = resolveConnectorConfigFile(
+    parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
+  )
+  const policyExists = dependencies.pathExists(configFile)
+  const existingDocument = policyExists
+    ? dependencies.loadConfigDocument(configFile)
+    : undefined
+  const existingInstall = existingDocument
+    ? reusableOnboardInstallPlan(existingDocument, configFile)
+    : undefined
   const applicationId = await promptDiscordSnowflake(
     interaction,
     "Discord Application ID: ",
     "Application ID",
-    parsed.applicationId,
+    parsed.applicationId ?? existingInstall?.applicationId,
   )
   const guildId = await promptDiscordSnowflake(
     interaction,
     "Discord Guild ID: ",
     "Guild ID",
-    parsed.guildId,
+    parsed.guildId ?? existingInstall?.guildId,
   )
   const install = createBotInstallPlan({
     applicationId,
     guildId,
     preset: "server-observer",
   })
+  if (existingDocument) {
+    assertReusableOnboardPolicy(existingDocument, configFile, install)
+  }
   if (!onboardHostSupportsCredentialFile(hostId) && parsed.credentialFile) {
     throw new ConfigurationError(
       "The selected MCPB host requires an environment-backed policy; use --token-env or the hidden prompt",
     )
   }
 
-  progress(2, "Install the bounded read-only bot and confirm the exact guild")
+  progress(
+    2,
+    policyExists
+      ? "Reverify the bounded bot installation pinned by the existing policy"
+      : "Install the bounded read-only bot and confirm the exact guild",
+  )
   let installOpened = false
-  if (interactive && parsed.confirmation === undefined) {
+  if (!policyExists && interactive && parsed.confirmation === undefined) {
     const shouldOpen = parsed.open || await promptYesNo(
       interaction,
       [
@@ -3768,29 +3788,20 @@ async function executeOnboard(
     }
   }
 
-  await confirmOnboardInstallation(
-    interaction,
-    install.guildId,
-    parsed.confirmation,
-  )
+  if (!policyExists || parsed.confirmation !== undefined) {
+    await confirmOnboardInstallation(
+      interaction,
+      install.guildId,
+      parsed.confirmation,
+    )
+  }
 
-  const defaultConfig = parsed.configFile === undefined
-  const configFile = resolveConnectorConfigFile(
-    parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
-  )
-  const policyExists = dependencies.pathExists(configFile)
   progress(
     3,
     policyExists
       ? "Verify identity and installation against the existing private policy"
       : "Verify identity and installation, then publish the private policy",
   )
-  const existingDocument = policyExists
-    ? dependencies.loadConfigDocument(configFile)
-    : undefined
-  if (existingDocument) {
-    assertReusableOnboardPolicy(existingDocument, configFile, install)
-  }
   const credential = await selectOnboardCredential(
     parsed,
     hostId,
