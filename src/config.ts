@@ -27,6 +27,8 @@ import {
 } from "./constants.js"
 import {
   connectorConfigSecretEnvironmentNames,
+  expandedConnectorReadScope,
+  expandedConnectorScope,
   loadConnectorConfigDocumentFile,
   parseConnectorConfigDocument,
   resolveConnectorCredential,
@@ -38,7 +40,7 @@ import {
   type ConnectorConfigThreadScopeMode,
   type ConnectorConfigUserMentionMode,
 } from "./config-document.js"
-import { ConfigurationError } from "./errors.js"
+import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import {
   loadObservabilityDocumentConfig,
   type ObservabilityConfig,
@@ -331,13 +333,14 @@ function configScope(
   name: ConnectorConfigScopeName,
   maximum?: number,
 ): ReadonlySet<string> {
-  const result = new Set(document.scopes[name] ?? [])
-  if (maximum !== undefined && result.size > maximum) {
-    throw new ConfigurationError(
-      `$.scopes.${name} must contain at most ${maximum} unique IDs`,
-    )
+  try {
+    return new Set(expandedConnectorScope(document, name, maximum))
+  } catch (error) {
+    if (error instanceof ConfigDocumentError) {
+      throw new ConfigurationError(error.message, { cause: error })
+    }
+    throw error
   }
-  return result
 }
 
 function configCapability(
@@ -488,8 +491,9 @@ export function loadConnectorConfigDocument(
   const document = parseConnectorConfigDocument(documentValue)
   assertNoAmbientPolicyEnvironment(document, environment)
 
-  const allowedChannelIds = new Set(document.readScope.channelIds)
-  const allowedGuildIds = new Set(document.readScope.guildIds)
+  const expandedReadScope = expandedConnectorReadScope(document)
+  const allowedChannelIds = new Set(expandedReadScope.channelIds)
+  const allowedGuildIds = new Set(expandedReadScope.guildIds)
   const automodGuildIds = configScope(document, "automodGuildIds")
   const applicationCommandGuildIds = configScope(
     document,

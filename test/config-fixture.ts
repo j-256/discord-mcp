@@ -21,6 +21,7 @@ export interface FixtureConfigOverrides {
   capabilities?: ConnectorConfigDocument["capabilities"]
   credential?: ConnectorCredentialReference
   gateway?: Partial<ConnectorConfigDocument["gateway"]>
+  groups?: ConnectorConfigDocument["groups"]
   identity?: Partial<ConnectorConfigDocument["identity"]>
   limits?: ConnectorConfigDocument["limits"]
   name?: string
@@ -68,6 +69,7 @@ export function fixtureConfigInput(
     ...(overrides.gateway?.eventBufferSize === undefined
       ? {}
       : { gatewayEventBufferSize: overrides.gateway.eventBufferSize }),
+    ...(overrides.groups === undefined ? {} : { groups: overrides.groups }),
     guildIds: overrides.readScope?.guildIds ?? [FIXTURE_GUILD_ID],
     ...(overrides.readScope?.guildMode === undefined
       ? {}

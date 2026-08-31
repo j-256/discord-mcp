@@ -3,6 +3,8 @@ import { createHash } from "node:crypto"
 import {
   CONFIG_CAPABILITY_NAMES,
   CONFIG_SCOPE_NAMES,
+  expandedConnectorReadScope,
+  expandedConnectorScope,
   loadConnectorConfigDocumentFile,
   type ConnectorConfigCapabilityName,
   type ConnectorConfigDocument,
@@ -734,10 +736,11 @@ function assertInsideOuterBoundary(
   document: ConnectorConfigDocument,
   request: NormalizedConfigRecipeRequest,
 ): void {
+  const expandedReadScope = expandedConnectorReadScope(document)
   const outer = request.scope.kind === "guild"
-    ? document.readScope.guildIds
+    ? expandedReadScope.guildIds
     : request.scope.kind === "channel"
-      ? document.readScope.channelIds
+      ? expandedReadScope.channelIds
       : null
   if (outer === null) return
   if (request.scope.kind === "channel" && outer.length === 0) return
@@ -762,9 +765,10 @@ function proposedDocument(
     ...document.scopes,
   }
   for (const targetScope of scopeNames(recipe)) {
+    const effectiveIds = new Set(expandedConnectorScope(document, targetScope))
     scopes[targetScope] = [...new Set([
       ...(document.scopes[targetScope] ?? []),
-      ...request.scope.ids,
+      ...request.scope.ids.filter((id) => !effectiveIds.has(id)),
     ])].sort()
   }
   const selectedToolsets = new Set([
@@ -883,7 +887,7 @@ function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan 
   const recipeContractDigest = digest(recipe)
   const warnings = Object.freeze([
     ...recipe.warnings,
-    ...(request.scope.kind === "channel" && currentDocument.readScope.channelIds.length === 0
+    ...(request.scope.kind === "channel" && currentDocument.readScope.channelMode === "all-visible"
       ? [
           "The empty outer channel allowlist permits all visible channels inside the configured guild boundary; offline planning cannot prove which configured guild owns each selected channel",
         ]

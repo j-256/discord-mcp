@@ -11,6 +11,7 @@ import {
 import {
   CONFIG_DOCUMENT_SCHEMA_ID,
   CONFIG_DOCUMENT_SCHEMA_VERSION,
+  CONFIG_SCOPE_GROUP_LIMITS,
   connectorConfigFields,
   connectorConfigJsonSchema,
   type ConfigDocumentField,
@@ -32,28 +33,33 @@ import {
 import { stableString } from "./normalize.js"
 
 export const CONFIG_WORKBENCH_HTML_FORMAT = "guildcontrol.config-workbench-html.v1"
-export const CONFIG_WORKBENCH_HTML_SCHEMA_VERSION = 1
+export const CONFIG_WORKBENCH_HTML_SCHEMA_VERSION = 2
 
 const CONFIG_WORKBENCH_TOP_LEVEL_ORDER = Object.freeze([
   "$schema",
   "capabilities",
   "credential",
   "gateway",
+  "groups",
   "identity",
   "limits",
   "name",
+  "notifications",
   "observability",
   "readScope",
   "runtime",
   "schemaVersion",
   "scopes",
   "storage",
+  "threads",
   "tools",
 ] as const)
 
 const CONFIG_WORKBENCH_GROUPS = Object.freeze([
   { description: "Format, policy name, external credential reference, and immutable Discord identity", id: "identity", label: "Identity and format" },
   { description: "Exact guild boundary and optional exact channel boundary", id: "read", label: "Read boundary" },
+  { description: "Reusable typed names that expand to exact Discord IDs during validation", id: "aliases", label: "Scope groups" },
+  { description: "Explicit mention and child-thread behavior", id: "behavior", label: "Behavior" },
   { description: "Advertised MCP surface and risk-separated toolsets", id: "tools", label: "Tool surface" },
   { description: "Optional privacy-safe real-time connection and bounded event memory", id: "gateway", label: "Gateway" },
   { description: "Independent opt-in audit and write gates", id: "capabilities", label: "Capabilities" },
@@ -122,6 +128,7 @@ export interface DiscordConfigWorkbenchModel {
   readonly schemaDigest: string
   readonly schemaId: string
   readonly schemaVersion: typeof CONFIG_WORKBENCH_HTML_SCHEMA_VERSION
+  readonly scopeGroupLimits: typeof CONFIG_SCOPE_GROUP_LIMITS
   readonly topLevelOrder: typeof CONFIG_WORKBENCH_TOP_LEVEL_ORDER
   readonly toolsets: readonly string[]
 }
@@ -274,7 +281,11 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
       const selected = new Set(Array.isArray(value) ? value : []);
       return payload.toolsets.filter((entry) => selected.has(entry));
     }
-    if (field.kind === 'snowflakes' || field.kind === 'paths' || field.kind === 'strings') {
+    if (field.kind === 'group-map') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map((name) => [name, uniqueSorted(Array.isArray(value[name]) ? value[name] : [])]));
+    }
+    if (field.kind === 'snowflakes' || field.kind === 'scope-entries' || field.kind === 'paths' || field.kind === 'strings') {
       return uniqueSorted(Array.isArray(value) ? value : []);
     }
     return value;
@@ -283,12 +294,13 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
     if (field.required) return false;
     if (value === undefined || value === null || value === '') return true;
     if (Array.isArray(value) && value.length === 0) return true;
+    if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return true;
     if (field.kind === 'boolean' && value === false) return true;
     return false;
   };
   const canonicalDocument = (source) => {
     const target = {};
-    const sections = new Set(['capabilities', 'gateway', 'identity', 'limits', 'observability', 'readScope', 'runtime', 'scopes', 'storage', 'tools']);
+    const sections = new Set(['capabilities', 'gateway', 'groups', 'identity', 'limits', 'notifications', 'observability', 'readScope', 'runtime', 'scopes', 'storage', 'threads', 'tools']);
     payload.topLevelOrder.forEach((top) => {
       if (sections.has(top)) target[top] = {};
     });
@@ -334,17 +346,28 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
       const message = patternError(constraints.pattern, String(value), 'Enter one valid Discord snowflake');
       if (message) found.push(message);
     }
-    if (field.kind === 'snowflakes' || field.kind === 'paths' || field.kind === 'strings') {
+    if (field.kind === 'snowflakes' || field.kind === 'scope-entries' || field.kind === 'paths' || field.kind === 'strings') {
       const values = Array.isArray(value) ? value : [];
       if (duplicateValues(raw || values).length > 0) found.push('Remove duplicate values');
       if (constraints.minItems !== undefined && values.length < constraints.minItems) found.push('Add at least ' + constraints.minItems + ' value');
       if (constraints.maxItems !== undefined && values.length > constraints.maxItems) found.push('Use no more than ' + constraints.maxItems + ' values');
       if (field.kind === 'snowflakes' && constraints.pattern && values.some((entry) => !(new RegExp(constraints.pattern)).test(entry))) found.push('Every entry must be a Discord snowflake');
+      if (field.kind === 'scope-entries' && values.some((entry) => !/^(?:[0-9]{1,20}|@[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)$/.test(entry))) found.push('Every entry must be a Discord snowflake or @group reference');
       if (field.kind === 'paths' && values.some((entry) => !absoluteCanonicalPath(entry))) found.push('Every entry must be an absolute canonical path');
       if (field.kind === 'strings' && constraints.pattern && values.some((entry) => !(new RegExp(constraints.pattern)).test(entry))) found.push('Every entry must match the required format');
       if (field.kind === 'strings' && constraints.maxLength !== undefined && values.some((entry) => entry.length > constraints.maxLength)) found.push('Every entry must use no more than ' + constraints.maxLength + ' characters');
       if (field.path === '$.scopes.componentLinkOrigins' && values.some((entry) => !canonicalHttpsOrigin(entry))) found.push('Every entry must be an exact canonical HTTPS origin');
       if (field.path === '$.tools.toolsets' && values.some((entry) => !payload.toolsets.includes(entry))) found.push('Select only known toolsets');
+    }
+    if (field.kind === 'group-map') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) found.push('Enter a JSON object of group names to ID arrays');
+      else {
+        const names = Object.keys(value);
+        if (names.length > payload.scopeGroupLimits.groupsPerType) found.push('Define no more than ' + payload.scopeGroupLimits.groupsPerType + ' groups');
+        if (names.some((name) => !/^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/.test(name))) found.push('Every group name must be lowercase and filename-safe');
+        if (Object.values(value).some((entries) => !Array.isArray(entries) || entries.length === 0 || entries.length > payload.scopeGroupLimits.idsPerGroup)) found.push('Every group must contain between 1 and ' + payload.scopeGroupLimits.idsPerGroup + ' IDs');
+        if (Object.values(value).some((entries) => Array.isArray(entries) && (duplicateValues(entries).length > 0 || entries.some((entry) => !/^[0-9]{1,20}$/.test(entry))))) found.push('Every group member must be a unique Discord snowflake');
+      }
     }
     if (field.kind === 'path' && !absoluteCanonicalPath(String(value))) found.push('Enter an absolute canonical path');
     if (field.kind === 'integer' || field.kind === 'number') {
@@ -426,7 +449,7 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
         list.append(label);
       });
       control.append(list);
-    } else if (field.kind === 'snowflakes' || field.kind === 'paths' || field.kind === 'strings') {
+    } else if (field.kind === 'snowflakes' || field.kind === 'scope-entries' || field.kind === 'paths' || field.kind === 'strings') {
       const input = document.createElement('textarea');
       input.rows = Math.min(8, Math.max(3, Array.isArray(value) ? value.length + 1 : 3));
       input.value = arrayText(value);
@@ -437,6 +460,24 @@ const WORKBENCH_SCRIPT = String.raw`(function () {
       input.addEventListener('input', () => {
         const lines = parseLines(input.value);
         setFieldValue(field, lines, lines);
+      });
+      control.append(input);
+    } else if (field.kind === 'group-map') {
+      const input = document.createElement('textarea');
+      input.rows = 10;
+      input.value = JSON.stringify(value || {}, null, 2);
+      input.disabled = !field.editable;
+      input.spellcheck = false;
+      input.placeholder = '{\n  "operators": ["123456789"]\n}';
+      input.setAttribute('aria-label', fieldLabel(field));
+      input.addEventListener('input', () => {
+        try {
+          const parsed = JSON.parse(input.value || '{}');
+          setFieldValue(field, parsed);
+        } catch {
+          errors.set(field.path, ['Enter valid JSON for this group map']);
+          update();
+        }
       });
       control.append(input);
     } else if (field.kind === 'secret-reference') {
@@ -797,6 +838,7 @@ function fieldConstraints(
 ): ConfigWorkbenchConstraint {
   const fieldSchema = schemaAtPath(schema, field.path)
   const valueSchema = field.kind === "snowflakes"
+    || field.kind === "scope-entries"
     || field.kind === "paths"
     || field.kind === "strings"
     ? fieldSchema.items || {}
@@ -821,6 +863,8 @@ function fieldConstraints(
 
 function fieldGroup(path: string): ConfigWorkbenchGroupId {
   if (path.startsWith("$.capabilities.")) return "capabilities"
+  if (path.startsWith("$.groups.")) return "aliases"
+  if (path.startsWith("$.notifications.") || path.startsWith("$.threads.")) return "behavior"
   if (path.startsWith("$.scopes.")) return "scopes"
   if (path.startsWith("$.readScope.")) return "read"
   if (path.startsWith("$.tools.")) return "tools"
@@ -886,6 +930,7 @@ export function createDiscordConfigWorkbenchModel(
     schemaDigest: `sha256:${digest(stableString(schema))}`,
     schemaId: CONFIG_DOCUMENT_SCHEMA_ID,
     schemaVersion: CONFIG_WORKBENCH_HTML_SCHEMA_VERSION,
+    scopeGroupLimits: CONFIG_SCOPE_GROUP_LIMITS,
     topLevelOrder: CONFIG_WORKBENCH_TOP_LEVEL_ORDER,
     toolsets: MCP_TOOLSET_NAMES,
   })

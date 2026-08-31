@@ -4,8 +4,11 @@ import {
   CONFIG_CAPABILITY_NAMES,
   CONFIG_LIMIT_NAMES,
   CONFIG_RUNTIME_NAMES,
+  CONFIG_SCOPE_GROUP_TYPES,
   CONFIG_SCOPE_NAMES,
   CONFIG_STORAGE_NAMES,
+  expandedConnectorReadScope,
+  expandedConnectorScope,
   loadConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
   type ConnectorConfigDocumentObservability,
@@ -47,6 +50,7 @@ export type ConfigChangeCategory =
   | "observability"
   | "read-scope"
   | "runtime"
+  | "scope-groups"
   | "storage"
   | "threads"
   | "tool-surface"
@@ -251,6 +255,18 @@ function setImpact(
   return inverse ? "authority-expansion" : "authority-reduction"
 }
 
+function hasScopeGroupReference(value: RawValue): boolean {
+  return arrayValues(value).some((entry) => entry.startsWith("@"))
+}
+
+function presentValue(value: unknown): RawValue {
+  return { present: true, value }
+}
+
+function scopeGroupChangePath(type: string, name: string): string {
+  return `$.groups.${type}[${JSON.stringify(name)}]`
+}
+
 function orderedModeImpact(
   before: RawValue,
   after: RawValue,
@@ -345,6 +361,40 @@ function configChanges(
     ownValue(candidateRecord, "credential"),
   )
 
+  const currentGroups = current.groups as Readonly<Record<string, unknown>>
+  const candidateGroups = candidate.groups as Readonly<Record<string, unknown>>
+  for (const type of CONFIG_SCOPE_GROUP_TYPES) {
+    const currentType = (current.groups[type] ?? {}) as Readonly<Record<string, unknown>>
+    const candidateType = (candidate.groups[type] ?? {}) as Readonly<Record<string, unknown>>
+    const names = [...new Set([
+      ...Object.keys(currentType),
+      ...Object.keys(candidateType),
+    ])].sort()
+    for (const name of names) {
+      addChange(
+        changes,
+        scopeGroupChangePath(type, name),
+        "scope-groups",
+        "metadata-only",
+        ownValue(currentType, name),
+        ownValue(candidateType, name),
+      )
+    }
+    if (names.length === 0) {
+      addChange(
+        changes,
+        `$.groups.${type}`,
+        "scope-groups",
+        "metadata-only",
+        ownValue(currentGroups, type),
+        ownValue(candidateGroups, type),
+      )
+    }
+  }
+
+  const currentExpandedReadScope = expandedConnectorReadScope(current)
+  const candidateExpandedReadScope = expandedConnectorReadScope(candidate)
+
   for (const name of ["guildMode", "channelMode"] as const) {
     const before = ownValue(current.readScope, name)
     const after = ownValue(candidate.readScope, name)
@@ -361,14 +411,27 @@ function configChanges(
   for (const name of ["guildIds", "channelIds"] as const) {
     const before = ownValue(current.readScope, name)
     const after = ownValue(candidate.readScope, name)
+    const groupAware = hasScopeGroupReference(before) || hasScopeGroupReference(after)
     addChange(
       changes,
       `$.readScope.${name}`,
       "read-scope",
-      setImpact(before, after),
+      groupAware ? "metadata-only" : setImpact(before, after),
       before,
       after,
     )
+    if (groupAware) {
+      const expandedBefore = presentValue(currentExpandedReadScope[name])
+      const expandedAfter = presentValue(candidateExpandedReadScope[name])
+      addChange(
+        changes,
+        `$.effective.readScope.${name}`,
+        "read-scope",
+        setImpact(expandedBefore, expandedAfter),
+        expandedBefore,
+        expandedAfter,
+      )
+    }
   }
 
   const currentNotifications = current.notifications as Readonly<Record<string, unknown>>
@@ -423,14 +486,29 @@ function configChanges(
   for (const name of CONFIG_SCOPE_NAMES) {
     const before = ownValue(currentScopes, name)
     const after = ownValue(candidateScopes, name)
+    const groupAware = hasScopeGroupReference(before) || hasScopeGroupReference(after)
     addChange(
       changes,
       `$.scopes.${name}`,
       "feature-scope",
-      setImpact(before, after, name === "protectedUserIds"),
+      groupAware
+        ? "metadata-only"
+        : setImpact(before, after, name === "protectedUserIds"),
       before,
       after,
     )
+    if (groupAware) {
+      const expandedBefore = presentValue(expandedConnectorScope(current, name))
+      const expandedAfter = presentValue(expandedConnectorScope(candidate, name))
+      addChange(
+        changes,
+        `$.effective.scopes.${name}`,
+        "feature-scope",
+        setImpact(expandedBefore, expandedAfter, name === "protectedUserIds"),
+        expandedBefore,
+        expandedAfter,
+      )
+    }
   }
 
   const currentTools = current.tools as unknown as Readonly<Record<string, unknown>>
@@ -607,6 +685,9 @@ function planWarnings(
     category === "read-scope" && impact === "authority-expansion"
   ))) {
     warnings.push("The candidate expands the outer Discord read boundary")
+  }
+  if (changes.some(({ category }) => category === "scope-groups")) {
+    warnings.push("The candidate changes reusable scope groups; review every effective exact-ID delta because one group can affect multiple policy fields")
   }
   if (changes.some(({ category, impact }) => (
     category === "capability" && impact === "authority-expansion"

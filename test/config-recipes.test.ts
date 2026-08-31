@@ -636,6 +636,32 @@ test("message-channel adds only exact-channel plain-message writes", async (cont
   assert.deepEqual([...runtime.interactionChannelIds], [CHANNEL_ID])
 })
 
+test("configuration recipes preserve a group alias when it already grants the requested scope", async (context) => {
+  const original = document({
+    channelIds: ["@support"],
+    groups: { channels: { support: [CHANNEL_ID] } },
+    scopes: { interactionChannelIds: ["@support"] },
+  })
+  const file = await configFile(context, original)
+  const plan = planConfigRecipe({
+    channelIds: [CHANNEL_ID],
+    file,
+    name: "message-channel",
+  })
+
+  assert.deepEqual(plan.proposedDocument.groups, original.groups)
+  assert.deepEqual(plan.proposedDocument.readScope.channelIds, ["@support"])
+  assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, ["@support"])
+  assert.equal(
+    plan.changes.some((entry) => entry.path === "$.scopes.interactionChannelIds"),
+    false,
+  )
+  assert.deepEqual(
+    [...loadConnectorConfigDocument(plan.proposedDocument, { [TOKEN_ALIAS]: TOKEN }).interactionChannelIds],
+    [CHANNEL_ID],
+  )
+})
+
 test("coordination-channel adds only exact-channel directed routing policy", async (context) => {
   const file = await configFile(context)
   const plan = planConfigRecipe({

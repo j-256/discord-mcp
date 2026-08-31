@@ -16,6 +16,7 @@ import {
   CONFIG_READ_SCOPE_MODES,
   connectorConfigSecretEnvironmentNames,
   connectorConfigSecretFilePaths,
+  expandedConnectorReadScope,
   parseConnectorConfigDocument,
   type ConnectorConfigDocument,
 } from "./config-document.js"
@@ -352,19 +353,30 @@ export function createHostActivationPlan(
   options: CreateHostActivationPlanOptions,
 ): HostActivationPlan {
   const document = parseConnectorConfigDocument(options.document)
+  const expandedReadScope = expandedConnectorReadScope(document)
   const parsedLaunch = launchSchema.safeParse(options.launch)
   if (!parsedLaunch.success) {
     throw new ConfigurationError("Host activation requires an exact stdio launch descriptor")
   }
   const source = exactSource(options.source, document.name)
   assertLaunchMatchesPolicy(parsedLaunch.data, document, source)
+  const verificationPolicy = {
+    identity: document.identity,
+    readScope: {
+      channelIds: expandedReadScope.channelIds,
+      channelMode: document.readScope.channelMode,
+      guildIds: expandedReadScope.guildIds,
+      guildMode: document.readScope.guildMode,
+    },
+    tools: document.tools,
+  }
   const base = parseActivationBase({
     format: HOST_ACTIVATION_REPORT_FORMAT,
     launch: parsedLaunch.data,
     policy: {
       identity: document.identity,
       name: document.name,
-      readScope: document.readScope,
+      readScope: verificationPolicy.readScope,
       source,
       tools: document.tools,
     },
@@ -379,7 +391,7 @@ export function createHostActivationPlan(
     },
     schemaVersion: HOST_ACTIVATION_REPORT_SCHEMA_VERSION,
     status: "ok",
-    verification: verification(document, parsedLaunch.data.serverName),
+    verification: verification(verificationPolicy, parsedLaunch.data.serverName),
   })
   return deepFreeze({
     ...base,
