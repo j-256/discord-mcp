@@ -133,6 +133,10 @@ test("plan-review app is a self-contained display-only MCP App document", () => 
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /object-src 'none'/)
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /base-uri 'none'/)
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /Review only/)
+  assert.match(MCP_PLAN_REVIEW_APP_HTML, /Change impact/)
+  assert.match(MCP_PLAN_REVIEW_APP_HTML, /Exact targets and names/)
+  assert.match(MCP_PLAN_REVIEW_APP_HTML, /Permission and decision/)
+  assert.match(MCP_PLAN_REVIEW_APP_HTML, /Evidence and coordination details/)
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /cannot approve, execute, modify, or retry/)
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /prefers-reduced-motion/)
   assert.match(MCP_PLAN_REVIEW_APP_HTML, /role="tablist"/)
@@ -175,9 +179,9 @@ test("plan-review app completes a display-only host lifecycle without trusted HT
     "empty-state",
     "filter",
     "footnote",
-    "metric-digest",
-    "metric-scope",
-    "metric-status",
+    "metric-decision",
+    "metric-impact",
+    "metric-target",
     "review-panel",
     "tool-name",
   ]
@@ -313,9 +317,11 @@ test("plan-review app completes a display-only host lifecycle without trusted HT
     },
     source: parent,
   })
-  assert.equal(elements.get("metric-status")?.textContent, "ok")
-  assert.equal(elements.get("metric-digest")?.textContent, "sha256:test")
+  assert.equal(elements.get("metric-decision")?.textContent, "ok")
+  assert.equal(elements.get("metric-impact")?.textContent, "Review the exact change")
+  assert.equal(elements.get("metric-target")?.textContent, "2 exact ID fields")
   assert.ok(created.some((element) => element.textContent === hostile))
+  assert.ok(created.some((element) => element.textContent === "sha256:test"))
 
   messageListener({
     data: { id: 9, jsonrpc: "2.0", method: "ping", params: {} },

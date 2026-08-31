@@ -9747,6 +9747,7 @@ function serviceFixture(overrides: {
   guildBlueprintWriteRequired?: boolean
   guildScaffoldError?: Error
   guildScaffoldPlanDigest?: string
+  guildScaffoldResultStatus?: "completed" | "paused"
   guildTemplateError?: Error
   guildTemplateMutation?: GuildTemplateChangePlan["mutation"]
   guildTemplatePlanDigest?: string
@@ -12999,6 +13000,7 @@ function serviceFixture(overrides: {
       if (overrides.guildScaffoldError) throw overrides.guildScaffoldError
       calls.guildScaffoldExecute += 1
       const planned = guildScaffoldPlan(request, planDigest)
+      const status = overrides.guildScaffoldResultStatus ?? "completed"
       return {
         applicationId: planned.applicationId,
         botId: planned.botId,
@@ -13013,10 +13015,13 @@ function serviceFixture(overrides: {
         guildId: request.guildId,
         operationKeyHash: planned.operation.operationKeyHash,
         planDigest,
-        remaining: { ready: 0, waitingForParent: 0 },
+        remaining: {
+          ready: status === "paused" ? 1 : 0,
+          waitingForParent: 0,
+        },
         requestDigest: planned.operation.requestDigest,
         schemaVersion: 1,
-        status: "completed" as const,
+        status,
       }
     },
     async verifyGuildScaffold(request) {
@@ -16950,6 +16955,19 @@ test("MCP tool discovery returns bounded exact contracts without contacting Disc
   assert.equal(exactMatches[0]?.name, "delete_messages")
   assert.equal(exactMatches[0]?.risk, "destructive")
   assert.deepEqual(
+    (exactMatches[0]?.access as Record<string, unknown>).guidance,
+    {
+      impact: "destructive-or-high-impact-discord-write",
+      impactLabel: "Destructive or high-impact Discord change",
+      impactSummary: "Performs a destructive, authority-changing, or otherwise high-impact Discord mutation",
+      preferredNextAction: "call-tool",
+      preferredNextTool: "delete_messages",
+      preferredNextToolReason: "This workflow entry point prepares fresh evidence and requests signed review before any write",
+      reviewRequirement: "signed-interactive-review",
+      workflowRole: "execute",
+    },
+  )
+  assert.deepEqual(
     exactMatches[0]?.annotations,
     listedTool(advertised.tools, "delete_messages").annotations,
   )
@@ -17034,37 +17052,40 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
     { expected: ["explain_channel_access"], first: "explain_channel_access", query: "who can view this channel" },
     { expected: ["search_guild_members"], first: "search_guild_members", query: "find a guild member by name" },
     { expected: ["get_guild_ban"], first: "get_guild_ban", query: "inspect why a user is banned" },
-    { expected: ["plan_direct_message_change"], first: "plan_direct_message_change", query: "send a private direct message" },
-    { expected: ["plan_attachment_message"], first: "plan_attachment_message", query: "send a file attachment" },
-    { expected: ["plan_embed_message"], first: "plan_embed_message", query: "publish a rich embed" },
-    { expected: ["plan_forum_post"], first: "plan_forum_post", query: "create a forum post" },
-    { expected: ["plan_message_deletion"], first: "plan_message_deletion", query: "delete a message" },
-    { expected: ["plan_message_pin"], first: "plan_message_pin", query: "pin a message" },
-    { expected: ["plan_member_moderation"], first: "plan_member_moderation", query: "ban one member" },
-    { expected: ["plan_bulk_guild_ban"], first: "plan_bulk_guild_ban", query: "ban many members" },
-    { expected: ["plan_guild_prune"], first: "plan_guild_prune", query: "remove inactive members" },
-    { expected: ["plan_member_nickname_change"], first: "plan_member_nickname_change", query: "change a member nickname" },
-    { expected: ["plan_member_role_change"], first: "plan_member_role_change", query: "assign a role to a member" },
-    { expected: ["plan_bulk_member_role_change"], first: "plan_bulk_member_role_change", query: "assign a role to many members" },
-    { expected: ["plan_member_voice_change"], first: "plan_member_voice_change", query: "move a member to another voice channel" },
-    { expected: ["plan_channel_creation"], first: "plan_channel_creation", query: "create a channel" },
-    { expected: ["plan_channel_metadata_change"], first: "plan_channel_metadata_change", query: "change a channel topic" },
-    { expected: ["plan_channel_order"], first: "plan_channel_order", query: "reorder a channel" },
-    { expected: ["plan_channel_deletion"], first: "plan_channel_deletion", query: "delete a channel" },
-    { expected: ["plan_role_creation"], first: "plan_role_creation", query: "create a role" },
-    { expected: ["plan_role_configuration"], first: "plan_role_configuration", query: "change role permissions" },
-    { expected: ["plan_role_order"], first: "plan_role_order", query: "reorder roles" },
-    { expected: ["plan_role_deletion"], first: "plan_role_deletion", query: "delete a role" },
-    { expected: ["plan_automod_change"], first: "plan_automod_change", query: "configure automod spam rules" },
-    { expected: ["plan_scheduled_event_change"], first: "plan_scheduled_event_change", query: "schedule a guild event" },
-    { expected: ["plan_stage_instance_change"], first: "plan_stage_instance_change", query: "start a stage event" },
-    { expected: ["plan_guild_application_command_change", "plan_native_interaction_command"], query: "create a slash command" },
-    { expected: ["plan_onboarding_change"], first: "plan_onboarding_change", query: "configure server onboarding" },
-    { expected: ["plan_guild_welcome_screen_change"], first: "plan_guild_welcome_screen_change", query: "configure the welcome screen" },
-    { expected: ["plan_guild_community_change"], first: "plan_guild_community_change", query: "enable community mode" },
-    { expected: ["plan_guild_incident_action_change"], first: "plan_guild_incident_action_change", query: "lock down a guild during an incident" },
-    { expected: ["plan_webhook_creation"], first: "plan_webhook_creation", query: "create an incoming webhook" },
-    { expected: ["plan_invite_creation"], first: "plan_invite_creation", query: "create a private invite" },
+    { expected: ["execute_direct_message_change"], first: "execute_direct_message_change", query: "send a private direct message" },
+    { expected: ["execute_attachment_message"], first: "execute_attachment_message", query: "send a file attachment" },
+    { expected: ["execute_embed_message"], first: "execute_embed_message", query: "publish a rich embed" },
+    { expected: ["execute_forum_post"], first: "execute_forum_post", query: "create a forum post" },
+    { expected: ["delete_messages"], first: "delete_messages", query: "delete a message" },
+    { expected: ["execute_message_pin"], first: "execute_message_pin", query: "pin a message" },
+    { expected: ["execute_member_moderation"], first: "execute_member_moderation", query: "ban one member" },
+    { expected: ["execute_bulk_guild_ban"], first: "execute_bulk_guild_ban", query: "ban many members" },
+    { expected: ["execute_guild_prune"], first: "execute_guild_prune", query: "remove inactive members" },
+    { expected: ["execute_member_nickname_change"], first: "execute_member_nickname_change", query: "change a member nickname" },
+    { expected: ["execute_member_role_change"], first: "execute_member_role_change", query: "assign a role to a member" },
+    { expected: ["execute_bulk_member_role_change"], first: "execute_bulk_member_role_change", query: "assign a role to many members" },
+    { expected: ["execute_member_voice_change"], first: "execute_member_voice_change", query: "move a member to another voice channel" },
+    { expected: ["execute_channel_creation"], first: "execute_channel_creation", query: "create a channel" },
+    { expected: ["execute_channel_creation"], first: "execute_channel_creation", query: "make a new channel" },
+    { expected: ["execute_channel_metadata_change"], first: "execute_channel_metadata_change", query: "change a channel topic" },
+    { expected: ["execute_channel_order"], first: "execute_channel_order", query: "reorder a channel" },
+    { expected: ["execute_channel_deletion"], first: "execute_channel_deletion", query: "delete a channel" },
+    { expected: ["execute_role_creation"], first: "execute_role_creation", query: "create a role" },
+    { expected: ["execute_role_creation"], first: "execute_role_creation", query: "provision a role" },
+    { expected: ["execute_role_configuration"], first: "execute_role_configuration", query: "change role permissions" },
+    { expected: ["execute_role_order"], first: "execute_role_order", query: "reorder roles" },
+    { expected: ["execute_role_deletion"], first: "execute_role_deletion", query: "delete a role" },
+    { expected: ["execute_automod_change"], first: "execute_automod_change", query: "configure automod spam rules" },
+    { expected: ["execute_scheduled_event_change"], first: "execute_scheduled_event_change", query: "schedule a guild event" },
+    { expected: ["execute_stage_instance_change"], first: "execute_stage_instance_change", query: "start a stage event" },
+    { expected: ["execute_guild_application_command_change", "execute_native_interaction_command"], query: "create a slash command" },
+    { expected: ["execute_onboarding_change"], first: "execute_onboarding_change", query: "configure server onboarding" },
+    { expected: ["execute_onboarding_change"], first: "execute_onboarding_change", query: "set onboarding prompts" },
+    { expected: ["execute_guild_welcome_screen_change"], first: "execute_guild_welcome_screen_change", query: "configure the welcome screen" },
+    { expected: ["execute_guild_community_change"], first: "execute_guild_community_change", query: "enable community mode" },
+    { expected: ["execute_guild_incident_action_change"], first: "execute_guild_incident_action_change", query: "lock down a guild during an incident" },
+    { expected: ["execute_webhook_creation"], first: "execute_webhook_creation", query: "create an incoming webhook" },
+    { expected: ["execute_invite_creation"], first: "execute_invite_creation", query: "create a private invite" },
   ]
 
   for (const goal of goals) {
@@ -17098,7 +17119,7 @@ test("MCP tool discovery routes representative goals and rejects unsupported wea
   assert.equal(Object.values(calls).every((count) => count === 0), true)
 })
 
-test("progressive natural-language discovery leads with a plan and reveals its workflow", async (context) => {
+test("progressive natural-language discovery leads with execute and reveals its workflow", async (context) => {
   const { calls, client } = await connectedFixture(context, {
     configOverrides: {
       tools: {
@@ -17112,7 +17133,29 @@ test("progressive natural-language discovery leads with a plan and reveals its w
     arguments: { limit: 1, query: "create a channel" },
     name: "discover_discord_tools",
   }))
-  assert.equal((discovery.matches as Array<{ name: string }>)[0]?.name, "plan_channel_creation")
+  const match = (discovery.matches as Array<{
+    access: {
+      companions: Record<string, unknown>
+      guidance: Record<string, unknown>
+    }
+    name: string
+  }>)[0]
+  assert.equal(match?.name, "execute_channel_creation")
+  assert.deepEqual(match?.access.companions, {
+    execute: ["execute_channel_creation"],
+    plan: ["plan_channel_creation"],
+    verify: [],
+  })
+  assert.deepEqual(match?.access.guidance, {
+    impact: "administrative-discord-write",
+    impactLabel: "Administrative Discord change",
+    impactSummary: "Changes Discord configuration or structure without being classified as destructive",
+    preferredNextAction: "call-tool",
+    preferredNextTool: "execute_channel_creation",
+    preferredNextToolReason: "This workflow entry point prepares fresh evidence and requests signed review before any write",
+    reviewRequirement: "signed-interactive-review",
+    workflowRole: "execute",
+  })
   assert.deepEqual(discovery.newlyEnabledToolNames, [
     "execute_channel_creation",
     "plan_channel_creation",
@@ -36263,6 +36306,13 @@ test("MCP guild scaffolds bind signed approval to the exact reviewed frontier", 
   })
 
   assert.equal(structuredContent(result).status, "completed")
+  assert.deepEqual(structuredContent(result).continuation, {
+    planDigest: "not-applicable",
+    preferredNextTool: null,
+    reuseOperationKey: false,
+    reuseRequest: false,
+    status: "complete",
+  })
   assert.equal(calls.guildScaffoldPlan, 1)
   assert.equal(calls.guildScaffoldExecute, 1)
   assert.match(confirmationMessage, new RegExp(APPLICATION_ID))
@@ -36283,6 +36333,50 @@ test("MCP guild scaffolds bind signed approval to the exact reviewed frontier", 
     JSON.stringify(serverMessages),
     new RegExp(GUILD_SCAFFOLD_OPERATION_KEY),
   )
+})
+
+test("MCP guild scaffolds return an actionable fresh-plan continuation after a pause", async (context) => {
+  const { client } = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: { guildScaffoldResultStatus: "paused" },
+  })
+  const result = await client.callTool({
+    arguments: {
+      auditReason: AUDIT_REASON,
+      channels: [{
+        key: "review-category",
+        kind: "category",
+        name: "Review",
+      }, {
+        key: "review-child",
+        kind: "text",
+        name: "Child",
+        parentKey: "review-category",
+      }],
+      guildId: GUILD_ID,
+      operationKey: GUILD_SCAFFOLD_OPERATION_KEY,
+      planDigest: DIGEST,
+      roles: [],
+      stepLimit: 1,
+    },
+    name: "execute_guild_scaffold",
+  })
+  const output = structuredContent(result)
+
+  assert.equal(output.status, "paused")
+  assert.deepEqual(output.continuation, {
+    planDigest: "omit-for-fresh-plan",
+    preferredNextTool: "execute_guild_scaffold",
+    reuseOperationKey: true,
+    reuseRequest: true,
+    status: "fresh-plan-required",
+  })
+  assert.match(JSON.stringify(result.content), /unchanged request and operation key/)
+  assert.match(JSON.stringify(result.content), /omit the stale plan digest/)
+  assert.equal(JSON.stringify(output.continuation).includes(CHANNEL_ID), false)
 })
 
 test("MCP guild scaffolds stop before execution on refusal or a changed plan", async (context) => {
