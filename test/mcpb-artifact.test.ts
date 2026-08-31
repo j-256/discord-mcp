@@ -22,6 +22,7 @@ test("MCPB archive allowlist is canonical and content-bearing", () => {
   assert.ok(MCPB_ARCHIVE_ENTRIES.includes("server/THIRD_PARTY_NOTICES.md"))
   assert.ok(MCPB_ARCHIVE_ENTRIES.includes("server/catalog-evidence.json"))
   assert.ok(MCPB_ARCHIVE_ENTRIES.includes("docs/reference.md"))
+  assert.ok(MCPB_ARCHIVE_ENTRIES.includes("docs/safety-usability.md"))
   assert.ok(MCPB_ARCHIVE_ENTRIES.includes("README.md"))
   assert.equal(MCPB_ARCHIVE_ENTRIES.some((name) => name.endsWith("/")), false)
 })

@@ -1,6 +1,6 @@
 # Getting started: first verified Discord read
 
-[Project overview](../README.md) | [Migration from another Discord MCP](migration.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Support and privacy-safe reporting](../SUPPORT.md)
+[Project overview](../README.md) | [Safety and usability decisions](safety-usability.md) | [Complete reference](reference.md) | [Privacy policy](../PRIVACY.md) | [Support and privacy-safe reporting](../SUPPORT.md)
 
 This is the shortest supported path from no installation to one useful Discord read through an MCP host. It creates an operator-owned bot, installs only a read-only permission grant, writes one strict non-secret policy file, verifies readiness during setup, and ends with a natural-language channel inventory for one exact guild. No Discord write surface is enabled.
 
@@ -34,7 +34,7 @@ A bare interactive launch enters onboarding. `guildctl onboard` remains the expl
 
 The command performs one linear sequence:
 
-1. Ask which MCP host you want to activate first.
+1. Ask which MCP host you want to activate first, or use explicitly requested metadata-only detection.
 2. Ask for the public Application ID and exact Server ID.
 3. Generate the recommended `server-observer` grant and offer to open the guild-locked Discord install page.
 4. Require the exact Server ID after Discord shows the installation is complete.
@@ -46,6 +46,8 @@ The command performs one linear sequence:
 The command asks for browser authorization and one exact installation confirmation. It does not ask you to reconfirm already supplied policy choices, enable a write, or approve a host-file edit. It never places the token in a command argument, policy, report, HTML guide, digest, or activity record, and it does not read Discord message content. A hidden prompt keeps the token only for setup and smoke, then clears it. To avoid entering it again, start onboarding with an existing protected environment variable for Claude Code, Codex, Cursor, or a common MCP JSON host that will inherit the same state, or select an externally managed protected token file for any adapter route. With an environment-backed policy, Claude Desktop MCPB, VS Code secure input, and Gemini CLI keychain custody still require their own protected host-side entry. The terminal result and private guide state the exact handoff for the selected combination.
 
 Interactive host and credential menus accept a displayed number, canonical ID, or displayed name. Correctable input remains at the same prompt for bounded retries, and credential source sub-prompts accept `:back` so a mistaken environment or protected-file choice does not force a restart. Progress is labeled by setup stage, and Ctrl-C exits as a cancellation instead of printing failure recovery. Automation remains strict and never repairs an invalid supplied value.
+
+If choosing among hosts is the only uncertain step, run `npx guildctl host detect` first or start with `npx guildctl onboard --detect-host`. Detection is never implicit. It checks only documented path existence and type, reads no candidate configuration content or credential, and changes nothing. One candidate can be selected automatically; zero or multiple candidates return to an explicit choice. The report includes private local paths, so keep it out of issues and shared logs.
 
 Rerun the same interactive command after a failure. If the selected policy already exists, onboarding treats its public Application ID, exact Server ID, and credential reference as authoritative. It verifies that the complete document still equals the one-guild `server-observer` policy, skips the repeated installation link and confirmation, rechecks the live Discord installation and stdio path, and leaves the policy bytes unchanged. A different explicitly supplied application or guild, bot identity, scope, preset, Gateway setting, tool surface, or credential reference fails closed; choose another `--config` path or review the existing policy explicitly instead of expecting onboarding to replace it. Non-interactive use remains fully explicit so automation cannot silently infer a target.
 
@@ -59,7 +61,7 @@ By default the policy and guide are created in the per-user GuildControl configu
 
 The first implicit guide is named `guildcontrol-onboarding.html` beside the policy. If that name is occupied, onboarding exclusively creates the next available numbered guide instead of overwriting it. An explicit `--html FILE` remains exact and fails when occupied. The CLI creates only this non-secret private directory. Pass `--config FILE` or `--html FILE` for explicit locations; the parent of an explicit policy path must already satisfy the canonical private-directory checks.
 
-Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. For a static JSON adapter, enter the exact host file and reviewed plan digest in the guide to build copy-ready `host plan`, `host apply`, and inspection commands for Bash, zsh, or PowerShell. Those inputs remain only in the open page and reset on reload. Codex stays an exact manual TOML merge, while Claude Desktop stays a host-native MCPB import. The guide never searches for, reads, or edits a host configuration. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
+Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. For a static JSON adapter, enter the exact host file and reviewed plan digest in the guide to build copy-ready `host plan`, `host apply`, and inspection commands for Bash, zsh, or PowerShell. Those inputs remain only in the open page and reset on reload. Codex stays an exact manual TOML merge, while Claude Desktop stays a host-native MCPB import. Unless detection was explicitly requested, the guide does not search for, read, or edit host configuration. Detection itself never reads content. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
 
 For a non-interactive terminal or CI wrapper, make every public decision explicit. JSON mode never prompts or opens a browser:
 
@@ -75,7 +77,7 @@ npx --yes guildctl@0.3.0 onboard \
   --json
 ```
 
-`--host`, `--application-id`, `--guild-id`, `--config`, and `--confirm-installed` are required without an interactive terminal. The confirmation must exactly equal the supplied guild ID. `--open` explicitly opens the final guide in non-interactive human mode, while JSON rejects it. A missing secret reference, wrong application, absent guild installation, existing policy target, stdio failure, or existing guide target fails the command instead of skipping that boundary.
+Either `--host` or `--detect-host`, plus `--application-id`, `--guild-id`, `--config`, and `--confirm-installed`, is required without an interactive terminal. Detection must find exactly one candidate in non-interactive mode; otherwise pass one exact `--host`. The confirmation must equal the supplied guild ID. `--open` explicitly opens the final guide in non-interactive human mode, while JSON rejects it. A missing secret reference, wrong application, absent guild installation, existing policy target, stdio failure, or existing guide target fails the command instead of skipping that boundary.
 
 The remainder of this guide is the equivalent manual route. Use it when you want credential-free inspection before installation, a `channel-reader` policy, a protected-file deployment, individually captured evidence, or step-by-step recovery.
 
@@ -184,7 +186,7 @@ npx --yes guildctl@0.3.0 setup \
 
 Setup is the first-run readiness gate. It validates the strict policy and local file boundary, contacts Discord with the selected secret, verifies the application and bot, completes the bounded ID-only installed-guild inventory, compares it with every exact configured guild, writes only public identity and policy data, and prints a portable stdio launch descriptor. A missing configured installation fails setup; an unexpected installation outside local scope produces a warning without granting access, changing policy, or leaving that guild. A completed setup exits successfully with non-blocking warnings still visible for deliberate review. `--npx` makes the descriptor use the exact published package instead of the temporary entrypoint from the package runner's cache.
 
-The policy file is the complete non-secret authority boundary. The token remains a separate caller-owned input, and no ambient environment variable can add guild scope, tools, Gateway access, observability, or write authority.
+The policy file is the complete non-secret authority boundary. Generated policies name `allowlist` or `all-visible` read behavior explicitly, default user notifications to disabled, state thread read and write behavior, use progressive tool discovery, and support typed reusable exact-ID groups. The token remains a separate caller-owned input, and no ambient environment variable can add guild scope, tools, Gateway access, observability, or write authority. See the [decision record](safety-usability.md) before choosing a broader mode.
 
 ## 6. Connect now or collect optional evidence
 
@@ -221,7 +223,13 @@ The same bundle supports macOS, Windows, and Linux with Node.js 22 through 26. I
 
 The release workflow builds the bundle twice, requires identical bytes, validates every ZIP path, mode, timestamp, and entry, checks its embedded deterministic SPDX inventory, third-party notices, privacy policy, and credential-free catalog evidence, then unpacks it and completes a real MCP handshake. Verify the downloaded bundle against `SHA256SUMS` and its GitHub artifact attestation before import.
 
-If the host does not support MCPB or the policy names a protected token file, generate an exact host-neutral handoff. This command does not read the token or another credential value, contact Discord or the network, start the server, discover a host, edit a policy or host configuration, or open a browser:
+If the host does not support MCPB or the policy names a protected token file, generate an exact host-neutral handoff. Optional detection can precede generation:
+
+```sh
+npx --yes guildctl@0.3.0 host detect
+```
+
+The detection report is advisory and metadata-only. Generation still uses the explicit policy and does not read a credential, contact Discord or the network, start the server, discover a host, edit a policy or host configuration, or open a browser:
 
 ```sh
 npx --yes guildctl@0.3.0 host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html
@@ -279,7 +287,7 @@ npx --yes guildctl@0.3.0 host --npx --config ./guildcontrol.json --adapter vscod
 
 `--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify every adapter digest against the same activation digest. Generation never writes or discovers a host configuration. A file-backed credential policy causes every adapter to omit environment forwarding, input, and extension-setting fields because the exact policy already names the protected file.
 
-You may manually merge only the generated server and input records, or use the reviewed installer for a static JSON adapter. Codex TOML remains an exact manual projection because the installer deliberately does not parse or rewrite TOML. Choose the adapter and exact host path yourself; the connector never searches for one. The parent directory must already exist as a canonical process-owned directory that is not writable by a group or the world. An existing JSON file must be strict and bounded with private ownership and mode on POSIX:
+You may manually merge only the generated server and input records, or use the reviewed installer for a static JSON adapter. Codex TOML remains an exact manual projection because the installer deliberately does not parse or rewrite TOML. Choose the adapter and exact host path yourself; detection never supplies a path to `host plan` or `host apply`. The parent directory must already exist as a canonical process-owned directory that is not writable by a group or the world. An existing JSON file must be strict and bounded with private ownership and mode on POSIX:
 
 ```sh
 npx --yes guildctl@0.3.0 host plan \
@@ -335,11 +343,11 @@ After the host is working, remove a temporary terminal secret with `unset DISCOR
 Use the narrow `message-channel` recipe when the bot should only send plain text, reply, edit its own plain-text messages, or briefly acknowledge a long-running command in one exact channel. The recipe does not enable message-history reads, reactions, Components V2, embeds, coordination, a Gateway connection, or a privileged intent:
 
 ```sh
-npx --yes guildctl@0.3.0 recipe plan message-channel ./guildcontrol.json \
+npx --yes guildctl@0.3.0 recipe enable message-channel ./guildcontrol.json \
   --channel-id YOUR_CHANNEL_ID
 ```
 
-The plan prints one `Exact reviewed apply command` as a structured `command` and `args` array. Execute that exact argv with the installed `guildctl` binary, or append its args to the same exact-version `npx` launcher above. It already carries the canonical path, normalized scope, fresh digest, and confirmation, so no approval field needs to be copied or reconstructed separately. The plan and application review one durable policy expansion and never contact Discord. After applying, reload the MCP server and ask the host naturally:
+The command prints the complete policy delta, requirements, risks, warnings, and recovery behavior before asking for the recipe name. It recomputes under the file lock, preserves a backup, and verifies the result without contacting Discord. Use detached `recipe plan` and digest-bound `recipe apply` only when automation or independent review needs them. After enabling, reload the MCP server and ask the host naturally:
 
 ```text
 Send this exact plain-text message to Discord channel YOUR_CHANNEL_ID: Deployment finished successfully. Do not mention anyone.
@@ -387,10 +395,10 @@ Recall searches live Discord state, fuses duplicate candidates, and refetches cu
 
 Request Buttons deliberately use a two-stage setup so the native Interaction broker never starts against a missing or drifted command.
 
-1. Open the [offline configuration workbench](reference.md#offline-configuration-workbench). First enable `capabilities.interactions` and `capabilities.nativeCommandChanges`, add the target channel to `scopes.interactionChannelIds`, add the guild to `scopes.nativeInteractionGuildIds`, and include the `interactions` and `native-interactions` toolsets. Keep `capabilities.nativeInteractions` disabled. Apply the candidate only through `config plan` and `config apply`.
-2. Restart the MCP server and use `plan_native_interaction_command` followed by `execute_native_interaction_command` to install the exact managed guild command. Review and approve that separate write before continuing.
+1. Open the [offline configuration workbench](reference.md#offline-configuration-workbench). First enable `capabilities.interactions` and `capabilities.nativeCommandChanges`, add the target channel to `scopes.interactionChannelIds`, add the guild to `scopes.nativeInteractionGuildIds`, and include the `interactions` and `native-interactions` toolsets. Keep `capabilities.nativeInteractions` disabled. Apply the candidate through `config replace`; detached `config plan` and `config apply` remain available.
+2. Restart the MCP server and call `execute_native_interaction_command` without `planDigest` to install the exact managed guild command. The connector computes and displays the fresh plan, then requires signed approval and performs the final fresh check. Use the standalone planner only for detached review.
 3. Return to the workbench. Enable `capabilities.nativeInteractions`, add the same exact guild and channel to `scopes.nativeInteractionGuildIds` and `scopes.nativeInteractionChannelIds`, and add only the intended people to `scopes.nativeInteractionUserIds`. Leave the application's outgoing Interaction endpoint unset because Discord cannot deliver the same Interaction through both Gateway and HTTP. Apply, restart, and require `discord://interactions/status` to report ready.
-4. Use `preview_component_layout` with a `request-row`, then pass its exact normalized layout through `plan_component_message` and `execute_component_message`. The plan must show verified Gateway delivery, the exact ready guild, authorized user IDs, freshly verified command ID and version, and request-button count before approval.
+4. Use `preview_component_layout` with a `request-row`, then pass its exact normalized layout to `execute_component_message` without `planDigest`. The elicited plan must show verified Gateway delivery, the exact ready guild, authorized user IDs, freshly verified command ID and version, and request-button count before approval. The standalone planner remains available for detached review.
 5. Click the published Button from one allowlisted account. Read `discord://interactions/pending`, respond through its opaque reference, and confirm that the response remains ephemeral. The button label is the transient request; the connector never runs another Discord action automatically.
 
 The target channel must already be inside read scope, Message Content must be enabled, and the bot needs the same view, history, and send permissions required for every reviewed Components V2 publication. The slash command remains Administrator-only by default; a request-button click does not require Administrator because it creates only a private bounded request. Rotating the bot token intentionally invalidates existing request-button routes. Old clicks then fail closed, so publish fresh replacement messages after a rotation rather than attempting to edit a row whose former authentication can no longer be proven. See [Managed request Buttons](reference.md#managed-request-buttons) for the complete identity, replay, privacy, and failure boundary.
@@ -404,6 +412,7 @@ npx --yes guildctl@0.3.0 config validate ./guildcontrol.json
 npx --yes guildctl@0.3.0 doctor --config ./guildcontrol.json
 npx --yes guildctl@0.3.0 doctor --config ./guildcontrol.json --online
 npx --yes guildctl@0.3.0 smoke --config ./guildcontrol.json
+npx --yes guildctl@0.3.0 host detect
 npx --yes guildctl@0.3.0 host --npx --config ./guildcontrol.json --html ./guildcontrol-host-activation.html
 npx --yes guildctl@0.3.0 host plan --npx --config ./guildcontrol.json --adapter ADAPTER_ID --host-file HOST_JSON_FILE
 npx --yes guildctl@0.3.0 host apply --npx --config ./guildcontrol.json --adapter ADAPTER_ID --host-file HOST_JSON_FILE --plan-digest PLAN_DIGEST --confirm HOST_SERVER_NAME
@@ -412,7 +421,7 @@ npx --yes guildctl@0.3.0 host --npx --config ./guildcontrol.json --adapter ADAPT
 
 - If a bare `guildctl` command is not found, use the pinned `npx --yes guildctl@0.3.0` prefix or install the package globally before using the bare executable.
 - If the memory-optimized launcher is inappropriate for a CPU-heavy local workflow, place `--standard-runtime` before the command. This changes only Node's execution profile and never changes Discord policy or tool authority.
-- If policy creation rejects the directory, apply the exact platform-specific directory requirements above. A missing, symlinked, noncanonical, wrongly owned, or broadly writable location produces a condition-specific error.
+- If policy creation rejects the directory, apply the exact platform-specific directory requirements above. Creation still needs a canonical private parent. An existing selected non-secret policy may be a stable safe symlink or have additional hard links, but credential files and private state retain their stricter link rules.
 - If offline doctor reports the credential unavailable, make the exact referenced environment variable or file available to that process. The connector has no fallback token source.
 - If online doctor fails identity or guild access, verify the token belongs to the intended application, reinstall the exact generated grant in the intended guild, and inspect role or channel overrides. Do not broaden to `Administrator`.
 - If smoke fails, correct its reported layer before editing the host. Smoke exercises the same stdio server entrypoint without a model or host dependency.
@@ -433,7 +442,7 @@ Do not post raw configuration, logs, screenshots, Discord IDs, local paths, or p
 - Prefer `message-channel` for a first plain-text write; use `channel-publisher` only for its broader message-read, reaction, component, or embed surface
 - Prefer `guild-starter` for a bundled public layout; use `guild-builder` only when its broader Community, onboarding, Welcome Screen, AutoMod, and requested `Manage Roles` authority is intended
 - Preview the complete retained guild-blueprint manifest locally before live planning, including bottom-up role- and channel-order adjacencies and exact-channel permission-overwrite targets, then distinguish freshly assessed entries from deferred intent and execute only the one named frontier
-- Plan and review a recipe before applying it to the active policy
-- Read the [safety model](reference.md#safety-model) before enabling any write capability
+- Use `recipe enable` for integrated review or detached `recipe plan` and `recipe apply` when separate approval is required
+- Read the [safety and usability decision record](safety-usability.md) before enabling any write capability
 - Use `signal_command_processing` only after enabling exact message interactions and only for a fresh bot-directed command whose response is expected to take several seconds
 - Recheck [product boundaries and host compatibility](limitations.md) before moving from reads and plans to reviewed writes

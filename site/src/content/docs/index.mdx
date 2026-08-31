@@ -39,10 +39,10 @@ The host-first guide carries the Application ID, exact guild, least-privilege in
     The project does not operate a shared bot, hosted relay, or token store. The token stays in a caller-owned secret source and out of the non-secret policy file.
   </Card>
   <Card title="Policy narrows discovery" icon="approve-check-circle">
-    Exact guild, channel, user, feature, and toolset policy decides which capabilities the MCP host can discover. Unconfigured authority is absent from the callable surface.
+    Explicit read modes, typed exact-ID groups, notification and thread choices, feature scope, and toolsets decide which capabilities the MCP host can discover. Unconfigured authority is absent from the callable surface.
   </Card>
   <Card title="Writes are reviewed workflows" icon="pencil">
-    Mutating operations use exact IDs, fresh keyed plans, signed request state, interactive approval, final freshness checks, durable coordination, and exact readback where the Discord API permits it.
+    Mutating operations start from exact intent, prepare fresh keyed evidence internally, require signed request state and interactive approval, replan, coordinate durably, and read back the exact outcome where Discord permits it.
   </Card>
   <Card title="Evidence excludes Discord content" icon="document">
     Activity records preserve identifiers, hashes, timestamps, numeric parameters, outcomes, and sanitized errors without persisting messages, names, topics, URLs, embeds, or profiles.
@@ -67,6 +67,7 @@ The host-first guide carries the Application ID, exact guild, least-privilege in
   <LinkCard title="Take the verified product tour" href="./generated/contract-explorer.html#tour" description="Walk from release inspection through scope, a first read, reviewed change, and ambiguity recovery using exact negotiated contract evidence." />
   <LinkCard title="Connect your MCP host" href="./start/manual-setup/#7-connect-the-mcp-host" description="Import the deterministic MCPB or generate digest-bound host projections without placing a credential in static configuration." />
   <LinkCard title="Understand the safety model" href="./understand/safety/" description="See how policy, planning, approval, coordination, readback, and evidence fit together." />
+  <LinkCard title="Review every safety tradeoff" href="./understand/safety-decisions/" description="See the threat, usability cost, retained controls, residual risk, and recovery rationale behind each restriction." />
   <LinkCard title="Read the privacy policy" href="./understand/privacy/" description="See what the connector reads, returns, retains, exports, and leaves under operator control." />
   <LinkCard title="Compare the field" href="./understand/comparison/" description="Inspect the dated head-to-head matrix, rubric, release sources, and evidence behind every lead." />
   <LinkCard title="Browse the complete reference" href="./reference/" description="Navigate the canonical capability documentation as searchable task-sized pages." />

@@ -217,6 +217,7 @@ const EXPECTED_PACKAGE_FILES = [
   "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
+  "docs/safety-usability.md",
   "SUPPORT.md",
   "PRIVACY.md",
   "server.json",
@@ -469,6 +470,7 @@ async function checkDocumentationPortal() {
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md",
     "docs/reference.md",
+    "docs/safety-usability.md",
     "SECURITY.md",
     "guildcontrol.config.schema.json",
     "server.json",
@@ -620,11 +622,15 @@ async function checkDocumentation(packageJson) {
     "utf8",
   )
   const releasing = await readFile(join(REPOSITORY_ROOT, "docs/releasing.md"), "utf8")
+  const safetyUsability = await readFile(
+    join(REPOSITORY_ROOT, "docs/safety-usability.md"),
+    "utf8",
+  )
   const reference = await readFile(
     join(REPOSITORY_ROOT, "docs/reference.md"),
     "utf8",
   )
-  const documentation = `${readme}\n${gettingStarted}\n${migration}\n${limitations}\n${comparison}\n${reference}`
+  const documentation = `${readme}\n${gettingStarted}\n${migration}\n${limitations}\n${comparison}\n${safetyUsability}\n${reference}`
   const documentedVersions = [...documentation.matchAll(/\bguildctl@([0-9]+\.[0-9]+\.[0-9]+)/g)]
     .map((match) => match[1])
   invariant(documentedVersions.length > 0, "README does not show a pinned npm installation")
@@ -648,6 +654,7 @@ async function checkDocumentation(packageJson) {
   }
   for (const required of [
     "[Complete reference](docs/reference.md)",
+    "[Safety and usability decisions](docs/safety-usability.md)",
     `[Verified product tour](${DOCUMENTATION_URL}/generated/contract-explorer.html#tour)`,
     "--preset server-observer",
     "preset install server-observer",
@@ -661,6 +668,7 @@ async function checkDocumentation(packageJson) {
     "coordination-channel",
     "message-channel",
     "recipe list",
+    "recipe enable guild-starter",
     "recipe plan guild-starter",
     "recipe apply guild-starter",
     "smoke --config ./guildcontrol.json",
@@ -692,7 +700,13 @@ async function checkDocumentation(packageJson) {
   invariant(security.includes("An already-current application is a no-write, no-backup operation"), "security policy lacks guarded recipe application")
   invariant(reference.startsWith("# GuildControl MCP complete reference\n"), "complete reference heading is invalid")
   invariant(reference.includes("[Getting started and first verified read](getting-started.md)"), "complete reference lacks the getting-started link")
+  invariant(reference.includes("[Safety and usability decisions](safety-usability.md)"), "complete reference lacks the safety-decision link")
   invariant(reference.includes("[Project overview](../README.md)"), "complete reference lacks the landing-page link")
+  invariant(reference.includes("config replace ACTIVE_FILE CANDIDATE_FILE"), "complete reference lacks integrated configuration review")
+  invariant(reference.includes("node dist/bin.js host detect"), "complete reference lacks opt-in host detection")
+  invariant(safetyUsability.includes("### Why a strict user ID list still exists"), "safety decision record lacks mention-allowlist rationale")
+  invariant(safetyUsability.includes('`notifications.userMentions: "reviewed"`'), "safety decision record lacks reviewed mention policy")
+  invariant(safetyUsability.includes("## Reads retry safely; mutations do not"), "safety decision record lacks retry analysis")
   invariant(gettingStarted.startsWith("# Getting started: first verified Discord read\n"), "getting-started heading is invalid")
   invariant(limitations.startsWith("# Product boundaries and host compatibility\n"), "limitations guide heading is invalid")
   invariant(Buffer.byteLength(limitations) <= README_MAX_BYTES, "limitations guide must remain concise")
@@ -1064,6 +1078,7 @@ async function checkMcpbSource(packageJson) {
     "docs/migration.md",
     "docs/reference.md",
     "docs/releasing.md",
+    "docs/safety-usability.md",
     "icon.png",
     "manifest.json",
     "server/THIRD_PARTY_NOTICES.md",

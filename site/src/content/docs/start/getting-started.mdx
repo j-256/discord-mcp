@@ -25,9 +25,11 @@ npx guildctl
 
 A bare interactive launch enters onboarding. `guildctl onboard` remains the explicit equivalent, while MCP hosts and scripts use `guildctl serve` or a non-interactive zero-argument launch.
 
+If host choice is the only uncertainty, run `npx guildctl host detect` or opt in with `npx guildctl onboard --detect-host`. Detection checks only the existence and type of documented marker paths. It reads no candidate configuration content or credential and changes nothing. Exactly one candidate may be selected; ambiguity returns to an explicit choice.
+
 <Steps>
 
-1. Choose the MCP host you want to use first.
+1. Choose the MCP host you want to use first, or accept one unambiguous opt-in metadata detection result.
 
 2. Enter the public Application ID and exact Server ID.
 
@@ -42,6 +44,8 @@ A bare interactive launch enters onboarding. `guildctl onboard` remains the expl
 </Steps>
 
 If an exact onboarding policy already exists, rerun the same interactive command. GuildControl derives the public IDs from that policy, skips the repeated installation ceremony, then revalidates the live bot, policy, credential custody, stdio path, and host handoff. Policy drift fails closed instead of replacing the file.
+
+The generated policy states its read modes directly, uses progressive discovery, suppresses user notifications, and permits documented message reads to follow verified child threads while keeping message writes exact. Those choices are visible policy, not hidden defaults.
 
 <Aside type="note" title="The guide does not retain a prompted token">
 
@@ -65,5 +69,6 @@ Success proves that the host launched the selected package, delivered the refere
   <LinkCard title="Use the advanced manual route" href="../manual-setup/" description="Inspect the release first, choose another preset or credential mode, capture each proof separately, and use the complete recovery ladder." />
   <LinkCard title="Troubleshoot initialization" href="../../operate/troubleshooting/" description="Separate policy, credential, Discord, stdio, and host failures without widening authority." />
   <LinkCard title="Check fit and boundaries" href="../../understand/boundaries/" description="Review custody, privacy, host compatibility, and deliberately unsupported behavior." />
+  <LinkCard title="Review safety tradeoffs" href="../../understand/safety-decisions/" description="See why each restriction was retained, internalized, made optional, or relaxed." />
   <LinkCard title="Migrate from another MCP" href="../migration/" description="Map the old release's outcomes and authority before changing either installation." />
 </CardGrid>

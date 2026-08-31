@@ -6,7 +6,7 @@ GuildControl MCP is a local stdio Model Context Protocol server for safe Discord
 
 **Least privilege. Review before mutation. Verifiable outcomes. No Discord-content persistence.**
 
-[Documentation portal](https://guildcontrol.lasers.app/) | [Verified product tour](https://guildcontrol.lasers.app/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
+[Documentation portal](https://guildcontrol.lasers.app/) | [Verified product tour](https://guildcontrol.lasers.app/generated/contract-explorer.html#tour) | [Get a verified read](docs/getting-started.md) | [Safety and usability decisions](docs/safety-usability.md) | [Switch from another MCP](docs/migration.md) | [Fit and boundaries](docs/limitations.md) | [Field comparison](docs/comparison.md) | [Complete reference](docs/reference.md) | [Privacy](PRIVACY.md) | [Security](SECURITY.md)
 
 GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
 
@@ -14,16 +14,16 @@ GuildControl is an independent project and is not affiliated with or endorsed by
 
 | Concern | Enforced behavior |
 | --- | --- |
-| Discord reach | One strict non-secret policy file with verified application and bot identities, exact guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
+| Discord reach | One strict non-secret policy file with verified application and bot identities, explicit guild and channel scope, a separate exact-user private-message scope, risk-separated toolsets, and read-only setup presets |
 | Exact targeting | Canonical Discord jump links and official typed mentions convert locally into exact IDs without name lookup, Discord contact, input echo, persistence, or downstream authority |
-| Read safety | Bounded requests, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, caller-retained multi-channel catch-up with loss-resistant cursor advancement, exact native attachment reads without local-file persistence, and no private-channel discovery or scope inheritance |
-| Write safety | Exact-ID requests, keyed fresh plans, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
+| Read safety | Bounded requests, safe transient GET retries, lossless whole-result byte budgets, strict response validation, privacy-tiered projections, untrusted-content handling, caller-retained catch-up, exact attachment reads without local-file persistence, no private-channel discovery, and only explicit verified parent-thread inheritance |
+| Write safety | Exact-ID requests, execute-first keyed planning, signed interactive approval, a final fresh-plan match, and action-specific Discord permission proof |
 | Outcome integrity | Pending content-free evidence, non-retried writes, exact readback, durable coordination, ambiguity quarantine, and bounded local invalid-request pressure |
 | Privacy | Tokens stay in a caller-owned secret source; Discord content, profiles, URLs, audit reasons, and raw operation keys are not persisted |
 | Plan review | Complete evidence, MCP App display, and local authority-free blueprint preview |
 | Release integrity | Exact dependency and base-image pins, credential-free contract fingerprints, reproducible npm and MCPB artifacts, hardened OCI checks, embedded and external SPDX evidence, signed-release automation, and source-bound public documentation |
 
-Use the [first verified read guide](docs/getting-started.md) for one linear setup and recovery path. Read [product boundaries and host compatibility](docs/limitations.md) to decide whether the custody, privacy, approval, and recovery model fits. The [complete reference](docs/reference.md) documents every tool family, policy gate, permission boundary, privacy tier, resource, prompt, Gateway mode, operator command, and workflow-specific limitation.
+Use the [first verified read guide](docs/getting-started.md) for setup and recovery. Read [product boundaries and host compatibility](docs/limitations.md) before adopting the custody, privacy, approval, and recovery model. The [complete reference](docs/reference.md) covers every policy, tool, permission, resource, prompt, command, and workflow limit.
 
 ## Quick start
 
@@ -39,7 +39,9 @@ npx guildctl
 
 `npx guildctl` starts interactive onboarding: host selection, minimum `server-observer` policy creation or exact revalidation, live bot and MCP verification, and a private activation guide. It fails closed on drift and never stores the token, reads message content, enables writes, discovers host paths, or edits host configuration.
 
-The result states whether host credential entry is required or existing custody can be reused. A one-time prompt is cleared after smoke. See the [first verified read guide](docs/getting-started.md) for custody, reruns, host installation, and recovery.
+The result explains credential handoff; a one-time prompt is cleared after smoke. See the [first verified read guide](docs/getting-started.md) for custody and recovery.
+
+Optional `guildctl host detect` checks path metadata only. `onboard --detect-host` selects one candidate; ambiguity requires a choice. Detection reads no candidate content or credential.
 
 For unattended setup, supply every public decision and an existing secret reference:
 
@@ -134,7 +136,7 @@ npx --yes guildctl@0.3.0 setup \
 
 The `server-observer` preset exposes guild metadata, roles, permission diagnostics, connector health, content-free activity, and tool discovery without enabling writes, the Gateway, telemetry, persistence, or Message Content access. Setup is the first-run readiness gate: it validates the strict policy, verifies the application and bot, audits the exact guild installation, stores public IDs and a credential reference but never the token, and prints the launch descriptor. A ready setup exits successfully even when it reports non-blocking warnings for deliberate review. `route_discord_goal` safely routes later discovery, reads, and reviewed planning, never mutation; it creates bookkeeping keys itself instead of asking the operator to invent them.
 
-The versioned file is the only policy boundary. It covers identity, read scope, tools, capabilities, feature scopes, limits, local storage paths, Gateway behavior, runtime settings, and privacy-safe observability. A typical deployment has two inputs: one JSON policy file and one external bot-token secret. The bot token may be referenced through an environment variable or a strictly validated file; optional authenticated-collector headers remain environment references. The checked-in [JSON Schema](guildcontrol.config.schema.json) supports editor validation, while `config show` and `config explain` provide secret-free inspection. Managed profiles use the same document when private per-user storage is preferable.
+The versioned file is the only policy boundary. It covers identity, explicit read modes, typed reusable exact-ID groups, notification and thread behavior, tools, capabilities, scopes, limits, storage, Gateway, runtime, and observability. A typical deployment has one JSON policy and one external bot-token secret. The [JSON Schema](guildcontrol.config.schema.json), `config show`, and `config explain` support secret-free inspection; managed profiles use the same document.
 
 Operational commands require `--config FILE`, `--profile NAME`, or the non-secret `GUILDCONTROL_CONFIG_FILE` selector. Ambient policy variables are rejected and there is no alternate environment-policy or automatic import mode. The offline `migrate` planner never becomes a runtime policy source. Running `setup` without a preset verifies an existing policy without rewriting it, while a preset explicitly creates or replaces the selected target.
 
@@ -142,7 +144,7 @@ Operational commands require `--config FILE`, `--profile NAME`, or the non-secre
 
 After setup reports `ready`, compatible MCPB hosts can import `guildcontrol-0.3.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or MCP Registry. Select the strict config and enter only the token through the sensitive prompt. The verified bundle supports macOS, Windows, and Linux, duplicates no policy field, embeds privacy and dependency evidence, and completes a real unpacked MCP handshake.
 
-For a file-backed token or another host, `host` emits deterministic adapters for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and common MCP JSON. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; Codex receives an exact reviewable TOML projection, and `--inspect-host-file` reports exact JSON drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
+For a file-backed token or another host, `host` emits deterministic adapters for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and common MCP JSON. Optional `host detect` reports plausible hosts from metadata only. `host plan` and `host apply` review and install one static JSON projection without resolving credentials or replacing unrelated entries; Codex receives an exact reviewable TOML projection, and `--inspect-host-file` reports exact JSON drift without returning observed values. The [connection guide](docs/getting-started.md#7-connect-the-mcp-host) covers setup and verification.
 
 Once the host is connected, the first useful request can stay natural and narrow:
 
@@ -160,12 +162,20 @@ npx --yes guildctl@0.3.0 smoke --config ./guildcontrol.json
 
 ### Review any policy replacement
 
-Keep the active policy unchanged while editing a separate candidate, then review and apply only an exact fresh plan:
+Keep the active policy unchanged while editing a separate candidate, then use the integrated review path:
 
 ```sh
 npx --yes guildctl@0.3.0 config workbench \
   ./guildcontrol.json \
   --html ./guildcontrol-workbench.html
+npx --yes guildctl@0.3.0 config replace \
+  ./guildcontrol.json \
+  ./guildcontrol.candidate.json
+```
+
+`config replace` prints the plan before named confirmation, recomputes under lock, writes atomically, keeps a backup, and verifies the result. Detached review remains available:
+
+```sh
 npx --yes guildctl@0.3.0 config plan \
   ./guildcontrol.json \
   ./guildcontrol.candidate.json
@@ -176,7 +186,7 @@ npx --yes guildctl@0.3.0 config apply \
   --confirm ACTIVE_POLICY_NAME
 ```
 
-The private workbench keeps edits in memory until explicit candidate download and has no secret, network, persistence, Discord, active-file write, or approval authority. Application rereads both files, requires the fresh digest and policy-name confirmation, rejects identity or file drift, and preserves a recoverable backup. The active document remains the only policy source.
+The private workbench keeps edits in memory until explicit candidate download and has no secret, network, persistence, Discord, active-file write, or approval authority. Both application paths reread the files, reject identity or file drift, and preserve a recoverable backup. The active document remains the only policy source.
 
 Review recent write outcomes and durable cross-process claims from the same selected policy without making a Discord request or resolving its credential:
 
@@ -203,31 +213,30 @@ npx --yes guildctl@0.3.0 setup \
 
 ### Expand the policy through review
 
-Keep first setup read-only, then plan one additive recipe. `message-channel` is the narrowest first write: plain sends, replies, connector-owned edits, and typing acknowledgement in exact channels, with no privileged intent or message-history, reaction, component, or embed tools. Actual messages need ordinary host write approval, not a plan and signed confirmation. `coordination-channel` adds directed notes, `channel-publisher` adds the broader read, reaction, Components V2, and remote-free embed surface, `guild-starter` adds reviewed public layouts with nonprivileged `GUILDS` evidence, and `guild-builder` adds the broader blueprint lifecycle. `incident-response` adds reviewed lockdown, while [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds reviewed exact-user private messaging. Every recipe reports permissions, intents, scopes, risks, and exclusions before policy changes.
+Keep first setup read-only, then enable one additive recipe through integrated review. `message-channel` is the narrowest first write: plain sends, replies, connector-owned edits in exact channels or eligible child threads, and exact-target typing. `coordination-channel` adds directed notes; `channel-publisher` adds broader publishing; `guild-starter` adds reviewed public layouts with nonprivileged `GUILDS` evidence; `guild-builder` adds blueprint lifecycle; `incident-response` adds lockdown; and [`direct-messenger`](docs/reference.md#exact-one-to-one-private-message-lifecycle) adds exact-user private messaging. Every recipe reports permissions, intents, scopes, risks, and exclusions.
 
 ```sh
 npx --yes guildctl@0.3.0 recipe list
+npx --yes guildctl@0.3.0 recipe enable message-channel ./guildcontrol.json \
+  --channel-id YOUR_MESSAGE_CHANNEL_ID
+npx --yes guildctl@0.3.0 recipe enable direct-messenger ./guildcontrol.json \
+  --user-id EXPECTED_RECIPIENT_USER_ID
+npx --yes guildctl@0.3.0 recipe enable guild-starter ./guildcontrol.json \
+  --guild-id YOUR_GUILD_ID
+```
+
+The detached automation path remains explicit:
+
+```sh
 npx --yes guildctl@0.3.0 recipe plan guild-starter ./guildcontrol.json \
   --guild-id YOUR_GUILD_ID
 npx --yes guildctl@0.3.0 recipe apply guild-starter ./guildcontrol.json \
   --guild-id YOUR_GUILD_ID \
   --plan-digest SHA256_FROM_THE_PLAN \
   --confirm guild-starter
-npx --yes guildctl@0.3.0 recipe plan message-channel ./guildcontrol.json \
-  --channel-id YOUR_MESSAGE_CHANNEL_ID
-npx --yes guildctl@0.3.0 recipe apply message-channel ./guildcontrol.json \
-  --channel-id YOUR_MESSAGE_CHANNEL_ID \
-  --plan-digest SHA256_FROM_THE_PLAN \
-  --confirm message-channel
-npx --yes guildctl@0.3.0 recipe plan direct-messenger ./guildcontrol.json \
-  --user-id EXPECTED_RECIPIENT_USER_ID
-npx --yes guildctl@0.3.0 recipe apply direct-messenger ./guildcontrol.json \
-  --user-id EXPECTED_RECIPIENT_USER_ID \
-  --plan-digest SHA256_FROM_THE_PLAN \
-  --confirm direct-messenger
 ```
 
-Planning prints the complete proposed document, exact changes, requirements, risks, warnings, and path-bound digest without a secret or Discord request. Application recomputes the plan, requires exact digest and name confirmation, rejects source drift, and preserves a backup. Recipes add policy only and grant no Discord authority.
+Both paths show the complete policy delta, requirements, risks, warnings, and path-bound evidence without a secret or Discord request. Application recomputes, requires name confirmation, rejects drift, and keeps a backup. Recipes grant no Discord authority.
 
 Online doctor verifies identity, complete ID-only installation drift, and application posture. Smoke launches `serve`, negotiates stable MCP over stdio, validates catalogs and read-only status, writes nothing to Discord, and shuts down configured runtimes. See the [operator reference](docs/reference.md#operator-cli).
 
@@ -279,10 +288,10 @@ Discord permissions are the outer boundary. Connector policy narrows that author
 - Guild incident actions require one exact allowlisted guild, complete known `MANAGE_GUILD` or owner evidence, future deadlines no more than 24 hours ahead, signed review, one non-retried sparse write, and exact response plus fresh readback; clearing protection early is treated as destructive
 - Privileged-intent enablement accepts only Guild Members or Message Content when the strict policy proves that intent is required or recommended, preserves every observed non-target application flag, and excludes Presence, disabling, generic application editing, and automatic remediation
 
-The common reviewed-write sequence is:
+The common reviewed-write sequence starts from the execute tool. Callers can still supply a digest from a detached plan when independent review requires it:
 
 ```text
-exact request -> fresh keyed plan -> human review -> signed approval
+exact execute request -> fresh keyed plan -> human review -> signed approval
              -> final fresh-plan match -> pending content-free evidence
              -> one non-retried write -> exact readback or quarantine
 ```
@@ -300,6 +309,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `guildctl preset show server-observer --json` | Exact read-only tools, scope requirements, intents, and zero-write boundary for the recommended preset | None |
 | `guildctl preset install server-observer --application-id ID --guild-id ID [--html FILE]` | Fixed-origin, guild-locked bot authorization plan plus an optional credential-free standalone checklist with exact digests and post-install commands | None |
 | `guildctl config workbench ACTIVE --html FILE` | Private offline in-memory editor and explicit candidate download for one validated schema-v2 policy, with no active-file write or approval authority | None |
+| `guildctl config replace ACTIVE CANDIDATE` | Integrated complete review, named confirmation, fresh locked recomputation, atomic replacement, backup, and readback | None |
 | `guildctl config plan ACTIVE CANDIDATE --json` | Complete candidate policy, exact semantic changes, authority impacts, tool exposure, warnings, identity lock, and fresh path-bound digest | None |
 | `guildctl config apply ACTIVE CANDIDATE --plan-digest DIGEST --confirm ACTIVE_NAME` | Exact fresh local policy replacement with stale-file rejection, atomic publication, and a recoverable prior version | None |
 | `guildctl recipe show guild-starter --json` | Exact additive capability, scope, toolset, permission, intent, Gateway-evidence, and risk contract | None |
@@ -309,7 +319,7 @@ Read the [complete safety model](docs/reference.md#safety-model) and [security p
 | `guildctl doctor --config FILE` | Local Node.js, credential availability, identity pins, policy, scope, tool surface, lossless read-response budget, Gateway, observability, and write-gate diagnostics, even before a secret is available | None |
 | `guildctl doctor --config FILE --online` | Strict policy, pinned application and bot identity, intent flags, complete bounded ID-only installed-guild inventory, and exact configured-scope drift | Read-only |
 | `guildctl smoke --config FILE` | Spawned stdio negotiation, discovery, annotations, and connector identity through the selected policy | Read-only |
-| `guildctl host`; `host plan`; `host apply` | Credential-free adapters, reviewed freshness-bound static JSON installation with a recoverable backup and rollback, and value-free drift inspection | None |
+| `guildctl host detect`; `host`; `host plan`; `host apply` | Opt-in metadata-only candidate detection, credential-free adapters, reviewed freshness-bound static JSON installation with a recoverable backup and rollback, and value-free drift inspection | None |
 | `npm run container:verify` | Pinned-base build, non-root filesystem and process restrictions, secret-free metadata, deterministic catalog identity, MCP behavior, and safe credential failure | None |
 | `npm run container:index:verify` | Exact multi-architecture index, platform configurations and blobs, and per-platform provenance plus SBOM records | Public image registries only |
 | `npm run pack:verify` | Reproducible archives, exact package contents, isolated install, installed CLI, deterministic catalog evidence and HTML, and content-free MCP handshake | None |
@@ -330,6 +340,7 @@ This keeps transport, permission evidence, local authority, reviewed writes, per
 
 - [Verified documentation portal](https://guildcontrol.lasers.app/)
 - [First verified read and initialization recovery](docs/getting-started.md)
+- [Safety and usability decision record](docs/safety-usability.md)
 - [Release-exact migration from another Discord MCP](docs/migration.md)
 - [Product boundaries, honest limitations, and host compatibility](docs/limitations.md)
 - [Source-audited field comparison](docs/comparison.md)
