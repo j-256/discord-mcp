@@ -10,6 +10,20 @@ export interface CliInteraction {
   promptText(message: string): Promise<string>
 }
 
+export class CliInteractionCancelledError extends Error {
+  constructor(options: ErrorOptions = {}) {
+    super("Interactive command canceled", options)
+    this.name = "CliInteractionCancelledError"
+  }
+}
+
+function readlineCancellation(error: unknown): boolean {
+  return error instanceof Error
+    && error.name === "AbortError"
+    && "code" in error
+    && error.code === "ABORT_ERR"
+}
+
 async function question(
   message: string,
   secret: boolean,
@@ -32,7 +46,12 @@ async function question(
     if (secret) process.stdout.write(message)
     muted = secret
     const pending = terminal.question(secret ? "" : message)
-    const answer = await pending
+    const answer = await pending.catch((error: unknown) => {
+      if (readlineCancellation(error)) {
+        throw new CliInteractionCancelledError({ cause: error })
+      }
+      throw error
+    })
     if (secret) process.stdout.write("\n")
     return answer.trim()
   } finally {

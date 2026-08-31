@@ -43,6 +43,8 @@ The command performs one linear sequence:
 
 The command asks for browser authorization and one exact installation confirmation. It does not ask you to reconfirm already supplied policy choices, enable a write, or approve a host-file edit. It never places the token in a command argument, policy, report, HTML guide, digest, or activity record, and it does not read Discord message content. A hidden prompt keeps the token only for setup and smoke; you must still give the MCP host access through its own protected environment, keychain, or sensitive-input facility.
 
+Interactive host and credential menus accept a displayed number, canonical ID, or displayed name. Correctable input remains at the same prompt for bounded retries, progress is labeled by setup stage, and Ctrl-C exits as a cancellation instead of printing failure recovery. Automation remains strict and never repairs an invalid supplied value.
+
 By default the policy and guide are created in the per-user GuildControl configuration directory:
 
 | Platform | Default policy |

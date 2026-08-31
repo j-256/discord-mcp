@@ -118,6 +118,23 @@ test("operator recovery routes host configuration failures through fresh inspect
   )
 })
 
+test("operator recovery keeps onboarding input failures on the guided path", () => {
+  const result = classifyCliFailure(
+    new ConfigurationError("Host was not recognized"),
+    { helpTopic: "onboard", usage: false },
+  )
+
+  assert.equal(result.category, "configuration")
+  assert.equal(result.recovery.retry, "after-correction")
+  assert.match(result.recovery.action, /reported onboarding error/u)
+  assert.match(result.recovery.action, /guildctl help onboard/u)
+  assert.doesNotMatch(result.recovery.action, /doctor/u)
+  assert.equal(
+    result.recovery.reference,
+    "docs/getting-started.md#fast-path-let-guildctl-carry-the-setup-state",
+  )
+})
+
 test("operator recovery directs config changes through fresh candidate review", () => {
   const active = classifyCliFailure(
     new ConfigChangeError("active failed", "active"),
