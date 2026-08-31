@@ -4,12 +4,12 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
   readSync,
   realpathSync,
 } from "node:fs"
 import type { BigIntStats } from "node:fs"
 import {
+  dirname,
   isAbsolute,
   resolve,
 } from "node:path"
@@ -66,7 +66,7 @@ const CONFIG_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/
 const WINDOWS_DEVICE_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/
 const HEADER_ENVIRONMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,118}_HEADERS$/
 const CONFIG_JSON_MAX_DEPTH = 64
-const CREDENTIAL_FILE_OVERFLOW_PROBE_BYTES = 1
+const FILE_OVERFLOW_PROBE_BYTES = 1
 const CONFIG_STRING_CHARACTERS = 4_096
 const CONFIG_SCOPE_ENTRIES = 1_000
 const CONFIG_ROOT_ENTRIES = 32
@@ -158,6 +158,14 @@ export interface ConfigDocumentField {
   kind: "boolean" | "group-map" | "integer" | "number" | "path" | "paths" | "scope-entries" | "secret-reference" | "snowflake" | "snowflakes" | "string" | "strings"
   path: string
   required: boolean
+}
+
+export interface ConnectorConfigDocumentFileInspection {
+  document: ConnectorConfigDocument
+  file: string
+  hardLinkCount: number
+  symbolicLink: boolean
+  targetFile: string
 }
 
 function humanizeConfigKey(value: string): string {
@@ -1652,13 +1660,41 @@ function isNodeError(error: unknown, code: string): boolean {
     && (error as NodeJS.ErrnoException).code === code
 }
 
-export function loadConnectorConfigDocumentFile(
+function assertConfigDocumentFileMetadata(
+  metadata: BigIntStats,
+  options: {
+    platform: NodeJS.Platform
+    processUserId: number | undefined
+  },
+): void {
+  if (
+    !metadata.isFile()
+    || metadata.isSymbolicLink()
+    || metadata.nlink < 1n
+    || metadata.size < 3n
+    || metadata.size > BigInt(CONNECTOR_LIMITS.configBytes)
+    || (
+      options.platform !== "win32"
+      && (
+        options.processUserId === undefined
+        || ![0n, BigInt(options.processUserId)].includes(metadata.uid)
+        || (metadata.mode & 0o022n) !== 0n
+      )
+    )
+  ) {
+    throw new ConfigDocumentError(
+      "Configuration file target must be a bounded regular file owned by the process user or root with no group or world write access",
+    )
+  }
+}
+
+export function inspectConnectorConfigDocumentFile(
   file: string,
   options: {
     platform?: NodeJS.Platform
     processUserId?: number
   } = {},
-): ConnectorConfigDocument {
+): ConnectorConfigDocumentFileInspection {
   const normalized = file.trim()
   if (
     !normalized
@@ -1668,39 +1704,78 @@ export function loadConnectorConfigDocumentFile(
   ) {
     throw new ConfigDocumentError("Configuration file path must be absolute and canonical")
   }
+  const platform = options.platform ?? process.platform
+  const processUserId = options.processUserId
+    ?? (typeof process.getuid === "function" ? process.getuid() : undefined)
   let handle: number | undefined
   try {
-    handle = openSync(normalized, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
-    const opened = fstatSync(handle)
-    const linked = lstatSync(normalized)
-    const canonical = realpathSync.native(normalized)
-    const platform = options.platform ?? process.platform
-    const processUserId = options.processUserId
-      ?? (typeof process.getuid === "function" ? process.getuid() : undefined)
-    if (
-      !opened.isFile()
-      || !linked.isFile()
-      || linked.isSymbolicLink()
-      || opened.dev !== linked.dev
-      || opened.ino !== linked.ino
-      || opened.nlink !== 1
-      || opened.size < 3
-      || opened.size > CONNECTOR_LIMITS.configBytes
-      || canonical !== normalized
-      || (
-        platform !== "win32"
-        && (
-          processUserId === undefined
-          || ![0, processUserId].includes(opened.uid)
-          || (opened.mode & 0o022) !== 0
-        )
-      )
-    ) {
+    const parent = dirname(normalized)
+    if (realpathSync.native(parent) !== parent) {
       throw new ConfigDocumentError(
-        "Configuration file must be a bounded canonical non-writable regular file owned by the process user or root",
+        "Configuration file path may use only one explicit final symlink",
       )
     }
-    return parseConnectorConfigJson(readFileSync(handle, "utf8"))
+    const beforeLink = lstatSync(normalized, { bigint: true })
+    if (!beforeLink.isFile() && !beforeLink.isSymbolicLink()) {
+      throw new ConfigDocumentError(
+        "Configuration file path must name a regular file or one explicit symlink",
+      )
+    }
+    const canonical = realpathSync.native(normalized)
+    const symbolicLink = beforeLink.isSymbolicLink()
+    if (!symbolicLink && canonical !== normalized) {
+      throw new ConfigDocumentError(
+        "Configuration file path may use only one explicit final symlink",
+      )
+    }
+    const beforeTarget = lstatSync(canonical, { bigint: true })
+    assertConfigDocumentFileMetadata(beforeTarget, { platform, processUserId })
+    const noFollow = typeof fsConstants.O_NOFOLLOW === "number"
+      ? fsConstants.O_NOFOLLOW
+      : 0
+    handle = openSync(canonical, fsConstants.O_RDONLY | noFollow)
+    const beforeRead = fstatSync(handle, { bigint: true })
+    assertConfigDocumentFileMetadata(beforeRead, { platform, processUserId })
+    if (
+      beforeTarget.dev !== beforeRead.dev
+      || beforeTarget.ino !== beforeRead.ino
+    ) {
+      throw new ConfigDocumentError(
+        "Configuration file target changed while it was opened",
+      )
+    }
+    const bytes = readBoundedFileBytes(handle, Number(beforeRead.size))
+    const afterRead = fstatSync(handle, { bigint: true })
+    const afterTarget = lstatSync(canonical, { bigint: true })
+    const afterLink = lstatSync(normalized, { bigint: true })
+    const finalCanonical = realpathSync.native(normalized)
+    if (
+      bytes.byteLength !== Number(beforeRead.size)
+      || !sameStableFileMetadata(beforeRead, afterRead)
+      || !sameStableFileMetadata(afterRead, afterTarget)
+      || !sameStableFileMetadata(beforeLink, afterLink)
+      || finalCanonical !== canonical
+    ) {
+      throw new ConfigDocumentError(
+        "Configuration file target changed while it was read",
+      )
+    }
+    let text: string
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    } catch (error) {
+      throw new ConfigDocumentError(
+        "Configuration file must contain valid UTF-8",
+        { cause: error },
+      )
+    }
+    return Object.freeze({
+      document: parseConnectorConfigJson(text),
+      file: normalized,
+      hardLinkCount: Number(afterRead.nlink),
+      symbolicLink,
+      targetFile: canonical,
+    })
   } catch (error) {
     if (error instanceof ConfigDocumentError) throw error
     const message = isNodeError(error, "ENOENT")
@@ -1712,6 +1787,16 @@ export function loadConnectorConfigDocumentFile(
   }
 }
 
+export function loadConnectorConfigDocumentFile(
+  file: string,
+  options: {
+    platform?: NodeJS.Platform
+    processUserId?: number
+  } = {},
+): ConnectorConfigDocument {
+  return inspectConnectorConfigDocumentFile(file, options).document
+}
+
 function nonEmptyEnvironmentValue(
   environment: NodeJS.ProcessEnv,
   name: string,
@@ -1720,7 +1805,7 @@ function nonEmptyEnvironmentValue(
   return value ? value : undefined
 }
 
-function sameStableCredentialMetadata(
+function sameStableFileMetadata(
   left: BigIntStats,
   right: BigIntStats,
 ): boolean {
@@ -1763,12 +1848,12 @@ function assertCredentialFileMetadata(
   }
 }
 
-function readBoundedCredentialBytes(
+function readBoundedFileBytes(
   handle: number,
   expectedBytes: number,
 ): Buffer {
   const buffer = Buffer.allocUnsafe(
-    expectedBytes + CREDENTIAL_FILE_OVERFLOW_PROBE_BYTES,
+    expectedBytes + FILE_OVERFLOW_PROBE_BYTES,
   )
   let offset = 0
   while (offset < buffer.byteLength) {
@@ -1818,14 +1903,14 @@ export function loadConnectorCredentialFile(
         "Configuration credential file changed while it was opened",
       )
     }
-    const bytes = readBoundedCredentialBytes(handle, Number(beforeRead.size))
+    const bytes = readBoundedFileBytes(handle, Number(beforeRead.size))
     const afterRead = fstatSync(handle, { bigint: true })
     const afterPath = lstatSync(canonical, { bigint: true })
     const finalCanonical = realpathSync.native(reference.path)
     if (
       bytes.byteLength !== Number(beforeRead.size)
-      || !sameStableCredentialMetadata(beforeRead, afterRead)
-      || !sameStableCredentialMetadata(afterRead, afterPath)
+      || !sameStableFileMetadata(beforeRead, afterRead)
+      || !sameStableFileMetadata(afterRead, afterPath)
       || finalCanonical !== canonical
     ) {
       throw new ConfigDocumentError(

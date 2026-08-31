@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -370,7 +371,7 @@ test("configuration change plans expose typed-group authoring and exact authorit
   assert.ok(report.warnings.some((warning) => warning.includes("one group can affect multiple policy fields")))
 })
 
-test("configuration change planning rejects same-file, unsafe, and identity-changing candidates", async (context) => {
+test("configuration change planning rejects same-file, same-target, unsafe, and identity-changing candidates", async (context) => {
   const root = await reviewRoot(context)
   const file = join(root, "active.json")
   const candidateFile = join(root, "candidate.json")
@@ -390,10 +391,60 @@ test("configuration change planning rejects same-file, unsafe, and identity-chan
   const candidateLink = join(root, "candidate-link.json")
   await writeConnectorConfigDocumentFile(validCandidate, document())
   await symlink(validCandidate, candidateLink)
+  const linkedPlan = planConfigChange({ candidateFile: candidateLink, file })
+  assert.equal(linkedPlan.candidateFile, candidateLink)
+  assert.equal(linkedPlan.candidateTargetFile, validCandidate)
+
+  const activeLink = join(root, "active-link.json")
+  await symlink(file, activeLink)
   assert.throws(
-    () => planConfigChange({ candidateFile: candidateLink, file }),
-    /candidate configuration is unavailable or invalid/,
+    () => planConfigChange({ candidateFile: activeLink, file }),
+    /distinct resolved active and candidate targets/,
   )
+
+  if (process.platform !== "win32") {
+    await chmod(validCandidate, 0o622)
+    assert.throws(
+      () => planConfigChange({ candidateFile: candidateLink, file }),
+      /candidate configuration is unavailable or invalid/,
+    )
+    await chmod(validCandidate, 0o600)
+  }
+})
+
+test("configuration change review binds a policy symlink to its resolved target", async (context) => {
+  const root = await reviewRoot(context)
+  const targetFile = join(root, "managed-active.json")
+  const alternateTargetFile = join(root, "alternate-active.json")
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const original = document()
+  const candidate = document({ name: "reviewed-bot" })
+  await writeConnectorConfigDocumentFile(targetFile, original)
+  await writeConnectorConfigDocumentFile(alternateTargetFile, original)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+  await symlink(targetFile, file)
+
+  const plan = planConfigChange({ candidateFile, file })
+  assert.equal(plan.file, file)
+  assert.equal(plan.targetFile, targetFile)
+  assert.equal(plan.candidateFile, candidateFile)
+  assert.equal(plan.candidateTargetFile, candidateFile)
+
+  await rm(file)
+  await symlink(alternateTargetFile, file)
+  await assert.rejects(
+    () => applyConfigChange({
+      candidateFile,
+      confirmation: "support-bot",
+      file,
+      planDigest: plan.planDigest,
+    }),
+    /stale or does not match/,
+  )
+  assert.deepEqual(loadConnectorConfigDocumentFile(targetFile), original)
+  assert.deepEqual(loadConnectorConfigDocumentFile(alternateTargetFile), original)
+  assert.deepEqual(loadConnectorConfigDocumentFile(candidateFile), candidate)
 })
 
 test("configuration change apply requires exact fresh review and preserves the candidate", async (context) => {

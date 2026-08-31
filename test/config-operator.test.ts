@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
 import {
   chmod,
+  link,
   lstat,
   mkdtemp,
   readFile,
+  readlink,
   realpath,
   rm,
   symlink,
@@ -169,6 +171,67 @@ test("configuration files create privately, validate canonically, and preserve b
     ),
     /locked to its existing Discord identity/,
   )
+})
+
+test("configuration replacement preserves an explicit symlink and binds its resolved target", async (context) => {
+  const root = await operatorRoot(context)
+  const targetFile = join(root, "managed-policy.json")
+  const linkedFile = join(root, "guildcontrol.json")
+  const alternateTarget = join(root, "alternate-policy.json")
+  const original = document()
+  const replacement = document({ limits: { interactionMaxWritesPerMinute: 9 } })
+  await writeConnectorConfigDocumentFile(targetFile, original)
+  await writeConnectorConfigDocumentFile(alternateTarget, original)
+  await symlink(targetFile, linkedFile)
+
+  const validation = validateConnectorConfigFile(linkedFile)
+  assert.equal(validation.file, linkedFile)
+  assert.equal(validation.targetFile, targetFile)
+  const outcome = await writeConnectorConfigDocumentFile(linkedFile, replacement, {
+    expectedCurrent: original,
+    expectedTargetFile: targetFile,
+    overwrite: true,
+  })
+  assert.equal(outcome.file, linkedFile)
+  assert.equal(outcome.targetFile, targetFile)
+  assert.ok(outcome.backupFile)
+  assert.equal((await lstat(linkedFile)).isSymbolicLink(), true)
+  assert.equal(await readlink(linkedFile), targetFile)
+  assert.deepEqual(loadConnectorConfigDocumentFile(linkedFile), replacement)
+  assert.deepEqual(loadConnectorConfigDocumentFile(outcome.backupFile as string), original)
+
+  await rm(linkedFile)
+  await symlink(alternateTarget, linkedFile)
+  await assert.rejects(
+    () => writeConnectorConfigDocumentFile(linkedFile, replacement, {
+      expectedCurrent: original,
+      expectedTargetFile: targetFile,
+      overwrite: true,
+    }),
+    /target changed after the reviewed source was read/,
+  )
+  assert.deepEqual(loadConnectorConfigDocumentFile(alternateTarget), original)
+})
+
+test("configuration replacement accepts hard links and atomically detaches only the selected path", async (context) => {
+  const root = await operatorRoot(context)
+  const managedFile = join(root, "managed-policy.json")
+  const activeFile = join(root, "guildcontrol.json")
+  const original = document()
+  const replacement = document({ limits: { interactionMaxWritesPerMinute: 9 } })
+  await writeConnectorConfigDocumentFile(managedFile, original)
+  await link(managedFile, activeFile)
+
+  assert.deepEqual(loadConnectorConfigDocumentFile(activeFile), original)
+  const outcome = await writeConnectorConfigDocumentFile(activeFile, replacement, {
+    expectedCurrent: original,
+    expectedTargetFile: activeFile,
+    overwrite: true,
+  })
+  assert.equal(outcome.targetFile, activeFile)
+  assert.deepEqual(loadConnectorConfigDocumentFile(activeFile), replacement)
+  assert.deepEqual(loadConnectorConfigDocumentFile(managedFile), original)
+  assert.deepEqual(loadConnectorConfigDocumentFile(outcome.backupFile as string), original)
 })
 
 test("configuration publication respects directory safety and another writer's lock", async (context) => {

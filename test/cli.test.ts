@@ -557,6 +557,7 @@ function configValidationReport(
     schemaVersion: CONFIG_OPERATOR_REPORT_SCHEMA_VERSION,
     status: "ok",
     summary: summarizeConnectorConfigDocument(profile),
+    targetFile: "/configuration/guildcontrol.json",
     validation: {
       crossFieldPolicy: true,
       discordContacted: false,
@@ -4229,7 +4230,9 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
   assert.equal(plan.status, "planned")
   assert.equal(plan.execution.secretValuesRead, false)
   assert.equal(plan.execution.discordContacted, false)
+  assert.equal(plan.targetFile, file)
   assert.match(textOutput.value(), /Complete proposed non-secret configuration/)
+  assert.equal(textOutput.value().includes(`Resolved target: ${file}`), true)
   assert.match(textOutput.value(), /Exact reviewed apply command:/)
   assert.match(textOutput.value(), new RegExp(plan.planDigest))
   assert.deepEqual(plan.applyCommand, {
@@ -4540,7 +4543,10 @@ test("CLI routes config lifecycle commands without exposing credential values", 
     },
     validateConfig(file) {
       events.push(`validate:${file}`)
-      return configValidationReport()
+      return {
+        ...configValidationReport(),
+        targetFile: "/managed/guildcontrol.json",
+      }
     },
   })
 
@@ -4587,6 +4593,7 @@ test("CLI routes config lifecycle commands without exposing credential values", 
     "init:/configuration/new.json:new",
   ])
   assert.equal(output.value().includes(TOKEN), false)
+  assert.match(output.value(), /Resolved target: \/managed\/guildcontrol\.json/)
   assert.match(output.value(), /secret values, and did not contact Discord/)
 })
 
@@ -4662,6 +4669,8 @@ test("CLI plans and applies one exact candidate configuration without resolving 
   assert.equal(plan.execution.secretValuesRead, false)
   assert.equal(plan.execution.discordContacted, false)
   assert.equal(plan.candidateDocument.name, "reviewed-bot")
+  assert.equal(plan.targetFile, file)
+  assert.equal(plan.candidateTargetFile, candidateFile)
   assert.doesNotMatch(planOutput.value(), new RegExp(TOKEN))
 
   const applyOutput = outputStream()
@@ -4682,6 +4691,11 @@ test("CLI plans and applies one exact candidate configuration without resolving 
   }), 0)
   assert.deepEqual(loadConnectorConfigDocumentFile(file), candidate)
   assert.match(applyOutput.value(), /configuration change apply: applied/)
+  assert.equal(applyOutput.value().includes(`Active target: ${file}`), true)
+  assert.equal(
+    applyOutput.value().includes(`Candidate target: ${candidateFile}`),
+    true,
+  )
   assert.match(applyOutput.value(), /Recoverable prior version:/)
   assert.match(applyOutput.value(), /Canonical tools added:/)
   assert.match(applyOutput.value(), /No secret value was read and Discord was not contacted/)

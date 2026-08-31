@@ -9,7 +9,7 @@ import {
   CONFIG_STORAGE_NAMES,
   expandedConnectorReadScope,
   expandedConnectorScope,
-  loadConnectorConfigDocumentFile,
+  inspectConnectorConfigDocumentFile,
   type ConnectorConfigDocument,
   type ConnectorConfigDocumentObservability,
 } from "./config-document.js"
@@ -33,10 +33,10 @@ import { ConfigChangeError } from "./errors.js"
 import { selectedCanonicalMcpToolNames } from "./mcp-tool-catalog.js"
 import { stableString } from "./normalize.js"
 
-export const CONFIG_CHANGE_REPORT_SCHEMA_VERSION = 1
+export const CONFIG_CHANGE_REPORT_SCHEMA_VERSION = 2
 export const CONFIG_CHANGE_PLAN_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-const CONFIG_CHANGE_PLAN_FORMAT = "guildcontrol.config-change-plan.v1"
+const CONFIG_CHANGE_PLAN_FORMAT = "guildcontrol.config-change-plan.v2"
 const OMITTED_VALUE = Object.freeze({ state: "omitted" as const })
 
 export type ConfigChangeCategory =
@@ -99,6 +99,7 @@ export interface ConfigChangePlanReport {
   readonly candidateDocument: ConnectorConfigDocument
   readonly candidateDocumentDigest: string
   readonly candidateFile: string
+  readonly candidateTargetFile: string
   readonly candidateSummary: ConnectorConfigSummary
   readonly changes: readonly ConfigChangeRecord[]
   readonly confirmation: {
@@ -118,6 +119,7 @@ export interface ConfigChangePlanReport {
   readonly planDigest: string
   readonly schemaVersion: typeof CONFIG_CHANGE_REPORT_SCHEMA_VERSION
   readonly status: "already-current" | "planned"
+  readonly targetFile: string
   readonly tools: {
     readonly added: readonly string[]
     readonly removed: readonly string[]
@@ -740,10 +742,13 @@ function createConfigChangePlan(
     )
   }
   let currentDocument: ConnectorConfigDocument
+  let currentTargetFile: string
   try {
+    const inspection = inspectConnectorConfigDocumentFile(file)
     currentDocument = validateConnectorConfigDocumentPolicy(
-      loadConnectorConfigDocumentFile(file),
+      inspection.document,
     )
+    currentTargetFile = inspection.targetFile
   } catch (error) {
     throw new ConfigChangeError(
       "The active configuration is unavailable or invalid",
@@ -752,15 +757,24 @@ function createConfigChangePlan(
     )
   }
   let candidateDocument: ConnectorConfigDocument
+  let candidateTargetFile: string
   try {
+    const inspection = inspectConnectorConfigDocumentFile(candidateFile)
     candidateDocument = validateConnectorConfigDocumentPolicy(
-      loadConnectorConfigDocumentFile(candidateFile),
+      inspection.document,
     )
+    candidateTargetFile = inspection.targetFile
   } catch (error) {
     throw new ConfigChangeError(
       "The candidate configuration is unavailable or invalid",
       "candidate",
       { cause: error },
+    )
+  }
+  if (currentTargetFile === candidateTargetFile) {
+    throw new ConfigChangeError(
+      "Configuration change planning requires distinct resolved active and candidate targets",
+      "review",
     )
   }
   if (
@@ -781,12 +795,14 @@ function createConfigChangePlan(
   const planDigest = digest({
     candidateDocumentDigest,
     candidateFile,
+    candidateTargetFile,
     changes,
     confirmation,
     currentDocumentDigest,
     file,
     format: CONFIG_CHANGE_PLAN_FORMAT,
     tools,
+    targetFile: currentTargetFile,
     warnings,
   }, CONFIG_CHANGE_PLAN_FORMAT)
   const report: ConfigChangePlanReport = Object.freeze({
@@ -794,6 +810,7 @@ function createConfigChangePlan(
     candidateDocument,
     candidateDocumentDigest,
     candidateFile,
+    candidateTargetFile,
     candidateSummary: summarizeConnectorConfigDocument(candidateDocument),
     changes,
     confirmation,
@@ -811,6 +828,7 @@ function createConfigChangePlan(
     planDigest,
     schemaVersion: CONFIG_CHANGE_REPORT_SCHEMA_VERSION,
     status: changes.length === 0 ? "already-current" : "planned",
+    targetFile: currentTargetFile,
     tools,
     warnings,
   })
@@ -866,6 +884,7 @@ export async function applyConfigChange(
       report.candidateDocument,
       {
         expectedCurrent: planned.currentDocument,
+        expectedTargetFile: report.targetFile,
         overwrite: true,
       },
     )
