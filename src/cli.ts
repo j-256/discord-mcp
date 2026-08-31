@@ -39,6 +39,7 @@ import {
   onboardHostDescriptor,
   onboardHostSupportsCredentialFile,
   resolveDefaultOnboardConfigFile,
+  type OnboardCredentialAccess,
   type OnboardHostId,
   type OnboardReport,
 } from "./onboard.js"
@@ -2102,7 +2103,7 @@ function helpText(
       "  5. Create a credential-free host activation handoff",
       "",
       `Supported hosts: ${ONBOARD_HOST_IDS.map((id) => `${onboardHostDescriptor(id).title} (${id})`).join(", ")}.`,
-      "The default credential reference is DISCORD_BOT_TOKEN. A one-time hidden prompt verifies setup but does not persist the token, so you must supply it to the selected host separately. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
+      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
       "",
       "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy publication failure, stdio failure, or guide export failure.",
     ].join("\n")
@@ -2505,6 +2506,9 @@ function renderOnboard(
     `Install page opened: ${browser.installOpened ? "yes" : "no"}`,
     `Activation guide opened: ${browser.guideOpened ? "yes" : "no"}`,
     `Evidence digest: ${report.onboardDigest}`,
+    "",
+    `Credential handoff: ${report.credentialHandoff.summary}`,
+    ...report.credentialHandoff.details.map((detail) => `- ${detail}`),
     "",
     "First read-only request:",
     report.firstRead.prompt,
@@ -3248,6 +3252,7 @@ function publishedPackageLaunch(): {
 }
 
 interface OnboardCredentialSelection {
+  readonly access: OnboardCredentialAccess
   readonly credentialFile?: string
   readonly credentialVariable?: string
   readonly hiddenToken?: string
@@ -3452,9 +3457,9 @@ async function selectOnboardCredentialSource(
     interaction,
     [
       "Choose how GuildControl should access the bot token:",
-      "  1. One-time hidden prompt (supply it to the host separately)",
-      "  2. Existing environment variable",
-      ...(credentialFileSupported ? ["  3. Existing protected token file"] : []),
+      "  1. One-time hidden prompt (setup only; host entry still required)",
+      "  2. Existing environment variable (reusable when the host inherits it)",
+      ...(credentialFileSupported ? ["  3. Existing protected token file (reused by the policy)"] : []),
       "Token source [1]: ",
     ].join("\n"),
     (value) => {
@@ -3495,10 +3500,14 @@ async function selectOnboardCredential(
         "The selected MCPB host requires an environment-backed policy; use a protected environment variable or hidden prompt",
       )
     }
-    return { credentialFile: parsed.credentialFile }
+    return {
+      access: "protected-file",
+      credentialFile: parsed.credentialFile,
+    }
   }
   if (parsed.credentialVariable) {
     return {
+      access: "existing-environment",
       credentialVariable: requireAvailableCredentialVariable(
         parsed.credentialVariable,
         environment,
@@ -3506,7 +3515,10 @@ async function selectOnboardCredential(
     }
   }
   if (environment[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]?.trim()) {
-    return { credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE }
+    return {
+      access: "existing-environment",
+      credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+    }
   }
   if (!interactive) {
     throw new CredentialUnavailableError(
@@ -3521,12 +3533,14 @@ async function selectOnboardCredential(
   if (source === "prompt") {
     const hiddenToken = await promptHiddenToken(interaction)
     return {
+      access: "one-time-prompt",
       credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
       hiddenToken,
     }
   }
   if (source === "environment") {
     return {
+      access: "existing-environment",
       credentialVariable: await promptAvailableCredentialVariable(
         interaction,
         environment,
@@ -3535,6 +3549,7 @@ async function selectOnboardCredential(
   }
   if (credentialFileSupported) {
     return {
+      access: "protected-file",
       credentialFile: await promptRequired(
         interaction,
         "Protected token file: ",
@@ -3721,6 +3736,7 @@ async function executeOnboard(
     report = createOnboardReport({
       activation,
       configFile,
+      credentialAccess: credential.access,
       hostId,
       install,
       setup,

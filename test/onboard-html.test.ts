@@ -11,6 +11,7 @@ import {
 } from "../src/onboard-html.js"
 import {
   createOnboardReport,
+  type OnboardCredentialAccess,
   type OnboardHostId,
 } from "../src/onboard.js"
 import {
@@ -21,9 +22,13 @@ import {
 function report(
   hostId: OnboardHostId = "codex",
   configFile?: string,
+  credentialAccess?: OnboardCredentialAccess,
+  credentialFile?: string,
 ) {
+  const fixture = onboardFixture(configFile, credentialFile)
   return createOnboardReport({
-    ...onboardFixture(configFile),
+    ...fixture,
+    credentialAccess: credentialAccess || fixture.credentialAccess,
     hostId,
   })
 }
@@ -32,6 +37,8 @@ test("onboarding HTML is host-specific, interactive, offline, and credential-fre
   const html = renderOnboardHtml(report("codex"))
   assert.match(html, /GuildControl is ready for Codex/)
   assert.match(html, /\[mcp_servers\.discord\]/)
+  assert.match(html, /Reuse DISCORD_BOT_TOKEN through Codex/)
+  assert.match(html, /No second token entry is needed after confirming/)
   assert.match(html, /data-check/)
   assert.match(html, /connect-src 'none'/)
   assert.match(html, /First read-only request/)
@@ -44,6 +51,7 @@ test("onboarding HTML renders the Claude Desktop MCPB handoff", () => {
   assert.match(html, /GuildControl is ready for Claude Desktop/)
   assert.match(html, /Download guildcontrol-[0-9]+\.[0-9]+\.[0-9]+\.mcpb/)
   assert.match(html, /protected sensitive-input prompt/)
+  assert.match(html, /Complete Claude Desktop&#39;s protected credential entry/)
   assert.doesNotMatch(html, /\[mcp_servers\.discord\]/)
   assert.doesNotMatch(html, /host-plan-command/)
   assert.doesNotMatch(html, /--adapter mcp-json/)
@@ -78,6 +86,11 @@ test("onboarding HTML builds reviewed plan, apply, and inspection commands for e
     assert.match(html, /aria-label="Copy host apply command"/)
     assert.match(html, /tabindex="0"/)
     assert.doesNotMatch(html, new RegExp(ONBOARD_TOKEN))
+    if (["vscode", "gemini-extension"].includes(hostId)) {
+      assert.match(html, /Complete .* protected credential entry/)
+    } else {
+      assert.match(html, /No second token entry is needed after confirming/)
+    }
   }
 })
 
@@ -91,6 +104,26 @@ test("onboarding HTML keeps TOML activation manual and safely quotes private pat
   assert.doesNotMatch(html, /host-plan-command/)
   assert.match(html, /owner&#39;&quot;&#39;&quot;&#39;s/)
   assert.doesNotMatch(html, /owner's/)
+})
+
+test("onboarding HTML explains cleared prompt and protected-file handoffs exactly", () => {
+  const prompted = renderOnboardHtml(report(
+    "codex",
+    undefined,
+    "one-time-prompt",
+  ))
+  assert.match(prompted, /one-time setup value was cleared/)
+  assert.match(prompted, /Provide DISCORD_BOT_TOKEN through Codex&#39;s protected environment or launcher/)
+
+  const fileBacked = renderOnboardHtml(report(
+    "vscode",
+    undefined,
+    "protected-file",
+    "/run/secrets/discord_bot_token",
+  ))
+  assert.match(fileBacked, /Reuse the policy&#39;s protected credential file/)
+  assert.match(fileBacked, /No second token entry is needed/)
+  assert.doesNotMatch(fileBacked, /password-masked input prompt/)
 })
 
 test("onboarding HTML export is exclusive, owner-private, and deterministic", async (context) => {

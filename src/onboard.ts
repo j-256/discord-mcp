@@ -9,6 +9,7 @@ import {
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
   CONNECTOR_VERSION,
+  DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
 import {
@@ -21,6 +22,7 @@ import {
   findHostAdapter,
   type HostAdapter,
   type HostAdapterId,
+  type HostAdapterSecretStrategy,
 } from "./host-adapters.js"
 import { stableString } from "./normalize.js"
 import type {
@@ -62,9 +64,23 @@ export interface OnboardAdapterRoute {
 
 export type OnboardHostRoute = OnboardAdapterRoute | OnboardMcpbRoute
 
+export type OnboardCredentialAccess =
+  | "existing-environment"
+  | "one-time-prompt"
+  | "protected-file"
+
+export interface OnboardCredentialHandoff {
+  readonly additionalTokenEntry: "not-required" | "not-required-if-inherited" | "required"
+  readonly details: readonly string[]
+  readonly hostAction: "enter-in-host" | "inherit-environment" | "reuse-protected-file"
+  readonly setupAccess: OnboardCredentialAccess
+  readonly summary: string
+}
+
 export interface OnboardReport {
   readonly activation: HostActivationPlan
   readonly configFile: string
+  readonly credentialHandoff: OnboardCredentialHandoff
   readonly firstRead: BotInstallPlan["postInstall"]["firstRead"]
   readonly format: typeof ONBOARD_REPORT_FORMAT
   readonly host: OnboardHostDescriptor & {
@@ -87,6 +103,7 @@ export interface OnboardReport {
 export interface CreateOnboardReportOptions {
   readonly activation: HostActivationPlan
   readonly configFile: string
+  readonly credentialAccess: OnboardCredentialAccess
   readonly hostId: OnboardHostId
   readonly install: BotInstallPlan
   readonly setup: SetupReport
@@ -95,6 +112,11 @@ export interface CreateOnboardReportOptions {
 
 const ONBOARD_DIGEST_DOMAIN = "guildcontrol-onboard-v1\0"
 const DEFAULT_CONFIG_FILE_NAME = "guildcontrol.json"
+const REUSABLE_ENVIRONMENT_STRATEGIES = new Set<HostAdapterSecretStrategy>([
+  "environment-interpolation",
+  "forwarded-environment",
+  "inherited-environment",
+])
 
 const HOST_TITLES: Readonly<Record<OnboardHostId, string>> = Object.freeze({
   "claude-code": "Claude Code",
@@ -165,6 +187,77 @@ function hostRoute(
   return deepFreeze({
     adapter: findHostAdapter(catalog, hostId as HostAdapterId),
     kind: "adapter" as const,
+  })
+}
+
+function credentialHandoff(
+  access: OnboardCredentialAccess,
+  host: OnboardReport["host"],
+  setup: SetupReport,
+): OnboardCredentialHandoff {
+  const credential = setup.credential
+  if (access === "protected-file") {
+    if (credential.provider !== "file" || !onboardHostSupportsCredentialFile(host.id)) {
+      throw new ConfigurationError("Protected-file onboarding evidence does not match the selected host and policy")
+    }
+    return deepFreeze({
+      additionalTokenEntry: "not-required" as const,
+      details: [
+        "The connector resolves the same external protected file when the MCP host starts it",
+        "Keep that file available at its exact policy-selected path and never copy its token into host configuration",
+        "No second token entry is needed",
+      ],
+      hostAction: "reuse-protected-file" as const,
+      setupAccess: access,
+      summary: "Reuse the policy's protected credential file",
+    })
+  }
+  if (credential.provider !== "environment") {
+    throw new ConfigurationError("Environment onboarding evidence does not match the selected policy")
+  }
+  if (
+    access === "one-time-prompt"
+    && credential.variable !== DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
+  ) {
+    throw new ConfigurationError("One-time prompt evidence requires the default credential variable")
+  }
+  const adapterStrategy = host.route.kind === "adapter"
+    ? host.route.adapter.secret.strategy
+    : "secure-input"
+  const canInherit = access === "existing-environment"
+    && REUSABLE_ENVIRONMENT_STRATEGIES.has(adapterStrategy)
+  if (canInherit) {
+    return deepFreeze({
+      additionalTokenEntry: "not-required-if-inherited" as const,
+      details: [
+        `The token was already available through ${credential.variable} during onboarding`,
+        `Start or restart ${host.title} from protected process state that provides the same named variable`,
+        "No second token entry is needed after confirming that the host inherits or resolves that variable",
+      ],
+      hostAction: "inherit-environment" as const,
+      setupAccess: access,
+      summary: `Reuse ${credential.variable} through ${host.title}`,
+    })
+  }
+  const hostInstruction = host.route.kind === "mcpb"
+    ? `Enter the token only through ${host.title}'s protected sensitive-input prompt`
+    : adapterStrategy === "secure-input"
+      ? `Enter the token only through ${host.title}'s password-masked input prompt`
+      : adapterStrategy === "system-keychain"
+        ? `Enter the token only through ${host.title}'s sensitive extension setting`
+        : `Provide ${credential.variable} through ${host.title}'s protected environment or launcher`
+  return deepFreeze({
+    additionalTokenEntry: "required" as const,
+    details: [
+      access === "one-time-prompt"
+        ? "The one-time setup value was cleared after the verified smoke test"
+        : `The setup process cannot transfer ${credential.variable} into ${host.title}'s protected secret custody`,
+      hostInstruction,
+      "GuildControl cannot perform this handoff without persisting the token or exposing it across a trust boundary",
+    ],
+    hostAction: "enter-in-host" as const,
+    setupAccess: access,
+    summary: `Complete ${host.title}'s protected credential entry`,
   })
 }
 
@@ -258,15 +351,21 @@ export function createOnboardReport(
 ): OnboardReport {
   const install = exactInstallPlan(options.install)
   assertMatchingEvidence({ ...options, install })
+  const host = deepFreeze({
+    ...onboardHostDescriptor(options.hostId),
+    route: hostRoute(options.hostId, options.activation),
+  })
   const base: Omit<OnboardReport, "onboardDigest"> = deepFreeze({
     activation: options.activation,
     configFile: options.configFile,
+    credentialHandoff: credentialHandoff(
+      options.credentialAccess,
+      host,
+      options.setup,
+    ),
     firstRead: install.postInstall.firstRead,
     format: ONBOARD_REPORT_FORMAT,
-    host: {
-      ...onboardHostDescriptor(options.hostId),
-      route: hostRoute(options.hostId, options.activation),
-    },
+    host,
     install,
     privacy: {
       credentialValuesEmbedded: false as const,
@@ -293,6 +392,7 @@ export function verifyOnboardReport(value: unknown): value is OnboardReport {
     return stableString(report) === stableString(createOnboardReport({
       activation: report.activation,
       configFile: report.configFile,
+      credentialAccess: report.credentialHandoff.setupAccess,
       hostId: report.host.id,
       install: report.install,
       setup: report.setup,

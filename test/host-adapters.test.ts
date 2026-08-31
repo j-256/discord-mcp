@@ -270,6 +270,19 @@ test("file-credential plans omit every host secret field", () => {
     assert.match(adapter.instructions.join(" "), /private credential file/)
   }
   assert.doesNotMatch(findHostAdapter(catalog, "codex").content, /env_vars/)
+  assert.doesNotMatch(
+    findHostAdapter(catalog, "claude-code").limitations.join(" "),
+    /Environment expansion/,
+  )
+  assert.doesNotMatch(
+    findHostAdapter(catalog, "codex").limitations.join(" "),
+    /Named environment forwarding/,
+  )
+  const vscode = findHostAdapter(catalog, "vscode")
+  assert.match(vscode.instructions[0] || "", /Merge only the .* server/)
+  assert.doesNotMatch(vscode.instructions.join(" "), /generated inputs/)
+  assert.doesNotMatch(vscode.limitations.join(" "), /interactive input variables|Secure input storage/)
+  assert.match(vscode.limitations.join(" "), /no interactive secret input/)
 })
 
 test("adapter verification rejects changed evidence and invalid activation plans", () => {
