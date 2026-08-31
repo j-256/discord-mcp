@@ -13,6 +13,7 @@ import {
   createHostActivationPlan,
   type HostActivationPlan,
 } from "../src/host-activation.js"
+import type { OnboardCredentialAccess } from "../src/onboard.js"
 import {
   createStdioLaunchDescriptor,
   OPERATOR_REPORT_SCHEMA_VERSION,
@@ -29,6 +30,7 @@ export const ONBOARD_TOKEN = "onboard-fixture-secret-token"
 export interface OnboardFixture {
   readonly activation: HostActivationPlan
   readonly configFile: string
+  readonly credentialAccess: OnboardCredentialAccess
   readonly document: ReturnType<typeof createConnectorConfigDocument>
   readonly install: BotInstallPlan
   readonly setup: SetupReport
@@ -37,12 +39,15 @@ export interface OnboardFixture {
 
 export function onboardFixture(
   configFile = "/private/guildcontrol.json",
+  credentialFile?: string,
 ): OnboardFixture {
   const preset = getSetupPreset("server-observer")
   const document = createConnectorConfigDocument({
     applicationId: ONBOARD_APPLICATION_ID,
     botId: ONBOARD_BOT_ID,
-    credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+    ...(credentialFile
+      ? { credentialFile }
+      : { credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE }),
     gatewayEnabled: false,
     guildIds: [ONBOARD_GUILD_ID],
     name: "guildcontrol",
@@ -108,6 +113,9 @@ export function onboardFixture(
   return {
     activation,
     configFile,
+    credentialAccess: credentialFile
+      ? "protected-file"
+      : "existing-environment",
     document,
     install: createBotInstallPlan({
       applicationId: ONBOARD_APPLICATION_ID,

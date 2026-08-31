@@ -214,7 +214,9 @@ function claudeCodeAdapter(plan: HostActivationPlan): HostAdapter {
     instructions: Object.freeze(instructions),
     limitations: Object.freeze([
       "This projection does not select a Claude Code scope or edit a host configuration",
-      "Environment expansion does not prove secret availability, write approval, elicitation support, startup, or Discord access",
+      environmentVariables.length > 0
+        ? "Environment expansion does not prove secret availability, write approval, elicitation support, startup, or Discord access"
+        : "Protected credential-file availability does not prove write approval, elicitation support, startup, or Discord access",
     ]),
     requirements: exactRequirements(plan),
     secret: deepFreeze({
@@ -284,7 +286,9 @@ function codexAdapter(plan: HostActivationPlan): HostAdapter {
     instructions: Object.freeze(instructions),
     limitations: Object.freeze([
       "The reviewed JSON host installer and inspector cannot merge or inspect TOML; merge this exact table manually",
-      "Named environment forwarding does not prove secret availability, write approval, elicitation support, startup, or Discord access",
+      environmentVariables.length > 0
+        ? "Named environment forwarding does not prove secret availability, write approval, elicitation support, startup, or Discord access"
+        : "Protected credential-file availability does not prove write approval, elicitation support, startup, or Discord access",
     ]),
     requirements: exactRequirements(plan),
     secret: deepFreeze({
@@ -424,7 +428,9 @@ function vscodeAdapter(plan: HostActivationPlan): HostAdapter {
     },
   })
   const instructions = [
-    `Merge the ${plan.launch.serverName} server and its generated inputs into exactly one VS Code mcp.json file`,
+    environmentVariables.length > 0
+      ? `Merge the ${plan.launch.serverName} server and its generated inputs into exactly one VS Code mcp.json file`
+      : `Merge only the ${plan.launch.serverName} server into exactly one VS Code mcp.json file`,
     ...(environmentVariables.length > 0
       ? ["Enter the Discord bot credential only in VS Code's password-masked input prompt; do not replace an input reference with a literal"]
       : [fileCredentialInstruction(plan)]),
@@ -443,10 +449,15 @@ function vscodeAdapter(plan: HostActivationPlan): HostAdapter {
     hostServerName: plan.launch.serverName,
     id: "vscode",
     instructions: Object.freeze(instructions),
-    limitations: Object.freeze([
-      "VS Code does not forward servers with interactive input variables to Agent Host sessions",
-      "Secure input storage does not prove write approval, elicitation support, startup, or Discord access",
-    ]),
+    limitations: Object.freeze(environmentVariables.length > 0
+      ? [
+          "VS Code does not forward servers with interactive input variables to Agent Host sessions",
+          "Secure input storage does not prove write approval, elicitation support, startup, or Discord access",
+        ]
+      : [
+          "The static projection contains no interactive secret input; the launched connector resolves its policy-selected credential file",
+          "Protected credential-file availability does not prove write approval, elicitation support, startup, or Discord access",
+        ]),
     requirements: exactRequirements(plan),
     secret: deepFreeze({
       environmentVariables: [...environmentVariables],

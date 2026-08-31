@@ -158,6 +158,12 @@ function list(values: readonly string[]): string {
   return `<ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>`
 }
 
+function credentialHandoffMarkup(report: OnboardReport): string {
+  const handoff = report.credentialHandoff
+  const state = handoff.additionalTokenEntry === "required" ? "attention" : "good"
+  return `<div class="callout ${state}"><strong>${escapeHtml(handoff.summary)}</strong>${list(handoff.details)}</div>`
+}
+
 function reviewedInstallerMarkup(report: OnboardReport): string {
   if (report.host.route.kind !== "adapter") return ""
   const adapter = report.host.route.adapter
@@ -225,6 +231,7 @@ function hostMarkup(report: OnboardReport): string {
   if (report.host.route.kind === "mcpb") {
     const route = report.host.route
     return `
+      ${credentialHandoffMarkup(report)}
       <p>Import the verified cross-platform bundle and select the exact policy file below. Enter the token only through Claude Desktop's protected sensitive-input prompt.</p>
       <div class="action-row"><a class="primary" href="${escapeHtml(route.downloadUrl)}" rel="noreferrer noopener">Download ${escapeHtml(route.archiveName)}</a></div>
       <h3>Import checklist</h3>
@@ -234,6 +241,7 @@ function hostMarkup(report: OnboardReport): string {
   }
   const adapter = report.host.route.adapter
   return `
+    ${credentialHandoffMarkup(report)}
     <p>Merge only the generated <code>${escapeHtml(adapter.hostServerName)}</code> server projection into one destination below. Preserve unrelated host configuration.</p>
     <p class="meta"><strong>Suggested destinations:</strong> ${escapeHtml(adapter.destinations.join("; "))}</p>
     ${codeBlock("host-config", adapter.content, `${adapter.title} configuration`)}
@@ -314,7 +322,7 @@ export function renderOnboardHtml(value: OnboardReport): string {
     </section>
     <section class="step" id="policy">
       <div class="step-head"><div class="title"><span class="number">2</span><div><h2>Private policy pinned</h2><p class="meta">The policy stores a credential reference, never the credential value.</p></div></div><label class="done"><input type="checkbox" data-check> Reviewed</label></div>
-      <div class="body"><div class="grid"><div class="field"><span>Policy file</span><code>${escapeHtml(report.configFile)}</code></div><div class="field"><span>Credential custody</span><code>${escapeHtml(credentialReference)}</code></div><div class="field"><span>Preset</span><code>${escapeHtml(report.setup.preset?.name || "")}</code></div><div class="field"><span>Tool surface</span><code>${escapeHtml(report.setup.toolSurface)}</code></div></div>${warningMarkup(report)}</div>
+      <div class="body"><div class="grid"><div class="field"><span>Policy file</span><code>${escapeHtml(report.configFile)}</code></div><div class="field"><span>Credential custody</span><code>${escapeHtml(credentialReference)}</code></div><div class="field"><span>Setup access</span><code>${escapeHtml(report.credentialHandoff.setupAccess)}</code></div><div class="field"><span>Host action</span><code>${escapeHtml(report.credentialHandoff.hostAction)}</code></div><div class="field"><span>Preset</span><code>${escapeHtml(report.setup.preset?.name || "")}</code></div><div class="field"><span>Tool surface</span><code>${escapeHtml(report.setup.toolSurface)}</code></div></div>${warningMarkup(report)}</div>
     </section>
     <section class="step" id="smoke">
       <div class="step-head"><div class="title"><span class="number">3</span><div><h2>The real MCP path passed</h2><p class="meta">A child process started, negotiated MCP, checked catalogs, and called only discovery plus connector status.</p></div></div><label class="done"><input type="checkbox" data-check> Reviewed</label></div>

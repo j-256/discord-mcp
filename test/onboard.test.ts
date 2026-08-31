@@ -52,6 +52,13 @@ test("onboarding binds install, policy, stdio smoke, and one exact host adapter"
   assert.equal(report.host.route.kind, "adapter")
   if (report.host.route.kind !== "adapter") assert.fail("Expected adapter route")
   assert.equal(report.host.route.adapter.id, "codex")
+  assert.equal(report.credentialHandoff.setupAccess, "existing-environment")
+  assert.equal(report.credentialHandoff.hostAction, "inherit-environment")
+  assert.equal(
+    report.credentialHandoff.additionalTokenEntry,
+    "not-required-if-inherited",
+  )
+  assert.match(report.credentialHandoff.summary, /Reuse DISCORD_BOT_TOKEN/)
   assert.equal(report.firstRead.guildId, fixture.install.guildId)
   assert.equal(report.privacy.credentialValuesEmbedded, false)
   assert.match(report.onboardDigest, /^sha256:[a-f0-9]{64}$/)
@@ -68,7 +75,46 @@ test("Claude Desktop onboarding selects the exact versioned MCPB route", () => {
   if (report.host.route.kind !== "mcpb") assert.fail("Expected MCPB route")
   assert.match(report.host.route.archiveName, /^guildcontrol-[0-9]+\.[0-9]+\.[0-9]+\.mcpb$/)
   assert.match(report.host.route.downloadUrl, /github\.com\/j-256\/guildcontrol\/releases\/download/)
+  assert.equal(report.credentialHandoff.hostAction, "enter-in-host")
+  assert.equal(report.credentialHandoff.additionalTokenEntry, "required")
   assert.equal(verifyOnboardReport(report), true)
+})
+
+test("onboarding distinguishes cleared prompts from reusable protected files", () => {
+  const environmentFixture = onboardFixture()
+  const prompted = createOnboardReport({
+    ...environmentFixture,
+    credentialAccess: "one-time-prompt",
+    hostId: "codex",
+  })
+  assert.equal(prompted.credentialHandoff.hostAction, "enter-in-host")
+  assert.equal(prompted.credentialHandoff.additionalTokenEntry, "required")
+  assert.match(prompted.credentialHandoff.details.join(" "), /cleared after the verified smoke test/)
+
+  const fileFixture = onboardFixture(
+    "/private/guildcontrol.json",
+    "/run/secrets/discord_bot_token",
+  )
+  const fileBacked = createOnboardReport({
+    ...fileFixture,
+    hostId: "vscode",
+  })
+  assert.equal(fileBacked.credentialHandoff.hostAction, "reuse-protected-file")
+  assert.equal(fileBacked.credentialHandoff.additionalTokenEntry, "not-required")
+  assert.match(fileBacked.credentialHandoff.details.join(" "), /No second token entry is needed/)
+  assert.equal(verifyOnboardReport(fileBacked), true)
+})
+
+test("onboarding rejects credential access claims that contradict policy custody", () => {
+  const fixture = onboardFixture()
+  assert.throws(
+    () => createOnboardReport({
+      ...fixture,
+      credentialAccess: "protected-file",
+      hostId: "codex",
+    }),
+    /does not match the selected host and policy/,
+  )
 })
 
 test("onboarding rejects evidence from another application or transport", () => {

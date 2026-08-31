@@ -852,6 +852,11 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
   const output = JSON.parse(stdout.value())
   assert.equal(output.host.id, "codex")
   assert.equal(output.host.route.kind, "adapter")
+  assert.equal(output.credentialHandoff.hostAction, "inherit-environment")
+  assert.equal(
+    output.credentialHandoff.additionalTokenEntry,
+    "not-required-if-inherited",
+  )
   assert.equal(output.guide.file, "/output/onboarding.html")
   assert.deepEqual(output.browser, {
     guideOpened: false,
@@ -945,6 +950,8 @@ test("interactive onboarding recovers from input mistakes without exposing a one
   assert.doesNotMatch(stderr.value(), new RegExp(ONBOARD_TOKEN))
   assert.match(stdout.value(), /GuildControl onboarding: ready/)
   assert.match(stdout.value(), /Activation guide opened: no/)
+  assert.match(stdout.value(), /Credential handoff: Complete Codex's protected credential entry/)
+  assert.match(stdout.value(), /one-time setup value was cleared/)
   assert.match(prompts[0] || "", /1\. Claude Desktop \(claude-desktop\)/)
   assert.match(prompts[1] || "", /Host was not recognized/)
   assert.match(prompts[3] || "", /Application ID must be a Discord snowflake/)
@@ -1085,6 +1092,8 @@ test("interactive onboarding accepts a displayed host name", async () => {
   assert.equal(exit, 0)
   assert.deepEqual(answers, [])
   assert.match(stdout.value(), /Host: Visual Studio Code/)
+  assert.match(stdout.value(), /Credential handoff: Complete Visual Studio Code's protected credential entry/)
+  assert.match(stdout.value(), /cannot transfer DISCORD_BOT_TOKEN/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
@@ -4733,8 +4742,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(onboardHelpOutput.value(), /Five verified stages/)
   assert.match(onboardHelpOutput.value(), /--confirm-installed/)
   assert.match(onboardHelpOutput.value(), /--json never prompts or opens a browser/)
-  assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but does not persist the token/)
-  assert.match(onboardHelpOutput.value(), /supply it to the selected host separately/)
+  assert.match(onboardHelpOutput.value(), /existing environment or protected-file source can be reused/)
+  assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but is cleared after smoke/)
+  assert.match(onboardHelpOutput.value(), /selected host still needs its own protected credential entry/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
