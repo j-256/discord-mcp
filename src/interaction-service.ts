@@ -13,6 +13,8 @@ import {
   CONNECTOR_LIMITS,
   DISCORD_CHANNEL_TYPES,
   DISCORD_LIMITS,
+  DISCORD_SNOWFLAKE_MAX,
+  DISCORD_SNOWFLAKE_PATTERN,
   IDEMPOTENCY_KEY_PATTERN,
   REACTION_LIMITS,
   SCHEMA_VERSION,
@@ -69,6 +71,7 @@ import type {
   DiscordChannel,
   DiscordGuildMember,
   DiscordMessage,
+  DiscordRole,
   DiscordThreadMember,
   RequestOptions,
 } from "./types.js"
@@ -87,6 +90,13 @@ const THREAD_CHANNEL_TYPES: ReadonlySet<number> = new Set([
   DISCORD_CHANNEL_TYPES.announcementThread,
   DISCORD_CHANNEL_TYPES.privateThread,
   DISCORD_CHANNEL_TYPES.publicThread,
+])
+const MESSAGE_PUBLICATION_CHANNEL_TYPES: ReadonlySet<number> = new Set([
+  DISCORD_CHANNEL_TYPES.announcement,
+  DISCORD_CHANNEL_TYPES.announcementThread,
+  DISCORD_CHANNEL_TYPES.privateThread,
+  DISCORD_CHANNEL_TYPES.publicThread,
+  DISCORD_CHANNEL_TYPES.text,
 ])
 
 export interface SendMessageRequest {
@@ -170,6 +180,15 @@ export interface MessageNotificationPlan {
     suppressedUserIds: string[]
     userMentions: NotificationAuthorizationDecision
   }
+  permission: {
+    administrator: boolean
+    confidence: "complete"
+    effectivePermissionNames: DiscordPermissionName[]
+    effectivePermissions: string
+    permissionSourceChannelId: string
+    privateThreadAccess: "lookup-succeeded" | "not-applicable"
+    requiredPermissionNames: DiscordPermissionName[]
+  }
   reviewRequired: boolean
   schemaVersion: number
   status: "direct" | "review-required"
@@ -178,19 +197,29 @@ export interface MessageNotificationPlan {
     messageId: string | null
     replyToMessageId: string | null
   }
+  thread: {
+    parentId: string
+    privateThreadAccess: "lookup-succeeded" | "not-applicable"
+  } | null
   warnings: string[]
 }
 
-interface SendMessageNotificationState {
+interface InteractionMessageChannelState {
   channel: DiscordChannel
   guildId: string
+  member: DiscordGuildMember
+  parent: DiscordChannel | null
+  permission: BotChannelPermissionResult
+  privateThreadMember: DiscordThreadMember | null
+  roles: DiscordRole[]
+}
+
+interface SendMessageNotificationState extends InteractionMessageChannelState {
   reply: DiscordMessage | null
 }
 
-interface EditMessageNotificationState {
-  channel: DiscordChannel
+interface EditMessageNotificationState extends InteractionMessageChannelState {
   existing: DiscordMessage
-  guildId: string
 }
 
 export interface AddReactionResult {
@@ -450,6 +479,250 @@ function assertProcessingPermissions(
   }
 }
 
+function validSnowflake(value: unknown): value is string {
+  return typeof value === "string"
+    && DISCORD_SNOWFLAKE_PATTERN.test(value)
+    && BigInt(value) >= 1n
+    && BigInt(value) <= DISCORD_SNOWFLAKE_MAX
+}
+
+function messagePublicationChannel(channel: DiscordChannel): DiscordChannel {
+  if (
+    !channel
+    || typeof channel !== "object"
+    || Array.isArray(channel)
+    || !validSnowflake(channel.id)
+    || !validSnowflake(channel.guild_id)
+    || !MESSAGE_PUBLICATION_CHANNEL_TYPES.has(channel.type)
+  ) {
+    throw new InteractionIdentityError(
+      "Discord message publication requires a text, announcement, or active thread channel",
+    )
+  }
+  if (THREAD_CHANNEL_TYPES.has(channel.type)) {
+    const metadata = channel.thread_metadata
+    if (
+      !validSnowflake(channel.parent_id)
+      || !metadata
+      || metadata.archived !== false
+      || metadata.locked !== false
+      || typeof metadata.archive_timestamp !== "string"
+      || Number.isNaN(Date.parse(metadata.archive_timestamp))
+      || !Number.isSafeInteger(metadata.auto_archive_duration)
+    ) {
+      throw new InteractionIdentityError(
+        "Discord message publication requires an active unlocked thread with complete lifecycle evidence",
+      )
+    }
+  }
+  return channel
+}
+
+function messagePublicationParentTypeMatches(
+  threadType: number,
+  parentType: number,
+): boolean {
+  if (threadType === DISCORD_CHANNEL_TYPES.announcementThread) {
+    return parentType === DISCORD_CHANNEL_TYPES.announcement
+  }
+  if (threadType === DISCORD_CHANNEL_TYPES.privateThread) {
+    return parentType === DISCORD_CHANNEL_TYPES.text
+  }
+  return parentType === DISCORD_CHANNEL_TYPES.forum
+    || parentType === DISCORD_CHANNEL_TYPES.media
+    || parentType === DISCORD_CHANNEL_TYPES.text
+}
+
+function exactMessagePublicationParent(
+  parent: DiscordChannel,
+  thread: DiscordChannel,
+  guildId: string,
+): DiscordChannel {
+  if (
+    !parent
+    || typeof parent !== "object"
+    || Array.isArray(parent)
+    || parent.id !== thread.parent_id
+    || !validSnowflake(parent.id)
+    || parent.guild_id !== guildId
+    || THREAD_CHANNEL_TYPES.has(parent.type)
+    || !messagePublicationParentTypeMatches(thread.type, parent.type)
+    || !Array.isArray(parent.permission_overwrites)
+  ) {
+    throw new InteractionIdentityError(
+      "Discord returned mismatched message-publication thread-parent evidence",
+    )
+  }
+  return parent
+}
+
+function exactMessagePublicationMember(
+  member: DiscordGuildMember,
+  botId: string,
+): DiscordGuildMember {
+  if (
+    !member
+    || typeof member !== "object"
+    || Array.isArray(member)
+    || !member.user
+    || member.user.id !== botId
+    || member.user.bot !== true
+    || !Array.isArray(member.roles)
+    || member.roles.some((roleId) => !validSnowflake(roleId))
+    || new Set(member.roles).size !== member.roles.length
+  ) {
+    throw new InteractionIdentityError(
+      "Discord returned invalid connector membership for message publication",
+    )
+  }
+  return member
+}
+
+function exactMessagePublicationRoles(
+  roles: DiscordRole[],
+  guildId: string,
+  member: DiscordGuildMember,
+): DiscordRole[] {
+  if (
+    !Array.isArray(roles)
+    || roles.length < 1
+    || roles.length > DISCORD_LIMITS.guildRoles
+    || !roles.some((role) => role?.id === guildId)
+    || roles.some((role) => (
+      !role
+      || typeof role !== "object"
+      || !validSnowflake(role.id)
+      || typeof role.permissions !== "string"
+      || !/^(0|[1-9][0-9]*)$/u.test(role.permissions)
+    ))
+    || new Set(roles.map((role) => role.id)).size !== roles.length
+  ) {
+    throw new InteractionIdentityError(
+      "Discord returned invalid bounded role evidence for message publication",
+    )
+  }
+  const roleIds = new Set(roles.map((role) => role.id))
+  if (member.roles.some((roleId) => !roleIds.has(roleId))) {
+    throw new InteractionIdentityError(
+      "Discord message-publication member evidence references an absent role",
+    )
+  }
+  return roles
+}
+
+function exactMessagePublicationThreadMember(
+  member: DiscordThreadMember,
+  threadId: string,
+  botId: string,
+): DiscordThreadMember {
+  if (
+    !member
+    || typeof member !== "object"
+    || Array.isArray(member)
+    || member.id !== threadId
+    || member.user_id !== botId
+    || !Number.isSafeInteger(member.flags)
+    || member.flags < 0
+    || typeof member.join_timestamp !== "string"
+    || Number.isNaN(Date.parse(member.join_timestamp))
+  ) {
+    throw new InteractionIdentityError(
+      "Discord returned mismatched message-publication private-thread membership evidence",
+    )
+  }
+  return member
+}
+
+function messagePublicationRequiredPermissions(
+  channel: DiscordChannel,
+): DiscordPermissionName[] {
+  return [
+    "VIEW_CHANNEL",
+    "READ_MESSAGE_HISTORY",
+    THREAD_CHANNEL_TYPES.has(channel.type)
+      ? "SEND_MESSAGES_IN_THREADS"
+      : "SEND_MESSAGES",
+  ]
+}
+
+function messagePublicationPermission(
+  permission: BotChannelPermissionResult,
+  channel: DiscordChannel,
+): MessageNotificationPlan["permission"] {
+  const requiredPermissionNames = messagePublicationRequiredPermissions(channel)
+  const effective = BigInt(permission.effectivePermissions)
+  const missing = permission.administrator
+    ? []
+    : requiredPermissionNames.filter((name) => (
+        (effective & DISCORD_PERMISSIONS[name]) !== DISCORD_PERMISSIONS[name]
+      ))
+  if (permission.confidence !== "complete" || missing.length > 0) {
+    throw new InteractionIdentityError(
+      `Discord connector bot message-publication permission evidence is incomplete or missing: ${missing.join(", ") || permission.warnings.join("; ") || "unknown evidence"}`,
+    )
+  }
+  return {
+    administrator: permission.administrator,
+    confidence: "complete",
+    effectivePermissionNames: permission.effectivePermissionNames,
+    effectivePermissions: permission.effectivePermissions,
+    permissionSourceChannelId: permission.permissionSourceChannelId,
+    privateThreadAccess: permission.privateThreadAccess,
+    requiredPermissionNames,
+  }
+}
+
+function messagePublicationChannelSnapshot(channel: DiscordChannel) {
+  return {
+    guildId: channel.guild_id ?? null,
+    id: channel.id,
+    parentId: channel.parent_id ?? null,
+    permissionOverwrites: channel.permission_overwrites ?? null,
+    threadMetadata: channel.thread_metadata
+      ? {
+          archiveTimestamp: channel.thread_metadata.archive_timestamp ?? null,
+          archived: channel.thread_metadata.archived ?? null,
+          autoArchiveDuration: channel.thread_metadata.auto_archive_duration ?? null,
+          locked: channel.thread_metadata.locked ?? null,
+        }
+      : null,
+    type: channel.type,
+  }
+}
+
+function messagePublicationRoleSnapshot(roles: readonly DiscordRole[]) {
+  return roles
+    .map((role) => ({
+      id: role.id,
+      managed: role.managed,
+      permissions: role.permissions,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function messagePublicationEvidence(state: InteractionMessageChannelState) {
+  return {
+    channel: messagePublicationChannelSnapshot(state.channel),
+    member: {
+      roles: [...state.member.roles].sort(),
+      userId: state.member.user?.id ?? null,
+    },
+    parent: state.parent
+      ? messagePublicationChannelSnapshot(state.parent)
+      : null,
+    permission: messagePublicationPermission(state.permission, state.channel),
+    privateThreadMember: state.privateThreadMember
+      ? {
+          flags: state.privateThreadMember.flags,
+          id: state.privateThreadMember.id,
+          joinedAt: state.privateThreadMember.join_timestamp,
+          userId: state.privateThreadMember.user_id,
+        }
+      : null,
+    roles: messagePublicationRoleSnapshot(state.roles),
+  }
+}
+
 function assertCommandSource(
   message: DiscordMessage,
   botId: string,
@@ -591,6 +864,63 @@ export class InteractionService {
       throw new InteractionIdentityError("Discord returned a different interaction channel than requested")
     }
     return { channel, guildId: this.#policy.assertChannelInteractable(channel) }
+  }
+
+  async #messageChannel(
+    botId: string,
+    channelId: string,
+    options: RequestOptions,
+  ): Promise<InteractionMessageChannelState> {
+    assertDiscordSnowflake(botId, "Discord interaction bot ID")
+    assertDiscordSnowflake(channelId, "Discord interaction channel ID")
+    const observedChannel = await this.#client.getChannel(channelId, options)
+    if (observedChannel.id !== channelId) {
+      throw new InteractionIdentityError(
+        "Discord returned a different message-publication channel than requested",
+      )
+    }
+    const channel = messagePublicationChannel(observedChannel)
+    const guildId = this.#policy.assertChannelMessagePublishable(channel)
+    let parent: DiscordChannel | null = null
+    if (THREAD_CHANNEL_TYPES.has(channel.type)) {
+      const observedParent = await this.#client.getChannel(channel.parent_id!, options)
+      parent = exactMessagePublicationParent(observedParent, channel, guildId)
+      if (this.#policy.assertChannelReadable(parent) !== guildId) {
+        throw new InteractionIdentityError(
+          "Discord message-publication thread parent belongs to another guild",
+        )
+      }
+    }
+    const [observedMember, observedRoles, observedThreadMember] = await Promise.all([
+      this.#client.getGuildMember(guildId, botId, options),
+      this.#client.getGuildRoles(guildId, options),
+      channel.type === DISCORD_CHANNEL_TYPES.privateThread
+        ? this.#client.getThreadMember(channel.id, botId, options)
+        : Promise.resolve(null),
+    ])
+    const member = exactMessagePublicationMember(observedMember, botId)
+    const roles = exactMessagePublicationRoles(observedRoles, guildId, member)
+    const privateThreadMember = observedThreadMember
+      ? exactMessagePublicationThreadMember(observedThreadMember, channel.id, botId)
+      : null
+    const permission = evaluateBotChannelPermissions({
+      botId,
+      channel,
+      guildId,
+      member,
+      permissionChannel: parent || channel,
+      roles,
+    })
+    messagePublicationPermission(permission, channel)
+    return {
+      channel,
+      guildId,
+      member,
+      parent,
+      permission,
+      privateThreadMember,
+      roles,
+    }
   }
 
   async #message(
@@ -871,7 +1201,7 @@ export class InteractionService {
     assertDiscordSnowflake(botId, "Discord interaction bot ID")
     const notifyUserIds = validateSendMessageRequest(request)
     const userMentions = this.#policy.notificationAuthorization(notifyUserIds)
-    const state = await this.#sendMessageNotificationState(request, options)
+    const state = await this.#sendMessageNotificationState(botId, request, options)
     const { channel, guildId, reply } = state
     const replyAuthorDecision = reply && request.notifyReplyAuthor
       ? this.#policy.notificationAuthorization([reply.author.id])
@@ -894,19 +1224,15 @@ export class InteractionService {
     )
     const suppressedUserIds = discordMentionedUserIds(request.content)
       .filter((userId) => !notifyUserIds.includes(userId))
+    const publication = messagePublicationEvidence(state)
     const digest = reviewedPlanDigest(this.#planKey, {
       action: "send",
       botId,
-      channel: {
-        guildId,
-        id: channel.id,
-        parentId: channel.parent_id ?? null,
-        type: channel.type,
-      },
       contentDigest,
       idempotencyKeyDigest,
       notifyReplyAuthor: request.notifyReplyAuthor ?? false,
       notifyUserIds,
+      publication,
       reply: reply
         ? {
             authorId: reply.author.id,
@@ -940,6 +1266,7 @@ export class InteractionService {
         suppressedUserIds,
         userMentions,
       },
+      permission: publication.permission,
       reviewRequired,
       schemaVersion: SCHEMA_VERSION,
       status: reviewRequired ? "review-required" : "direct",
@@ -948,6 +1275,12 @@ export class InteractionService {
         messageId: null,
         replyToMessageId: request.replyToMessageId ?? null,
       },
+      thread: state.parent
+        ? {
+            parentId: state.parent.id,
+            privateThreadAccess: publication.permission.privateThreadAccess,
+          }
+        : null,
       warnings: [
         "Discord role and everyone notifications remain suppressed",
         ...(reviewRequired
@@ -1047,7 +1380,8 @@ export class InteractionService {
     reviewedState: SendMessageNotificationState | null,
     options: RequestOptions,
   ): Promise<SendMessageResult> {
-    const state = reviewedState ?? await this.#sendMessageNotificationState(request, options)
+    const state = reviewedState
+      ?? await this.#sendMessageNotificationState(botId, request, options)
     const { guildId, reply } = state
     if (reply && request.notifyReplyAuthor) {
       assertDiscordSnowflake(reply.author.id, "Discord reply author ID")
@@ -1111,19 +1445,20 @@ export class InteractionService {
   }
 
   async #sendMessageNotificationState(
+    botId: string,
     request: SendMessageRequest,
     options: RequestOptions,
   ): Promise<SendMessageNotificationState> {
-    const { channel, guildId } = await this.#channel(request.channelId, options)
+    const state = await this.#messageChannel(botId, request.channelId, options)
     const reply = request.replyToMessageId === undefined
       ? null
       : await this.#message(
           request.channelId,
-          guildId,
+          state.guildId,
           request.replyToMessageId,
           options,
         )
-    return { channel, guildId, reply }
+    return { ...state, reply }
   }
 
   async editOwnMessage(
@@ -1163,19 +1498,15 @@ export class InteractionService {
     const suppressedUserIds = discordMentionedUserIds(request.content)
       .filter((userId) => !notifyUserIds.includes(userId))
     const reviewRequired = userMentions.authorization === "reviewed"
+    const publication = messagePublicationEvidence(state)
     const digest = reviewedPlanDigest(this.#planKey, {
       action: "edit",
       botId,
-      channel: {
-        guildId,
-        id: channel.id,
-        parentId: channel.parent_id ?? null,
-        type: channel.type,
-      },
       contentDigest,
       currentContentDigest,
       messageId: request.messageId,
       notifyUserIds,
+      publication,
       reviewRequired,
       suppressedUserIds,
       userMentions,
@@ -1201,6 +1532,7 @@ export class InteractionService {
         suppressedUserIds,
         userMentions,
       },
+      permission: publication.permission,
       reviewRequired,
       schemaVersion: SCHEMA_VERSION,
       status: reviewRequired ? "review-required" : "direct",
@@ -1209,6 +1541,12 @@ export class InteractionService {
         messageId: request.messageId,
         replyToMessageId: null,
       },
+      thread: state.parent
+        ? {
+            parentId: state.parent.id,
+            privateThreadAccess: publication.permission.privateThreadAccess,
+          }
+        : null,
       warnings: [
         "Discord role and everyone notifications remain suppressed",
         ...(reviewRequired
@@ -1322,15 +1660,15 @@ export class InteractionService {
     request: EditOwnMessageRequest,
     options: RequestOptions,
   ): Promise<EditMessageNotificationState> {
-    const { channel, guildId } = await this.#channel(request.channelId, options)
+    const state = await this.#messageChannel(botId, request.channelId, options)
     const existing = await this.#message(
       request.channelId,
-      guildId,
+      state.guildId,
       request.messageId,
       options,
     )
     assertDiscordBotMessage(existing, botId)
-    return { channel, existing, guildId }
+    return { ...state, existing }
   }
 
   async addReaction(

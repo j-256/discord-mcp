@@ -3003,6 +3003,9 @@ function renderRecipe(recipe: ConfigRecipeDescriptor): string {
     `  Scope input: ${recipe.requirements.scope.option} (${recipe.requirements.scope.minimum}-${recipe.requirements.scope.maximum})`,
     `  Outer boundary: ${recipe.requirements.scope.outerBoundary ?? "independent exact-user scope"}`,
     `  Added scopes: ${recipe.requirements.scope.targets.join(", ")}`,
+    `  Thread scope: ${recipe.requirements.threads
+      ? `reads ${recipe.requirements.threads.reads}; message writes ${recipe.requirements.threads.messageWrites}`
+      : "unchanged"}`,
     `  Bot permissions: ${recipe.requirements.botPermissions.length === 0 ? "none" : recipe.requirements.botPermissions.join(", ")} (${recipe.requirements.botPermissionBitfield})`,
     `  Privileged intents: ${privilegedIntents}`,
     `  Gateway evidence: ${gatewayEvidence}`,
@@ -3071,6 +3074,9 @@ function renderRecipePlan(
       ? [`Recoverable prior version: ${applied.backupFile}`]
       : []),
     `Bot permissions: ${report.recipe.requirements.botPermissions.join(", ")} (${report.recipe.requirements.botPermissionBitfield})`,
+    `Thread scope: ${report.recipe.requirements.threads
+      ? `reads ${report.recipe.requirements.threads.reads}; message writes ${report.recipe.requirements.threads.messageWrites}`
+      : "unchanged"}`,
     `Privileged intents: ${report.recipe.requirements.privilegedIntents.length === 0
       ? "none"
       : report.recipe.requirements.privilegedIntents

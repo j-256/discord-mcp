@@ -63,6 +63,7 @@ import type {
   DiscordMessage,
   DiscordPoll,
   DiscordRole,
+  DiscordThreadMember,
   DiscordUser,
   RequestOptions,
 } from "./types.js"
@@ -223,6 +224,7 @@ export interface PollPermissionEvidence {
   effectivePermissionNames: DiscordPermissionName[]
   effectivePermissions: string
   permissionSourceChannelId: string
+  privateThreadAccess: "lookup-succeeded" | "not-applicable"
   requiredPermissionNames: DiscordPermissionName[]
 }
 
@@ -332,6 +334,7 @@ export interface PollServiceOptions {
     | "getGuildMember"
     | "getGuildRoles"
     | "getMessage"
+    | "getThreadMember"
     | "listPollAnswerVoters"
   >
   clock?: () => Date
@@ -356,6 +359,7 @@ interface PollChannelEvidence {
   member: DiscordGuildMember
   parent: DiscordChannel | null
   permission: BotChannelPermissionResult
+  privateThreadMember: DiscordThreadMember | null
   roles: DiscordRole[]
 }
 
@@ -818,6 +822,9 @@ function exactChannel(value: DiscordChannel, channelId: string): DiscordChannel 
       || !value.thread_metadata
       || typeof value.thread_metadata.archived !== "boolean"
       || typeof value.thread_metadata.locked !== "boolean"
+      || typeof value.thread_metadata.archive_timestamp !== "string"
+      || Number.isNaN(Date.parse(value.thread_metadata.archive_timestamp))
+      || !Number.isSafeInteger(value.thread_metadata.auto_archive_duration)
     ) {
       throw new PollEvidenceError("Discord returned incomplete poll thread evidence")
     }
@@ -838,6 +845,48 @@ function exactParent(value: DiscordChannel, parentId: string, guildId: string): 
     || !Array.isArray(value.permission_overwrites)
   ) {
     throw new PollEvidenceError("Discord returned invalid poll thread-parent evidence")
+  }
+  return value
+}
+
+function exactThreadParent(
+  value: DiscordChannel,
+  thread: DiscordChannel,
+  guildId: string,
+): DiscordChannel {
+  const parent = exactParent(value, thread.parent_id as string, guildId)
+  const typeMatches = thread.type === DISCORD_CHANNEL_TYPES.announcementThread
+    ? parent.type === DISCORD_CHANNEL_TYPES.announcement
+    : thread.type === DISCORD_CHANNEL_TYPES.privateThread
+      ? parent.type === DISCORD_CHANNEL_TYPES.text
+      : parent.type === DISCORD_CHANNEL_TYPES.forum
+        || parent.type === DISCORD_CHANNEL_TYPES.media
+        || parent.type === DISCORD_CHANNEL_TYPES.text
+  if (!typeMatches) {
+    throw new PollEvidenceError("Discord returned an invalid poll thread-parent relationship")
+  }
+  return parent
+}
+
+function exactPrivateThreadMember(
+  value: DiscordThreadMember,
+  threadId: string,
+  botId: string,
+): DiscordThreadMember {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || value.id !== threadId
+    || value.user_id !== botId
+    || !Number.isSafeInteger(value.flags)
+    || value.flags < 0
+    || typeof value.join_timestamp !== "string"
+    || Number.isNaN(Date.parse(value.join_timestamp))
+  ) {
+    throw new PollEvidenceError(
+      "Discord returned mismatched poll private-thread membership evidence",
+    )
   }
   return value
 }
@@ -947,6 +996,7 @@ function assertPermission(
     effectivePermissionNames: permission.effectivePermissionNames,
     effectivePermissions: permission.effectivePermissions,
     permissionSourceChannelId: permission.permissionSourceChannelId,
+    privateThreadAccess: permission.privateThreadAccess,
     requiredPermissionNames,
   }
 }
@@ -970,7 +1020,9 @@ function channelSnapshot(channel: DiscordChannel) {
     permissionOverwrites: permissionOverwriteSnapshot(channel),
     threadMetadata: channel.thread_metadata
       ? {
+          archiveTimestamp: channel.thread_metadata.archive_timestamp ?? null,
           archived: channel.thread_metadata.archived ?? null,
+          autoArchiveDuration: channel.thread_metadata.auto_archive_duration ?? null,
           locked: channel.thread_metadata.locked ?? null,
         }
       : null,
@@ -1366,23 +1418,29 @@ export class PollService {
       : this.#policy.assertPollEndable(channel)
     let parent: DiscordChannel | null = null
     if (THREAD_CHANNEL_TYPES.has(channel.type)) {
-      parent = exactParent(
+      parent = exactThreadParent(
         await this.#client.getChannel(channel.parent_id as string, options),
-        channel.parent_id as string,
+        channel,
         guildId,
       )
       if (this.#policy.assertChannelReadable(parent) !== guildId) {
         throw new PollEvidenceError("Discord poll thread parent belongs to another guild")
       }
     }
-    const [guildValue, memberValue, rolesValue] = await Promise.all([
+    const [guildValue, memberValue, rolesValue, threadMemberValue] = await Promise.all([
       this.#client.getGuild(guildId, options),
       this.#client.getGuildMember(guildId, botId, options),
       this.#client.getGuildRoles(guildId, options),
+      channel.type === DISCORD_CHANNEL_TYPES.privateThread
+        ? this.#client.getThreadMember(channel.id, botId, options)
+        : Promise.resolve(null),
     ])
     const guild = exactGuild(guildValue, guildId)
     const member = exactMember(memberValue, botId)
     const roles = exactRoles(rolesValue, guildId, member)
+    const privateThreadMember = threadMemberValue
+      ? exactPrivateThreadMember(threadMemberValue, channel.id, botId)
+      : null
     const permission = evaluateBotChannelPermissions({
       botId,
       channel,
@@ -1399,6 +1457,7 @@ export class PollService {
       member,
       parent,
       permission,
+      privateThreadMember,
       roles,
     }
   }
@@ -1436,8 +1495,17 @@ export class PollService {
         confidence: permission.confidence,
         effectivePermissions: permission.effectivePermissions,
         permissionSourceChannelId: permission.permissionSourceChannelId,
+        privateThreadAccess: permission.privateThreadAccess,
         requiredPermissionNames: permission.requiredPermissionNames,
       },
+      privateThreadMember: state.privateThreadMember
+        ? {
+            flags: state.privateThreadMember.flags,
+            id: state.privateThreadMember.id,
+            joinedAt: state.privateThreadMember.join_timestamp,
+            userId: state.privateThreadMember.user_id,
+          }
+        : null,
       request: {
         ...pollCreationTarget(request),
         channelId: request.channelId,
@@ -1877,8 +1945,17 @@ export class PollService {
         confidence: permission.confidence,
         effectivePermissions: permission.effectivePermissions,
         permissionSourceChannelId: permission.permissionSourceChannelId,
+        privateThreadAccess: permission.privateThreadAccess,
         requiredPermissionNames: permission.requiredPermissionNames,
       },
+      privateThreadMember: state.privateThreadMember
+        ? {
+            flags: state.privateThreadMember.flags,
+            id: state.privateThreadMember.id,
+            joinedAt: state.privateThreadMember.join_timestamp,
+            userId: state.privateThreadMember.user_id,
+          }
+        : null,
       request: {
         channelId: request.channelId,
         messageId: request.messageId,

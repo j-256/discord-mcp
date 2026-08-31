@@ -68,6 +68,7 @@ import type {
   DiscordGuildMember,
   DiscordMessage,
   DiscordRole,
+  DiscordThreadMember,
   RequestOptions,
 } from "./types.js"
 
@@ -137,6 +138,7 @@ export interface AttachmentMessagePlan {
     effectivePermissionNames: DiscordPermissionName[]
     effectivePermissions: string
     permissionSourceChannelId: string
+    privateThreadAccess: "lookup-succeeded" | "not-applicable"
     requiredPermissionNames: DiscordPermissionName[]
   }
   reply: {
@@ -181,6 +183,7 @@ export interface AttachmentMessageServiceOptions {
     | "getGuildMember"
     | "getGuildRoles"
     | "getMessage"
+    | "getThreadMember"
   >
   clock?: () => Date
   limiter: InteractionLimiter
@@ -198,6 +201,7 @@ interface AttachmentMessageState {
   notificationAuthorization: DiscordNotificationAuthorization
   parent: DiscordChannel | null
   permission: BotChannelPermissionResult
+  privateThreadMember: DiscordThreadMember | null
   reply: DiscordMessage | null
   roles: DiscordRole[]
 }
@@ -317,6 +321,14 @@ function channelSnapshot(channel: DiscordChannel) {
     id: channel.id,
     parentId: channel.parent_id ?? null,
     permissionOverwrites: channel.permission_overwrites ?? null,
+    threadMetadata: channel.thread_metadata
+      ? {
+          archiveTimestamp: channel.thread_metadata.archive_timestamp ?? null,
+          archived: channel.thread_metadata.archived ?? null,
+          autoArchiveDuration: channel.thread_metadata.auto_archive_duration ?? null,
+          locked: channel.thread_metadata.locked ?? null,
+        }
+      : null,
     type: channel.type,
   }
 }
@@ -380,7 +392,59 @@ function exactChannel(
       "Discord returned a mismatched or unsupported attachment channel",
     )
   }
+  if (THREAD_CHANNEL_TYPES.has(channel.type)) {
+    const metadata = channel.thread_metadata
+    if (
+      !channel.parent_id
+      || !DISCORD_SNOWFLAKE_PATTERN.test(channel.parent_id)
+      || !metadata
+      || metadata.archived !== false
+      || metadata.locked !== false
+      || typeof metadata.archive_timestamp !== "string"
+      || Number.isNaN(Date.parse(metadata.archive_timestamp))
+      || !Number.isSafeInteger(metadata.auto_archive_duration)
+    ) {
+      throw new AttachmentMessageStateError(
+        "Discord attachment messages require an active unlocked thread with complete lifecycle evidence",
+      )
+    }
+  }
   return channel
+}
+
+function parentTypeMatches(threadType: number, parentType: number): boolean {
+  if (threadType === DISCORD_CHANNEL_TYPES.announcementThread) {
+    return parentType === DISCORD_CHANNEL_TYPES.announcement
+  }
+  if (threadType === DISCORD_CHANNEL_TYPES.privateThread) {
+    return parentType === DISCORD_CHANNEL_TYPES.text
+  }
+  return parentType === DISCORD_CHANNEL_TYPES.forum
+    || parentType === DISCORD_CHANNEL_TYPES.media
+    || parentType === DISCORD_CHANNEL_TYPES.text
+}
+
+function exactPrivateThreadMember(
+  member: DiscordThreadMember,
+  threadId: string,
+  botId: string,
+): DiscordThreadMember {
+  if (
+    !member
+    || typeof member !== "object"
+    || Array.isArray(member)
+    || member.id !== threadId
+    || member.user_id !== botId
+    || !Number.isSafeInteger(member.flags)
+    || member.flags < 0
+    || typeof member.join_timestamp !== "string"
+    || Number.isNaN(Date.parse(member.join_timestamp))
+  ) {
+    throw new AttachmentMessageStateError(
+      "Discord returned mismatched attachment private-thread membership evidence",
+    )
+  }
+  return member
 }
 
 function exactMember(member: DiscordGuildMember, botId: string): DiscordGuildMember {
@@ -587,6 +651,8 @@ export class AttachmentMessageService {
         parent.id !== channel.parent_id
         || parent.guild_id !== guildId
         || THREAD_CHANNEL_TYPES.has(parent.type)
+        || !parentTypeMatches(channel.type, parent.type)
+        || !Array.isArray(parent.permission_overwrites)
       ) {
         throw new AttachmentMessageStateError(
           "Discord returned a mismatched attachment thread parent",
@@ -599,9 +665,12 @@ export class AttachmentMessageService {
       }
     }
 
-    const [member, roles, reply, file] = await Promise.all([
+    const [member, roles, privateThreadMember, reply, file] = await Promise.all([
       this.#client.getGuildMember(guildId, botId, options),
       this.#client.getGuildRoles(guildId, options),
+      channel.type === DISCORD_CHANNEL_TYPES.privateThread
+        ? this.#client.getThreadMember(channel.id, botId, options)
+        : Promise.resolve(null),
       request.replyToMessageId
         ? this.#client.getMessage(request.channelId, request.replyToMessageId, options)
         : Promise.resolve(null),
@@ -613,6 +682,9 @@ export class AttachmentMessageService {
       }),
     ])
     exactMember(member, botId)
+    if (privateThreadMember) {
+      exactPrivateThreadMember(privateThreadMember, channel.id, botId)
+    }
     if (!Array.isArray(roles) || roles.length < 1 || roles.length > DISCORD_LIMITS.guildRoles) {
       throw new AttachmentMessageStateError("Discord returned an invalid bounded role inventory")
     }
@@ -654,6 +726,7 @@ export class AttachmentMessageService {
       notificationAuthorization,
       parent,
       permission,
+      privateThreadMember,
       reply,
       roles,
     }
@@ -685,6 +758,14 @@ export class AttachmentMessageService {
         effectivePermissions: state.permission.effectivePermissions,
         permissionSourceChannelId: state.permission.permissionSourceChannelId,
       },
+      privateThreadMember: state.privateThreadMember
+        ? {
+            flags: state.privateThreadMember.flags,
+            id: state.privateThreadMember.id,
+            joinedAt: state.privateThreadMember.join_timestamp,
+            userId: state.privateThreadMember.user_id,
+          }
+        : null,
       reply: state.reply
         ? {
             authorId: state.reply.author.id,
@@ -733,6 +814,7 @@ export class AttachmentMessageService {
         effectivePermissionNames: state.permission.effectivePermissionNames,
         effectivePermissions: state.permission.effectivePermissions,
         permissionSourceChannelId: state.permission.permissionSourceChannelId,
+        privateThreadAccess: state.permission.privateThreadAccess,
         requiredPermissionNames: required,
       },
       reply: state.reply

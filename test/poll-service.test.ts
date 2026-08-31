@@ -46,6 +46,7 @@ import type {
   DiscordPoll,
   DiscordPollVoters,
   DiscordRole,
+  DiscordThreadMember,
 } from "../src/types.js"
 
 const APPLICATION_ID = "100000000000000001"
@@ -226,6 +227,8 @@ function policy(options: {
   allowEnding?: boolean
   allowVoterAudit?: boolean
   pollChannelIds?: readonly string[]
+  threadMessageWriteMode?: "exact" | "inherit"
+  threadReadMode?: "exact" | "inherit"
 } = {}): ScopePolicy {
   const allowedChannelIds = options.allowedChannelIds ?? [CHANNEL_ID]
   return new ScopePolicy({
@@ -246,6 +249,8 @@ function policy(options: {
     mentionUserIds: new Set(),
     pollChannelIds: new Set(options.pollChannelIds ?? [CHANNEL_ID]),
     protectedUserIds: new Set(),
+    threadMessageWriteMode: options.threadMessageWriteMode ?? "exact",
+    threadReadMode: options.threadReadMode ?? "inherit",
   })
 }
 
@@ -318,6 +323,7 @@ interface FixtureState {
   message: DiscordMessage
   parent: DiscordChannel
   roles: DiscordRole[]
+  threadMember: DiscordThreadMember
   voterCalls: number
   voters: DiscordPollVoters
 }
@@ -356,6 +362,12 @@ function fixture(options: {
       role(GUILD_ID, 0n),
       role(BOT_ROLE_ID, CREATE_PERMISSIONS, 1),
     ],
+    threadMember: {
+      flags: 0,
+      id: THREAD_ID,
+      join_timestamp: NOW,
+      user_id: BOT_ID,
+    },
     voterCalls: 0,
     voters: {
       users: [
@@ -398,6 +410,9 @@ function fixture(options: {
     async getMessage() {
       state.getMessageCalls += 1
       return structuredClone(state.message)
+    },
+    async getThreadMember() {
+      return structuredClone(state.threadMember)
     },
     async listPollAnswerVoters() {
       state.voterCalls += 1
@@ -621,6 +636,174 @@ test("poll creation plans bind identity, content, channel evidence, and permissi
     creationRequest({ operationKey: SECOND_OPERATION_KEY }),
   )
   assert.notEqual(changed.digest, plan.digest)
+})
+
+test("poll threads separate parent-inherited reads from reviewed message writes", async () => {
+  const threadPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
+    | DISCORD_PERMISSIONS.SEND_POLLS
+  const thread = threadChannel()
+  const threadMessage = pollMessage(MESSAGE_ID, {
+    channel_id: THREAD_ID,
+    nonce: pollNonce(THREAD_ID, OPERATION_KEY),
+  })
+  const inheritedPolicy = policy({
+    allowedChannelIds: [PARENT_ID],
+    pollChannelIds: [PARENT_ID],
+    threadMessageWriteMode: "inherit",
+    threadReadMode: "inherit",
+  })
+  const inherited = fixture({
+    policy: inheritedPolicy,
+    state: {
+      channel: thread,
+      created: threadMessage,
+      message: threadMessage,
+      roles: [
+        role(GUILD_ID, 0n),
+        role(BOT_ROLE_ID, threadPermissions, 1),
+      ],
+    },
+  })
+
+  const read = await inherited.service.get(THREAD_ID, MESSAGE_ID)
+  const createPlan = await inherited.service.planCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    creationRequest({ channelId: THREAD_ID }),
+  )
+  const endPlan = await inherited.service.planEnd(
+    APPLICATION_ID,
+    BOT_ID,
+    endRequest({ channelId: THREAD_ID }),
+  )
+
+  assert.equal(read.channelId, THREAD_ID)
+  assert.equal(createPlan.channel.parentId, PARENT_ID)
+  assert.equal(createPlan.permission.permissionSourceChannelId, PARENT_ID)
+  assert.equal(createPlan.permission.privateThreadAccess, "not-applicable")
+  assert.deepEqual(createPlan.permission.requiredPermissionNames, [
+    "VIEW_CHANNEL",
+    "READ_MESSAGE_HISTORY",
+    "SEND_MESSAGES_IN_THREADS",
+    "SEND_POLLS",
+  ])
+  assert.equal(endPlan.permission.permissionSourceChannelId, PARENT_ID)
+
+  const readOnly = fixture({
+    policy: policy({
+      allowedChannelIds: [PARENT_ID],
+      pollChannelIds: [PARENT_ID],
+      threadMessageWriteMode: "exact",
+      threadReadMode: "inherit",
+    }),
+    state: {
+      channel: thread,
+      message: threadMessage,
+    },
+  })
+  assert.equal((await readOnly.service.get(THREAD_ID, MESSAGE_ID)).channelId, THREAD_ID)
+  await assert.rejects(
+    () => readOnly.service.planCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      creationRequest({ channelId: THREAD_ID }),
+    ),
+    /outside the poll scope/u,
+  )
+
+  const exactReads = fixture({
+    policy: policy({
+      allowedChannelIds: [PARENT_ID],
+      pollChannelIds: [PARENT_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "exact",
+    }),
+    state: {
+      channel: thread,
+      message: threadMessage,
+    },
+  })
+  await assert.rejects(
+    () => exactReads.service.get(THREAD_ID, MESSAGE_ID),
+    /outside the configured read scope/u,
+  )
+})
+
+test("private-thread poll writes require exact membership and parent relationship", async () => {
+  const threadPermissions = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
+    | DISCORD_PERMISSIONS.SEND_POLLS
+  const privateThread = threadChannel({ type: DISCORD_CHANNEL_TYPES.privateThread })
+  const inheritedPolicy = policy({
+    allowedChannelIds: [PARENT_ID],
+    pollChannelIds: [PARENT_ID],
+    threadMessageWriteMode: "inherit",
+    threadReadMode: "inherit",
+  })
+  const member = fixture({
+    policy: inheritedPolicy,
+    state: {
+      channel: privateThread,
+      roles: [
+        role(GUILD_ID, 0n),
+        role(BOT_ROLE_ID, threadPermissions, 1),
+      ],
+    },
+  })
+  const plan = await member.service.planCreation(
+    APPLICATION_ID,
+    BOT_ID,
+    creationRequest({ channelId: THREAD_ID }),
+  )
+  assert.equal(plan.permission.privateThreadAccess, "lookup-succeeded")
+
+  const mismatch = fixture({
+    policy: inheritedPolicy,
+    state: {
+      channel: privateThread,
+      roles: [
+        role(GUILD_ID, 0n),
+        role(BOT_ROLE_ID, threadPermissions, 1),
+      ],
+      threadMember: {
+        flags: 0,
+        id: THREAD_ID,
+        join_timestamp: NOW,
+        user_id: VOTER_ID_ONE,
+      },
+    },
+  })
+  await assert.rejects(
+    () => mismatch.service.planCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      creationRequest({ channelId: THREAD_ID }),
+    ),
+    /private-thread membership evidence/u,
+  )
+
+  const wrongParent = fixture({
+    policy: inheritedPolicy,
+    state: {
+      channel: privateThread,
+      parent: textChannel(PARENT_ID, { type: DISCORD_CHANNEL_TYPES.category }),
+      roles: [
+        role(GUILD_ID, 0n),
+        role(BOT_ROLE_ID, threadPermissions, 1),
+      ],
+    },
+  })
+  await assert.rejects(
+    () => wrongParent.service.planCreation(
+      APPLICATION_ID,
+      BOT_ID,
+      creationRequest({ channelId: THREAD_ID }),
+    ),
+    /thread-parent relationship/u,
+  )
 })
 
 test("poll creation policy, permissions, and thread lifecycle fail closed", async () => {

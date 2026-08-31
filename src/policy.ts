@@ -2622,6 +2622,34 @@ export class ScopePolicy {
       )
   }
 
+  #channelIdInThreadScope(
+    channel: DiscordChannel,
+    channelIds: ReadonlySet<string>,
+    mode: "exact" | "inherit",
+  ): boolean {
+    return channelIds.has(channel.id)
+      || Boolean(
+        mode === "inherit"
+        && THREAD_CHANNEL_TYPES.has(channel.type)
+        && channel.parent_id
+        && channelIds.has(channel.parent_id),
+      )
+  }
+
+  #assertMessageChannelScope(
+    channel: DiscordChannel,
+    channelIds: ReadonlySet<string>,
+    feature: string,
+  ): void {
+    if (!this.#channelIdInThreadScope(
+      channel,
+      channelIds,
+      this.#threadMessageWriteMode,
+    )) {
+      throw new PolicyError(`Discord channel ${channel.id} is outside the ${feature} scope`)
+    }
+  }
+
   constrainSearchChannelIds(
     requestedChannelIds: readonly string[] | undefined,
     maximum: number,
@@ -2730,9 +2758,7 @@ export class ScopePolicy {
         "Discord attachment messages require an explicit attachment-channel allowlist",
       )
     }
-    if (!this.#attachmentChannelIds.has(channel.id)) {
-      throw new PolicyError(`Discord channel ${channel.id} is outside the attachment scope`)
-    }
+    this.#assertMessageChannelScope(channel, this.#attachmentChannelIds, "attachment")
     return guildId
   }
 
@@ -2750,6 +2776,22 @@ export class ScopePolicy {
     return guildId
   }
 
+  assertChannelMessagePublishable(channel: DiscordChannel): string {
+    const guildId = this.assertChannelReadable(channel)
+    if (!this.#allowInteractions) {
+      throw new PolicyError("Discord interactions are disabled by connector configuration")
+    }
+    if (this.#interactionChannelIds.size === 0) {
+      throw new PolicyError("Discord interactions require an explicit interaction-channel allowlist")
+    }
+    this.#assertMessageChannelScope(
+      channel,
+      this.#interactionChannelIds,
+      "message-publication",
+    )
+    return guildId
+  }
+
   assertChannelEmbedMessageAllowed(channel: DiscordChannel): string {
     const guildId = this.assertChannelReadable(channel)
     if (!this.#allowEmbedMessages) {
@@ -2760,9 +2802,11 @@ export class ScopePolicy {
         "Discord embed messages require an explicit embed-message channel allowlist",
       )
     }
-    if (!this.#embedMessageChannelIds.has(channel.id)) {
-      throw new PolicyError(`Discord channel ${channel.id} is outside the embed-message scope`)
-    }
+    this.#assertMessageChannelScope(
+      channel,
+      this.#embedMessageChannelIds,
+      "embed-message",
+    )
     return guildId
   }
 
@@ -2936,7 +2980,11 @@ export class ScopePolicy {
     if (this.#pollChannelIds.size === 0) {
       throw new PolicyError("Discord poll audit requires an explicit channel allowlist")
     }
-    if (!this.#pollChannelIds.has(channel.id)) {
+    if (!this.#channelIdInThreadScope(
+      channel,
+      this.#pollChannelIds,
+      this.#threadReadMode,
+    )) {
       throw new PolicyError(`Discord channel ${channel.id} is outside the poll scope`)
     }
     return guildId
@@ -2955,6 +3003,7 @@ export class ScopePolicy {
     if (!this.#allowPollCreation) {
       throw new PolicyError("Discord poll creation is disabled by connector configuration")
     }
+    this.#assertMessageChannelScope(channel, this.#pollChannelIds, "poll")
     return guildId
   }
 
@@ -2963,6 +3012,7 @@ export class ScopePolicy {
     if (!this.#allowPollEnding) {
       throw new PolicyError("Discord poll ending is disabled by connector configuration")
     }
+    this.#assertMessageChannelScope(channel, this.#pollChannelIds, "poll")
     return guildId
   }
 

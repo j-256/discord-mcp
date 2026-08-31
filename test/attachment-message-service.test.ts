@@ -13,6 +13,7 @@ import type {
   ActivityEntry,
   ActivityStore,
 } from "../src/activity-log.js"
+import { DISCORD_CHANNEL_TYPES } from "../src/constants.js"
 import {
   attachmentMessageNonce,
   AttachmentMessageService,
@@ -39,6 +40,7 @@ import type {
   DiscordGuildMember,
   DiscordMessage,
   DiscordRole,
+  DiscordThreadMember,
 } from "../src/types.js"
 
 const GUILD_ID = "100000000000000001"
@@ -121,6 +123,8 @@ function policy(root: string, options: {
   mentionUserIds?: readonly string[]
   permissions?: bigint
   readChannels?: readonly string[]
+  threadMessageWriteMode?: "exact" | "inherit"
+  threadReadMode?: "exact" | "inherit"
   userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}) {
   const permissions = options.permissions
@@ -148,6 +152,8 @@ function policy(root: string, options: {
       interactionMinWriteIntervalMs: 0,
       mentionUserIds: new Set(options.mentionUserIds ?? [REPLY_AUTHOR_ID]),
       protectedUserIds: new Set(),
+      threadMessageWriteMode: options.threadMessageWriteMode ?? "exact",
+      threadReadMode: options.threadReadMode ?? "inherit",
       userMentionMode: options.userMentionMode ?? "allowlist",
     }),
     roles: [role(GUILD_ID, 0n), role(BOT_ROLE_ID, permissions)],
@@ -192,6 +198,7 @@ interface FixtureState {
   readbackOverrides: Partial<DiscordMessage>
   reply: DiscordMessage
   roles: DiscordRole[]
+  threadMember: DiscordThreadMember
 }
 
 async function fixture(options: {
@@ -214,6 +221,12 @@ async function fixture(options: {
     readbackOverrides: {},
     reply: message(REPLY_ID),
     roles: configured.roles,
+    threadMember: {
+      flags: 0,
+      id: CHANNEL_ID,
+      join_timestamp: NOW,
+      user_id: BOT_ID,
+    },
     ...options.state,
   }
   const activities: ActivityEntry[] = []
@@ -305,6 +318,10 @@ async function fixture(options: {
       })
       if (state.omitReadbackNonce) delete readback.nonce
       return readback
+    },
+    async getThreadMember() {
+      events.push("read:thread-member")
+      return state.threadMember
     },
   }
   const limiter = new InteractionLimiter({
@@ -501,24 +518,37 @@ test("attachment planning fails closed on scope and complete send permissions", 
   }
 })
 
-test("attachment threads require their exact scope and thread-specific send permission", async () => {
+test("attachment threads support explicit parent scope with complete access proof", async () => {
   const required = DISCORD_PERMISSIONS.VIEW_CHANNEL
     | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
     | DISCORD_PERMISSIONS.ATTACH_FILES
     | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
   const current = await fixture({
     policyOptions: {
+      channels: [PARENT_CHANNEL_ID],
       permissions: required,
-      readChannels: [CHANNEL_ID, PARENT_CHANNEL_ID],
+      readChannels: [PARENT_CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "inherit",
     },
     state: {
-      channel: channel({ parent_id: PARENT_CHANNEL_ID, type: 11 }),
+      channel: channel({
+        parent_id: PARENT_CHANNEL_ID,
+        thread_metadata: {
+          archive_timestamp: NOW,
+          archived: false,
+          auto_archive_duration: 60,
+          locked: false,
+        },
+        type: DISCORD_CHANNEL_TYPES.publicThread,
+      }),
     },
   })
   try {
     const plan = await current.service.plan(BOT_ID, request(current.filePath))
     assert.equal(plan.channel.parentId, PARENT_CHANNEL_ID)
     assert.equal(plan.permission.permissionSourceChannelId, PARENT_CHANNEL_ID)
+    assert.equal(plan.permission.privateThreadAccess, "not-applicable")
     assert.deepEqual(plan.permission.requiredPermissionNames, [
       "VIEW_CHANNEL",
       "READ_MESSAGE_HISTORY",
@@ -531,11 +561,23 @@ test("attachment threads require their exact scope and thread-specific send perm
 
   const missing = await fixture({
     policyOptions: {
+      channels: [PARENT_CHANNEL_ID],
       permissions: required ^ DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS,
-      readChannels: [CHANNEL_ID, PARENT_CHANNEL_ID],
+      readChannels: [PARENT_CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "inherit",
     },
     state: {
-      channel: channel({ parent_id: PARENT_CHANNEL_ID, type: 11 }),
+      channel: channel({
+        parent_id: PARENT_CHANNEL_ID,
+        thread_metadata: {
+          archive_timestamp: NOW,
+          archived: false,
+          auto_archive_duration: 60,
+          locked: false,
+        },
+        type: DISCORD_CHANNEL_TYPES.publicThread,
+      }),
     },
   })
   try {
@@ -545,6 +587,113 @@ test("attachment threads require their exact scope and thread-specific send perm
     )
   } finally {
     await missing.cleanup()
+  }
+
+  const writeExact = await fixture({
+    policyOptions: {
+      channels: [PARENT_CHANNEL_ID],
+      permissions: required,
+      readChannels: [PARENT_CHANNEL_ID],
+      threadMessageWriteMode: "exact",
+      threadReadMode: "inherit",
+    },
+    state: {
+      channel: channel({
+        parent_id: PARENT_CHANNEL_ID,
+        thread_metadata: {
+          archive_timestamp: NOW,
+          archived: false,
+          auto_archive_duration: 60,
+          locked: false,
+        },
+        type: DISCORD_CHANNEL_TYPES.publicThread,
+      }),
+    },
+  })
+  try {
+    await assert.rejects(
+      writeExact.service.plan(BOT_ID, request(writeExact.filePath)),
+      /outside the attachment scope/,
+    )
+  } finally {
+    await writeExact.cleanup()
+  }
+})
+
+test("attachment private threads require active lifecycle and exact membership", async () => {
+  const required = DISCORD_PERMISSIONS.VIEW_CHANNEL
+    | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+    | DISCORD_PERMISSIONS.ATTACH_FILES
+    | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
+  const policyOptions = {
+    channels: [PARENT_CHANNEL_ID],
+    permissions: required,
+    readChannels: [PARENT_CHANNEL_ID],
+    threadMessageWriteMode: "inherit" as const,
+    threadReadMode: "inherit" as const,
+  }
+  const privateChannel = channel({
+    parent_id: PARENT_CHANNEL_ID,
+    thread_metadata: {
+      archive_timestamp: NOW,
+      archived: false,
+      auto_archive_duration: 60,
+      locked: false,
+    },
+    type: DISCORD_CHANNEL_TYPES.privateThread,
+  })
+  const member = await fixture({
+    policyOptions,
+    state: { channel: privateChannel },
+  })
+  try {
+    const plan = await member.service.plan(BOT_ID, request(member.filePath))
+    assert.equal(plan.permission.privateThreadAccess, "lookup-succeeded")
+    assert.equal(member.events.includes("read:thread-member"), true)
+  } finally {
+    await member.cleanup()
+  }
+
+  const mismatched = await fixture({
+    policyOptions,
+    state: {
+      channel: privateChannel,
+      threadMember: {
+        flags: 0,
+        id: CHANNEL_ID,
+        join_timestamp: NOW,
+        user_id: REPLY_AUTHOR_ID,
+      },
+    },
+  })
+  try {
+    await assert.rejects(
+      mismatched.service.plan(BOT_ID, request(mismatched.filePath)),
+      /private-thread membership evidence/,
+    )
+  } finally {
+    await mismatched.cleanup()
+  }
+
+  const archived = await fixture({
+    policyOptions,
+    state: {
+      channel: {
+        ...privateChannel,
+        thread_metadata: {
+          ...privateChannel.thread_metadata!,
+          archived: true,
+        },
+      },
+    },
+  })
+  try {
+    await assert.rejects(
+      archived.service.plan(BOT_ID, request(archived.filePath)),
+      /active unlocked thread/,
+    )
+  } finally {
+    await archived.cleanup()
   }
 })
 

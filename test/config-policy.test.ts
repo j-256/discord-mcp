@@ -6800,6 +6800,51 @@ test("scope policy inherits parent read scope for threads but keeps deletion exa
   )
 })
 
+test("scope policy limits parent-inherited writes to message publication", () => {
+  const policy = new ScopePolicy(loadConnectorConfig({
+    token: TOKEN,
+    capabilities: {
+      deletions: true,
+      interactions: true,
+      threadAudit: true,
+      threadChanges: true,
+    },
+    readScope: {
+      channelIds: [CHANNEL_ID],
+      guildIds: [GUILD_ID],
+    },
+    scopes: {
+      deleteChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+      threadGuildIds: [GUILD_ID],
+      threadIds: [CHANNEL_ID],
+    },
+    threads: {
+      messageWrites: "inherit",
+      reads: "inherit",
+    },
+  }, { homeDirectory: "/test/home" }))
+  const child = channel({
+    id: OTHER_CHANNEL_ID,
+    parent_id: CHANNEL_ID,
+    type: DISCORD_CHANNEL_TYPES.publicThread,
+  })
+
+  assert.equal(policy.assertChannelMessagePublishable(child), GUILD_ID)
+  assert.throws(
+    () => policy.assertChannelInteractable(child),
+    /outside the interaction scope/,
+  )
+  assert.throws(
+    () => policy.assertChannelDeletable(child),
+    /outside the deletion scope/,
+  )
+  assert.throws(
+    () => policy.assertThreadChangeAllowed(GUILD_ID, child.id),
+    /outside the thread-governance scope/,
+  )
+})
+
 test("scope policy attenuates native search to exact configured channel IDs", () => {
   const thirdChannelId = "200000000000000003"
   const scoped = new ScopePolicy(loadConnectorConfig({

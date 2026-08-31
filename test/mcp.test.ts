@@ -1904,6 +1904,7 @@ function pollCreationPlan(
         | DISCORD_PERMISSIONS.SEND_POLLS
       ).toString(),
       permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
       requiredPermissionNames: [
         "VIEW_CHANNEL",
         "READ_MESSAGE_HISTORY",
@@ -1961,6 +1962,7 @@ function pollEndPlan(
         | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
       ).toString(),
       permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
       requiredPermissionNames: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY"],
     },
     poll: pollRead(request.channelId, request.messageId, !writeRequired).poll,
@@ -6152,6 +6154,23 @@ function messageNotificationPlan(
         reviewedUserIds: userReviewRequired ? userIds : [],
       },
     },
+    permission: {
+      administrator: false,
+      confidence: "complete",
+      effectivePermissionNames: [
+        "VIEW_CHANNEL",
+        "SEND_MESSAGES",
+        "READ_MESSAGE_HISTORY",
+      ],
+      effectivePermissions: "68608",
+      permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
+      requiredPermissionNames: [
+        "VIEW_CHANNEL",
+        "READ_MESSAGE_HISTORY",
+        "SEND_MESSAGES",
+      ],
+    },
     reviewRequired,
     schemaVersion: 1,
     status: reviewRequired ? "review-required" : "direct",
@@ -6164,6 +6183,7 @@ function messageNotificationPlan(
         ? request.replyToMessageId ?? null
         : null,
     },
+    thread: null,
     warnings: ["Role and everyone notifications remain suppressed"],
   }
 }
@@ -6217,6 +6237,7 @@ function attachmentPlan(
         | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
       ).toString(),
       permissionSourceChannelId: request.channelId,
+      privateThreadAccess: "not-applicable",
       requiredPermissionNames: [
         "VIEW_CHANNEL",
         "READ_MESSAGE_HISTORY",

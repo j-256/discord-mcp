@@ -79,6 +79,11 @@ export interface ConfigRecipeGatewayRequirement {
   readonly intents: readonly "GUILDS"[]
 }
 
+export interface ConfigRecipeThreadRequirement {
+  readonly messageWrites: "inherit"
+  readonly reads: "inherit"
+}
+
 export interface ConfigRecipeDescriptor {
   readonly capabilities: readonly ConnectorConfigCapabilityName[]
   readonly description: string
@@ -96,6 +101,7 @@ export interface ConfigRecipeDescriptor {
       readonly outerBoundary: "$.readScope.channelIds" | "$.readScope.guildIds" | null
       readonly targets: readonly `$.scopes.${ConnectorConfigScopeName}`[]
     }
+    readonly threads: ConfigRecipeThreadRequirement | null
   }
   readonly riskClasses: readonly McpToolRiskClass[]
   readonly risks: readonly string[]
@@ -118,6 +124,7 @@ interface ConfigRecipeSource {
     readonly names: readonly ConnectorConfigScopeName[]
   }
   readonly toolsets: readonly McpToolsetName[]
+  readonly threads?: ConfigRecipeThreadRequirement
   readonly warnings: readonly string[]
 }
 
@@ -137,8 +144,8 @@ export interface NormalizedConfigRecipeRequest {
 }
 
 export interface ConfigRecipeChange {
-  readonly after: boolean | readonly string[]
-  readonly before: boolean | readonly string[]
+  readonly after: boolean | "exact" | "inherit" | readonly string[]
+  readonly before: boolean | "exact" | "inherit" | readonly string[]
   readonly path: string
 }
 
@@ -333,16 +340,22 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     risks: [
       "Coordination-note sends and replies make visible Discord changes",
       "An optional separately allowlisted exact-user notification creates a visible Discord mention",
+      "Parent-scoped publication automatically includes supported active child threads created later beneath that parent",
     ],
     scope: {
       kind: "channel",
       names: ["interactionChannelIds"],
+    },
+    threads: {
+      messageWrites: "inherit",
+      reads: "inherit",
     },
     toolsets: ["coordination"],
     warnings: [
       "Routing labels are visible, copyable, spoofable, and caller-retained; they never identify a participant, register a session, prove liveness, or grant authority",
       "Only strict messages authored by the pinned current bot are eligible, so Discord's app-authored-message exception keeps the privileged Message Content intent unnecessary",
       "Mentions remain suppressed unless exact notification users are configured separately and visibly referenced in the reviewed note",
+      "Thread inheritance applies only to message reads and publication; reactions, typing, deletion, and administration retain exact child scope",
       "The recipe creates no alias registry, persona store, listener, timer, background poller, coordination database, or execution authority",
       "Aggregate reaction status remains unavailable until the interactions toolset is selected separately; reaction-user audit and reaction moderation remain separately gated",
       "A newly scaffolded coordination channel must be added after its exact Discord ID is known",
@@ -368,10 +381,15 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Message sends and replies make visible Discord changes",
       "Message edits replace exact connector-authored plain text and can remove omitted content",
       "Typing acknowledgement briefly exposes that the connector is processing a command",
+      "Parent-scoped publication automatically includes supported active child threads created later beneath that parent",
     ],
     scope: {
       kind: "channel",
       names: ["interactionChannelIds"],
+    },
+    threads: {
+      messageWrites: "inherit",
+      reads: "inherit",
     },
     toolsets: ["message-writes"],
     warnings: [
@@ -379,6 +397,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Discord exempts app-authored messages from Message Content restrictions, so exact connector-message readback needs no privileged intent",
       "Sends and edits retain nonce-based duplicate prevention, shared anti-spam limits, exact authorship checks, and fresh readback",
       "Typing acknowledgement is intended only for commands whose processing is expected to take several seconds and is never retried",
+      "Thread inheritance applies to sends and connector-owned edits; typing acknowledgement retains exact child scope",
       "A newly scaffolded message channel must be added after its exact Discord ID is known",
     ],
   },
@@ -406,10 +425,15 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
     risks: [
       "Message sends, reactions, component creates, and rich-embed creates make visible Discord changes",
       "Message, component, and rich-embed edits replace exact bot-authored state and can remove omitted content",
+      "Parent-scoped publication automatically includes supported active child threads created later beneath that parent",
     ],
     scope: {
       kind: "channel",
       names: ["embedMessageChannelIds", "interactionChannelIds"],
+    },
+    threads: {
+      messageWrites: "inherit",
+      reads: "inherit",
     },
     toolsets: ["embed-messages", "interactions", "message-writes", "messages"],
     warnings: [
@@ -417,6 +441,7 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Outbound link buttons remain disabled until their exact canonical HTTPS origins are separately added to scopes.componentLinkOrigins; the recipe never infers or broadens destination trust",
       "Rich embeds intentionally exclude embed URL and remote-asset fields, attachments, providers, and arbitrary embed types",
       "Plain content excludes HTTP URLs so Discord cannot append an unreviewed automatic link embed; embed text may contain ordinary markdown links",
+      "Thread inheritance applies to message reads and publication; reactions, typing, deletion, and administration retain exact child scope",
       "A newly scaffolded publication channel must be added after its exact Discord ID is known",
     ],
   },
@@ -747,6 +772,9 @@ function createRecipeDescriptor(source: ConfigRecipeSource): ConfigRecipeDescrip
         Object.freeze({ ...intent })
       ))),
       scope: recipeScope(source),
+      threads: source.threads
+        ? Object.freeze({ ...source.threads })
+        : null,
     }),
     riskClasses,
     risks: Object.freeze([...source.risks]),
@@ -933,6 +961,12 @@ function proposedDocument(
     ...document,
     capabilities,
     scopes,
+    threads: recipe.requirements.threads
+      ? {
+          ...document.threads,
+          ...recipe.requirements.threads,
+        }
+      : document.threads,
     tools: {
       ...document.tools,
       toolsets: MCP_TOOLSET_NAMES.filter((toolset) => selectedToolsets.has(toolset)),
@@ -966,6 +1000,19 @@ function configChanges(
         before: Object.freeze([...beforeScope]),
         path: `$.scopes.${targetScope}`,
       })
+    }
+  }
+  if (recipe.requirements.threads) {
+    for (const field of ["messageWrites", "reads"] as const) {
+      const before = current.threads[field]
+      const after = proposed.threads[field]
+      if (before !== after) {
+        changes.push({
+          after,
+          before,
+          path: `$.threads.${field}`,
+        })
+      }
     }
   }
   if (JSON.stringify(current.tools.toolsets) !== JSON.stringify(proposed.tools.toolsets)) {
