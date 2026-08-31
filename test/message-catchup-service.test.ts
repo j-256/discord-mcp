@@ -383,7 +383,7 @@ test("message catch-up initializes channels chronologically with a compact priva
     "private-reaction-payload",
     "private-sticker-payload",
   ]) {
-    assert.doesNotMatch(serialized, new RegExp(secret))
+    assert.equal(serialized.includes(secret), false)
   }
   const firstMessageRead = target.events.findIndex((event) => event.startsWith("messages:"))
   assert(firstMessageRead > target.events.indexOf("member"))
