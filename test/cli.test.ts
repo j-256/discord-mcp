@@ -881,6 +881,11 @@ test("interactive onboarding recovers from input mistakes without exposing a one
     "999999999999999999",
     GUILD_ID,
     "somewhere",
+    "3",
+    ":back",
+    "2",
+    "",
+    ":back",
     "",
     "perhaps",
     "n",
@@ -959,7 +964,12 @@ test("interactive onboarding recovers from input mistakes without exposing a one
   assert.match(prompts[7] || "", /Enter yes or no/)
   assert.match(prompts[9] || "", /must exactly match guild/)
   assert.match(prompts[11] || "", /Token source was not recognized/)
-  assert.match(prompts[13] || "", /Enter yes or no/)
+  assert.match(prompts[12] || "", /Protected token file \[:back to choose another source\]/)
+  assert.match(prompts[13] || "", /Choose how GuildControl should access the bot token/)
+  assert.match(prompts[14] || "", /Environment variable \[DISCORD_BOT_TOKEN; :back to choose another source\]/)
+  assert.match(prompts[15] || "", /is not set in this process/)
+  assert.match(prompts[16] || "", /Choose how GuildControl should access the bot token/)
+  assert.match(prompts[18] || "", /Enter yes or no/)
   assert.match(stderr.value(), /\[1\/5\] Identify the MCP host/)
   assert.match(stderr.value(), /\[2\/5\] Install the bounded read-only bot/)
   assert.match(stderr.value(), /\[3\/5\] Verify identity and installation/)
@@ -4739,6 +4749,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)
   assert.match(onboardHelpOutput.value(), /onboard \[options\]/)
   assert.match(onboardHelpOutput.value(), /Answer menus with a number, host ID, or displayed name/)
+  assert.match(onboardHelpOutput.value(), /credential sub-prompts accept :back/)
   assert.match(onboardHelpOutput.value(), /Five verified stages/)
   assert.match(onboardHelpOutput.value(), /--confirm-installed/)
   assert.match(onboardHelpOutput.value(), /--json never prompts or opens a browser/)

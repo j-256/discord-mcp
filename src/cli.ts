@@ -2077,7 +2077,7 @@ function helpText(
       "",
       "Guided setup:",
       `  ${CONNECTOR_CLI_COMMAND} onboard`,
-      "  Answer menus with a number, host ID, or displayed name. Invalid interactive answers can be corrected without restarting.",
+      "  Answer menus with a number, host ID, or displayed name. Invalid interactive answers can be corrected without restarting, and credential sub-prompts accept :back to choose another source.",
       "",
       "Automation:",
       `  ${CONNECTOR_CLI_COMMAND} onboard --host HOST --application-id ID --guild-id ID --config FILE --confirm-installed ID [--token-env VARIABLE | --token-file FILE] [--html FILE] [--json]`,
@@ -3269,6 +3269,10 @@ interface OnboardExecutionResult {
 
 const ONBOARD_PROMPT_ATTEMPTS = 3
 const ONBOARD_STAGE_COUNT = 5
+const ONBOARD_BACK_INPUT = ":back"
+const ONBOARD_BACK = Symbol("onboard-back")
+
+type OnboardBack = typeof ONBOARD_BACK
 
 type OnboardPromptValidation<Value> =
   | { readonly ok: true; readonly value: Value }
@@ -3301,18 +3305,6 @@ function requiredValue(
   return normalized
     ? { ok: true, value: normalized }
     : { message: `${label} must not be empty`, ok: false }
-}
-
-async function promptRequired(
-  interaction: CliInteraction,
-  message: string,
-  label: string,
-): Promise<string> {
-  return promptValidated(
-    interaction,
-    message,
-    (value) => requiredValue(value, label),
-  )
 }
 
 function discordSnowflake(
@@ -3417,19 +3409,38 @@ function requireAvailableCredentialVariable(
 async function promptAvailableCredentialVariable(
   interaction: CliInteraction,
   environment: NodeJS.ProcessEnv,
-): Promise<string> {
-  return promptValidated(
+): Promise<string | OnboardBack> {
+  return promptValidated<string | OnboardBack>(
     interaction,
-    `Environment variable [${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE}]: `,
+    `Environment variable [${DEFAULT_TOKEN_ENVIRONMENT_VARIABLE}; ${ONBOARD_BACK_INPUT} to choose another source]: `,
     (value) => {
       const variable = value.trim() || DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
+      if (variable.toLowerCase() === ONBOARD_BACK_INPUT) {
+        return { ok: true, value: ONBOARD_BACK }
+      }
       if (!environment[variable]?.trim()) {
         return {
-          message: `Environment variable ${variable} is not set in this process`,
+          message: `Environment variable ${variable} is not set in this process. Enter another name or ${ONBOARD_BACK_INPUT} to choose another source`,
           ok: false,
         }
       }
       return { ok: true, value: variable }
+    },
+  )
+}
+
+async function promptProtectedCredentialFile(
+  interaction: CliInteraction,
+): Promise<string | OnboardBack> {
+  return promptValidated<string | OnboardBack>(
+    interaction,
+    `Protected token file [${ONBOARD_BACK_INPUT} to choose another source]: `,
+    (value) => {
+      const file = value.trim()
+      if (file.toLowerCase() === ONBOARD_BACK_INPUT) {
+        return { ok: true, value: ONBOARD_BACK }
+      }
+      return requiredValue(file, "Protected token file")
     },
   )
 }
@@ -3526,38 +3537,40 @@ async function selectOnboardCredential(
       DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
     )
   }
-  const source = await selectOnboardCredentialSource(
-    interaction,
-    credentialFileSupported,
-  )
-  if (source === "prompt") {
-    const hiddenToken = await promptHiddenToken(interaction)
-    return {
-      access: "one-time-prompt",
-      credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
-      hiddenToken,
+  for (;;) {
+    const source = await selectOnboardCredentialSource(
+      interaction,
+      credentialFileSupported,
+    )
+    if (source === "prompt") {
+      const hiddenToken = await promptHiddenToken(interaction)
+      return {
+        access: "one-time-prompt",
+        credentialVariable: DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+        hiddenToken,
+      }
     }
-  }
-  if (source === "environment") {
-    return {
-      access: "existing-environment",
-      credentialVariable: await promptAvailableCredentialVariable(
+    if (source === "environment") {
+      const credentialVariable = await promptAvailableCredentialVariable(
         interaction,
         environment,
-      ),
+      )
+      if (credentialVariable === ONBOARD_BACK) continue
+      return {
+        access: "existing-environment",
+        credentialVariable,
+      }
     }
-  }
-  if (credentialFileSupported) {
-    return {
-      access: "protected-file",
-      credentialFile: await promptRequired(
-        interaction,
-        "Protected token file: ",
-        "Protected token file",
-      ),
+    if (credentialFileSupported) {
+      const credentialFile = await promptProtectedCredentialFile(interaction)
+      if (credentialFile === ONBOARD_BACK) continue
+      return {
+        access: "protected-file",
+        credentialFile,
+      }
     }
+    throw new ConfigurationError("The selected host does not support protected token files")
   }
-  throw new ConfigurationError("The selected host does not support protected token files")
 }
 
 async function confirmOnboardInstallation(
