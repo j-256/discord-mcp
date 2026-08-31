@@ -661,7 +661,11 @@ import {
   type OperationalObserver,
   type ObservabilityRuntime,
 } from "./observability.js"
-import { REVIEWED_PLAN_DIGEST_PATTERN } from "./reviewed-plan.js"
+import {
+  requireReviewedPlanDigest,
+  REVIEWED_PLAN_DIGEST_PATTERN,
+  resolveSignedReviewedPlanDigest,
+} from "./reviewed-plan.js"
 import {
   normalizeReactionModerationRequest,
   REACTION_MODERATION_SCOPES,
@@ -1603,7 +1607,7 @@ const pollCreationFields = {
 const pollCreationPlanInputSchema = z.strictObject(pollCreationFields)
 const pollCreationExecuteInputSchema = z.strictObject({
   ...pollCreationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const pollEndFields = {
   channelId: positiveSnowflakeSchema.describe("Exact separately allowlisted poll channel ID"),
@@ -1617,7 +1621,7 @@ const pollEndFields = {
 const pollEndPlanInputSchema = z.strictObject(pollEndFields)
 const pollEndExecuteInputSchema = z.strictObject({
   ...pollEndFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const channelMetadataGetInputSchema = z.strictObject({
   channelId: positiveSnowflakeSchema.describe("Exact readable guild channel ID"),
@@ -2074,11 +2078,11 @@ const componentMessagePlanInputSchema = z.discriminatedUnion("action", [
 const componentMessageExecuteInputSchema = z.discriminatedUnion("action", [
   z.strictObject({
     ...componentMessageCreateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...componentMessageEditFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const embedFieldSchema = z.strictObject({
@@ -2148,11 +2152,11 @@ const embedMessagePlanInputSchema = z.discriminatedUnion("action", [
 const embedMessageExecuteInputSchema = z.discriminatedUnion("action", [
   z.strictObject({
     ...embedMessageCreateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...embedMessageEditFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const attachmentFilenameSchema = z.string()
@@ -2218,7 +2222,7 @@ const attachmentMessagePlanInputSchema = z.strictObject(attachmentMessageFields)
   .superRefine(attachmentMessageRules)
 const attachmentMessageExecuteInputSchema = z.strictObject({
   ...attachmentMessageFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(attachmentMessageRules)
 const messageIdsSchema = z.array(positiveSnowflakeSchema)
   .min(1)
@@ -2253,7 +2257,7 @@ const deletionFields = {
 const deletionPlanInputSchema = z.strictObject(deletionFields)
 const deleteInputSchema = z.strictObject({
   ...deletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const reactionModerationCommonFields = {
   auditReason: auditReasonSchema
@@ -2290,15 +2294,15 @@ const reactionModerationPlanInputSchema = z.discriminatedUnion("scope", [
 const reactionModerationExecuteInputSchema = z.discriminatedUnion("scope", [
   z.strictObject({
     ...reactionModerationAllFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...reactionModerationEmojiFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...reactionModerationUserFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const messagePinFields = {
@@ -2315,7 +2319,7 @@ const messagePinFields = {
 const messagePinPlanInputSchema = z.strictObject(messagePinFields)
 const messagePinExecuteInputSchema = z.strictObject({
   ...messagePinFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const announcementCrosspostFields = {
   channelId: snowflakeSchema.describe("Exact direct announcement-channel ID"),
@@ -2331,7 +2335,7 @@ const announcementCrosspostPlanInputSchema = z.strictObject(
 )
 const announcementCrosspostExecuteInputSchema = z.strictObject({
   ...announcementCrosspostFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const messageForwardFields = {
   operationKey: z.string()
@@ -2346,7 +2350,7 @@ const messageForwardFields = {
 const messageForwardPlanInputSchema = z.strictObject(messageForwardFields)
 const messageForwardExecuteInputSchema = z.strictObject({
   ...messageForwardFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const announcementSubscriptionCommonFields = {
   auditReason: auditReasonSchema,
@@ -2377,11 +2381,11 @@ const announcementSubscriptionPlanInputSchema = z.discriminatedUnion("action", [
 const announcementSubscriptionExecuteInputSchema = z.discriminatedUnion("action", [
   z.strictObject({
     ...announcementSubscribeFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...announcementUnsubscribeFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const announcementSubscriptionListInputSchema = z.strictObject({
@@ -2402,7 +2406,7 @@ const nativeInteractionCommandPlanInputSchema = z.strictObject(
 )
 const nativeInteractionCommandExecuteInputSchema = z.strictObject({
   ...nativeInteractionCommandFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 function canonicalApplicationCommandTextSchema(
   maximum: number,
@@ -2643,15 +2647,15 @@ const guildApplicationCommandPlanInputSchema = z.discriminatedUnion("action", [
 const guildApplicationCommandExecuteInputSchema = z.discriminatedUnion("action", [
   z.strictObject({
     ...guildApplicationCommandCreateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...guildApplicationCommandUpdateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...guildApplicationCommandDeleteFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const globalApplicationCommandContextsSchema = z.array(
@@ -2745,15 +2749,15 @@ const globalApplicationCommandPlanInputSchema = z.discriminatedUnion("action", [
 const globalApplicationCommandExecuteInputSchema = z.discriminatedUnion("action", [
   z.strictObject({
     ...globalApplicationCommandCreateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...globalApplicationCommandUpdateFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   z.strictObject({
     ...globalApplicationCommandDeleteFields,
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const guildTemplateReferenceSchema = z.string()
@@ -2821,7 +2825,7 @@ const guildTemplatePlanInputSchema = z.union([
   guildTemplateMetadataPlanSchema,
 ])
 const guildTemplatePlanDigestSchema = {
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }
 const guildTemplateExecuteInputSchema = z.union([
   guildTemplateCreatePlanSchema.extend(guildTemplatePlanDigestSchema),
@@ -2884,7 +2888,7 @@ const webhookDeletionFields = {
 const webhookDeletionPlanInputSchema = z.strictObject(webhookDeletionFields)
 const webhookDeletionExecuteInputSchema = z.strictObject({
   ...webhookDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const webhookNameSchema = z.string()
   .refine((value) => [...value].length >= 1, {
@@ -2951,7 +2955,7 @@ const webhookMessageDeletionPlanInputSchema = z.strictObject(
 )
 const webhookMessageDeletionExecuteInputSchema = z.strictObject({
   ...webhookMessageDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const webhookCreationFields = {
   auditReason: auditReasonSchema,
@@ -2962,7 +2966,7 @@ const webhookCreationFields = {
 const webhookCreationPlanInputSchema = z.strictObject(webhookCreationFields)
 const webhookCreationExecuteInputSchema = z.strictObject({
   ...webhookCreationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const webhookChangeFields = {
   auditReason: auditReasonSchema,
@@ -2984,7 +2988,7 @@ const webhookChangePlanInputSchema = z.strictObject(webhookChangeFields).refine(
 )
 const webhookChangeExecuteInputSchema = z.strictObject({
   ...webhookChangeFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine(
   ({ destinationChannelId, name }) => (
     destinationChannelId !== undefined || name !== undefined
@@ -3012,7 +3016,7 @@ const integrationDeletionFields = {
 const integrationDeletionPlanInputSchema = z.strictObject(integrationDeletionFields)
 const integrationDeletionExecuteInputSchema = z.strictObject({
   ...integrationDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const guildDepartureFields = {
   acknowledgeAccessLoss: z.literal(true)
@@ -3039,7 +3043,7 @@ const guildDepartureFields = {
 const guildDeparturePlanInputSchema = z.strictObject(guildDepartureFields)
 const guildDepartureExecuteInputSchema = z.strictObject({
   ...guildDepartureFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const inviteDeletionFields = {
   auditReason: auditReasonSchema,
@@ -3154,12 +3158,12 @@ const inviteCreationPlanInputSchema = z.strictObject(inviteCreationFields)
   .superRefine(validateInviteCreationRoleIntent)
 const inviteCreationExecuteInputSchema = z.strictObject({
   ...inviteCreationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(validateInviteCreationRoleIntent)
 const inviteDeletionPlanInputSchema = z.strictObject(inviteDeletionFields)
 const inviteDeletionExecuteInputSchema = z.strictObject({
   ...inviteDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const onboardingTitleSchema = z.string()
   .min(1)
@@ -3262,7 +3266,7 @@ const onboardingFields = {
 const onboardingPlanInputSchema = z.strictObject(onboardingFields)
 const onboardingExecuteInputSchema = z.strictObject({
   ...onboardingFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 function welcomeScreenTextSchema(maximum: number, description: string) {
   return z.string()
@@ -3333,7 +3337,7 @@ const welcomeScreenFields = {
 const welcomeScreenPlanInputSchema = z.strictObject(welcomeScreenFields)
 const welcomeScreenExecuteInputSchema = z.strictObject({
   ...welcomeScreenFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const widgetSettingsFields = {
   auditReason: auditReasonSchema,
@@ -3351,7 +3355,7 @@ const widgetSettingsFields = {
 const widgetSettingsPlanInputSchema = z.strictObject(widgetSettingsFields)
 const widgetSettingsExecuteInputSchema = z.strictObject({
   ...widgetSettingsFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const guildSettingsFields = {
   afkChannelId: positiveSnowflakeSchema
@@ -3405,7 +3409,7 @@ const guildSettingsPlanInputSchema = z.strictObject(guildSettingsFields).refine(
 )
 const guildSettingsExecuteInputSchema = z.strictObject({
   ...guildSettingsFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine(
   selectsGuildSettingsField,
   { message: "Select at least one guild setting to change" },
@@ -3441,7 +3445,7 @@ const guildIncidentPlanInputSchema = z.strictObject(guildIncidentFields).refine(
 )
 const guildIncidentExecuteInputSchema = z.strictObject({
   ...guildIncidentFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine(
   selectsGuildIncidentField,
   { message: "Select at least one guild incident action to change" },
@@ -3497,7 +3501,7 @@ const guildProfilePlanInputSchema = z.strictObject(guildProfileFields).refine(
 )
 const guildProfileExecuteInputSchema = z.strictObject({
   ...guildProfileFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine(
   selectsGuildProfileField,
   { message: "Select at least one guild profile field to change" },
@@ -3533,7 +3537,7 @@ const guildCommunityPlanInputSchema = z.strictObject(guildCommunityFields).refin
 )
 const guildCommunityExecuteInputSchema = z.strictObject({
   ...guildCommunityFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine(
   (value) => value.rulesChannelId !== value.publicUpdatesChannelId,
   { message: "Rules and public-updates channels must be distinct" },
@@ -3572,13 +3576,13 @@ const applicationEmojiPlanInputSchema = z.union([
 ])
 const applicationEmojiExecuteInputSchema = z.union([
   createApplicationEmojiInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   renameApplicationEmojiInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   deleteApplicationEmojiInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const applicationEntitlementOperationKeySchema = z.string()
@@ -3618,10 +3622,10 @@ const applicationTestEntitlementPlanInputSchema = z.union([
 ])
 const applicationTestEntitlementExecuteInputSchema = z.union([
   createApplicationTestEntitlementInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   deleteApplicationTestEntitlementInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const applicationEntitlementConsumptionFields = {
@@ -3648,7 +3652,7 @@ const applicationEntitlementConsumptionPlanInputSchema = z.strictObject(
 )
 const applicationEntitlementConsumptionExecuteInputSchema = z.strictObject({
   ...applicationEntitlementConsumptionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const applicationIntentFields = {
   acknowledgePrivilegeExpansion: z.literal(true)
@@ -3669,7 +3673,7 @@ const applicationIntentFields = {
 const applicationIntentPlanInputSchema = z.strictObject(applicationIntentFields)
 const applicationIntentExecuteInputSchema = z.strictObject({
   ...applicationIntentFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const botProfileImageChangeInputSchema = z.union([
   z.strictObject({
@@ -3721,7 +3725,7 @@ const botProfilePlanInputSchema = z.strictObject(botProfileFields)
   ), { message: "At least one bot-profile field change is required" })
 const botProfileExecuteInputSchema = z.strictObject({
   ...botProfileFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).refine((value) => (
   value.avatar !== undefined
   || value.banner !== undefined
@@ -3854,10 +3858,10 @@ const applicationRoleConnectionMetadataPlanInputSchema = z.union([
 ])
 const applicationRoleConnectionMetadataExecuteInputSchema = z.union([
   replaceApplicationRoleConnectionMetadataInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   clearApplicationRoleConnectionMetadataInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const guildExpressionListInputSchema = z.strictObject({
@@ -3997,7 +4001,7 @@ const guildExpressionPlanInputSchema = z.union([
   deleteGuildStickerInputSchema,
 ])
 const planDigestField = {
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }
 const guildExpressionExecuteInputSchema = z.union([
   createGuildEmojiInputSchema.extend(planDigestField),
@@ -4809,7 +4813,7 @@ const channelPermissionOverwritePlanInputSchema = z
   .superRefine(channelPermissionOverwriteRules)
 const channelPermissionOverwriteExecuteInputSchema = z.strictObject({
   ...channelPermissionOverwriteFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(channelPermissionOverwriteRules)
 const channelPermissionSyncFields = {
   acknowledgeConcurrentPermissionChangesStopped: z.literal(true)
@@ -4831,7 +4835,7 @@ const channelPermissionSyncPlanInputSchema = z.strictObject(
 )
 const channelPermissionSyncExecuteInputSchema = z.strictObject({
   ...channelPermissionSyncFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const channelNameSchema = z.string()
   .min(1)
@@ -4923,7 +4927,7 @@ const channelCreationPlanInputSchema = z.strictObject(channelCreationFields)
   .superRefine(channelCreationRules)
 const channelCreationExecuteInputSchema = z.strictObject({
   ...channelCreationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(channelCreationRules)
 const channelMetadataTopicSchema = z.string()
   .max(DISCORD_LIMITS.forumChannelTopicCharacters)
@@ -5031,7 +5035,7 @@ const channelMetadataPlanInputSchema = z.strictObject(channelMetadataFields)
   .superRefine(channelMetadataRules)
 const channelMetadataExecuteInputSchema = z.strictObject({
   ...channelMetadataFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(channelMetadataRules)
 const voiceChannelStatusSchema = z.string()
   .min(1)
@@ -5068,7 +5072,7 @@ const voiceChannelStatusFields = {
 const voiceChannelStatusPlanInputSchema = z.strictObject(voiceChannelStatusFields)
 const voiceChannelStatusExecuteInputSchema = z.strictObject({
   ...voiceChannelStatusFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const forumTagNameSchema = z.string()
   .max(DISCORD_LIMITS.forumTagNameCharacters)
@@ -5140,7 +5144,7 @@ const forumTagPlanInputSchema = z.union([
   forumTagUpdatePlanSchema,
 ])
 const forumTagPlanDigestField = {
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }
 const forumTagExecuteInputSchema = z.union([
   forumTagCreatePlanSchema.extend(forumTagPlanDigestField),
@@ -5194,7 +5198,7 @@ const forumPostFields = {
 const forumPostPlanInputSchema = z.strictObject(forumPostFields)
 const forumPostExecuteInputSchema = z.strictObject({
   ...forumPostFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const threadCreationBaseFields = {
   auditReason: auditReasonSchema,
@@ -5234,13 +5238,13 @@ const threadCreationPlanInputSchema = z.discriminatedUnion("mode", [
 ])
 const threadCreationExecuteInputSchema = z.discriminatedUnion("mode", [
   anchoredThreadCreationInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   publicThreadCreationInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
   privateThreadCreationInputSchema.extend({
-    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+    planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
   }),
 ])
 const roleNameSchema = z.string()
@@ -5419,7 +5423,7 @@ const memberRoleFields = {
 const memberRolePlanInputSchema = z.strictObject(memberRoleFields)
 const memberRoleExecuteInputSchema = z.strictObject({
   ...memberRoleFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const bulkMemberRoleUserIdsSchema = z.array(canonicalPositiveSnowflakeSchema)
   .min(2)
@@ -5439,7 +5443,7 @@ const bulkMemberRoleFields = {
 const bulkMemberRolePlanInputSchema = z.strictObject(bulkMemberRoleFields)
 const bulkMemberRoleExecuteInputSchema = z.strictObject({
   ...bulkMemberRoleFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const memberNicknameTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("current-bot") }),
@@ -5474,7 +5478,7 @@ const memberNicknameFields = {
 const memberNicknamePlanInputSchema = z.strictObject(memberNicknameFields)
 const memberNicknameExecuteInputSchema = z.strictObject({
   ...memberNicknameFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const memberVerificationFields = {
   auditReason: auditReasonSchema,
@@ -5488,7 +5492,7 @@ const memberVerificationFields = {
 const memberVerificationPlanInputSchema = z.strictObject(memberVerificationFields)
 const memberVerificationExecuteInputSchema = z.strictObject({
   ...memberVerificationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const memberVoiceFields = {
   action: z.enum(MEMBER_VOICE_ACTIONS),
@@ -5568,7 +5572,7 @@ const memberVoiceAuditInputSchema = z.strictObject({
 })
 const memberVoiceExecuteInputSchema = z.strictObject({
   ...memberVoiceFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(memberVoiceRules)
 const threadGovernanceFields = {
   action: z.enum(THREAD_CHANGE_ACTIONS),
@@ -5647,7 +5651,7 @@ const threadGovernancePlanInputSchema = z.strictObject(threadGovernanceFields)
   .superRefine(threadGovernanceRules)
 const threadGovernanceExecuteInputSchema = z.strictObject({
   ...threadGovernanceFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(threadGovernanceRules)
 const rolePermissionNamesSchema = z.array(discordPermissionNameSchema)
   .max(DISCORD_PERMISSION_NAMES.length)
@@ -5676,7 +5680,7 @@ const roleCreationFields = {
 const roleCreationPlanInputSchema = z.strictObject(roleCreationFields)
 const roleCreationExecuteInputSchema = z.strictObject({
   ...roleCreationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const rolePermissionDeltaSchema = z.array(discordPermissionNameSchema)
   .min(1)
@@ -5785,7 +5789,7 @@ const roleConfigurationPlanInputSchema = z.strictObject(roleConfigurationFields)
   .superRefine(roleConfigurationRules)
 const roleConfigurationExecuteInputSchema = z.strictObject({
   ...roleConfigurationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(roleConfigurationRules)
 const roleOrderingFields = {
   anchorRoleId: positiveSnowflakeSchema,
@@ -5818,7 +5822,7 @@ const roleOrderingPlanInputSchema = z.strictObject(roleOrderingFields)
   .superRefine(roleOrderingRules)
 const roleOrderingExecuteInputSchema = z.strictObject({
   ...roleOrderingFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(roleOrderingRules)
 const channelCloneFields = {
   auditReason: auditReasonSchema,
@@ -5835,7 +5839,7 @@ const channelCloneFields = {
 const channelClonePlanInputSchema = z.strictObject(channelCloneFields)
 const channelCloneExecuteInputSchema = z.strictObject({
   ...channelCloneFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const channelOrderingFields = {
   anchorChannelId: positiveSnowflakeSchema,
@@ -5868,7 +5872,7 @@ const channelOrderingPlanInputSchema = z.strictObject(channelOrderingFields)
   .superRefine(channelOrderingRules)
 const channelOrderingExecuteInputSchema = z.strictObject({
   ...channelOrderingFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(channelOrderingRules)
 const guildDeletionRecoveryInputSchema = z.discriminatedUnion("mode", [
   z.strictObject({
@@ -5902,7 +5906,7 @@ const channelDeletionFields = {
 const channelDeletionPlanInputSchema = z.strictObject(channelDeletionFields)
 const channelDeletionExecuteInputSchema = z.strictObject({
   ...channelDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const roleDeletionAuditInputSchema = z.strictObject({
   guildId: positiveSnowflakeSchema,
@@ -5924,7 +5928,7 @@ const roleDeletionFields = {
 const roleDeletionPlanInputSchema = z.strictObject(roleDeletionFields)
 const roleDeletionExecuteInputSchema = z.strictObject({
   ...roleDeletionFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const scaffoldSymbolSchema = z.string()
   .min(1)
@@ -5986,7 +5990,7 @@ const guildScaffoldPlanInputSchema = z.strictObject(guildScaffoldFields)
   .superRefine(guildScaffoldRules)
 const guildScaffoldExecuteInputSchema = z.strictObject({
   ...guildScaffoldFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(guildScaffoldRules)
 const guildBlueprintExactChannelReferenceSchema = z.strictObject({
   channelId: positiveSnowflakeSchema,
@@ -6805,7 +6809,7 @@ const guildBlueprintPlanInputSchema = z.strictObject(guildBlueprintFields)
   .superRefine(guildBlueprintRules)
 const guildBlueprintExecuteInputSchema = z.strictObject({
   ...guildBlueprintFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(guildBlueprintRules)
 const memberModerationFields = {
   action: z.enum(MEMBER_MODERATION_ACTIONS),
@@ -6876,7 +6880,7 @@ const memberModerationPlanInputSchema = z.strictObject(memberModerationFields)
   .superRefine(memberModerationRules)
 const memberModerationExecuteInputSchema = z.strictObject({
   ...memberModerationFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 }).superRefine(memberModerationRules)
 const bulkGuildBanUserIdsSchema = z.array(positiveSnowflakeSchema)
   .min(2)
@@ -6898,7 +6902,7 @@ const bulkGuildBanFields = {
 const bulkGuildBanPlanInputSchema = z.strictObject(bulkGuildBanFields)
 const bulkGuildBanExecuteInputSchema = z.strictObject({
   ...bulkGuildBanFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const guildPruneIncludeRoleIdsSchema = z.array(positiveSnowflakeSchema)
   .max(CONNECTOR_LIMITS.guildPruneIncludeRoles)
@@ -6924,7 +6928,7 @@ const guildPruneFields = {
 const guildPrunePlanInputSchema = z.strictObject(guildPruneFields)
 const guildPruneExecuteInputSchema = z.strictObject({
   ...guildPruneFields,
-  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN),
+  planDigest: z.string().regex(REVIEWED_PLAN_DIGEST_PATTERN).optional(),
 })
 const activityInputSchema = z.strictObject({
   limit: z.number().int().min(1).max(CONNECTOR_LIMITS.activityEntries)
@@ -22611,29 +22615,29 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: directMessageConfirmationRequestSchema,
         },
-        execute: () => service.executeDirectMessageChange(
+        execute: (planDigest) => service.executeDirectMessageChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => directMessageConfirmationOutcome(
+        outcome: (planDigest, status, reason) => directMessageConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planDirectMessageChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeDirectMessageChangeRequest(request)
           const result = {
             action: normalized.action,
             actualDigest: plan.digest,
             channelId: normalized.action === "send" ? null : normalized.channelId,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             messageId: normalized.action === "edit" || normalized.action === "delete"
               ? normalized.messageId
               : null,
@@ -22656,10 +22660,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord private message ${result.messageId} already has the requested body`
         ),
-        validRequestState: (value) => validDirectMessageRequestState(
+        validRequestState: (value, planDigest) => validDirectMessageRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -23588,16 +23592,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = reactionModerationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validReactionModerationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validReactionModerationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = reactionModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, message, reaction scope and target, local audit reason, one-shot operation key, or plan digest",
           )
@@ -23613,7 +23625,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord reaction-moderation confirmation was declined"
           const result = reactionModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -23627,7 +23639,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = reactionModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord reaction moderation requires explicit approval of the displayed plan",
           )
@@ -23635,7 +23647,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeReactionModeration(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -23647,9 +23659,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = reactionModerationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -23659,11 +23675,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planReactionModeration(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           ...reactionModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "plan-changed",
             "The fresh Discord reaction snapshot does not match the requested digest",
           ),
@@ -23674,7 +23698,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeReactionModeration(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -23684,7 +23708,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...reactionModerationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -23736,12 +23760,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = pollCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validPollCreationRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validPollCreationRequestState(requestState, request, planDigest)) {
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, question, answers, duration, multiselect setting, one-shot operation key, or plan digest",
           )
@@ -23757,7 +23789,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord poll creation confirmation was declined"
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -23771,7 +23803,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord poll creation requires explicit approval of the displayed immutable poll plan",
           )
@@ -23779,7 +23811,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executePollCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -23791,9 +23823,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = pollConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -23803,11 +23839,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planPollCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord poll-creation snapshot does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -23817,7 +23861,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...pollCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -23869,12 +23913,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = pollEndRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validPollEndRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validPollEndRequestState(requestState, request, planDigest)) {
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, poll message, one-shot operation key, or plan digest",
           )
@@ -23890,7 +23942,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord poll-ending confirmation was declined"
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -23904,7 +23956,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = pollConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord poll ending requires explicit approval of the displayed irreversible poll plan",
           )
@@ -23912,7 +23964,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executePollEnd(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const finalization = result.finalization === "final"
@@ -23926,9 +23978,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = pollConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -23938,11 +23994,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planPollEnd(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord poll snapshot, including live counts, does not match the requested digest",
@@ -23954,7 +24018,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executePollEnd(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -23964,7 +24028,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...pollEndRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24008,17 +24072,25 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
     },
     safeToolHandler("delete_messages", async (input: z.infer<typeof deleteInputSchema>, context) => {
       const request = deletionRequest(input)
+      let planDigest = input.planDigest
       const normalized = normalizeDeletionRequest(request)
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validDeletionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validDeletionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = deletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the deletion request, one-shot key hash, or plan digest",
           )
@@ -24034,7 +24106,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord message deletion confirmation was declined"
           const result = deletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24048,7 +24120,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = deletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord message deletion requires explicit approval of the displayed plan",
           )
@@ -24056,7 +24128,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.deleteMessages(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24065,9 +24137,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = deletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24078,11 +24154,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         request,
         { signal: context.mcpReq.signal },
       )
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: normalized.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageIds: normalized.messageIds,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord message snapshot does not match the requested deletion digest",
@@ -24093,7 +24177,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...deletionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24145,16 +24229,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = messagePinRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMessagePinRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMessagePinRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = messagePinConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, message, desired pin state, audit reason, one-shot operation key, or plan digest",
           )
@@ -24170,7 +24262,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord message pin confirmation was declined"
           const result = messagePinConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24184,7 +24276,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = messagePinConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord message pin change requires explicit approval of the displayed plan",
           )
@@ -24192,7 +24284,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMessagePin(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -24204,9 +24296,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = messagePinConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24216,12 +24312,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMessagePin(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
           desiredState: request.desiredState,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord message pin snapshot does not match the requested digest",
@@ -24233,7 +24337,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeMessagePin(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24243,7 +24347,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...messagePinRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24295,16 +24399,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = announcementCrosspostRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validAnnouncementCrosspostRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validAnnouncementCrosspostRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = announcementCrosspostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, message, one-shot operation key, or plan digest",
           )
@@ -24320,7 +24432,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord announcement-crosspost confirmation was declined"
           const result = announcementCrosspostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24334,7 +24446,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = announcementCrosspostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord announcement crosspost requires explicit approval of the displayed plan",
           )
@@ -24342,7 +24454,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeAnnouncementCrosspost(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24351,9 +24463,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = announcementCrosspostConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24363,11 +24479,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planAnnouncementCrosspost(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord announcement-crosspost snapshot does not match the requested digest",
@@ -24379,7 +24503,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeAnnouncementCrosspost(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24389,7 +24513,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...announcementCrosspostRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24441,12 +24565,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = messageForwardRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMessageForwardRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMessageForwardRequestState(requestState, request, planDigest)) {
           const result = messageForwardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact source channel, source message, target channel, one-shot operation key, or plan digest",
           )
@@ -24462,7 +24594,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord message-forward confirmation was declined"
           const result = messageForwardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24476,7 +24608,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = messageForwardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord message forwarding requires explicit approval of the displayed plan",
           )
@@ -24484,7 +24616,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMessageForward(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24493,9 +24625,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = messageForwardConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24505,10 +24641,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMessageForward(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord message-forward snapshot does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -24521,7 +24665,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...messageForwardRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24597,16 +24741,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = announcementSubscriptionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validAnnouncementSubscriptionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validAnnouncementSubscriptionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = announcementSubscriptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, source or webhook identity, target channel, audit reason, one-shot operation key, or plan digest",
           )
@@ -24622,7 +24774,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord announcement subscription confirmation was declined"
           const result = announcementSubscriptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24636,7 +24788,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = announcementSubscriptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord announcement subscription change requires explicit approval of the displayed plan",
           )
@@ -24644,7 +24796,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeAnnouncementSubscription(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const summary = result.action === "subscribe"
@@ -24655,9 +24807,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         return toolResult(result, summary)
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = announcementSubscriptionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24667,11 +24823,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planAnnouncementSubscription(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord announcement subscription snapshot does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -24683,7 +24847,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeAnnouncementSubscription(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24693,7 +24857,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...announcementSubscriptionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24747,16 +24911,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = nativeInteractionCommandRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validNativeInteractionCommandRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validNativeInteractionCommandRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = nativeInteractionCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, guild, one-shot operation key, or plan digest",
           )
@@ -24772,7 +24944,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord native Interaction command confirmation was declined"
           const result = nativeInteractionCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24786,7 +24958,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = nativeInteractionCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord native Interaction command change requires explicit approval of the displayed plan",
           )
@@ -24794,7 +24966,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeNativeInteractionCommand(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24803,9 +24975,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = nativeInteractionCommandConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24815,11 +24991,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planNativeInteractionCommand(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord command inventory does not match the requested digest",
@@ -24831,7 +25015,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.mutation === "none") {
         const result = await service.executeNativeInteractionCommand(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24841,7 +25025,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...nativeInteractionCommandRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -24895,16 +25079,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildApplicationCommandRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildApplicationCommandRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildApplicationCommandRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, guild, command ID, canonical definition digest, deletion acknowledgement, one-shot operation key, or plan digest",
           )
@@ -24920,7 +25112,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild application-command confirmation was declined"
           const result = guildApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -24934,7 +25126,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild application-command change requires explicit approval of the displayed plan",
           )
@@ -24942,7 +25134,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildApplicationCommandChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24951,9 +25143,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildApplicationCommandConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -24963,11 +25159,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildApplicationCommandChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord localized command or permission inventory does not match the requested digest",
@@ -24979,7 +25183,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeGuildApplicationCommandChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -24989,7 +25193,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...guildApplicationCommandRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25043,16 +25247,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = globalApplicationCommandRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGlobalApplicationCommandRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGlobalApplicationCommandRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = globalApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact global action, command ID, canonical definition digest, exposure and permission-reset acknowledgements, one-shot operation key, or plan digest",
           )
@@ -25068,7 +25280,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord global application-command confirmation was declined"
           const result = globalApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25082,7 +25294,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = globalApplicationCommandConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord global application-command change requires explicit approval of the displayed plan",
           )
@@ -25090,7 +25302,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGlobalApplicationCommandChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -25099,9 +25311,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = globalApplicationCommandConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25111,12 +25327,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGlobalApplicationCommandChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
           applicationId: plan.applicationId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord application capability or localized global command inventory does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -25127,7 +25351,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeGlobalApplicationCommandChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -25137,7 +25361,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...globalApplicationCommandRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25191,16 +25415,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildTemplateRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildTemplateRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildTemplateRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildTemplateConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, guild, metadata intent, opaque capability reference, one-shot operation key, or plan digest",
           )
@@ -25216,7 +25448,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild-template confirmation was declined"
           const result = guildTemplateConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25230,7 +25462,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildTemplateConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild-template change requires explicit approval of the displayed plan",
           )
@@ -25238,7 +25470,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildTemplateChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -25247,9 +25479,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildTemplateConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25259,11 +25495,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildTemplateChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh private Discord guild-template inventory does not match the requested digest",
@@ -25275,7 +25519,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.mutation === "none") {
         const result = await service.executeGuildTemplateChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -25285,7 +25529,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...guildTemplateRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25415,16 +25659,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = webhookMessageDeletionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validWebhookMessageDeletionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validWebhookMessageDeletionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = webhookMessageDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact Incoming webhook, message, transient review reason, one-shot operation key, or plan digest",
           )
@@ -25440,7 +25692,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord webhook message deletion confirmation was declined"
           const result = webhookMessageDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25454,7 +25706,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = webhookMessageDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord webhook message deletion requires explicit approval of the displayed plan",
           )
@@ -25462,7 +25714,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeWebhookMessageDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -25474,9 +25726,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = webhookMessageDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25486,10 +25742,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planWebhookMessageDeletion(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord webhook message snapshot does not match the requested digest",
@@ -25501,7 +25765,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...webhookMessageDeletionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25553,16 +25817,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = webhookCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validWebhookCreationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validWebhookCreationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = webhookCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, webhook name, audit reason, one-shot operation key, or plan digest",
           )
@@ -25578,7 +25850,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord webhook creation confirmation was declined"
           const result = webhookCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25592,7 +25864,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = webhookCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord webhook creation requires explicit approval of the displayed plan",
           )
@@ -25600,7 +25872,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeWebhookCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -25612,9 +25884,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = webhookCreationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25624,11 +25900,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planWebhookCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord webhook inventory does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -25638,7 +25922,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...webhookCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25692,16 +25976,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = webhookChangeRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validWebhookChangeRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validWebhookChangeRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = webhookChangeConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact source channel, destination intent, webhook, name intent, audit reason, one-shot operation key, or plan digest",
           )
@@ -25717,7 +26009,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord webhook change confirmation was declined"
           const result = webhookChangeConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25731,7 +26023,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = webhookChangeConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord webhook change requires explicit approval of the displayed plan",
           )
@@ -25739,7 +26031,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeWebhookChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -25751,9 +26043,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = webhookChangeConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25763,12 +26059,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planWebhookChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
           destinationChannelId: plan.desired.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord source or destination webhook inventory does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -25780,7 +26084,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeWebhookChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -25790,7 +26094,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...webhookChangeRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25842,16 +26146,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = webhookDeletionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validWebhookDeletionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validWebhookDeletionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = webhookDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, Incoming webhook, audit reason, one-shot operation key, or plan digest",
           )
@@ -25867,7 +26179,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord webhook deletion confirmation was declined"
           const result = webhookDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -25881,7 +26193,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = webhookDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord webhook deletion requires explicit approval of the displayed plan",
           )
@@ -25889,7 +26201,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeWebhookDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = !result.verifiedAbsent
@@ -25903,9 +26215,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = webhookDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -25915,11 +26231,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planWebhookDeletion(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord webhook snapshot does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -25930,7 +26254,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...webhookDeletionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -25982,16 +26306,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = integrationDeletionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validIntegrationDeletionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validIntegrationDeletionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = integrationDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, integration, consequence acknowledgments, audit reason, one-shot operation key, or plan digest",
           )
@@ -26007,7 +26339,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord integration deletion confirmation was declined"
           const result = integrationDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -26021,7 +26353,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = integrationDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord integration deletion requires explicit approval of the displayed plan",
           )
@@ -26029,7 +26361,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildIntegrationDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -26038,9 +26370,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = integrationDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -26050,10 +26386,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildIntegrationDeletion(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           integrationId: request.integrationId,
           operationKeyHash: plan.operationKeyHash,
@@ -26065,7 +26409,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...integrationDeletionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -26117,16 +26461,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildDepartureRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildDepartureRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildDepartureRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildDepartureConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, consequence acknowledgments, quiescence acknowledgment, transient review reason, one-shot operation key, or plan digest",
           )
@@ -26142,7 +26494,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild departure confirmation was declined"
           const result = guildDepartureConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -26156,7 +26508,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildDepartureConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild departure requires explicit approval of the displayed plan",
           )
@@ -26164,7 +26516,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildDeparture(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -26173,9 +26525,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildDepartureConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -26185,10 +26541,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildDeparture(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord guild membership snapshot does not match the requested digest",
@@ -26199,7 +26563,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...guildDepartureRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -26251,16 +26615,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = inviteCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validInviteCreationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validInviteCreationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = inviteCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, channel, acceptance set, persistent role assignment, finite invite intent, private output file, audit reason, one-shot operation key, or plan digest",
           )
@@ -26276,7 +26648,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord invite creation confirmation was declined"
           const result = inviteCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -26290,7 +26662,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = inviteCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord invite creation requires explicit approval of the displayed plan",
           )
@@ -26298,7 +26670,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const rawResult = await service.executeInviteCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const parsedResult = inviteCreationResultSchema.safeParse(rawResult)
@@ -26323,9 +26695,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = inviteCreationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -26335,11 +26711,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planInviteCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           outputFile: request.outputFile,
@@ -26351,7 +26735,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...inviteCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -26403,16 +26787,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = inviteDeletionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validInviteDeletionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validInviteDeletionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = inviteDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, invite reference, audit reason, one-shot operation key, or plan digest",
           )
@@ -26428,7 +26820,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord invite deletion confirmation was declined"
           const result = inviteDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -26442,7 +26834,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = inviteDeletionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord invite deletion requires explicit approval of the displayed plan",
           )
@@ -26450,7 +26842,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeInviteDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -26462,9 +26854,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = inviteDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -26474,10 +26870,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planInviteDeletion(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           inviteRef: request.inviteRef,
           operationKeyHash: plan.operationKeyHash,
@@ -26489,7 +26893,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...inviteDeletionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -26555,26 +26959,26 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: onboardingConfirmationRequestSchema,
         },
-        execute: () => service.executeOnboardingChange(
+        execute: (planDigest) => service.executeOnboardingChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => onboardingConfirmationOutcome(
+        outcome: (planDigest, status, reason) => onboardingConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planOnboardingChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
             reason: "The fresh Discord onboarding snapshot does not match the requested digest",
@@ -26598,10 +27002,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord onboarding for guild ${result.guildId} already matches the reviewed state`
         ),
-        validRequestState: (value) => validOnboardingRequestState(
+        validRequestState: (value, planDigest) => validOnboardingRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -26659,26 +27063,26 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: welcomeScreenConfirmationRequestSchema,
         },
-        execute: () => service.executeWelcomeScreenChange(
+        execute: (planDigest) => service.executeWelcomeScreenChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => welcomeScreenConfirmationOutcome(
+        outcome: (planDigest, status, reason) => welcomeScreenConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planWelcomeScreenChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
             reason: "The fresh Discord Welcome Screen snapshot does not match the requested digest",
@@ -26702,10 +27106,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord Welcome Screen for guild ${result.guildId} already matches the reviewed state`
         ),
-        validRequestState: (value) => validWelcomeScreenRequestState(
+        validRequestState: (value, planDigest) => validWelcomeScreenRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -26763,27 +27167,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: widgetSettingsConfirmationRequestSchema,
         },
-        execute: () => service.executeWidgetSettingsChange(
+        execute: (planDigest) => service.executeWidgetSettingsChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => widgetSettingsConfirmationOutcome(
+        outcome: (planDigest, status, reason) => widgetSettingsConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planWidgetSettingsChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeWidgetSettingsChangeRequest(request)
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: normalized.guildId,
             operationKeyHash: normalized.operationKeyHash,
             reason: "The fresh Discord widget-settings snapshot does not match the requested digest",
@@ -26807,10 +27211,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord widget settings for guild ${result.guildId} already match the reviewed state`
         ),
-        validRequestState: (value) => validWidgetSettingsRequestState(
+        validRequestState: (value, planDigest) => validWidgetSettingsRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -26868,27 +27272,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: guildSettingsConfirmationRequestSchema,
         },
-        execute: () => service.executeGuildSettingsChange(
+        execute: (planDigest) => service.executeGuildSettingsChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => guildSettingsConfirmationOutcome(
+        outcome: (planDigest, status, reason) => guildSettingsConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planGuildSettingsChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeGuildSettingsChangeRequest(request)
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: normalized.guildId,
             operationKeyHash: normalized.operationKeyHash,
             reason: "The fresh Discord guild-settings snapshot does not match the requested digest",
@@ -26912,10 +27316,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord guild settings for guild ${result.guildId} already match the reviewed state`
         ),
-        validRequestState: (value) => validGuildSettingsRequestState(
+        validRequestState: (value, planDigest) => validGuildSettingsRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -26973,27 +27377,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: guildCommunityConfirmationRequestSchema,
         },
-        execute: () => service.executeGuildCommunityChange(
+        execute: (planDigest) => service.executeGuildCommunityChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => guildCommunityConfirmationOutcome(
+        outcome: (planDigest, status, reason) => guildCommunityConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planGuildCommunityChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeGuildCommunityChangeRequest(request)
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: normalized.guildId,
             operationKeyHash: normalized.operationKeyHash,
             reason: "The fresh Discord Community snapshot does not match the requested digest",
@@ -27015,10 +27419,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord Community state for guild ${result.guildId} already matches the reviewed state`
         ),
-        validRequestState: (value) => validGuildCommunityRequestState(
+        validRequestState: (value, planDigest) => validGuildCommunityRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -27076,27 +27480,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: guildIncidentConfirmationRequestSchema,
         },
-        execute: () => service.executeGuildIncidentActionChange(
+        execute: (planDigest) => service.executeGuildIncidentActionChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => guildIncidentConfirmationOutcome(
+        outcome: (planDigest, status, reason) => guildIncidentConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planGuildIncidentActionChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeGuildIncidentActionChangeRequest(request)
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: normalized.guildId,
             operationKeyHash: normalized.operationKeyHash,
             reason: "The fresh Discord guild incident-action snapshot does not match the requested digest",
@@ -27120,10 +27524,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord guild incident actions for guild ${result.guildId} already match the reviewed state`
         ),
-        validRequestState: (value) => validGuildIncidentRequestState(
+        validRequestState: (value, planDigest) => validGuildIncidentRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -27181,27 +27585,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: guildProfileConfirmationRequestSchema,
         },
-        execute: () => service.executeGuildProfileChange(
+        execute: (planDigest) => service.executeGuildProfileChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => guildProfileConfirmationOutcome(
+        outcome: (planDigest, status, reason) => guildProfileConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planGuildProfileChange(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const normalized = normalizeGuildProfileChangeRequest(request)
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: normalized.guildId,
             operationKeyHash: normalized.operationKeyHash,
             reason: "The fresh Discord guild profile snapshot does not match the requested digest",
@@ -27225,10 +27629,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord guild profile for guild ${result.guildId} already matches the reviewed state`
         ),
-        validRequestState: (value) => validGuildProfileRequestState(
+        validRequestState: (value, planDigest) => validGuildProfileRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -27296,16 +27700,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = applicationEmojiRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validApplicationEmojiRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validApplicationEmojiRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = applicationEmojiConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact application emoji action and identity, metadata, local file path, global-impact acknowledgement, one-shot operation key, or plan digest",
           )
@@ -27321,7 +27733,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord application emoji confirmation was declined"
           const result = applicationEmojiConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -27335,7 +27747,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = applicationEmojiConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord application emoji change requires explicit approval of the displayed plan",
           )
@@ -27343,7 +27755,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeApplicationEmojiChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -27357,9 +27769,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = applicationEmojiConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -27369,14 +27785,22 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planApplicationEmojiChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeApplicationEmojiChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
           applicationId: plan.applicationId,
           emojiId: normalized.action === "create" ? null : normalized.emojiId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord application emoji inventory does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -27387,7 +27811,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeApplicationEmojiChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -27397,7 +27821,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...applicationEmojiRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -27449,16 +27873,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = applicationTestEntitlementRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validApplicationTestEntitlementRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validApplicationTestEntitlementRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = applicationTestEntitlementConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, beneficiary, SKU, entitlement and creation proof when deleting, one-shot operation key, or plan digest",
           )
@@ -27474,7 +27906,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord test entitlement confirmation was declined"
           const result = applicationTestEntitlementConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -27488,7 +27920,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = applicationTestEntitlementConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord test entitlement change requires explicit approval of the displayed exact lifecycle plan",
           )
@@ -27496,7 +27928,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeApplicationTestEntitlementChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed"
@@ -27508,9 +27940,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = applicationTestEntitlementConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -27520,11 +27956,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planApplicationTestEntitlementChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           ...applicationTestEntitlementConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "plan-changed",
             "The fresh Discord test entitlement evidence does not match the requested digest",
           ),
@@ -27536,7 +27980,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeApplicationTestEntitlementChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -27548,7 +27992,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         applicationTestEntitlementRequestStatePayload(
           request,
           plan.applicationId,
-          input.planDigest,
+          planDigest,
         ),
         context,
       )
@@ -27602,16 +28046,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = applicationEntitlementConsumptionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validApplicationEntitlementConsumptionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validApplicationEntitlementConsumptionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = applicationEntitlementConsumptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact user, SKU, entitlement, external-fulfillment acknowledgement, fulfillment-reference hash, one-shot operation key, or plan digest",
           )
@@ -27627,7 +28079,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord entitlement consumption confirmation was declined"
           const result = applicationEntitlementConsumptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -27641,7 +28093,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = applicationEntitlementConsumptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord entitlement consumption requires explicit approval of the displayed exact irreversible lifecycle plan",
           )
@@ -27649,7 +28101,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeApplicationEntitlementConsumption(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed"
@@ -27661,9 +28113,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = applicationEntitlementConsumptionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -27673,11 +28129,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planApplicationEntitlementConsumption(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           ...applicationEntitlementConsumptionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "plan-changed",
             "The fresh Discord entitlement lifecycle evidence does not match the requested digest",
           ),
@@ -27689,7 +28153,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeApplicationEntitlementConsumption(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -27701,7 +28165,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         applicationEntitlementConsumptionRequestStatePayload(
           request,
           plan.applicationId,
-          input.planDigest,
+          planDigest,
         ),
         context,
       )
@@ -27759,16 +28223,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = applicationIntentRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validApplicationIntentRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validApplicationIntentRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = applicationIntentConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact privileged intent, privilege acknowledgement, ephemeral review reason, one-shot operation key, or plan digest",
           )
@@ -27784,7 +28256,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord application intent confirmation was declined"
           const result = applicationIntentConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -27798,7 +28270,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = applicationIntentConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord application intent enablement requires explicit approval of the displayed plan",
           )
@@ -27806,7 +28278,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeApplicationIntentEnablement(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "already-current"
@@ -27818,9 +28290,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = applicationIntentConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -27830,12 +28306,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planApplicationIntentEnablement(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeApplicationIntentEnablementRequest(request)
         const result = {
           actualDigest: plan.digest,
           applicationId: plan.applicationId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           intent: normalized.intent,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord application intent state does not match the requested digest",
@@ -27847,7 +28331,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeApplicationIntentEnablement(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -27857,7 +28341,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...applicationIntentRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -27912,16 +28396,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = botProfileRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validBotProfileRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validBotProfileRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = botProfileConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact bot-profile fields, application-wide acknowledgement, ephemeral review reason, owned-file paths, one-shot operation key, or plan digest",
           )
@@ -27937,7 +28429,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord bot-profile confirmation was declined"
           const result = botProfileConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -27951,7 +28443,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = botProfileConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord bot-profile change requires explicit approval of the displayed plan",
           )
@@ -27959,7 +28451,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeBotProfileChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "already-current"
@@ -27971,9 +28463,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = botProfileConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -27983,13 +28479,21 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planBotProfileChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeBotProfileChangeRequest(request)
         const result = {
           actualDigest: plan.digest,
           applicationId: plan.applicationId,
           botId: plan.botId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord bot-profile or owned-file state does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -28000,14 +28504,14 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeBotProfileChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(result, "The requested Discord bot profile is already current")
       }
       const signedState = await requestStateCodec.mint({
         ...botProfileRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28059,16 +28563,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = applicationRoleConnectionMetadataRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validApplicationRoleConnectionMetadataRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validApplicationRoleConnectionMetadataRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = applicationRoleConnectionMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, desired complete-schema digest, one-shot operation key, application identity, or plan digest",
           )
@@ -28084,7 +28596,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord linked-role metadata confirmation was declined"
           const result = applicationRoleConnectionMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28098,7 +28610,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = applicationRoleConnectionMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord linked-role metadata schema change requires explicit approval of the displayed complete replacement plan",
           )
@@ -28106,7 +28618,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeApplicationRoleConnectionMetadataChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = ["already-current", "already-empty"].includes(result.status)
@@ -28118,9 +28630,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = applicationRoleConnectionMetadataConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28130,7 +28646,15 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planApplicationRoleConnectionMetadataChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeApplicationRoleConnectionMetadataChangeRequest(request)
         const result = {
           action: normalized.action,
@@ -28139,7 +28663,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           desiredSchemaDigest: applicationRoleConnectionMetadataSchemaDigest(
             applicationRoleConnectionMetadataDesiredSchema(request),
           ),
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord linked-role metadata schema does not match the requested digest",
           schemaVersion: SCHEMA_VERSION,
@@ -28150,7 +28674,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeApplicationRoleConnectionMetadataChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28162,7 +28686,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         applicationRoleConnectionMetadataRequestStatePayload(
           request,
           plan.applicationId,
-          input.planDigest,
+          planDigest,
         ),
         context,
       )
@@ -28193,16 +28717,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildExpressionRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildExpressionRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildExpressionRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildExpressionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, expression action and identity, metadata, local file path, audit reason, one-shot operation key, or plan digest",
           )
@@ -28218,7 +28750,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild expression confirmation was declined"
           const result = guildExpressionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28232,7 +28764,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildExpressionConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild expression change requires explicit approval of the displayed plan",
           )
@@ -28240,7 +28772,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildExpressionChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -28254,9 +28786,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildExpressionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28266,13 +28802,21 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildExpressionChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeGuildExpressionChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
           expressionId: normalized.action === "create" ? null : normalized.expressionId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           kind: normalized.kind,
           operationKeyHash: normalized.operationKeyHash,
@@ -28285,7 +28829,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeGuildExpressionChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28295,7 +28839,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...guildExpressionRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28347,16 +28891,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = soundboardRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validSoundboardRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validSoundboardRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = soundboardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, soundboard action and identity, metadata, local audio path, audit reason, one-shot operation key, or plan digest",
           )
@@ -28372,7 +28924,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild soundboard confirmation was declined"
           const result = soundboardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28386,7 +28938,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = soundboardConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild soundboard change requires explicit approval of the displayed plan",
           )
@@ -28394,7 +28946,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeSoundboardChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -28408,9 +28960,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = soundboardConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28420,12 +28976,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planSoundboardChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeSoundboardChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord guild soundboard snapshot does not match the requested digest",
@@ -28438,7 +29002,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeSoundboardChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28448,7 +29012,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...soundboardRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28524,16 +29088,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = autoModerationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validAutoModerationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validAutoModerationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = autoModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, AutoMod action and rule identity, complete policy changes, audit reason, one-shot operation key, or plan digest",
           )
@@ -28549,7 +29121,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord AutoMod confirmation was declined"
           const result = autoModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28563,7 +29135,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = autoModerationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord AutoMod change requires explicit approval of the displayed plan",
           )
@@ -28571,7 +29143,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeAutoModerationChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -28585,9 +29157,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = autoModerationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28597,12 +29173,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planAutoModerationChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeAutoModerationChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord AutoMod snapshot does not match the requested digest",
@@ -28618,7 +29202,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeAutoModerationChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28628,7 +29212,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...autoModerationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28680,16 +29264,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = scheduledEventRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validScheduledEventRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validScheduledEventRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = scheduledEventConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, event action and identity, hosting, metadata, recurrence, local cover path, audit reason, one-shot operation key, or plan digest",
           )
@@ -28705,7 +29297,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord scheduled event confirmation was declined"
           const result = scheduledEventConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28719,7 +29311,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = scheduledEventConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord scheduled event change requires explicit approval of the displayed plan",
           )
@@ -28727,7 +29319,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeScheduledEventChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -28741,9 +29333,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = scheduledEventConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28753,13 +29349,21 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planScheduledEventChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeScheduledEventChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
           eventId: normalized.action === "create" ? null : normalized.eventId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord scheduled event snapshot does not match the requested digest",
@@ -28774,7 +29378,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.effect === "none") {
         const result = await service.executeScheduledEventChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28784,7 +29388,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...scheduledEventRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28836,16 +29440,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = stageInstanceRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validStageInstanceRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validStageInstanceRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = stageInstanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, Stage channel, lifecycle action, topic, notification setting, audit reason, one-shot operation key, or plan digest",
           )
@@ -28861,7 +29473,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord Stage-instance confirmation was declined"
           const result = stageInstanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -28875,7 +29487,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = stageInstanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord Stage-instance change requires explicit approval of the displayed plan",
           )
@@ -28883,7 +29495,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeStageInstanceChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -28897,9 +29509,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = stageInstanceConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -28909,13 +29525,21 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planStageInstanceChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeStageInstanceChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
           channelId: normalized.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord Stage-instance snapshot does not match the requested digest",
@@ -28927,7 +29551,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeStageInstanceChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -28937,7 +29561,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...stageInstanceRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -28989,16 +29613,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelMetadataRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelMetadataRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelMetadataRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, channel, requested metadata fields, audit reason, one-shot operation key, or plan digest",
           )
@@ -29014,7 +29646,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord channel metadata confirmation was declined"
           const result = channelMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29028,7 +29660,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelMetadataConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord channel metadata change requires explicit approval of the displayed plan",
           )
@@ -29036,7 +29668,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelMetadataChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const suffix = result.status === "completed-with-drift"
@@ -29048,9 +29680,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelMetadataConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29060,11 +29696,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelMetadataChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord channel metadata snapshot does not match the requested digest",
@@ -29077,7 +29721,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeChannelMetadataChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29087,7 +29731,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelMetadataRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29139,16 +29783,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = voiceChannelStatusRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validVoiceChannelStatusRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validVoiceChannelStatusRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = voiceChannelStatusConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, voice channel, desired status, audit reason, one-shot operation key, or plan digest",
           )
@@ -29164,7 +29816,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord voice channel status confirmation was declined"
           const result = voiceChannelStatusConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29178,7 +29830,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = voiceChannelStatusConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord voice channel status change requires explicit approval of the displayed plan",
           )
@@ -29186,7 +29838,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeVoiceChannelStatusChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const suffix = result.status === "completed-with-drift"
@@ -29198,9 +29850,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = voiceChannelStatusConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29210,11 +29866,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planVoiceChannelStatusChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh exact-channel Discord status snapshot does not match the requested digest",
@@ -29226,7 +29890,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeVoiceChannelStatusChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29236,7 +29900,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...voiceChannelStatusRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29288,12 +29952,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = forumTagRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validForumTagRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validForumTagRequestState(requestState, request, planDigest)) {
           const result = forumTagConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, guild, forum, tag fields, audit reason, one-shot operation key, or plan digest",
           )
@@ -29309,7 +29981,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord forum-tag confirmation was declined"
           const result = forumTagConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29323,7 +29995,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = forumTagConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord forum-tag change requires explicit approval of the displayed plan",
           )
@@ -29331,7 +30003,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeForumTagChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29342,9 +30014,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = forumTagConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29354,12 +30030,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planForumTagChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord forum-tag snapshot does not match the requested digest",
@@ -29372,7 +30056,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeForumTagChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29382,7 +30066,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...forumTagRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29434,16 +30118,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelPermissionOverwriteRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelPermissionOverwriteRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelPermissionOverwriteRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelPermissionOverwriteConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, target, target type, mode, named permission changes, audit reason, one-shot operation key, or plan digest",
           )
@@ -29459,7 +30151,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord channel permission confirmation was declined"
           const result = channelPermissionOverwriteConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29473,7 +30165,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelPermissionOverwriteConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord channel permission change requires explicit approval of the displayed plan",
           )
@@ -29481,7 +30173,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelPermissionOverwrite(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -29493,9 +30185,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelPermissionOverwriteConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29505,11 +30201,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelPermissionOverwrite(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           mode: request.mode,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord channel permission snapshot does not match the requested digest",
@@ -29523,7 +30227,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeChannelPermissionOverwrite(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29533,7 +30237,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelPermissionOverwriteRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29585,16 +30289,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelPermissionSyncRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelPermissionSyncRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelPermissionSyncRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelPermissionSyncConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact child channel, acknowledgments, audit reason, one-shot operation key, or plan digest",
           )
@@ -29610,7 +30322,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord parent-category permission-sync confirmation was declined"
           const result = channelPermissionSyncConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29624,7 +30336,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelPermissionSyncConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord parent-category permission sync requires explicit approval of the displayed plan",
           )
@@ -29632,7 +30344,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelPermissionSync(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -29644,9 +30356,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelPermissionSyncConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29656,11 +30372,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelPermissionSync(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           parentChannelId: plan.parent.id,
           reason: "The fresh Discord child and parent permission snapshots do not match the requested digest",
@@ -29672,7 +30396,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeChannelPermissionSync(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29682,7 +30406,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelPermissionSyncRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29734,16 +30458,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelCreationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelCreationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel type, location, settings, audit reason, one-shot operation key, or plan digest",
           )
@@ -29759,7 +30491,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord channel creation confirmation was declined"
           const result = channelCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29773,7 +30505,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord channel creation requires explicit approval of the displayed plan",
           )
@@ -29781,7 +30513,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -29793,9 +30525,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelCreationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29805,10 +30541,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           kind: request.kind,
           operationKeyHash: plan.operationKeyHash,
@@ -29821,7 +30565,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeChannelCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -29831,7 +30575,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -29883,16 +30627,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = forumPostRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validForumPostRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validForumPostRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = forumPostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact forum, title, content, tags, settings, notifications, audit reason, one-shot operation key, or plan digest",
           )
@@ -29908,7 +30660,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord forum-post confirmation was declined"
           const result = forumPostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -29922,7 +30674,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = forumPostConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord forum-post creation requires explicit approval of the displayed plan",
           )
@@ -29930,7 +30682,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeForumPost(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -29942,9 +30694,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = forumPostConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -29954,11 +30710,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planForumPost(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord forum, tag, permission, and request snapshot does not match the requested forum-post digest",
           schemaVersion: SCHEMA_VERSION,
@@ -29968,7 +30732,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...forumPostRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -30023,16 +30787,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = threadCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validThreadCreationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validThreadCreationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = threadCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact parent, mode, source, name, settings, audit reason, one-shot operation key, or plan digest",
           )
@@ -30048,7 +30820,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord thread-creation confirmation was declined"
           const result = threadCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -30062,7 +30834,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = threadCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord thread creation requires explicit approval of the displayed plan",
           )
@@ -30070,7 +30842,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeThreadCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -30086,9 +30858,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = threadCreationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -30098,10 +30874,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planThreadCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           mode: request.mode,
           operationKeyHash: plan.operationKeyHash,
           parentChannelId: request.parentChannelId,
@@ -30115,7 +30899,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeThreadCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30125,7 +30909,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...threadCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -30278,16 +31062,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = componentMessageRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validComponentMessageRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validComponentMessageRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = componentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, channel, message, normalized layout, reply, notifications, one-shot operation key, or plan digest",
           )
@@ -30303,7 +31095,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord component-message confirmation was declined"
           const result = componentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -30317,7 +31109,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = componentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord component message requires explicit approval of the displayed plan",
           )
@@ -30325,7 +31117,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeComponentMessage(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30334,9 +31126,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = componentMessageConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -30346,12 +31142,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planComponentMessage(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: plan.action,
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId ?? null,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord identity, intent, channel, permission, reply, edit target, notification, and layout snapshot does not match the requested component-message digest",
@@ -30363,7 +31167,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeComponentMessage(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30373,7 +31177,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...componentMessageRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -30477,12 +31281,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = embedMessageRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validEmbedMessageRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validEmbedMessageRequestState(requestState, request, planDigest)) {
           const result = embedMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, channel, message, normalized static presentation, reply, notifications, one-shot operation key, or plan digest",
           )
@@ -30498,7 +31310,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord embed-message confirmation was declined"
           const result = embedMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -30512,7 +31324,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = embedMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord embed message requires explicit approval of the displayed plan",
           )
@@ -30520,7 +31332,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeEmbedMessage(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30529,9 +31341,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = embedMessageConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -30541,12 +31357,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planEmbedMessage(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: plan.action,
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           messageId: request.messageId ?? null,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord identity, intent, channel, permission, reply, edit target, notification, content, and embed snapshot does not match the requested digest",
@@ -30558,7 +31382,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeEmbedMessage(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30568,7 +31392,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...embedMessageRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -30620,16 +31444,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = attachmentMessageRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validAttachmentMessageRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validAttachmentMessageRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = attachmentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact channel, path, filename, description, content, reply, notifications, one-shot operation key, or plan digest",
           )
@@ -30645,7 +31477,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord attachment message confirmation was declined"
           const result = attachmentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -30659,7 +31491,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = attachmentMessageConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord attachment message requires explicit approval of the displayed plan",
           )
@@ -30667,7 +31499,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeAttachmentMessage(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30676,9 +31508,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = attachmentMessageConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -30688,11 +31524,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planAttachmentMessage(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord and local file snapshot does not match the requested attachment-message digest",
           schemaVersion: SCHEMA_VERSION,
@@ -30702,7 +31546,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...attachmentMessageRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -30868,16 +31712,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildBlueprintRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildBlueprintRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildBlueprintRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildBlueprintConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the caller-retained guild blueprint request digest or aggregate plan digest",
           )
@@ -30893,7 +31745,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild blueprint confirmation was declined"
           const result = guildBlueprintConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -30907,7 +31759,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildBlueprintConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild blueprint execution requires explicit approval of the displayed frontier",
           )
@@ -30915,7 +31767,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildBlueprint(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30924,9 +31776,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildBlueprintConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -30936,10 +31792,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildBlueprint(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: plan.guild.id,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord guild blueprint frontier does not match the requested aggregate digest",
@@ -30952,7 +31816,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.frontier === null || !plan.frontier.writeRequired) {
         const result = await service.executeGuildBlueprint(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -30961,7 +31825,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       const signedState = await requestStateCodec.mint({
-        planDigest: input.planDigest,
+        planDigest,
         requestDigest: guildBlueprintRequestDigest(request),
       }, context)
       return inputRequired({
@@ -31038,16 +31902,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildScaffoldRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildScaffoldRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildScaffoldRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = guildScaffoldConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild scaffold graph, properties, reason, operation binding, step limit, or plan digest",
           )
@@ -31063,7 +31935,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild scaffold confirmation was declined"
           const result = guildScaffoldConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31077,7 +31949,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildScaffoldConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild scaffold execution requires explicit approval of the displayed frontier",
           )
@@ -31085,7 +31957,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildScaffold(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31094,9 +31966,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildScaffoldConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31106,10 +31982,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildScaffold(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operation.operationKeyHash,
           reason: "The fresh Discord guild scaffold snapshot does not match the requested digest",
@@ -31121,7 +32005,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.counts.ready === 0) {
         const result = await service.executeGuildScaffold(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31131,7 +32015,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...guildScaffoldRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -31207,16 +32091,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = memberNicknameRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMemberNicknameRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMemberNicknameRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = memberNicknameConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact nickname target, guild, desired nickname, audit reason, one-shot operation key, or plan digest",
           )
@@ -31232,7 +32124,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord member nickname confirmation was declined"
           const result = memberNicknameConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31246,7 +32138,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = memberNicknameConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord member nickname change requires explicit approval of the displayed plan",
           )
@@ -31254,7 +32146,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMemberNicknameChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -31268,9 +32160,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = memberNicknameConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31280,11 +32176,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMemberNicknameChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeMemberNicknameChangeRequest(request)
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord member, nickname, permission, hierarchy, or policy snapshot does not match the requested digest",
@@ -31298,7 +32202,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeMemberNicknameChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31308,7 +32212,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...memberNicknameRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -31360,16 +32264,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = memberVerificationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMemberVerificationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMemberVerificationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = memberVerificationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact member, guild, desired verification-bypass state, audit reason, one-shot operation key, or plan digest",
           )
@@ -31385,7 +32297,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord member verification confirmation was declined"
           const result = memberVerificationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31399,7 +32311,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = memberVerificationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord member verification change requires explicit approval of the displayed plan",
           )
@@ -31407,7 +32319,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMemberVerificationChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -31421,9 +32333,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = memberVerificationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31433,12 +32349,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMemberVerificationChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeMemberVerificationChangeRequest(request)
         const result = {
           actualDigest: plan.digest,
           desiredBypassesVerification: normalized.bypassesVerification,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord member, flag, permission, hierarchy, or policy snapshot does not match the requested digest",
@@ -31451,7 +32375,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeMemberVerificationChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31461,7 +32385,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...memberVerificationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -31513,16 +32437,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = memberRoleRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMemberRoleRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMemberRoleRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = memberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact member-role action, guild, user, role, audit reason, one-shot operation key, or plan digest",
           )
@@ -31538,7 +32470,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord member-role confirmation was declined"
           const result = memberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31552,7 +32484,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = memberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord member-role change requires explicit approval of the displayed plan",
           )
@@ -31560,7 +32492,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMemberRoleChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -31574,9 +32506,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = memberRoleConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31586,12 +32522,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMemberRoleChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeMemberRoleChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord member, role, hierarchy, or channel-impact snapshot does not match the requested digest",
@@ -31605,7 +32549,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeMemberRoleChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31615,7 +32559,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...memberRoleRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -31669,16 +32613,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = bulkMemberRoleRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validBulkMemberRoleRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validBulkMemberRoleRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = bulkMemberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact action, guild, role, complete member set, audit reason, one-shot operation key hash, target-set digest, or plan digest",
           )
@@ -31694,7 +32646,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord bulk member-role confirmation was declined"
           const result = bulkMemberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31708,7 +32660,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = bulkMemberRoleConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord bulk member-role change requires explicit approval of the displayed exact target set, impacts, checkpoints, and frontier",
           )
@@ -31716,7 +32668,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeBulkMemberRoleChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const summary = result.status === "paused"
@@ -31727,9 +32679,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         return toolResult(result, summary)
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = bulkMemberRoleConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31739,12 +32695,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planBulkMemberRoleChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeBulkMemberRoleRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord common evidence, exact member states, permission impacts, checkpoints, or execution frontier does not match the requested bulk member-role digest",
@@ -31759,7 +32723,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.executionFrontier.userIds.length === 0) {
         const result = await service.executeBulkMemberRoleChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31768,7 +32732,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       const signedState = await requestStateCodec.mint(
-        bulkMemberRoleRequestStatePayload(request, input.planDigest),
+        bulkMemberRoleRequestStatePayload(request, planDigest),
         context,
       )
       return inputRequired({
@@ -31823,16 +32787,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = memberVoiceRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validMemberVoiceRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validMemberVoiceRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = memberVoiceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact member voice action, guild, user, destination or enabled state, audit reason, one-shot operation key, or plan digest",
           )
@@ -31848,7 +32820,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord member voice confirmation was declined"
           const result = memberVoiceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -31862,7 +32834,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = memberVoiceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord member voice change requires explicit approval of the displayed plan",
           )
@@ -31870,7 +32842,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMemberVoiceChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -31884,9 +32856,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = memberVoiceConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -31896,12 +32872,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMemberVoiceChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeMemberVoiceChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord member, voice state, channel, permission, or hierarchy snapshot does not match the requested digest",
@@ -31914,7 +32898,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeMemberVoiceChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -31924,7 +32908,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...memberVoiceRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -31978,16 +32962,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = threadGovernanceRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validThreadGovernanceRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validThreadGovernanceRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = threadGovernanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact thread action, guild, thread, optional user or desired state, audit reason, one-shot operation key, or plan digest",
           )
@@ -32003,7 +32995,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord thread change confirmation was declined"
           const result = threadGovernanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32017,7 +33009,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = threadGovernanceConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord thread change requires explicit approval of the displayed plan",
           )
@@ -32025,7 +33017,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeThreadChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -32039,9 +33031,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = threadGovernanceConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32051,12 +33047,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planThreadChange(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeThreadChangeRequest(request)
         const result = {
           action: normalized.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           operationKeyHash: normalized.operationKeyHash,
           reason: "The fresh Discord thread, membership, parent, permission, ownership, or lifecycle snapshot does not match the requested digest",
@@ -32070,7 +33074,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeThreadChange(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32080,7 +33084,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...threadGovernanceRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32132,16 +33136,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = roleCreationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validRoleCreationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validRoleCreationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = roleCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact role name, permissions, properties, audit reason, one-shot operation key, or plan digest",
           )
@@ -32157,7 +33169,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord role creation confirmation was declined"
           const result = roleCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32171,7 +33183,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = roleCreationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord role creation requires explicit approval of the displayed plan",
           )
@@ -32179,7 +33191,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeRoleCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verification = result.status === "completed-with-drift"
@@ -32191,9 +33203,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = roleCreationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32203,10 +33219,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planRoleCreation(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord guild and role snapshot does not match the requested role-creation digest",
@@ -32218,7 +33242,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (plan.action === "none") {
         const result = await service.executeRoleCreation(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32228,7 +33252,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...roleCreationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32280,16 +33304,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = roleConfigurationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validRoleConfigurationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validRoleConfigurationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = roleConfigurationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, role, requested configuration fields, permission deltas, audit reason, one-shot operation key, or plan digest",
           )
@@ -32305,7 +33337,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord role configuration confirmation was declined"
           const result = roleConfigurationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32319,7 +33351,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = roleConfigurationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord role configuration requires explicit approval of the displayed plan",
           )
@@ -32327,7 +33359,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeRoleConfiguration(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const suffix = result.status === "completed-with-drift"
@@ -32339,9 +33371,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = roleConfigurationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32351,10 +33387,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planRoleConfiguration(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           reason: "The fresh Discord guild, role, hierarchy, permission, or member-count snapshot does not match the requested role-configuration digest",
@@ -32368,7 +33412,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeRoleConfiguration(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32378,7 +33422,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...roleConfigurationRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32430,16 +33474,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = roleOrderingRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validRoleOrderingRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validRoleOrderingRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = roleOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, target role, anchor role, relative placement, audit reason, one-shot operation key, or plan digest",
           )
@@ -32455,7 +33507,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord role-ordering confirmation was declined"
           const result = roleOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32469,7 +33521,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = roleOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord role ordering requires explicit approval of the displayed plan",
           )
@@ -32477,7 +33529,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeRoleOrder(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const suffix = result.status === "completed-with-drift"
@@ -32489,9 +33541,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = roleOrderingConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32501,11 +33557,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planRoleOrder(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           anchorRoleId: request.anchorRoleId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           placement: request.placement,
@@ -32519,7 +33583,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeRoleOrder(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32529,7 +33593,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...roleOrderingRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32581,16 +33645,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelCloneRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelCloneRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelCloneRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelCloneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, source channel, target name, audit reason, one-shot operation key, or plan digest",
           )
@@ -32606,7 +33678,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord channel-clone confirmation was declined"
           const result = channelCloneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32620,7 +33692,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelCloneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord channel cloning requires explicit approval of the displayed plan",
           )
@@ -32628,7 +33700,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelClone(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32637,9 +33709,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelCloneConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32649,10 +33725,18 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelClone(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           name: request.name ?? null,
           operationKeyHash: plan.operationKeyHash,
@@ -32665,7 +33749,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelCloneRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32717,16 +33801,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = channelOrderingRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validChannelOrderingRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validChannelOrderingRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = channelOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, target channel, anchor channel, relative placement, audit reason, one-shot operation key, or plan digest",
           )
@@ -32742,7 +33834,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord channel-ordering confirmation was declined"
           const result = channelOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -32756,7 +33848,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = channelOrderingConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord channel ordering requires explicit approval of the displayed plan",
           )
@@ -32764,7 +33856,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeChannelOrder(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32773,9 +33865,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = channelOrderingConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -32785,12 +33881,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planChannelOrder(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           actualDigest: plan.digest,
           anchorChannelId: request.anchorChannelId,
           channelId: request.channelId,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           operationKeyHash: plan.operationKeyHash,
           placement: request.placement,
@@ -32803,7 +33907,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeChannelOrder(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -32813,7 +33917,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       }
       const signedState = await requestStateCodec.mint({
         ...channelOrderingRequestStatePayload(request),
-        planDigest: input.planDigest,
+        planDigest,
       }, context)
       return inputRequired({
         inputRequests: {
@@ -32879,27 +33983,27 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: channelDeletionConfirmationRequestSchema,
         },
-        execute: () => service.executeChannelDeletion(
+        execute: (planDigest) => service.executeChannelDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => channelDeletionConfirmationOutcome(
+        outcome: (planDigest, status, reason) => channelDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planChannelDeletion(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const result = {
             actualDigest: plan.digest,
             channelId: request.channelId,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
             reason: "The fresh Discord target, guild topology, dependency, recovery, or connector-authority snapshot does not match the requested channel-deletion digest",
@@ -32921,10 +34025,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord channel ${result.channelId} was not deleted because ${result.blockerCount} blocker classes remain`
         ),
-        validRequestState: (value) => validChannelDeletionRequestState(
+        validRequestState: (value, planDigest) => validChannelDeletionRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -33007,26 +34111,26 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
           missingStateReason: "Discord confirmation responses require signed request state",
           requestedSchema: roleDeletionConfirmationRequestSchema,
         },
-        execute: () => service.executeRoleDeletion(
+        execute: (planDigest) => service.executeRoleDeletion(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         ),
         inputResponses: context.mcpReq.inputResponses,
         mintRequestState: (payload) => requestStateCodec.mint(payload, context),
-        outcome: (status, reason) => roleDeletionConfirmationOutcome(
+        outcome: (planDigest, status, reason) => roleDeletionConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           status,
           reason,
         ),
         plan: () => service.planRoleDeletion(request, {
           signal: context.mcpReq.signal,
         }),
-        planChanged(plan) {
+        planChanged(plan, expectedPlanDigest) {
           const result = {
             actualDigest: plan.digest,
-            expectedDigest: input.planDigest,
+            expectedDigest: expectedPlanDigest,
             guildId: request.guildId,
             operationKeyHash: plan.operationKeyHash,
             reason: "The fresh Discord target role, holders, hierarchy, channel layout, dependency, recovery, or connector-authority snapshot does not match the requested role-deletion digest",
@@ -33049,10 +34153,10 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         summarizeNoWrite: (result) => (
           `Discord role ${result.roleId} was not deleted because ${result.blockerCount} blocker classes remain`
         ),
-        validRequestState: (value) => validRoleDeletionRequestState(
+        validRequestState: (value, planDigest) => validRoleDeletionRequestState(
           value,
           request,
-          input.planDigest,
+          planDigest,
         ),
       })
     }, secrets, observability),
@@ -33096,16 +34200,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = memberModerationRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validAdministrationRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validAdministrationRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = administrationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact moderation action, target, parameters, audit reason, one-shot operation key hash, or plan digest",
           )
@@ -33121,7 +34233,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord member moderation confirmation was declined"
           const result = administrationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -33135,7 +34247,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = administrationConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord member moderation requires explicit approval of the displayed plan",
           )
@@ -33143,7 +34255,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeMemberModeration(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verificationSummary = result.verification === "match"
@@ -33155,9 +34267,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = administrationConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -33167,11 +34283,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planMemberModeration(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const result = {
           action: request.action,
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: request.guildId,
           reason: "The fresh Discord member snapshot does not match the requested administration digest",
           schemaVersion: SCHEMA_VERSION,
@@ -33181,7 +34305,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         return toolResult(result, result.reason, { isError: true })
       }
       const signedState = await requestStateCodec.mint(
-        administrationRequestStatePayload(request, input.planDigest),
+        administrationRequestStatePayload(request, planDigest),
         context,
       )
       return inputRequired({
@@ -33234,16 +34358,24 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = bulkGuildBanRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validBulkGuildBanRequestState(
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validBulkGuildBanRequestState(
           requestState,
           request,
-          input.planDigest,
+          planDigest,
         )) {
           const result = bulkGuildBanConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, complete target set, batch parameters, audit reason, one-shot operation key hash, target-set digest, or plan digest",
           )
@@ -33259,7 +34391,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord bulk guild ban confirmation was declined"
           const result = bulkGuildBanConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -33273,7 +34405,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = bulkGuildBanConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord bulk guild ban requires explicit approval of the displayed exact target set and batch plan",
           )
@@ -33281,7 +34413,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeBulkGuildBan(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const verificationSummary = result.verification === "match"
@@ -33293,9 +34425,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = bulkGuildBanConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -33305,11 +34441,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planBulkGuildBan(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeBulkGuildBanRequest(request)
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           reason: "The fresh Discord guild, permission, hierarchy, member, user, or ban evidence does not match the requested bulk-ban digest",
           schemaVersion: SCHEMA_VERSION,
@@ -33320,7 +34464,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         return toolResult(result, result.reason, { isError: true })
       }
       const signedState = await requestStateCodec.mint(
-        bulkGuildBanRequestStatePayload(request, input.planDigest),
+        bulkGuildBanRequestStatePayload(request, planDigest),
         context,
       )
       return inputRequired({
@@ -33373,12 +34517,20 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       context,
     ) => {
       const request = guildPruneRequest(input)
+      let planDigest = input.planDigest
       const requestState = context.mcpReq.requestState()
       if (requestState !== undefined) {
-        if (!validGuildPruneRequestState(requestState, request, input.planDigest)) {
+        const planDigestResolution = resolveSignedReviewedPlanDigest(
+          requestState,
+          planDigest,
+        )
+        planDigest = planDigestResolution.planDigest
+        if (
+          !planDigestResolution.matchesSignedState
+          || !validGuildPruneRequestState(requestState, request, planDigest)) {
           const result = guildPruneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Signed confirmation state does not match the exact guild, inactivity window, include roles, non-exact acknowledgement, pre-dispatch ceiling, audit reason, one-shot operation key hash, or plan digest",
           )
@@ -33394,7 +34546,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
             : "Discord guild prune confirmation was declined"
           const result = guildPruneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-declined",
             reason,
           )
@@ -33408,7 +34560,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         if (!confirmation || confirmation.approve !== true) {
           const result = guildPruneConfirmationOutcome(
             request,
-            input.planDigest,
+            planDigest,
             "confirmation-invalid",
             "Discord guild prune requires explicit approval of the displayed non-exact cohort plan",
           )
@@ -33416,7 +34568,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         }
         const result = await service.executeGuildPrune(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         const summary = result.status === "completed"
@@ -33430,9 +34582,13 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       if (context.mcpReq.inputResponses !== undefined) {
+        planDigest = requireReviewedPlanDigest(
+          planDigest,
+          "Discord confirmation responses require signed request state",
+        )
         const result = guildPruneConfirmationOutcome(
           request,
-          input.planDigest,
+          planDigest,
           "confirmation-invalid",
           "Discord confirmation responses require signed request state",
         )
@@ -33442,11 +34598,19 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       const plan = await service.planGuildPrune(request, {
         signal: context.mcpReq.signal,
       })
-      if (plan.digest !== input.planDigest) {
+      const expectedPlanDigest = planDigest
+      planDigest = requireReviewedPlanDigest(
+        expectedPlanDigest ?? plan.digest,
+        "Fresh reviewed plan did not contain a valid digest",
+      )
+      if (
+        expectedPlanDigest !== undefined
+        && plan.digest !== expectedPlanDigest
+      ) {
         const normalized = normalizeGuildPruneRequest(request)
         const result = {
           actualDigest: plan.digest,
-          expectedDigest: input.planDigest,
+          expectedDigest: planDigest,
           guildId: normalized.guildId,
           reason: "The fresh Discord guild, role, protected-member, permission, or prune-count evidence does not match the requested guild-prune digest",
           schemaVersion: SCHEMA_VERSION,
@@ -33457,7 +34621,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
       if (!plan.writeRequired) {
         const result = await service.executeGuildPrune(
           request,
-          input.planDigest,
+          planDigest,
           { signal: context.mcpReq.signal },
         )
         return toolResult(
@@ -33466,7 +34630,7 @@ export function createGuildControlServer(options: GuildControlOptions = {}): Mcp
         )
       }
       const signedState = await requestStateCodec.mint(
-        guildPruneRequestStatePayload(request, input.planDigest),
+        guildPruneRequestStatePayload(request, planDigest),
         context,
       )
       return inputRequired({

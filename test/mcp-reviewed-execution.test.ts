@@ -8,7 +8,7 @@ import {
 
 const PLAN_DIGEST = "hmac-sha256:1111111111111111111111111111111111111111111111111111111111111111"
 const CHANGED_DIGEST = "hmac-sha256:2222222222222222222222222222222222222222222222222222222222222222"
-const REQUEST_STATE = Object.freeze({ signed: true })
+const REQUEST_STATE = Object.freeze({ planDigest: PLAN_DIGEST, signed: true })
 const CONFIRMATION_KEY = "confirm_change"
 
 interface Plan {
@@ -51,7 +51,8 @@ function fixture(
         type: "object",
       },
     },
-    async execute() {
+    async execute(planDigest) {
+      assert.equal(planDigest, PLAN_DIGEST)
       trace.push("execute")
       return { status: "completed" }
     },
@@ -61,7 +62,8 @@ function fixture(
       statePayloads.push(payload)
       return "signed-request-state"
     },
-    outcome(status, reason) {
+    outcome(planDigest, status, reason) {
+      assert.equal(planDigest, PLAN_DIGEST)
       trace.push(`outcome:${status}`)
       return { reason, status }
     },
@@ -69,7 +71,8 @@ function fixture(
       trace.push("plan")
       return { digest: PLAN_DIGEST, writeRequired: true }
     },
-    planChanged(plan) {
+    planChanged(plan, expectedPlanDigest) {
+      assert.equal(expectedPlanDigest, PLAN_DIGEST)
       trace.push("plan-changed")
       return {
         result: { actualDigest: plan.digest, status: "plan-changed" },
@@ -93,7 +96,8 @@ function fixture(
     summarizeNoWrite(result) {
       return `No write ${result.status}`
     },
-    validRequestState(value) {
+    validRequestState(value, planDigest) {
+      assert.equal(planDigest, PLAN_DIGEST)
       trace.push("validate-state")
       return value === REQUEST_STATE
     },
@@ -156,7 +160,7 @@ test("reviewed execution rejects invalid signed state before response handling",
         content: { approve: true },
       },
     },
-    requestState: { signed: false },
+    requestState: { planDigest: PLAN_DIGEST, signed: false },
   })
   const result = await runReviewedToolExecution(current.options)
 
@@ -285,6 +289,66 @@ test("reviewed execution runs a fresh no-op without elicitation or state", async
     summary: "No write completed",
   })
   assert.deepEqual(current.trace, ["plan", "execute", "render:ok"])
+})
+
+test("reviewed execution computes and signs a fresh digest when omitted", async () => {
+  const current = fixture({ planDigest: undefined })
+  const result = await runReviewedToolExecution(current.options)
+
+  assert.equal("resultType" in result && result.resultType, "input_required")
+  assert.deepEqual(current.statePayloads, [{
+    exactRequest: "bound",
+    planDigest: PLAN_DIGEST,
+  }])
+  assert.deepEqual(current.trace, ["plan", "mint"])
+})
+
+test("reviewed execution recovers an omitted digest from signed approval state", async () => {
+  const current = fixture({
+    inputResponses: {
+      [CONFIRMATION_KEY]: {
+        action: "accept",
+        content: { approve: true },
+      },
+    },
+    planDigest: undefined,
+    requestState: REQUEST_STATE,
+  })
+  const result = await runReviewedToolExecution(current.options)
+
+  assert.deepEqual(result, {
+    isError: false,
+    result: { status: "completed" },
+    summary: "Execution completed",
+  })
+  assert.deepEqual(current.trace, ["validate-state", "execute", "render:ok"])
+})
+
+test("reviewed execution rejects explicit and signed digest disagreement", async () => {
+  const current = fixture({
+    inputResponses: {
+      [CONFIRMATION_KEY]: {
+        action: "accept",
+        content: { approve: true },
+      },
+    },
+    requestState: { planDigest: CHANGED_DIGEST, signed: true },
+  })
+
+  const result = await runReviewedToolExecution(current.options)
+
+  assert.deepEqual(result, {
+    isError: true,
+    result: {
+      reason: "Signed state did not match",
+      status: "confirmation-invalid",
+    },
+    summary: "Signed state did not match",
+  })
+  assert.deepEqual(current.trace, [
+    "outcome:confirmation-invalid",
+    "render:error",
+  ])
 })
 
 test("reviewed execution leaves mint and service failures to the outer handler", async (context) => {

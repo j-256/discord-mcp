@@ -6,6 +6,11 @@ import {
 } from "@modelcontextprotocol/server"
 import { z } from "zod"
 
+import {
+  requireReviewedPlanDigest,
+  resolveSignedReviewedPlanDigest,
+} from "./reviewed-plan.js"
+
 const REVIEWED_APPROVAL_RESPONSE_SCHEMA = z.strictObject({
   approve: z.boolean(),
 })
@@ -37,21 +42,22 @@ export interface ReviewedToolExecutionOptions<
     readonly missingStateReason: string
     readonly requestedSchema: ElicitationRequestedSchema
   }
-  readonly execute: () => Promise<Execution>
+  readonly execute: (planDigest: string) => Promise<Execution>
   readonly inputResponses: Record<string, unknown> | undefined
   readonly mintRequestState: (
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<string>
   readonly outcome: (
+    planDigest: string,
     status: ReviewedConfirmationStatus,
     reason: string,
   ) => object
   readonly plan: () => Promise<Plan>
-  readonly planChanged: (plan: Plan) => {
+  readonly planChanged: (plan: Plan, expectedPlanDigest: string) => {
     readonly result: object
     readonly summary: string
   }
-  readonly planDigest: string
+  readonly planDigest: string | undefined
   readonly render: (
     result: object,
     summary: string,
@@ -61,7 +67,7 @@ export interface ReviewedToolExecutionOptions<
   readonly requestStatePayload: Readonly<Record<string, unknown>>
   readonly summarizeExecution: (result: Execution) => string
   readonly summarizeNoWrite: (result: Execution) => string
-  readonly validRequestState: (value: unknown) => boolean
+  readonly validRequestState: (value: unknown, planDigest: string) => boolean
 }
 
 function isDeclinedConfirmationAction(
@@ -76,9 +82,10 @@ function invalidConfirmation<
   Complete,
 >(
   options: ReviewedToolExecutionOptions<Plan, Execution, Complete>,
+  planDigest: string,
   reason: string,
 ): Complete {
-  const result = options.outcome("confirmation-invalid", reason)
+  const result = options.outcome(planDigest, "confirmation-invalid", reason)
   return options.render(result, reason, { isError: true })
 }
 
@@ -90,8 +97,20 @@ export async function runReviewedToolExecution<
   options: ReviewedToolExecutionOptions<Plan, Execution, Complete>,
 ): Promise<Complete | InputRequiredResult> {
   if (options.requestState !== undefined) {
-    if (!options.validRequestState(options.requestState)) {
-      return invalidConfirmation(options, options.confirmation.invalidStateReason)
+    const planDigestResolution = resolveSignedReviewedPlanDigest(
+      options.requestState,
+      options.planDigest,
+    )
+    const { planDigest } = planDigestResolution
+    if (
+      !planDigestResolution.matchesSignedState
+      || !options.validRequestState(options.requestState, planDigest)
+    ) {
+      return invalidConfirmation(
+        options,
+        planDigest,
+        options.confirmation.invalidStateReason,
+      )
     }
     const response = inputResponse(
       options.inputResponses,
@@ -102,7 +121,11 @@ export async function runReviewedToolExecution<
       && isDeclinedConfirmationAction(response.action)
     ) {
       const reason = options.confirmation.declinedReason(response.action)
-      const result = options.outcome("confirmation-declined", reason)
+      const result = options.outcome(
+        planDigest,
+        "confirmation-declined",
+        reason,
+      )
       return options.render(result, reason)
     }
     const confirmation = acceptedContent(
@@ -113,28 +136,45 @@ export async function runReviewedToolExecution<
     if (confirmation?.approve !== true) {
       return invalidConfirmation(
         options,
+        planDigest,
         options.confirmation.approvalRequiredReason,
       )
     }
-    const result = await options.execute()
+    const result = await options.execute(planDigest)
     return options.render(result, options.summarizeExecution(result))
   }
   if (options.inputResponses !== undefined) {
-    return invalidConfirmation(options, options.confirmation.missingStateReason)
+    const planDigest = requireReviewedPlanDigest(
+      options.planDigest,
+      options.confirmation.missingStateReason,
+    )
+    return invalidConfirmation(
+      options,
+      planDigest,
+      options.confirmation.missingStateReason,
+    )
   }
 
   const plan = await options.plan()
-  if (plan.digest !== options.planDigest) {
-    const changed = options.planChanged(plan)
+  const expectedPlanDigest = options.planDigest
+  if (
+    expectedPlanDigest !== undefined
+    && plan.digest !== expectedPlanDigest
+  ) {
+    const changed = options.planChanged(plan, expectedPlanDigest)
     return options.render(changed.result, changed.summary, { isError: true })
   }
+  const planDigest = requireReviewedPlanDigest(
+    expectedPlanDigest ?? plan.digest,
+    "Fresh reviewed plan did not contain a valid digest",
+  )
   if (!plan.writeRequired) {
-    const result = await options.execute()
+    const result = await options.execute(planDigest)
     return options.render(result, options.summarizeNoWrite(result))
   }
   const signedState = await options.mintRequestState({
     ...options.requestStatePayload,
-    planDigest: options.planDigest,
+    planDigest,
   })
   return inputRequired({
     inputRequests: {

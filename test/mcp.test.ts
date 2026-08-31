@@ -563,7 +563,11 @@ import {
   MCP_PLAN_REVIEW_TOOL_META,
 } from "../src/mcp-plan-review-app.js"
 import { MCP_OPERATIONAL_INSTRUCTION_PREAMBLE } from "../src/mcp-instructions.js"
-import { MCP_TOOL_CATALOG } from "../src/mcp-tool-catalog.js"
+import {
+  MCP_TOOL_ACCESS_NAMES,
+  MCP_TOOL_CATALOG,
+  mcpToolAccessContract,
+} from "../src/mcp-tool-catalog.js"
 import { serializedMcpResultBytes } from "../src/mcp-output.js"
 import { normalizeChannel, normalizeMessage } from "../src/normalize.js"
 import { loadObservabilityDocumentConfig } from "../src/observability-config.js"
@@ -16320,6 +16324,44 @@ test("MCP server advertises bounded tools with accurate write annotations", asyn
   assert.doesNotMatch(JSON.stringify(result), new RegExp(TOKEN))
 })
 
+test("MCP reviewed execute schemas make plan digests optional", async (context) => {
+  const { client } = await connectedFixture(context)
+  const tools = (await client.listTools()).tools
+  const reviewedExecuteNames = MCP_TOOL_ACCESS_NAMES.filter((name) => (
+    mcpToolAccessContract(name).stage === "review-execute"
+  ))
+
+  for (const name of reviewedExecuteNames) {
+    const schema = listedTool(tools, name).inputSchema
+    let digestFields = 0
+    const inspect = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const entry of value) inspect(entry)
+        return
+      }
+      if (typeof value !== "object" || value === null) return
+      const record = value as Record<string, unknown>
+      if (Array.isArray(record.required)) {
+        assert.equal(
+          record.required.includes("planDigest"),
+          false,
+          `${name} must not require planDigest`,
+        )
+      }
+      if (
+        typeof record.properties === "object"
+        && record.properties !== null
+        && Object.hasOwn(record.properties, "planDigest")
+      ) {
+        digestFields += 1
+      }
+      for (const entry of Object.values(record)) inspect(entry)
+    }
+    inspect(schema)
+    assert.ok(digestFields > 0, `${name} must advertise planDigest`)
+  }
+})
+
 test("MCP reviewed results expose content-free text receipts in both protocol eras", async (context) => {
   const legacy = await connectedFixture(context)
   const modern = await connectedModernStdioFixture(context)
@@ -21207,7 +21249,7 @@ test("MCP private-message execution displays and approves the exact reviewed pla
   })
 
   const result = await client.callTool({
-    arguments: directMessageSendToolInput(DIGEST),
+    arguments: directMessageSendToolInput(),
     name: "execute_direct_message_change",
   })
 
@@ -23202,7 +23244,6 @@ test("MCP message pins bind signed approval to the exact pin transition", async 
       desiredState: "pinned",
       messageId: MESSAGE_ID,
       operationKey: MESSAGE_PIN_OPERATION_KEY,
-      planDigest: DIGEST,
     },
     name: "execute_message_pin",
   })

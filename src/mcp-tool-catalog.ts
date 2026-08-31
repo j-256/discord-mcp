@@ -172,6 +172,9 @@ export interface McpToolAccessContract {
     | "target-bound-plan"
   companions: McpToolWorkflowCompanions
   discordRequest: "none" | "read" | "write"
+  planDigestInput:
+    | "computed-by-execute-or-explicit"
+    | "not-applicable"
   readiness: "not-applicable" | "target-specific"
   requirements: McpToolStaticRequirements
   stage: McpToolAccessStage
@@ -1537,6 +1540,9 @@ function accessStageContract(
       : stage === "review-execute" || stage === "guarded-write"
         ? "write"
         : "read",
+    planDigestInput: stage === "review-execute"
+      ? "computed-by-execute-or-explicit"
+      : "not-applicable",
     readiness: stage === "local" ? "not-applicable" : "target-specific",
   }
 }
