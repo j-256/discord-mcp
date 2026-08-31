@@ -234,6 +234,8 @@ function configuredPolicy(options: {
   nativeInteractionChannelIds?: readonly string[]
   permissions?: bigint
   readChannelIds?: readonly string[]
+  threadMessageWriteMode?: "exact" | "inherit"
+  threadReadMode?: "exact" | "inherit"
   userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): { policy: ScopePolicy; roles: DiscordRole[] } {
   const permissions = options.permissions ?? (
@@ -268,6 +270,8 @@ function configuredPolicy(options: {
         options.nativeInteractionsEnabled ? [REPLY_AUTHOR_ID] : [],
       ),
       protectedUserIds: new Set(),
+      threadMessageWriteMode: options.threadMessageWriteMode ?? "exact",
+      threadReadMode: options.threadReadMode ?? "inherit",
       userMentionMode: options.userMentionMode ?? "allowlist",
     }),
     roles: [role(GUILD_ID, 0n), role(BOT_ROLE_ID, permissions)],
@@ -1361,8 +1365,11 @@ test("component-message planning enforces scope, permissions, and active thread 
     | DISCORD_PERMISSIONS.SEND_MESSAGES_IN_THREADS
   const privateThread = fixture({
     policyOptions: {
+      interactionChannelIds: [PARENT_CHANNEL_ID],
       permissions: threadPermissions,
-      readChannelIds: [CHANNEL_ID, PARENT_CHANNEL_ID],
+      readChannelIds: [PARENT_CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "inherit",
     },
     state: {
       channel: channel({
@@ -1387,6 +1394,24 @@ test("component-message planning enforces scope, permissions, and active thread 
   assert.equal(threadPlan.permission.permissionSourceChannelId, PARENT_CHANNEL_ID)
   assert.equal(threadPlan.permission.privateThreadAccess, "lookup-succeeded")
   assert.equal(privateThread.events.includes("read:thread-member"), true)
+
+  const exactScope = fixture({
+    policyOptions: {
+      interactionChannelIds: [PARENT_CHANNEL_ID],
+      permissions: threadPermissions,
+      readChannelIds: [PARENT_CHANNEL_ID],
+      threadMessageWriteMode: "exact",
+      threadReadMode: "inherit",
+    },
+    state: {
+      channel: structuredClone(privateThread.state.channel),
+      parent: channel({ id: PARENT_CHANNEL_ID }),
+    },
+  })
+  await assert.rejects(
+    exactScope.service.plan(APPLICATION_ID, BOT_ID, "enabled", createRequest()),
+    /outside the message-publication scope/,
+  )
 
   privateThread.state.channel.thread_metadata = {
     archive_timestamp: NOW,

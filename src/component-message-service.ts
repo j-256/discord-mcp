@@ -1387,7 +1387,7 @@ export class ComponentMessageService {
       request.channelId,
       "component-message target",
     )
-    const guildId = this.#policy.assertChannelInteractable(channel)
+    const guildId = this.#policy.assertChannelMessagePublishable(channel)
     let parent: DiscordChannel | null = null
     if (THREAD_CHANNEL_TYPES.has(channel.type)) {
       parent = exactParent(

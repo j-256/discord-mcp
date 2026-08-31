@@ -6,7 +6,10 @@ import type {
   ActivityList,
   ActivityStore,
 } from "../src/activity-log.js"
-import { REACTION_LIMITS } from "../src/constants.js"
+import {
+  DISCORD_CHANNEL_TYPES,
+  REACTION_LIMITS,
+} from "../src/constants.js"
 import type {
   CreateMessageInput,
   EditMessageInput,
@@ -36,6 +39,7 @@ const BOT_ID = "100000000000000001"
 const GUILD_ID = "200000000000000001"
 const CHANNEL_ID = "300000000000000001"
 const OTHER_CHANNEL_ID = "300000000000000002"
+const THREAD_ID = "300000000000000003"
 const MESSAGE_ID = "400000000000000001"
 const REPLY_MESSAGE_ID = "400000000000000002"
 const MEMBER_ID = "500000000000000001"
@@ -91,6 +95,21 @@ function channel(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
   }
 }
 
+function activeThread(overrides: Partial<DiscordChannel> = {}): DiscordChannel {
+  return channel({
+    id: THREAD_ID,
+    parent_id: CHANNEL_ID,
+    thread_metadata: {
+      archive_timestamp: NOW,
+      archived: false,
+      auto_archive_duration: 60,
+      locked: false,
+    },
+    type: DISCORD_CHANNEL_TYPES.publicThread,
+    ...overrides,
+  })
+}
+
 function message(overrides: Partial<DiscordMessage> = {}): DiscordMessage {
   return {
     author: {
@@ -137,13 +156,16 @@ function ownReactionAggregate(reaction: string) {
 }
 
 function policy(options: {
+  allowedChannelIds?: readonly string[]
   interactionChannelIds?: readonly string[]
   mentionUserIds?: readonly string[]
+  threadMessageWriteMode?: "exact" | "inherit"
+  threadReadMode?: "exact" | "inherit"
   userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): ScopePolicy {
   return new ScopePolicy({
     adminGuildIds: new Set(),
-    allowedChannelIds: new Set([CHANNEL_ID, OTHER_CHANNEL_ID]),
+    allowedChannelIds: new Set(options.allowedChannelIds || [CHANNEL_ID, OTHER_CHANNEL_ID]),
     allowedGuildIds: new Set([GUILD_ID]),
     allowAdministration: false,
     allowDeletions: false,
@@ -154,17 +176,23 @@ function policy(options: {
     interactionMinWriteIntervalMs: 0,
     mentionUserIds: new Set(options.mentionUserIds || []),
     protectedUserIds: new Set(),
+    threadMessageWriteMode: options.threadMessageWriteMode ?? "exact",
+    threadReadMode: options.threadReadMode ?? "inherit",
     userMentionMode: options.userMentionMode ?? "allowlist",
   })
 }
 
-function createdMessage(input: CreateMessageInput): DiscordMessage {
+function createdMessage(
+  input: CreateMessageInput,
+  channelId = CHANNEL_ID,
+): DiscordMessage {
   return message({
+    channel_id: channelId,
     content: input.content,
     id: MESSAGE_ID,
     ...(input.reply
       ? { message_reference: {
-          channel_id: CHANNEL_ID,
+          channel_id: channelId,
           guild_id: GUILD_ID,
           message_id: input.reply.messageId,
         } }
@@ -203,10 +231,10 @@ function fixture(options: {
       events.push("reaction")
       ownReactions.add(emoji)
     },
-    async createMessage(_channelId, input) {
+    async createMessage(channelId, input) {
       calls.create.push(structuredClone(input))
       events.push("create")
-      return createdMessage(input)
+      return createdMessage(input, channelId)
     },
     async editMessage(_channelId, _messageId, input) {
       calls.edit.push(structuredClone(input))
@@ -650,6 +678,258 @@ test("send suppresses mentions, journals before writing, and returns no content"
   assert.equal(result.messageId, MESSAGE_ID)
   assert.equal(result.localReplay, false)
   assert.doesNotMatch(JSON.stringify({ result, entries: store.entries }), /safe text/)
+})
+
+test("message publication supports exact threads and explicit parent inheritance", async () => {
+  const thread = activeThread()
+  const exact = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID ? thread : channel()
+      },
+    },
+    interactionPolicy: policy({
+      allowedChannelIds: [CHANNEL_ID, THREAD_ID],
+      interactionChannelIds: [THREAD_ID],
+      threadMessageWriteMode: "exact",
+      threadReadMode: "exact",
+    }),
+  })
+  const exactResult = await exact.service.sendMessage(BOT_ID, {
+    channelId: THREAD_ID,
+    content: "exact thread response",
+    idempotencyKey: IDEMPOTENCY_KEY,
+  })
+
+  assert.equal(exactResult.channelId, THREAD_ID)
+  assert.equal(exact.calls.create.length, 1)
+
+  const inherited = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID ? thread : channel()
+      },
+    },
+    interactionPolicy: policy({
+      allowedChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "inherit",
+    }),
+  })
+  const plan = await inherited.service.planSendMessageNotifications(BOT_ID, {
+    channelId: THREAD_ID,
+    content: "inherited thread response",
+    idempotencyKey: IDEMPOTENCY_KEY,
+  })
+
+  assert.deepEqual(plan.thread, {
+    parentId: CHANNEL_ID,
+    privateThreadAccess: "not-applicable",
+  })
+  assert.equal(plan.permission.confidence, "complete")
+  assert.equal(plan.permission.permissionSourceChannelId, CHANNEL_ID)
+  assert.deepEqual(plan.permission.requiredPermissionNames, [
+    "VIEW_CHANNEL",
+    "READ_MESSAGE_HISTORY",
+    "SEND_MESSAGES_IN_THREADS",
+  ])
+  assert.equal(plan.permission.effectivePermissionNames.includes("SEND_MESSAGES_IN_THREADS"), true)
+})
+
+test("thread publication requires independent read and write inheritance", async () => {
+  const thread = activeThread()
+  const client = {
+    async getChannel(channelId: string) {
+      return channelId === THREAD_ID ? thread : channel()
+    },
+  }
+  const writeExact = fixture({
+    client,
+    interactionPolicy: policy({
+      allowedChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+      threadMessageWriteMode: "exact",
+      threadReadMode: "inherit",
+    }),
+  })
+  await assert.rejects(
+    () => writeExact.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "write scope is still exact",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /outside the message-publication scope/,
+  )
+
+  const readExact = fixture({
+    client,
+    interactionPolicy: policy({
+      allowedChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "exact",
+    }),
+  })
+  await assert.rejects(
+    () => readExact.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "read scope is still exact",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /outside the configured read scope/,
+  )
+
+  const narrow = fixture({
+    client,
+    interactionPolicy: policy({
+      allowedChannelIds: [CHANNEL_ID],
+      interactionChannelIds: [CHANNEL_ID],
+      threadMessageWriteMode: "inherit",
+      threadReadMode: "inherit",
+    }),
+  })
+  await assert.rejects(
+    () => narrow.service.addReaction({
+      channelId: THREAD_ID,
+      emoji: "🔥",
+      messageId: MESSAGE_ID,
+    }),
+    /outside the interaction scope/,
+  )
+  await assert.rejects(
+    () => narrow.service.signalCommandProcessing(BOT_ID, {
+      channelId: THREAD_ID,
+      sourceMessageId: COMMAND_MESSAGE_ID,
+    }),
+    /outside the interaction scope/,
+  )
+  assert.equal(narrow.calls.create.length, 0)
+  assert.deepEqual(narrow.calls.messageReads, [])
+})
+
+test("thread publication proves lifecycle, parent, private membership, and permissions", async () => {
+  const inheritedPolicy = policy({
+    allowedChannelIds: [CHANNEL_ID],
+    interactionChannelIds: [CHANNEL_ID],
+    threadMessageWriteMode: "inherit",
+    threadReadMode: "inherit",
+  })
+  const privateThread = activeThread({ type: DISCORD_CHANNEL_TYPES.privateThread })
+  const privateAccess = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID ? privateThread : channel()
+      },
+    },
+    interactionPolicy: inheritedPolicy,
+  })
+  const privatePlan = await privateAccess.service.planSendMessageNotifications(BOT_ID, {
+    channelId: THREAD_ID,
+    content: "private thread response",
+    idempotencyKey: IDEMPOTENCY_KEY,
+  })
+  assert.equal(privatePlan.permission.privateThreadAccess, "lookup-succeeded")
+  assert.deepEqual(privateAccess.calls.threadMember, [[THREAD_ID, BOT_ID]])
+
+  const archived = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID
+          ? activeThread({
+              thread_metadata: {
+                archive_timestamp: NOW,
+                archived: true,
+                auto_archive_duration: 60,
+                locked: false,
+              },
+            })
+          : channel()
+      },
+    },
+    interactionPolicy: inheritedPolicy,
+  })
+  await assert.rejects(
+    () => archived.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "archived thread response",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /active unlocked thread/,
+  )
+
+  const wrongParent = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID
+          ? activeThread()
+          : channel({ id: OTHER_CHANNEL_ID })
+      },
+    },
+    interactionPolicy: inheritedPolicy,
+  })
+  await assert.rejects(
+    () => wrongParent.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "mismatched parent response",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /mismatched message-publication thread-parent evidence/,
+  )
+
+  const wrongPrivateMember = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID ? privateThread : channel()
+      },
+      async getThreadMember() {
+        return {
+          flags: 0,
+          id: THREAD_ID,
+          join_timestamp: NOW,
+          user_id: MEMBER_ID,
+        }
+      },
+    },
+    interactionPolicy: inheritedPolicy,
+  })
+  await assert.rejects(
+    () => wrongPrivateMember.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "unproven private thread response",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /private-thread membership evidence/,
+  )
+
+  const missingPermission = fixture({
+    client: {
+      async getChannel(channelId) {
+        return channelId === THREAD_ID ? activeThread() : channel()
+      },
+      async getGuildRoles() {
+        return [{
+          id: GUILD_ID,
+          managed: false,
+          name: "everyone",
+          permissions: (
+            DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+          ).toString(),
+          position: 0,
+        }]
+      },
+    },
+    interactionPolicy: inheritedPolicy,
+  })
+  await assert.rejects(
+    () => missingPermission.service.sendMessage(BOT_ID, {
+      channelId: THREAD_ID,
+      content: "permissionless thread response",
+      idempotencyKey: IDEMPOTENCY_KEY,
+    }),
+    /SEND_MESSAGES_IN_THREADS/,
+  )
 })
 
 test("send permits only configured visible user and reply-author notifications", async () => {
@@ -1365,7 +1645,7 @@ test("interaction scope stays exact and a pending audit failure blocks the write
       content: "blocked",
       idempotencyKey: IDEMPOTENCY_KEY,
     }),
-    /outside the interaction scope/,
+    /outside the message-publication scope/,
   )
 
   const store = new MemoryActivityStore()

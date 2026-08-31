@@ -123,6 +123,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     intents: ["GUILDS"],
   })
   assert.deepEqual(guildStarter.requirements.privilegedIntents, [])
+  assert.equal(guildStarter.requirements.threads, null)
   assert.equal(
     guildStarter.requirements.botPermissions.includes("MANAGE_ROLES"),
     false,
@@ -217,6 +218,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     eventFeedPolicy: "unchanged",
     intents: [],
   })
+  assert.deepEqual(coordinationChannel.requirements.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
+  })
   assert.equal(
     coordinationChannel.warnings.some((warning) => warning.includes("app-authored-message")),
     true,
@@ -251,6 +256,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     eventFeedPolicy: "unchanged",
     intents: [],
   })
+  assert.deepEqual(messageChannel.requirements.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
+  })
   assert.equal(messageChannel.toolNames.includes("add_reaction"), false)
   assert.equal(messageChannel.toolNames.includes("get_message"), false)
   assert.equal(messageChannel.toolNames.includes("execute_component_message"), false)
@@ -284,6 +293,10 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     evidenceConnection: "none",
     eventFeedPolicy: "unchanged",
     intents: [],
+  })
+  assert.deepEqual(channelPublisher.requirements.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
   })
   assert.equal(
     channelPublisher.requirements.botPermissions.includes("ADMINISTRATOR"),
@@ -714,7 +727,10 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
 
   const openFile = await configFile(
     context,
-    document({ channelIds: [] }),
+    document({
+      channelIds: [],
+      threadReadMode: "exact",
+    }),
     "open-channels.json",
   )
   const plan = planConfigRecipe({
@@ -725,6 +741,12 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
   assert.equal(plan.status, "planned")
   assert.deepEqual(plan.proposedDocument.scopes.embedMessageChannelIds, [OTHER_CHANNEL_ID])
   assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [OTHER_CHANNEL_ID])
+  assert.deepEqual(plan.proposedDocument.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
+  })
+  assert.equal(plan.changes.some((change) => change.path === "$.threads.messageWrites"), true)
+  assert.equal(plan.changes.some((change) => change.path === "$.threads.reads"), true)
   assert.deepEqual(plan.proposedDocument.tools.toolsets, [
     "connector",
     "embed-messages",
@@ -743,7 +765,7 @@ test("channel-publisher enforces explicit outer scope and explains an open chann
   )
 })
 
-test("message-channel adds only exact-channel plain-message writes", async (context) => {
+test("message-channel adds parent-aware plain-message writes", async (context) => {
   const file = await configFile(context)
   const plan = planConfigRecipe({
     channelIds: [CHANNEL_ID],
@@ -758,6 +780,11 @@ test("message-channel adds only exact-channel plain-message writes", async (cont
   ])
   assert.deepEqual(plan.proposedDocument.capabilities, { interactions: true })
   assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.deepEqual(plan.proposedDocument.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
+  })
+  assert.equal(plan.changes.some((change) => change.path === "$.threads.messageWrites"), true)
   assert.equal("embedMessageChannelIds" in plan.proposedDocument.scopes, false)
   assert.equal(
     plan.recipe.requirements.botPermissions.includes("ADD_REACTIONS"),
@@ -803,7 +830,7 @@ test("configuration recipes preserve a group alias when it already grants the re
   )
 })
 
-test("coordination-channel adds only exact-channel directed routing policy", async (context) => {
+test("coordination-channel adds parent-aware directed routing policy", async (context) => {
   const file = await configFile(context)
   const plan = planConfigRecipe({
     channelIds: [CHANNEL_ID],
@@ -818,6 +845,11 @@ test("coordination-channel adds only exact-channel directed routing policy", asy
   ])
   assert.deepEqual(plan.proposedDocument.capabilities, { interactions: true })
   assert.deepEqual(plan.proposedDocument.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.deepEqual(plan.proposedDocument.threads, {
+    messageWrites: "inherit",
+    reads: "inherit",
+  })
+  assert.equal(plan.changes.some((change) => change.path === "$.threads.messageWrites"), true)
   assert.equal("embedMessageChannelIds" in plan.proposedDocument.scopes, false)
   assert.equal(
     plan.recipe.requirements.botPermissions.includes("ADD_REACTIONS"),

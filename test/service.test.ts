@@ -3738,6 +3738,23 @@ test("distinct connector facades serialize resumable scaffold guild collections"
 test("service verifies bot identity before delegating safe message interactions", async () => {
   const writeCoordinator = new CapturingWriteCoordinator()
   const { calls, service } = serviceFixture({
+    client: {
+      async getGuildMember() {
+        return {
+          roles: [],
+          user: bot(),
+        }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
+      },
+    },
     configOverrides: {
       capabilities: {
         interactions: true,
@@ -3826,6 +3843,21 @@ test("service sends coordination notes only through the guarded message interact
           }],
           nonce: input.nonce,
         })
+      },
+      async getGuildMember() {
+        return {
+          roles: [],
+          user: bot(),
+        }
+      },
+      async getGuildRoles() {
+        return [role(
+          GUILD_ID,
+          DISCORD_PERMISSIONS.VIEW_CHANNEL
+            | DISCORD_PERMISSIONS.READ_MESSAGE_HISTORY
+            | DISCORD_PERMISSIONS.SEND_MESSAGES,
+          "@everyone",
+        )]
       },
     },
     configOverrides: {
