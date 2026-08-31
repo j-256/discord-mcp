@@ -14,6 +14,8 @@ import {
 const GITHUB_API_ORIGIN = "https://api.github.com"
 const GITHUB_API_VERSION = "2026-03-10"
 const GITHUB_REPOSITORY = "j-256/guildcontrol"
+const RELEASE_WORKFLOW_NAME = "Release"
+const RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml"
 const MCP_REGISTRY_NAME = "io.github.j-256/guildcontrol"
 const NPM_PACKAGE = "guildctl"
 const RELEASE_EVIDENCE_FORMAT = "guildcontrol.github-release-evidence.v2"
@@ -24,6 +26,7 @@ const CATALOG_EVIDENCE_FILE = "catalog-evidence.json"
 const SPDX_SBOM_FILE = "sbom.spdx.json"
 const RELEASE_ASSET_BYTE_LIMIT = 20 * 1024 * 1024
 const GITHUB_RESPONSE_BYTE_LIMIT = 16 * 1024 * 1024
+const RECOVERY_ARTIFACT_BYTE_LIMIT = 32 * 1024 * 1024
 const RELEASE_PAGE_SIZE = 100
 const RELEASE_PAGE_LIMIT = 1000
 
@@ -33,6 +36,10 @@ function assertVersion(version) {
 
 function assertRevision(revision) {
   invariant(/^[0-9a-f]{40}$/.test(revision), "GitHub Release revision must be a full lowercase commit SHA")
+}
+
+function assertRunId(runId) {
+  invariant(Number.isSafeInteger(runId) && runId > 0, "GitHub Release recovery run ID must be a positive integer")
 }
 
 function assertOciDigest(digest) {
@@ -71,6 +78,11 @@ function mcpbArchiveName(version) {
 function mcpbReleaseUrl(version) {
   assertVersion(version)
   return `https://github.com/${GITHUB_REPOSITORY}/releases/download/${releaseTag(version)}/${mcpbArchiveName(version)}`
+}
+
+function recoveryEvidenceArtifactName(version) {
+  assertVersion(version)
+  return `release-evidence-github-release-${releaseTag(version)}`
 }
 
 function registryVersionUrl(version) {
@@ -412,6 +424,71 @@ async function githubRequest(path, token) {
   }
 }
 
+export function validateGitHubReleaseRecoveryRun({ artifacts, revision, run, runId, version }) {
+  assertRevision(revision)
+  assertRunId(runId)
+  assertVersion(version)
+  const tag = releaseTag(version)
+  invariant(run?.id === runId, "GitHub Release recovery run ID is invalid")
+  invariant(run?.name === RELEASE_WORKFLOW_NAME, "GitHub Release recovery workflow name is invalid")
+  invariant(run?.path === RELEASE_WORKFLOW_PATH, "GitHub Release recovery workflow path is invalid")
+  invariant(run?.event === "workflow_dispatch", "GitHub Release recovery event is invalid")
+  invariant(run?.status === "completed", "GitHub Release recovery run is not complete")
+  invariant(run?.conclusion === "failure", "GitHub Release recovery run did not fail")
+  invariant(run?.head_branch === tag, "GitHub Release recovery source tag is invalid")
+  invariant(run?.head_sha === revision, "GitHub Release recovery source revision is invalid")
+  invariant(Number.isSafeInteger(run?.run_attempt) && run.run_attempt > 0, "GitHub Release recovery attempt is invalid")
+  invariant(run?.repository?.full_name === GITHUB_REPOSITORY, "GitHub Release recovery repository is invalid")
+  invariant(run?.repository?.private === false, "GitHub Release recovery repository is not public")
+  invariant(run?.head_repository?.full_name === GITHUB_REPOSITORY, "GitHub Release recovery head repository is invalid")
+  invariant(run?.head_repository?.id === run.repository.id, "GitHub Release recovery repository identity is invalid")
+  invariant(
+    run?.artifacts_url === `${GITHUB_API_ORIGIN}/repos/${GITHUB_REPOSITORY}/actions/runs/${runId}/artifacts`,
+    "GitHub Release recovery artifact URL is invalid",
+  )
+
+  invariant(Array.isArray(artifacts?.artifacts), "GitHub Release recovery artifacts are invalid")
+  invariant(artifacts?.total_count === artifacts.artifacts.length, "GitHub Release recovery artifact count is invalid")
+  const expectedName = recoveryEvidenceArtifactName(version)
+  const matches = artifacts.artifacts.filter((artifact) => artifact?.name === expectedName)
+  invariant(matches.length === 1, "GitHub Release recovery evidence artifact is missing or duplicated")
+  const [artifact] = matches
+  invariant(Number.isSafeInteger(artifact.id) && artifact.id > 0, "GitHub Release recovery artifact ID is invalid")
+  invariant(artifact.expired === false, "GitHub Release recovery evidence artifact is expired")
+  invariant(
+    Number.isSafeInteger(artifact.size_in_bytes) &&
+      artifact.size_in_bytes > 0 &&
+      artifact.size_in_bytes <= RECOVERY_ARTIFACT_BYTE_LIMIT,
+    "GitHub Release recovery artifact size is invalid",
+  )
+  invariant(artifact.workflow_run?.id === runId, "GitHub Release recovery artifact run is invalid")
+  invariant(artifact.workflow_run?.head_branch === tag, "GitHub Release recovery artifact tag is invalid")
+  invariant(artifact.workflow_run?.head_sha === revision, "GitHub Release recovery artifact revision is invalid")
+  invariant(artifact.workflow_run?.repository_id === run.repository.id, "GitHub Release recovery artifact repository is invalid")
+  invariant(
+    artifact.workflow_run?.head_repository_id === run.repository.id,
+    "GitHub Release recovery artifact head repository is invalid",
+  )
+  return {
+    artifactId: artifact.id,
+    artifactName: expectedName,
+    runAttempt: run.run_attempt,
+    runId,
+    sourceRef: `refs/tags/${tag}`,
+    sourceRevision: revision,
+  }
+}
+
+export async function fetchGitHubReleaseRecoveryRun({ revision, runId, token, version }) {
+  invariant(token, "GitHub Release recovery inspection requires GITHUB_TOKEN")
+  assertRunId(runId)
+  const [run, artifacts] = await Promise.all([
+    githubRequest(`/repos/${GITHUB_REPOSITORY}/actions/runs/${runId}`, token),
+    githubRequest(`/repos/${GITHUB_REPOSITORY}/actions/runs/${runId}/artifacts?per_page=100`, token),
+  ])
+  return validateGitHubReleaseRecoveryRun({ artifacts, revision, run, runId, version })
+}
+
 export async function findGitHubRelease(version, token) {
   for (let page = 1; page <= RELEASE_PAGE_LIMIT; page += 1) {
     const releases = await githubRequest(
@@ -455,6 +532,8 @@ function parseOptions(args) {
     else if (argument === "--oci-digest") options.ociDigest = value
     else if (argument === "--output") options.output = value
     else if (argument === "--revision") options.revision = value
+    else if (argument === "--run-id") options.runId = value
+    else if (argument === "--tag") options.tag = value
     else throw new Error(`Unknown option ${argument}`)
   }
   return options
@@ -502,6 +581,20 @@ async function main(args) {
       tagRevision: context.tagRevision,
     }
     process.stdout.write(options.json ? `${JSON.stringify(report)}\n` : `GitHub Release: ${report.state}\n`)
+    return
+  }
+
+  if (command === "verify-recovery-run") {
+    invariant(options.revision, "verify-recovery-run requires --revision")
+    invariant(options.runId && /^[1-9][0-9]*$/.test(options.runId), "verify-recovery-run requires --run-id")
+    invariant(options.tag && /^v\d+\.\d+\.\d+$/.test(options.tag), "verify-recovery-run requires --tag")
+    const report = await fetchGitHubReleaseRecoveryRun({
+      revision: options.revision,
+      runId: Number(options.runId),
+      token: process.env.GITHUB_TOKEN,
+      version: options.tag.slice(1),
+    })
+    process.stdout.write(options.json ? `${JSON.stringify(report)}\n` : `GitHub Release recovery: exact run ${report.runId}\n`)
     return
   }
 

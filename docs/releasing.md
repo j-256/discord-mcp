@@ -30,7 +30,7 @@ Before any publication:
 9. Install npm 11.15 or newer for human `npm stage` review commands. The workflow uses a fixed Node.js release whose bundled npm satisfies this floor.
 10. Confirm that the repository owner can administer the `guildcontrol` container package under `j-256`. The first image version is created by the protected workflow and requires one explicit visibility review before it can be made public.
 
-The workflow must be dispatched at the same tag supplied as its input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. The workflow accepts only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version. Every release operation also requires the canonical public documentation manifest to contain that version and exact hashes for the release's documentation source frontier.
+Candidate, stage, image, ordinary GitHub Release, and register operations must be dispatched at the same tag supplied as their input. This makes GitHub and npm provenance identify the commit that produced the package rather than the default branch's dispatch commit. These operations accept only an existing stable `vMAJOR.MINOR.PATCH` tag that points at the checked-out commit and is an ancestor of `origin/main`. Package metadata, the lockfile, source constants, `server.json`, and the immutable icon URL must all contain the same version. Every ordinary release operation also requires the canonical public documentation manifest to contain that version and exact hashes for the release's documentation source frontier. The narrowly bounded publisher recovery operation described below is the only exception: it executes corrected workflow code from a separate protected audit tag while checking out and verifying the unchanged stable source tag and previously attested evidence.
 
 ## First npm publication
 
@@ -205,6 +205,26 @@ An absent Release is created as a draft. An existing draft may be reconciled onl
 
 Publishing locks the tag and assets when repository-level immutable Releases remain enabled and creates GitHub's Release attestation over the tag, commit, and assets. GitHub still permits the displayed Release title and body to be edited, so `release-notes.md` is the canonical immutable copy and is covered by `SHA256SUMS`. The workflow waits for the immutable postcondition, verifies the Release attestation and every asset attestation, downloads every public asset, compares each byte-for-byte with the protected evidence, and verifies the checksum manifest. A matching immutable Release is a successful no-op. A mutable published Release, mismatched immutable Release, prerelease, unexpected asset, or draft that cannot be reconciled exactly fails closed. The workflow never deletes a Release or an unexpected asset.
 
+### Recover a failed publisher job
+
+Use the recovery operation only when the read-only `github-release` job completed and retained exact evidence, but its dependent publisher job failed before completing the immutable Release. Fix the workflow defect on `main` through the normal pull-request and required-check path. Do not move the release tag, replace the retained artifact, or publish locally.
+
+Create and push a new annotated recovery audit tag on the exact green fix commit. The tag must use the form `vMAJOR.MINOR.PATCH-recovery.N`, where `N` starts at 1 and increases for each distinct recovery attempt. Retain every recovery tag as public audit evidence and never move or delete one.
+
+Dispatch the corrected workflow at that recovery tag while naming the original stable release tag and failed run:
+
+```sh
+gh workflow run release.yml \
+  --ref vMAJOR.MINOR.PATCH-recovery.N \
+  -f operation=github-release-recovery \
+  -f tag=vMAJOR.MINOR.PATCH \
+  -f evidence_run_id=FAILED_RUN_ID
+```
+
+The protected recovery job checks that its execution ref is a distinct recovery tag whose commit is on `main`, checks that the source release tag still resolves to the exact package source, and accepts only a completed failed `release.yml` workflow-dispatch run from that source tag and commit. It downloads only that run's exact `release-evidence-github-release-vMAJOR.MINOR.PATCH` artifact, rejects missing, duplicate, expired, oversized, cross-repository, cross-tag, or cross-commit evidence, and verifies the npm archive, MCPB, catalog, and both SPDX claims against the release workflow, source ref, source commit, and GitHub-hosted runner boundary. It then repeats the package, npm, OCI, MCP Registry, release-note, checksum, draft, immutable-Release, public-download, and asset-attestation checks used by the normal publisher job.
+
+Approve the `release` environment only after reviewing the recovery commit, audit tag, original release tag and commit, failed run ID and logs, retained artifact, and repository-level immutable-Releases setting. If the prior evidence is unavailable or fails any binding, or if public state is mutable or mismatched, do not weaken recovery validation. Publish a corrected semantic version instead.
+
 ## Register the promoted version
 
 Only after the immutable GitHub Release exposes the exact MCPB bytes and digest, dispatch the final protected operation:
@@ -315,6 +335,7 @@ The exact registry response is also available from `https://registry.modelcontex
 - Deprecate a flawed public npm version and publish a corrected new version rather than overwriting it
 - Publish a corrected OCI image under a new semantic version rather than overwriting or reusing an existing tag
 - Leave a malformed draft unpublished for explicit maintainer cleanup; publish a corrected semantic version if an immutable GitHub Release is wrong
+- Use the protected recovery operation only for exact retained evidence from a failed GitHub Release publisher job; never move the stable release tag or substitute local evidence
 - Revoke a suspected credential immediately and preserve workflow logs without copying secrets into an issue
 - Use npm unpublish only for a confirmed security emergency and after evaluating downstream breakage
 - Publish corrected MCP Registry metadata under the corrected package version; never claim mismatched metadata is equivalent

@@ -28,6 +28,12 @@ interface ReleaseEvidence {
 
 interface GitHubReleaseModule {
   classifyGitHubRelease(releases: unknown[], version: string): { release?: Record<string, unknown>; state: string }
+  fetchGitHubReleaseRecoveryRun(input: {
+    revision: string
+    runId: number
+    token: string
+    version: string
+  }): Promise<Record<string, unknown>>
   fetchGitHubReleaseContext(version: string): Promise<unknown>
   findGitHubRelease(version: string, token?: string): Promise<{ release?: Record<string, unknown>; state: string }>
   prepareGitHubReleaseEvidence(input: {
@@ -46,6 +52,13 @@ interface GitHubReleaseModule {
     version: string
   }): string
   renderSha256Sums(assets: ReleaseAsset[]): string
+  validateGitHubReleaseRecoveryRun(input: {
+    artifacts: Record<string, unknown>
+    revision: string
+    run: Record<string, unknown>
+    runId: number
+    version: string
+  }): Record<string, unknown>
   validateGitHubRelease(input: {
     evidence: ReleaseEvidence
     expectedState: "draft" | "immutable"
@@ -65,6 +78,8 @@ const BUNDLE_NAME = `guildcontrol-${VERSION}.mcpb`
 const BUNDLE_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const MCPB_DIGEST = `sha256:${sha256(BUNDLE_BYTES)}`
 const NPM_INTEGRITY = `sha512-${Buffer.alloc(64, 3).toString("base64")}`
+const RECOVERY_RUN_ID = 33409582869
+const REPOSITORY_ID = 1334461127
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex")
@@ -102,6 +117,41 @@ function validSbom(overrides: Record<string, unknown> = {}): Record<string, unkn
     spdxVersion: "SPDX-2.3",
     ...overrides,
   }
+}
+
+function validRecoveryRun(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    artifacts_url: `https://api.github.com/repos/j-256/guildcontrol/actions/runs/${RECOVERY_RUN_ID}/artifacts`,
+    conclusion: "failure",
+    event: "workflow_dispatch",
+    head_branch: `v${VERSION}`,
+    head_repository: { full_name: "j-256/guildcontrol", id: REPOSITORY_ID },
+    head_sha: REVISION,
+    id: RECOVERY_RUN_ID,
+    name: "Release",
+    path: ".github/workflows/release.yml",
+    repository: { full_name: "j-256/guildcontrol", id: REPOSITORY_ID, private: false },
+    run_attempt: 1,
+    status: "completed",
+    ...overrides,
+  }
+}
+
+function validRecoveryArtifacts(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const artifacts = [{
+    expired: false,
+    id: 9764740402,
+    name: `release-evidence-github-release-v${VERSION}`,
+    size_in_bytes: 5_264_520,
+    workflow_run: {
+      head_branch: `v${VERSION}`,
+      head_repository_id: REPOSITORY_ID,
+      head_sha: REVISION,
+      id: RECOVERY_RUN_ID,
+      repository_id: REPOSITORY_ID,
+    },
+  }]
+  return { artifacts, total_count: artifacts.length, ...overrides }
 }
 
 async function writeEvidenceInputs(
@@ -356,6 +406,72 @@ test("requires authenticated state inspection so a draft cannot look absent", as
     if (originalToken === undefined) delete process.env.GITHUB_TOKEN
     else process.env.GITHUB_TOKEN = originalToken
   }
+})
+
+test("validates one exact failed release run and retained evidence artifact", () => {
+  assert.deepEqual(githubRelease.validateGitHubReleaseRecoveryRun({
+    artifacts: validRecoveryArtifacts(),
+    revision: REVISION,
+    run: validRecoveryRun(),
+    runId: RECOVERY_RUN_ID,
+    version: VERSION,
+  }), {
+    artifactId: 9764740402,
+    artifactName: `release-evidence-github-release-v${VERSION}`,
+    runAttempt: 1,
+    runId: RECOVERY_RUN_ID,
+    sourceRef: `refs/tags/v${VERSION}`,
+    sourceRevision: REVISION,
+  })
+})
+
+test("rejects ineligible release recovery runs and artifacts", () => {
+  const cases = [
+    { artifacts: validRecoveryArtifacts(), error: /did not fail/u, run: validRecoveryRun({ conclusion: "success" }) },
+    { artifacts: validRecoveryArtifacts(), error: /workflow path/u, run: validRecoveryRun({ path: ".github/workflows/other.yml" }) },
+    { artifacts: validRecoveryArtifacts(), error: /source revision/u, run: validRecoveryRun({ head_sha: "b".repeat(40) }) },
+    {
+      artifacts: validRecoveryArtifacts({ artifacts: [{ ...((validRecoveryArtifacts().artifacts as Record<string, unknown>[])[0]), expired: true }] }),
+      error: /expired/u,
+      run: validRecoveryRun(),
+    },
+  ]
+  for (const entry of cases) {
+    assert.throws(() => githubRelease.validateGitHubReleaseRecoveryRun({
+      artifacts: entry.artifacts,
+      revision: REVISION,
+      run: entry.run,
+      runId: RECOVERY_RUN_ID,
+      version: VERSION,
+    }), entry.error)
+  }
+})
+
+test("fetches recovery metadata through authenticated bounded GitHub API requests", async () => {
+  const originalFetch = globalThis.fetch
+  const requests: string[] = []
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push(String(input))
+    const headers = new Headers(init?.headers)
+    assert.equal(headers.get("authorization"), "Bearer workflow-token")
+    assert.equal(headers.get("x-github-api-version"), "2026-03-10")
+    return Response.json(requests.length === 1 ? validRecoveryRun() : validRecoveryArtifacts())
+  }) as typeof fetch
+  try {
+    const report = await githubRelease.fetchGitHubReleaseRecoveryRun({
+      revision: REVISION,
+      runId: RECOVERY_RUN_ID,
+      token: "workflow-token",
+      version: VERSION,
+    })
+    assert.equal(report.artifactName, `release-evidence-github-release-v${VERSION}`)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(requests, [
+    `https://api.github.com/repos/j-256/guildcontrol/actions/runs/${RECOVERY_RUN_ID}`,
+    `https://api.github.com/repos/j-256/guildcontrol/actions/runs/${RECOVERY_RUN_ID}/artifacts?per_page=100`,
+  ])
 })
 
 test("inspects the protected tag and releases without repository administration authority", async () => {
