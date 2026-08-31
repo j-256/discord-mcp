@@ -76,6 +76,11 @@ import {
   type HostAdapterId,
 } from "./host-adapters.js"
 import {
+  detectHosts,
+  type HostDetectionOptions,
+  type HostDetectionReport,
+} from "./host-detection.js"
+import {
   inspectHostAdapterFile,
   type HostInspectionReport,
 } from "./host-inspection.js"
@@ -253,7 +258,7 @@ const CLI_COMMAND_ACTIONS = Object.freeze({
     "apply",
   ] as const),
   coordination: Object.freeze(["list", "resolve"] as const),
-  host: Object.freeze(["generate", "plan", "apply"] as const),
+  host: Object.freeze(["detect", "generate", "plan", "apply"] as const),
   migrate: Object.freeze(["list", "plan"] as const),
   preset: Object.freeze(["list", "show", "install"] as const),
   profile: Object.freeze(["list", "show", "remove", "restore"] as const),
@@ -382,6 +387,11 @@ export type ParsedCliArguments =
     topic: CliCommand | undefined
   }
   | {
+    action: "detect"
+    command: "host"
+    json: boolean
+  }
+  | {
     action: "generate"
     adapterId?: HostAdapterId
     command: "host"
@@ -439,6 +449,7 @@ export type ParsedCliArguments =
     confirmation?: string
     credentialFile?: string
     credentialVariable?: string
+    detectHost: boolean
     guildId?: string
     hostId?: OnboardHostId
     htmlFile?: string
@@ -587,6 +598,7 @@ export interface CliDependencies {
     plan: BotInstallPlan,
   ): Promise<DiscordOnboardingHtmlExportReport>
   diagnose(options: DoctorOptions): Promise<DoctorReport>
+  detectHosts(options: HostDetectionOptions): Promise<HostDetectionReport>
   ensureConfigDirectory(directory: string): Promise<string>
   explainConfig(path?: string): ConfigExplainReport
   initializeConfig(options: ConfigInitOptions): Promise<ConfigWriteReport>
@@ -665,6 +677,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   catalog: runGuildControlCatalog,
   checkCatalog: checkDiscordCatalog,
   diagnose: diagnoseConnector,
+  detectHosts,
   ensureConfigDirectory: ensureConnectorConfigDirectory,
   exportActivityHtml: exportDiscordActivityHtml,
   exportCatalogHtml: exportDiscordCatalogHtml,
@@ -859,6 +872,7 @@ function parseOnboardOptions(
   let confirmation: string | undefined
   let credentialFile: string | undefined
   let credentialVariable: string | undefined
+  let detectHost = false
   let guildId: string | undefined
   let hostId: OnboardHostId | undefined
   let htmlFile: string | undefined
@@ -876,6 +890,10 @@ function parseOnboardOptions(
     seen.add(argument)
     if (argument === "--json") {
       json = true
+      continue
+    }
+    if (argument === "--detect-host") {
+      detectHost = true
       continue
     }
     if (argument === "--open") {
@@ -928,6 +946,7 @@ function parseOnboardOptions(
     ...(confirmation ? { confirmation } : {}),
     ...(credentialFile ? { credentialFile } : {}),
     ...(credentialVariable ? { credentialVariable } : {}),
+    detectHost,
     ...(guildId ? { guildId } : {}),
     ...(hostId ? { hostId } : {}),
     ...(htmlFile ? { htmlFile } : {}),
@@ -942,6 +961,14 @@ function parseHostOptions(args: readonly string[]): Extract<ParsedCliArguments, 
     ? explicitAction
     : "generate"
   const options = action === explicitAction ? args.slice(1) : args
+  if (action === "detect") {
+    const present = parseBooleanOptions(options, new Set(["--json"]))
+    return {
+      action,
+      command: "host",
+      json: present.has("--json"),
+    }
+  }
   let adapterId: HostAdapterId | undefined
   let configFile: string | undefined
   let confirmation: string | undefined
@@ -2028,6 +2055,10 @@ const CLI_ACTION_HELP: CliActionHelpCatalog = Object.freeze({
     },
   }),
   host: Object.freeze({
+    detect: {
+      description: "Inspect only documented host-owned path metadata after this explicit request and report plausible MCP hosts. Detection reads no candidate file content or credential, initiates no network request, changes nothing, and selects a host only when exactly one candidate exists.",
+      synopsis: "detect [--json]",
+    },
     generate: {
       description: "Generate one credential-free local stdio activation plus verified client adapters from an explicit policy. Optional HTML exclusively creates a private guide. Generation resolves no credential, contacts no network or Discord endpoint, discovers no host, and changes no host file.",
       synopsis: "generate (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
@@ -2163,11 +2194,14 @@ function helpText(
   }
   if (topic === "host") {
     return [
-      `Usage: ${CONNECTOR_CLI_COMMAND} host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]`,
+      `Usage: ${CONNECTOR_CLI_COMMAND} host detect [--json]`,
+      `       ${CONNECTOR_CLI_COMMAND} host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]`,
       `       ${CONNECTOR_CLI_COMMAND} host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]`,
       `       ${CONNECTOR_CLI_COMMAND} host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]`,
       "",
-      `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact configuration and guidance to human output; JSON output always includes the complete adapter catalog.`,
+      "host detect is opt-in and checks only documented path existence and type. It reads no candidate configuration content or credential, initiates no network request, and changes nothing. One candidate can be selected by onboard --detect-host; zero or multiple candidates require an explicit host choice. Marker existence remains only a hint, and JSON contains private local paths.",
+      "",
+      `Generate creates one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact configuration and guidance to human output; JSON output always includes the complete adapter catalog.`,
       "",
       "--inspect-host-file safely reads one explicitly selected bounded private JSON file for a JSON adapter, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. Optional HTML exclusively creates a mode-0600 interactive guide. Generation and inspection contact no network or Discord endpoint, start no process, discover no host, and change no policy or host configuration.",
       "",
@@ -2196,11 +2230,12 @@ function helpText(
       "  Answer menus with a number, host ID, or displayed name. Invalid interactive answers can be corrected without restarting, and credential sub-prompts accept :back to choose another source.",
       "",
       "Automation:",
-      `  ${CONNECTOR_CLI_COMMAND} onboard --host HOST --application-id ID --guild-id ID --config FILE --confirm-installed ID [--token-env VARIABLE | --token-file FILE] [--html FILE] [--json]`,
+      `  ${CONNECTOR_CLI_COMMAND} onboard (--host HOST | --detect-host) --application-id ID --guild-id ID --config FILE --confirm-installed ID [--token-env VARIABLE | --token-file FILE] [--html FILE] [--json]`,
       "  Every required value is strict and invalid automation input fails immediately. --json never prompts or opens a browser.",
       "",
       "Options:",
       "  --host HOST             MCP host to activate first",
+      "  --detect-host            Opt in to metadata-only host marker detection when --host is absent",
       "  --application-id ID     Discord application snowflake",
       "  --guild-id ID           Exact Discord guild snowflake",
       "  --config FILE           Private non-secret policy file",
@@ -2219,7 +2254,7 @@ function helpText(
       "  5. Create a credential-free host activation handoff",
       "",
       `Supported hosts: ${ONBOARD_HOST_IDS.map((id) => `${onboardHostDescriptor(id).title} (${id})`).join(", ")}.`,
-      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. An interactive rerun with an exact existing onboarding policy derives its public IDs from that policy, skips repeated installation ceremony, revalidates it and the live bot without replacement, and chooses the next available default guide filename; drift fails closed. Automation remains fully explicit. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
+      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. Detection is never implicit, reads no host configuration content, and chooses only one unambiguous candidate; an explicit --host always takes precedence. An interactive rerun with an exact existing onboarding policy derives its public IDs from that policy, skips repeated installation ceremony, revalidates it and the live bot without replacement, and chooses the next available default guide filename; drift fails closed. Automation remains fully explicit. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
       "",
       "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy creation or revalidation failure, stdio failure, or guide export failure.",
     ].join("\n")
@@ -2611,10 +2646,19 @@ function renderOnboard(
   report: OnboardReport,
   guide: OnboardHtmlExportReport,
   browser: { guideOpened: boolean; installOpened: boolean },
+  hostDetection?: HostDetectionReport,
 ): string {
   return [
     "GuildControl onboarding: ready",
     `Host: ${report.host.title}`,
+    ...(hostDetection
+      ? [
+          hostDetection.selection.automatic
+            ? "Host selection: metadata-only detection of one candidate"
+            : `Host selection: interactive choice after metadata-only detection (${hostDetection.selection.reason})`,
+          "Host configuration content read during detection: no",
+        ]
+      : ["Host selection: explicit operator choice"]),
     `Verified application: ${report.setup.applicationId}`,
     `Verified bot: ${report.setup.botId}`,
     `Exact guild: ${report.install.guildId}`,
@@ -2632,6 +2676,44 @@ function renderOnboard(
     report.firstRead.prompt,
     "",
     "No token value was written to the policy, guide, report, or command arguments. No host configuration was changed.",
+  ].join("\n")
+}
+
+function renderHostDetection(report: HostDetectionReport): string {
+  const candidates = report.candidates.length === 0
+    ? ["  none"]
+    : report.candidates.flatMap((candidate) => [
+        `  ${candidate.title} (${candidate.hostId})`,
+        ...candidate.markers.map((marker) => (
+          `    ${marker.path} [${marker.scope} ${marker.kind}]`
+        )),
+      ])
+  const unavailable = report.unavailableMarkers.length === 0
+    ? ["  none"]
+    : report.unavailableMarkers.map((marker) => (
+      `  ${marker.hostId}: ${marker.path} [${marker.reason}]`
+    ))
+  const next = report.status === "selected"
+    ? `Next: Use ${CONNECTOR_CLI_COMMAND} onboard --detect-host, or override it with --host.`
+    : report.status === "choice-required"
+      ? `Next: Choose one candidate explicitly with ${CONNECTOR_CLI_COMMAND} onboard --host HOST.`
+      : `Next: Choose a supported host explicitly with ${CONNECTOR_CLI_COMMAND} onboard --host HOST.`
+  return [
+    `GuildControl MCP host detection: ${report.status}`,
+    `Platform: ${report.platform}`,
+    `Automatic selection: ${report.selection.hostId || "none"}`,
+    `Markers checked: ${report.coverage.checkedMarkerCount}`,
+    "Filesystem inspection: metadata only",
+    "Host configuration content read: no",
+    "Credential values read: no",
+    "Candidates:",
+    ...candidates,
+    "Unavailable markers:",
+    ...unavailable,
+    "Limitations:",
+    ...report.limitations.map((limitation) => `  - ${limitation}`),
+    "",
+    next,
   ].join("\n")
 }
 
@@ -3407,6 +3489,7 @@ interface OnboardExecutionResult {
     readonly installOpened: boolean
   }
   readonly guide: OnboardHtmlExportReport
+  readonly hostDetection?: HostDetectionReport
   readonly report: OnboardReport
 }
 
@@ -3543,12 +3626,15 @@ async function promptReviewedConfirmation(
   return confirmation
 }
 
-function matchOnboardHost(value: string): OnboardHostId | undefined {
+function matchOnboardHost(
+  value: string,
+  availableHostIds: readonly OnboardHostId[],
+): OnboardHostId | undefined {
   const normalized = value.trim().toLowerCase()
   if (/^[0-9]+$/.test(normalized)) {
-    return ONBOARD_HOST_IDS[Number(normalized) - 1]
+    return availableHostIds[Number(normalized) - 1]
   }
-  return ONBOARD_HOST_IDS.find((id) => (
+  return availableHostIds.find((id) => (
     id.toLowerCase() === normalized
     || onboardHostDescriptor(id).title.toLowerCase() === normalized
   ))
@@ -3557,21 +3643,23 @@ function matchOnboardHost(value: string): OnboardHostId | undefined {
 async function selectOnboardHost(
   interaction: CliInteraction,
   supplied: OnboardHostId | undefined,
+  availableHostIds: readonly OnboardHostId[] = ONBOARD_HOST_IDS,
+  heading = "Choose the MCP host to activate first:",
 ): Promise<OnboardHostId> {
   if (supplied) return supplied
   return promptValidated(
     interaction,
     [
-      "Choose the MCP host to activate first:",
-      ...ONBOARD_HOST_IDS.map((id, index) => `  ${index + 1}. ${onboardHostDescriptor(id).title} (${id})`),
+      heading,
+      ...availableHostIds.map((id, index) => `  ${index + 1}. ${onboardHostDescriptor(id).title} (${id})`),
       "Host [number, ID, or name]: ",
     ].join("\n"),
     (value) => {
-      const hostId = matchOnboardHost(value)
+      const hostId = matchOnboardHost(value, availableHostIds)
       return hostId
         ? { ok: true, value: hostId }
         : {
-            message: `Host was not recognized. Enter 1-${ONBOARD_HOST_IDS.length}, a host ID, or a displayed name`,
+            message: `Host was not recognized. Enter 1-${availableHostIds.length}, a host ID, or a displayed name`,
             ok: false,
           }
     },
@@ -3867,7 +3955,7 @@ function assertNonInteractiveOnboardArguments(
   parsed: Extract<ParsedCliArguments, { command: "onboard" }>,
 ): void {
   const missing = [
-    ["--host", parsed.hostId],
+    ["--host or --detect-host", parsed.hostId || parsed.detectHost],
     ["--application-id", parsed.applicationId],
     ["--guild-id", parsed.guildId],
     ["--config", parsed.configFile],
@@ -3905,7 +3993,33 @@ async function executeOnboard(
   if (!interactive) assertNonInteractiveOnboardArguments(parsed)
 
   progress(1, "Identify the MCP host and exact local policy")
-  const hostId = await selectOnboardHost(interaction, parsed.hostId)
+  let hostDetection: HostDetectionReport | undefined
+  let hostId: OnboardHostId
+  if (parsed.hostId) {
+    hostId = parsed.hostId
+  } else if (parsed.detectHost) {
+    hostDetection = await dependencies.detectHosts({ environment })
+    if (hostDetection.selection.hostId) {
+      hostId = hostDetection.selection.hostId
+    } else if (!interactive) {
+      const candidates = hostDetection.candidates.map(({ hostId: id }) => id)
+      throw new ConfigurationError(candidates.length > 0
+        ? `Host detection found multiple candidates: ${candidates.join(", ")}; pass one exact --host ID`
+        : "Host detection found no candidate; pass one exact --host ID")
+    } else {
+      const candidates = hostDetection.candidates.map(({ hostId: id }) => id)
+      hostId = await selectOnboardHost(
+        interaction,
+        undefined,
+        candidates.length > 0 ? candidates : ONBOARD_HOST_IDS,
+        candidates.length > 0
+          ? "Host detection found multiple plausible hosts. Choose one:"
+          : "Host detection found no plausible host. Choose one explicitly:",
+      )
+    }
+  } else {
+    hostId = await selectOnboardHost(interaction, undefined)
+  }
   const defaultConfig = parsed.configFile === undefined
   const configFile = resolveConnectorConfigFile(
     parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
@@ -4091,6 +4205,7 @@ async function executeOnboard(
   return {
     browser: { guideOpened, installOpened },
     guide,
+    ...(hostDetection ? { hostDetection } : {}),
     report,
   }
 }
@@ -4447,6 +4562,15 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
         )
         return CLI_EXIT_CODES.success
       case "host": {
+        if (parsed.action === "detect") {
+          const report = await dependencies.detectHosts({ environment })
+          safeWrite(
+            stdout,
+            parsed.json ? jsonReport(report) : renderHostDetection(report),
+            {},
+          )
+          return CLI_EXIT_CODES.success
+        }
         const defaultLauncher = currentEntrypointLaunch(options)
         const launcher = parsed.packageLaunch
           ? publishedPackageLaunch()
@@ -4587,8 +4711,16 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
                 ...result.report,
                 browser: result.browser,
                 guide: result.guide,
+                ...(result.hostDetection
+                  ? { hostDetection: result.hostDetection }
+                  : {}),
               })
-            : renderOnboard(result.report, result.guide, result.browser),
+            : renderOnboard(
+                result.report,
+                result.guide,
+                result.browser,
+                result.hostDetection,
+              ),
           environment,
         )
         return CLI_EXIT_CODES.success

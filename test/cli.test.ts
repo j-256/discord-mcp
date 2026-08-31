@@ -56,6 +56,10 @@ import {
   type HostInspectionReport,
 } from "../src/host-inspection.js"
 import {
+  detectHosts,
+  type HostDetectionReport,
+} from "../src/host-detection.js"
+import {
   applyHostAdapterFile,
   planHostAdapterFile,
 } from "../src/host-installation.js"
@@ -637,6 +641,68 @@ function hostInspectionReport(
   }
 }
 
+function hostDetectionReport(
+  ...hostIds: Array<HostDetectionReport["candidates"][number]["hostId"]>
+): HostDetectionReport {
+  const candidates = hostIds.map((hostId) => ({
+    hostId,
+    markers: [{
+      documentationUrl: "https://example.invalid/host-documentation",
+      hostId,
+      id: `${hostId}:test-marker`,
+      kind: "directory" as const,
+      path: `/private/markers/${hostId}`,
+      scope: "user" as const,
+    }],
+    title: hostId,
+  }))
+  const onlyHost = hostIds.length === 1 ? hostIds[0] : undefined
+  const selection: HostDetectionReport["selection"] = onlyHost
+    ? {
+        automatic: true,
+        hostId: onlyHost,
+        reason: "single-candidate",
+      }
+    : {
+        automatic: false,
+        hostId: null,
+        reason: hostIds.length === 0 ? "no-candidate" : "multiple-candidates",
+      }
+  return {
+    candidates,
+    coverage: {
+      checkedHostIds: [
+        "claude-desktop",
+        "claude-code",
+        "codex",
+        "cursor",
+        "vscode",
+        "gemini-extension",
+      ],
+      checkedMarkerCount: 6,
+      unscannedHostIds: [],
+    },
+    format: "guildcontrol.host-detection.v1",
+    limitations: ["Existence is not proof of host support."],
+    platform: "darwin",
+    privacy: {
+      credentialValuesRead: false,
+      filesystemInspection: "metadata-only",
+      hostConfigurationChanged: false,
+      hostConfigurationContentsRead: false,
+      networkRequestsIssued: false,
+    },
+    schemaVersion: 1,
+    selection,
+    status: hostIds.length === 0
+      ? "none"
+      : hostIds.length === 1
+        ? "selected"
+        : "choice-required",
+    unavailableMarkers: [],
+  }
+}
+
 function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies {
   const profile = connectorProfile()
   return {
@@ -696,6 +762,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
     async diagnose() {
       return doctorReport()
     },
+    detectHosts,
     async ensureConfigDirectory(directory) {
       return directory
     },
@@ -782,7 +849,7 @@ function dependencies(overrides: Partial<CliDependencies> = {}): CliDependencies
   }
 }
 
-test("non-interactive onboarding verifies setup and stdio without prompting or opening", async () => {
+test("non-interactive onboarding can select one detected host without prompting or opening", async () => {
   const fixture = onboardFixture(CONFIG_FILE)
   const stdout = outputStream()
   const stderr = outputStream()
@@ -791,8 +858,7 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
   const exit = await runCli({
     args: [
       "onboard",
-      "--host",
-      "codex",
+      "--detect-host",
       "--application-id",
       APPLICATION_ID,
       "--guild-id",
@@ -806,6 +872,9 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
       "--json",
     ],
     dependencies: dependencies({
+      async detectHosts() {
+        return hostDetectionReport("codex")
+      },
       loadConfig(environment) {
         return loadConnectorConfigDocument(fixture.document, environment)
       },
@@ -860,6 +929,9 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
   assert.equal(stderr.value(), "")
   const output = JSON.parse(stdout.value())
   assert.equal(output.host.id, "codex")
+  assert.equal(output.hostDetection.status, "selected")
+  assert.equal(output.hostDetection.selection.hostId, "codex")
+  assert.equal(output.hostDetection.privacy.hostConfigurationContentsRead, false)
   assert.equal(output.host.route.kind, "adapter")
   assert.equal(output.credentialHandoff.hostAction, "inherit-environment")
   assert.equal(
@@ -874,6 +946,52 @@ test("non-interactive onboarding verifies setup and stdio without prompting or o
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
+test("non-interactive onboarding requires an explicit host for ambiguous detection", async () => {
+  for (const report of [
+    hostDetectionReport(),
+    hostDetectionReport("codex", "cursor"),
+  ]) {
+    const stdout = outputStream()
+    let setupCalls = 0
+    const exit = await runCli({
+      args: [
+        "onboard",
+        "--detect-host",
+        "--application-id",
+        APPLICATION_ID,
+        "--guild-id",
+        GUILD_ID,
+        "--config",
+        CONFIG_FILE,
+        "--confirm-installed",
+        GUILD_ID,
+        "--json",
+      ],
+      dependencies: dependencies({
+        async detectHosts() {
+          return report
+        },
+        async prepareSetup() {
+          setupCalls += 1
+          return setupReport()
+        },
+      }),
+      environment: { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN },
+      stdin: { isTTY: false },
+      stdout: stdout.stream,
+    })
+
+    assert.equal(exit, 2)
+    assert.equal(setupCalls, 0)
+    const failure = JSON.parse(stdout.value())
+    assert.match(failure.error.message, /pass one exact --host ID/)
+    if (report.status === "choice-required") {
+      assert.match(failure.error.message, /codex, cursor/)
+    }
+    assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+  }
+})
+
 test("onboarding reuses an exact policy and allocates a fresh default guide", async () => {
   const fixture = onboardFixture(CONFIG_FILE)
   const stdout = outputStream()
@@ -883,6 +1001,7 @@ test("onboarding reuses an exact policy and allocates a fresh default guide", as
       "onboard",
       "--host",
       "codex",
+      "--detect-host",
       "--application-id",
       APPLICATION_ID,
       "--guild-id",
@@ -894,6 +1013,9 @@ test("onboarding reuses an exact policy and allocates a fresh default guide", as
       "--json",
     ],
     dependencies: dependencies({
+      async detectHosts() {
+        assert.fail("An explicit onboarding host must bypass detection")
+      },
       async ensureConfigDirectory() {
         assert.fail("Reused policy must not recreate its directory")
       },
@@ -1378,14 +1500,16 @@ test("interactive onboarding reports terminal cancellation without failure guida
   assert.doesNotMatch(stderr.value(), /Operator command failed|Next:|See:/)
 })
 
-test("interactive onboarding accepts a displayed host name", async () => {
+test("interactive onboarding chooses by name from ambiguous detected candidates", async () => {
   const fixture = onboardFixture(CONFIG_FILE)
   const stdout = outputStream()
   const stderr = outputStream()
   const answers = ["Visual Studio Code", "n"]
+  const prompts: string[] = []
   const exit = await runCli({
     args: [
       "onboard",
+      "--detect-host",
       "--application-id",
       APPLICATION_ID,
       "--guild-id",
@@ -1398,6 +1522,9 @@ test("interactive onboarding accepts a displayed host name", async () => {
       "/output/vscode-onboarding.html",
     ],
     dependencies: dependencies({
+      async detectHosts() {
+        return hostDetectionReport("codex", "vscode")
+      },
       loadConfig(environment) {
         return loadConnectorConfigDocument(fixture.document, environment)
       },
@@ -1419,7 +1546,8 @@ test("interactive onboarding accepts a displayed host name", async () => {
       async promptSecret() {
         assert.fail("Available environment credentials must not be prompted")
       },
-      async promptText() {
+      async promptText(message) {
+        prompts.push(message)
         const answer = answers.shift()
         if (answer === undefined) assert.fail("Unexpected onboarding prompt")
         return answer
@@ -1432,7 +1560,12 @@ test("interactive onboarding accepts a displayed host name", async () => {
 
   assert.equal(exit, 0)
   assert.deepEqual(answers, [])
+  assert.match(prompts[0] || "", /multiple plausible hosts/)
+  assert.match(prompts[0] || "", /Codex \(codex\)/)
+  assert.match(prompts[0] || "", /Visual Studio Code \(vscode\)/)
+  assert.doesNotMatch(prompts[0] || "", /Claude Desktop/)
   assert.match(stdout.value(), /Host: Visual Studio Code/)
+  assert.match(stdout.value(), /interactive choice after metadata-only detection/)
   assert.match(stdout.value(), /Credential handoff: Complete Visual Studio Code's protected credential entry/)
   assert.match(stdout.value(), /cannot transfer DISCORD_BOT_TOKEN/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
@@ -1850,6 +1983,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     configFile: CONFIG_FILE,
     confirmation: GUILD_ID,
     credentialVariable: TOKEN_ALIAS,
+    detectHost: false,
     guildId: GUILD_ID,
     hostId: "codex",
     htmlFile: "/output/onboarding.html",
@@ -1858,8 +1992,20 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   })
   assert.deepEqual(parseCliArguments(["onboard"]), {
     command: "onboard",
+    detectHost: false,
     json: false,
     open: false,
+  })
+  assert.deepEqual(parseCliArguments(["onboard", "--detect-host", "--json"]), {
+    command: "onboard",
+    detectHost: true,
+    json: true,
+    open: false,
+  })
+  assert.deepEqual(parseCliArguments(["host", "detect", "--json"]), {
+    action: "detect",
+    command: "host",
+    json: true,
   })
   assert.throws(
     () => parseCliArguments(["onboard", "--host", "unknown"]),
@@ -2228,6 +2374,10 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.throws(
     () => parseCliArguments(["host", "--json"]),
     /requires --config FILE or --profile NAME/,
+  )
+  assert.throws(
+    () => parseCliArguments(["host", "detect", "--config", CONFIG_FILE]),
+    /Unknown option --config/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2759,6 +2909,7 @@ test("CLI parser accepts strict contextual help for every action", () => {
     ["config", "apply"],
     ["coordination", "list"],
     ["coordination", "resolve"],
+    ["host", "detect"],
     ["host", "generate"],
     ["host", "plan"],
     ["host", "apply"],
@@ -3518,6 +3669,63 @@ test("CLI preserves long-running startup failure status with recovery text", asy
   assert.match(stderr.value(), /Operator command failed/)
   assert.match(stderr.value(), /Next: Run guildctl doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
+})
+
+test("CLI host detection needs no policy and returns only metadata evidence", async () => {
+  const report = hostDetectionReport("codex", "cursor")
+  const jsonOutput = outputStream()
+  const humanOutput = outputStream()
+  let detectionCalls = 0
+  const environment = new Proxy<NodeJS.ProcessEnv>({
+    APPDATA: "/private/application-data",
+    [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: TOKEN,
+  }, {
+    get(target, property, receiver) {
+      if (property === DEFAULT_TOKEN_ENVIRONMENT_VARIABLE) {
+        throw new Error("Host detection read a credential value")
+      }
+      return Reflect.get(target, property, receiver)
+    },
+    ownKeys() {
+      throw new Error("Host detection enumerated the environment")
+    },
+  })
+  const cliDependencies = dependencies({
+    async detectHosts(options) {
+      detectionCalls += 1
+      assert.equal(options.environment, environment)
+      return report
+    },
+    loadConfigDocument() {
+      assert.fail("Host detection must not load a GuildControl policy")
+    },
+    async loadProfile() {
+      assert.fail("Host detection must not load a GuildControl profile")
+    },
+  })
+
+  assert.equal(await runCli({
+    args: ["host", "detect", "--json"],
+    dependencies: cliDependencies,
+    environment,
+    stdout: jsonOutput.stream,
+  }), 0)
+  assert.equal(await runCli({
+    args: ["host", "detect"],
+    dependencies: cliDependencies,
+    environment,
+    stdout: humanOutput.stream,
+  }), 0)
+
+  assert.equal(detectionCalls, 2)
+  assert.deepEqual(JSON.parse(jsonOutput.value()), report)
+  assert.match(humanOutput.value(), /host detection: choice-required/)
+  assert.match(humanOutput.value(), /Host configuration content read: no/)
+  assert.match(humanOutput.value(), /codex/)
+  assert.match(humanOutput.value(), /cursor/)
+  assert.match(humanOutput.value(), /Choose one candidate explicitly/)
+  assert.doesNotMatch(jsonOutput.value(), new RegExp(TOKEN))
+  assert.doesNotMatch(humanOutput.value(), new RegExp(TOKEN))
 })
 
 test("CLI generates an exact host activation plan without reading ambient credentials", async () => {
@@ -5517,6 +5725,7 @@ test("CLI renders contextual action help without consulting dependencies or envi
     ["config", "apply"],
     ["coordination", "list"],
     ["coordination", "resolve"],
+    ["host", "detect"],
     ["host", "generate"],
     ["host", "plan"],
     ["host", "apply"],
@@ -5705,6 +5914,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
   assert.match(hostHelpOutput.value(), /host \[generate\] \(--config FILE \| --profile NAME\)/)
+  assert.match(hostHelpOutput.value(), /host detect \[--json\]/)
   assert.match(hostHelpOutput.value(), /host plan \(--config FILE \| --profile NAME\) --adapter ID --host-file FILE/)
   assert.match(hostHelpOutput.value(), /host apply .*--plan-digest DIGEST --confirm SERVER_NAME/)
   assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
@@ -5719,6 +5929,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(hostHelpOutput.value(), /rolls back on failed verification/)
   assert.match(hostHelpOutput.value(), /never edits the file/)
   assert.match(hostHelpOutput.value(), /discover no host/)
+  assert.match(hostHelpOutput.value(), /checks only documented path existence and type/)
   assert.match(migrateHelpOutput.value(), /migrate <action>/)
   assert.match(migrateHelpOutput.value(), /plan SOURCE \[--html FILE\] \[--json\]/)
   assert.match(migrateHelpOutput.value(), /does not rewrite prompts, arguments, configuration, credentials, or host settings/)
@@ -5727,12 +5938,14 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(onboardHelpOutput.value(), /credential sub-prompts accept :back/)
   assert.match(onboardHelpOutput.value(), /Five verified stages/)
   assert.match(onboardHelpOutput.value(), /--confirm-installed/)
+  assert.match(onboardHelpOutput.value(), /--detect-host/)
   assert.match(onboardHelpOutput.value(), /--json never prompts or opens a browser/)
   assert.match(onboardHelpOutput.value(), /existing environment or protected-file source can be reused/)
   assert.match(onboardHelpOutput.value(), /one-time hidden prompt verifies setup but is cleared after smoke/)
   assert.match(onboardHelpOutput.value(), /selected host still needs its own protected credential entry/)
   assert.match(onboardHelpOutput.value(), /derives its public IDs from that policy/)
   assert.match(onboardHelpOutput.value(), /Automation remains fully explicit/)
+  assert.match(onboardHelpOutput.value(), /explicit --host always takes precedence/)
   assert.match(onboardHelpOutput.value(), /next available default guide filename/)
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)

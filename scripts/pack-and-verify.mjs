@@ -278,6 +278,7 @@ async function assertNeutralPackage(packageDirectory, files) {
       !containsSpecificReference(contents.toString("latin1"), {
         allowClientCompatibility: clientCompatibilityFiles.has(relative)
           || relative.startsWith("dist/host-adapters.")
+          || relative.startsWith("dist/host-detection.")
           || relative.startsWith("dist/host-inspection.")
           || relative.startsWith("dist/host-installation.")
           || relative.startsWith("dist/onboard-html.")

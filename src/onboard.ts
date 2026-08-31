@@ -52,6 +52,11 @@ export const ONBOARD_HOST_IDS = Object.freeze([
 ] as const)
 
 export type OnboardHostId = typeof ONBOARD_HOST_IDS[number]
+export type DetectableOnboardHostId = Exclude<OnboardHostId, "mcp-json">
+export const ONBOARD_DETECTABLE_HOST_IDS: readonly DetectableOnboardHostId[] =
+  Object.freeze(ONBOARD_HOST_IDS.filter(
+    (id): id is DetectableOnboardHostId => id !== "mcp-json",
+  ))
 
 export interface OnboardHostDescriptor {
   readonly id: OnboardHostId
@@ -342,6 +347,12 @@ function assertMatchingEvidence(options: CreateOnboardReportOptions): void {
 
 export function isOnboardHostId(value: string): value is OnboardHostId {
   return (ONBOARD_HOST_IDS as readonly string[]).includes(value)
+}
+
+export function isDetectableOnboardHostId(
+  value: string,
+): value is DetectableOnboardHostId {
+  return (ONBOARD_DETECTABLE_HOST_IDS as readonly string[]).includes(value)
 }
 
 export function onboardHostDescriptor(id: OnboardHostId): OnboardHostDescriptor {
