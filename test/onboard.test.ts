@@ -2,9 +2,11 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  ONBOARD_DETECTABLE_HOST_IDS,
   ONBOARD_HOST_IDS,
   assertReusableOnboardPolicy,
   createOnboardReport,
+  isDetectableOnboardHostId,
   isOnboardHostId,
   resolveAvailableOnboardHtmlFile,
   resolveDefaultOnboardConfigFile,
@@ -25,6 +27,18 @@ test("onboarding exposes the complete host-first destination catalog", () => {
   ])
   for (const id of ONBOARD_HOST_IDS) assert.equal(isOnboardHostId(id), true)
   assert.equal(isOnboardHostId("unknown"), false)
+  assert.deepEqual(ONBOARD_DETECTABLE_HOST_IDS, [
+    "claude-desktop",
+    "claude-code",
+    "codex",
+    "cursor",
+    "vscode",
+    "gemini-extension",
+  ])
+  for (const id of ONBOARD_DETECTABLE_HOST_IDS) {
+    assert.equal(isDetectableOnboardHostId(id), true)
+  }
+  assert.equal(isDetectableOnboardHostId("mcp-json"), false)
 })
 
 test("default onboarding policy follows the CLI-owned platform config root", () => {
