@@ -79,10 +79,10 @@ Cappyeo's bundled component-template send maps to `compile_component_template` b
 
 ## Follow the staged path
 
-Every plan emits a source-specific version of this sequence:
+First generate `guildctl migrate plan SOURCE` as shown above. That report emits the source-specific commands in this sequence; `catalog --check` only verifies the installed target contract.
 
-1. Run `guildctl catalog --check` to fingerprint the installed target contract without credentials or execution.
-2. Run the emitted `setup --preset ...` command from a canonical private directory after replacing placeholder Discord IDs. This creates a new strict schema-v2 policy and references the token without embedding its value.
+1. Run the report's emitted `guildctl catalog --check` command to fingerprint the installed target contract without credentials or execution.
+2. Run the same report's emitted `guildctl setup --preset ...` command from a canonical private directory after replacing placeholder Discord IDs. This creates a new strict schema-v2 policy and references the token without embedding its value.
 3. For each needed recipe, run the emitted `recipe plan`, review the complete proposed configuration and risks, then use its fresh digest in the emitted `recipe apply` command. Skip recipes for outcomes you do not need.
 4. Use `config workbench` for an exact capability not represented by a named recipe. Download and validate a candidate, then use the separate config plan and confirmed apply workflow. Do not edit broad authority into the source plan.
 5. Run `host --config ... --html ...` to generate the selected MCP host projection without changing the host. For a supported static JSON destination, use `host plan` and its exact confirmed `host apply` to preserve unrelated state with a recoverable backup, then run read-only host inspection. Otherwise merge only the owned projection manually.
