@@ -335,6 +335,7 @@ import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotoc
 import * as connector from "guildctl"
 
 const DISCOVERY_TOOL_NAME = "discover_discord_tools"
+const DOCUMENTATION_SEARCH_TOOL_NAME = "search_guildcontrol_docs"
 const REVIEWED_DELETION_TOOLS = ["plan_message_deletion", "delete_messages"]
 const REVIEW_MESSAGE_DELETION_PROMPT = "review_message_deletion"
 const PROFILE_NAME = "installed-profile"
@@ -461,6 +462,7 @@ try {
     catalogClient.listPrompts(),
   ])
   assert.ok(tools.tools.some(({ name }) => name === "read_messages"))
+  assert.ok(tools.tools.some(({ name }) => name === DOCUMENTATION_SEARCH_TOOL_NAME))
   assert.ok(resources.resources.length > 0)
   assert.ok(templates.resourceTemplates.length > 0)
   assert.ok(prompts.prompts.length > 0)
@@ -544,7 +546,10 @@ try {
     client.listResourceTemplates(),
     client.listPrompts(),
   ])
-  assert.deepEqual(initialTools.tools.map(({ name }) => name), [DISCOVERY_TOOL_NAME])
+  assert.deepEqual(
+    initialTools.tools.map(({ name }) => name),
+    [DISCOVERY_TOOL_NAME, DOCUMENTATION_SEARCH_TOOL_NAME],
+  )
   assert.ok(resources.resources.length > 0)
   assert.ok(templates.resourceTemplates.length > 0)
   assert.ok(prompts.prompts.length > 0)
@@ -561,6 +566,18 @@ try {
   ])
   assert.deepEqual(guildCompletion.completion.values, [GUILD_ID])
   assert.deepEqual(channelCompletion.completion.values, [CHANNEL_ID])
+  const documentation = await client.callTool({
+    arguments: { query: "outside the notification scope" },
+    name: DOCUMENTATION_SEARCH_TOOL_NAME,
+  })
+  assert.equal(documentation.isError, undefined)
+  assert.equal(documentation.structuredContent.authorityGranted, false)
+  assert.equal(documentation.structuredContent.credentialsRequired, false)
+  assert.equal(documentation.structuredContent.discordContacted, false)
+  assert.equal(
+    documentation.structuredContent.matches[0]?.source,
+    "docs/reference.md#expanding-the-user-mention-allowlist",
+  )
   const progress = []
   const discovery = await client.callTool({
     arguments: { query: REVIEWED_DELETION_TOOLS[0] },
@@ -577,7 +594,11 @@ try {
   const refreshedTools = await client.listTools()
   assert.deepEqual(
     refreshedTools.tools.map(({ name }) => name),
-    [...REVIEWED_DELETION_TOOLS, DISCOVERY_TOOL_NAME],
+    [
+      ...REVIEWED_DELETION_TOOLS,
+      DISCOVERY_TOOL_NAME,
+      DOCUMENTATION_SEARCH_TOOL_NAME,
+    ],
   )
   const safety = await client.readResource({ uri: "${STATIC_RESOURCE_URI}" })
   assert.equal(safety.contents.length, 1)

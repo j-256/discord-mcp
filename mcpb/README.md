@@ -2,4 +2,4 @@
 
 `manifest.json` is the source for GuildControl MCP's deterministic one-click bundle. `mcpb-manifest-v0.3.schema.json` is a model-neutral projection of the official MCPB 0.3 JSON Schema from [`modelcontextprotocol/mcpb` v2.1.2](https://github.com/modelcontextprotocol/mcpb/blob/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json), retained locally so validation is version-pinned and works without network access. The projection removes one unused client-specific compatibility property; apart from that property, its parsed structure is identical. The upstream repository licenses that schema under Apache-2.0.
 
-The generated archive is deliberately narrower than the repository. It contains the exact allowlist enforced by `scripts/build-mcpb.mjs`; this source directory itself is not copied wholesale.
+The generated archive is deliberately narrower than the repository. It contains the exact allowlist enforced by `scripts/build-mcpb.mjs`; this source directory itself is not copied wholesale. The allowlist includes the fixed public Markdown corpus used by `search_guildcontrol_docs`, so runtime guidance remains version-matched and offline without exposing another file path.

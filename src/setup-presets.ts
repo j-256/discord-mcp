@@ -1,7 +1,7 @@
 import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_PATTERN,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   type McpToolsetName,
 } from "./constants.js"
 import { ConfigurationError } from "./errors.js"
@@ -163,7 +163,7 @@ function createSetupPresetDescriptor(
     throw new Error(`Setup preset ${source.name} must use unique canonical toolsets`)
   }
   const toolNames = [
-    MCP_DISCOVERY_TOOL_NAME,
+    ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
     ...selectedCanonicalMcpToolNames(new Set(toolsets)),
   ].sort() as McpToolName[]
   if (new Set(toolNames).size !== toolNames.length) {

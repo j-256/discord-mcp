@@ -21,7 +21,7 @@ import {
   DISCORD_LIMITS,
   DISCORD_SNOWFLAKE_MAX,
   DISCORD_SNOWFLAKE_PATTERN,
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
 } from "./constants.js"
@@ -563,7 +563,7 @@ function createRecipeDescriptor(source: ConfigRecipeSource): ConfigRecipeDescrip
     throw new Error(`Configuration recipe ${source.name} includes duplicate or unknown toolsets`)
   }
   const toolNames = Object.freeze([
-    MCP_DISCOVERY_TOOL_NAME,
+    ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
     ...selectedCanonicalMcpToolNames(new Set(toolsets)),
   ].sort() as McpToolName[])
   const riskClasses = Object.freeze([

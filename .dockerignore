@@ -3,6 +3,17 @@
 !.npmrc
 !Dockerfile
 !LICENSE
+!PRIVACY.md
+!README.md
+!SECURITY.md
+!SUPPORT.md
+!docs
+!docs/comparison.md
+!docs/getting-started.md
+!docs/limitations.md
+!docs/migration.md
+!docs/reference.md
+!docs/releasing.md
 !package-lock.json
 !package.json
 !src

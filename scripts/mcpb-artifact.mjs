@@ -42,6 +42,7 @@ const MCPB_VERIFY_TOKEN = "mcpb-artifact-verification-token"
 const MCPB_READY_MESSAGE = "[mcp] GuildControl MCP stdio server ready\n"
 const MCPB_LITE_MODE_WARNING_MAX_NODE_MAJOR = 23
 const LEGACY_LITE_MODE_WARNING = "Warning: disabling flag --expose_wasm due to conflicting flags\n"
+const MCPB_DOCUMENTATION_ROOT = ".."
 const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
 const ZIP_END_SIGNATURE = 0x06054b50
 const ZIP_LOCAL_FILE_SIGNATURE = 0x04034b50
@@ -61,9 +62,22 @@ const ZIP_FILE_OPTIONS = Object.freeze({
   os: ZIP_UNIX_ORIGIN,
 })
 
+const MCPB_DOCUMENTATION_ENTRIES = Object.freeze([
+  "PRIVACY.md",
+  "README.md",
+  "SECURITY.md",
+  "SUPPORT.md",
+  "docs/comparison.md",
+  "docs/getting-started.md",
+  "docs/limitations.md",
+  "docs/migration.md",
+  "docs/reference.md",
+  "docs/releasing.md",
+])
+
 export const MCPB_ARCHIVE_ENTRIES = Object.freeze([
   "LICENSE",
-  "PRIVACY.md",
+  ...MCPB_DOCUMENTATION_ENTRIES,
   "icon.png",
   "manifest.json",
   "server/THIRD_PARTY_NOTICES.md",
@@ -239,7 +253,12 @@ function assertNeutralAndCredentialFree(entries) {
   ].map((value) => value?.trim()).filter((value) => value && value.length >= 8)
   for (const [name, value] of Object.entries(entries)) {
     const text = asBuffer(value).toString("latin1")
-    invariant(!containsSpecificReference(text), `MCPB archive entry ${name} has model- or harness-specific branding`)
+    invariant(
+      !containsSpecificReference(text, {
+        allowClientCompatibility: MCPB_DOCUMENTATION_ENTRIES.includes(name),
+      }),
+      `MCPB archive entry ${name} has model- or harness-specific branding`,
+    )
     invariant(!discordTokenPattern.test(text), `MCPB archive entry ${name} resembles a Discord credential`)
     for (const sensitive of sensitiveValues) {
       invariant(!text.includes(sensitive), `MCPB archive entry ${name} contains a sensitive environment value`)
@@ -368,6 +387,7 @@ async function buildServerBundle(path) {
     bundle: true,
     charset: "ascii",
     define: {
+      __GUILDCONTROL_DOCUMENTATION_ROOT__: JSON.stringify(MCPB_DOCUMENTATION_ROOT),
       "import.meta.url": JSON.stringify("file:///__guildcontrol_internal__.mjs"),
     },
     entryPoints: ["src/mcpb-main.ts"],
@@ -391,12 +411,15 @@ async function buildServerBundle(path) {
 
 async function createStagingDirectory(root, packageJson, catalogEvidencePath) {
   await mkdir(join(root, "server"), { recursive: true })
+  await mkdir(join(root, "docs"), { recursive: true })
   const manifestPath = join(REPOSITORY_ROOT, "mcpb", "manifest.json")
   const manifest = await readJson(manifestPath)
   await validateMcpbManifest(manifest, packageJson)
   await Promise.all([
     copyFile(join(REPOSITORY_ROOT, "LICENSE"), join(root, "LICENSE")),
-    copyFile(join(REPOSITORY_ROOT, "PRIVACY.md"), join(root, "PRIVACY.md")),
+    ...MCPB_DOCUMENTATION_ENTRIES.map((name) => (
+      copyFile(join(REPOSITORY_ROOT, name), join(root, name))
+    )),
     copyFile(join(REPOSITORY_ROOT, "assets", "guildcontrol-icon.png"), join(root, "icon.png")),
     copyFile(manifestPath, join(root, "manifest.json")),
   ])
@@ -510,7 +533,22 @@ async function verifyMcpHandshake(unpacked, root, packageJson) {
       client.listResourceTemplates(),
       client.listPrompts(),
     ])
-    assert.deepEqual(tools.tools.map(({ name }) => name), ["discover_discord_tools"])
+    assert.deepEqual(
+      tools.tools.map(({ name }) => name),
+      ["discover_discord_tools", "search_guildcontrol_docs"],
+    )
+    const documentation = await client.callTool({
+      arguments: { query: "outside the notification scope" },
+      name: "search_guildcontrol_docs",
+    })
+    assert.equal(documentation.isError, undefined)
+    assert.equal(documentation.structuredContent.authorityGranted, false)
+    assert.equal(documentation.structuredContent.credentialsRequired, false)
+    assert.equal(documentation.structuredContent.discordContacted, false)
+    assert.equal(
+      documentation.structuredContent.matches[0]?.source,
+      "docs/reference.md#expanding-the-user-mention-allowlist",
+    )
     invariant(resources.resources.length > 0, "Unpacked MCPB resources are missing")
     invariant(templates.resourceTemplates.length > 0, "Unpacked MCPB resource templates are missing")
     invariant(prompts.prompts.length > 0, "Unpacked MCPB prompts are missing")

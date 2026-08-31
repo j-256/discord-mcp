@@ -48,7 +48,12 @@ const RESTRICTED_RUNTIME_ARGUMENTS = Object.freeze([
 ])
 const EXPECTED_TOP_LEVEL_PATHS = Object.freeze([
   "LICENSE",
+  "PRIVACY.md",
+  "README.md",
+  "SECURITY.md",
+  "SUPPORT.md",
   "dist",
+  "docs",
   "node_modules",
   "package.json",
 ])
@@ -304,8 +309,21 @@ try {
 assert.equal(rootWritable, false)
 const interfaces = Object.keys(networkInterfaces()).sort()
 assert.ok(interfaces.every((name) => name === "lo"))
+const { searchGuildControlDocumentation } = await import("/app/dist/documentation-search.js")
+const documentation = await searchGuildControlDocumentation({
+  limit: 1,
+  query: "outside the notification scope",
+})
+assert.equal(documentation.authorityGranted, false)
+assert.equal(documentation.credentialsRequired, false)
+assert.equal(documentation.discordContacted, false)
+assert.equal(
+  documentation.matches[0]?.source,
+  "docs/reference.md#expanding-the-user-mention-allowlist",
+)
 process.stdout.write(JSON.stringify({
   capabilityMask,
+  documentationSearch: "available",
   gid: process.getgid?.(),
   interfaces,
   noNewPrivileges,
@@ -329,6 +347,7 @@ async function verifyRestrictedRuntime(image) {
   invariant(report.capabilityMask === "0000000000000000", "container retained Linux capabilities")
   invariant(report.noNewPrivileges === "1", "container permits privilege escalation")
   invariant(report.pidsMax === "64", "container process limit changed")
+  invariant(report.documentationSearch === "available", "container documentation search is unavailable")
   assert.deepEqual(report.interfaces, ["lo"])
   return report
 }

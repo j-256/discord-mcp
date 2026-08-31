@@ -89,6 +89,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "execute_guild_blueprint",
     "plan_guild_blueprint",
     "preview_guild_blueprint",
+    "search_guildcontrol_docs",
     "verify_guild_blueprint",
   ])
   assert.deepEqual(guildStarter.capabilities, [
@@ -137,6 +138,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "execute_guild_blueprint",
     "plan_guild_blueprint",
     "preview_guild_blueprint",
+    "search_guildcontrol_docs",
     "verify_guild_blueprint",
   ])
   assert.equal(guildBuilder.capabilities.includes("automodAudit"), true)
@@ -188,6 +190,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "discover_discord_tools",
     "list_coordination_addresses",
     "list_coordination_notes",
+    "search_guildcontrol_docs",
     "send_coordination_note",
   ])
   assert.deepEqual(coordinationChannel.capabilities, ["interactions"])
@@ -220,6 +223,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
   assert.deepEqual(messageChannel.toolNames, [
     "discover_discord_tools",
     "edit_own_message",
+    "search_guildcontrol_docs",
     "send_message",
     "signal_command_processing",
   ])
@@ -304,6 +308,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "get_direct_message",
     "list_direct_messages",
     "plan_direct_message_change",
+    "search_guildcontrol_docs",
     "verify_direct_message_change",
   ])
   assert.equal(
@@ -338,6 +343,7 @@ test("configuration recipes expose frozen catalog-derived requirements", () => {
     "execute_guild_incident_action_change",
     "get_guild_incident_actions",
     "plan_guild_incident_action_change",
+    "search_guildcontrol_docs",
   ])
   assert.deepEqual(incidentResponse.requirements.scope.targets, [
     "$.scopes.guildIncidentGuildIds",

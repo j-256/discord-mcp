@@ -30,6 +30,7 @@ export const MCP_TOOL_RISK_CLASSES = Object.freeze({
   execute_bot_profile_change: "destructive-write",
   delete_messages: "destructive-write",
   discover_discord_tools: "local-read",
+  search_guildcontrol_docs: "local-read",
   edit_own_message: "interaction-write",
   edit_webhook_message: "destructive-write",
   execute_attachment_message: "interaction-write",

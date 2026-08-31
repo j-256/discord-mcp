@@ -6,7 +6,9 @@ import type { RegisteredTool, ToolAnnotations } from "@modelcontextprotocol/serv
 import { CONFIG_RECIPES } from "../src/config-recipes.js"
 import {
   CONNECTOR_LIMITS,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   MCP_DISCOVERY_TOOL_NAME,
+  MCP_DOCUMENTATION_SEARCH_TOOL_NAME,
 } from "../src/constants.js"
 import {
   MCP_TOOL_ACCESS_STAGES,
@@ -297,11 +299,15 @@ test("tool access manifest classifies every tool and binds reviewed companions",
   const index = createMcpToolAccessIndex(requirementsUriTemplate)
   assert.equal(
     manifest.entries.length,
-    Object.keys(MCP_TOOL_CATALOG).length + 1,
+    Object.keys(MCP_TOOL_CATALOG).length + MCP_ALWAYS_AVAILABLE_TOOL_NAMES.length,
   )
   assert.equal(manifest.entries[0]?.name, "add_reaction")
   assert.equal(
     manifest.entries.some(({ name }) => name === MCP_DISCOVERY_TOOL_NAME),
+    true,
+  )
+  assert.equal(
+    manifest.entries.some(({ name }) => name === MCP_DOCUMENTATION_SEARCH_TOOL_NAME),
     true,
   )
   assert.equal(
@@ -400,7 +406,7 @@ test("tool access manifest classifies every tool and binds reviewed companions",
     selected.entries.length,
     Object.values(MCP_TOOL_CATALOG)
       .filter(({ toolset }) => selected.toolsetNames.includes(toolset))
-      .length + 1,
+      .length + MCP_ALWAYS_AVAILABLE_TOOL_NAMES.length,
   )
   assert.equal(
     selected.entries.every((entry) => (

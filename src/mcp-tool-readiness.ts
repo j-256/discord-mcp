@@ -1,6 +1,6 @@
 import { connectorConfigFields } from "./config-document.js"
 import {
-  MCP_DISCOVERY_TOOL_NAME,
+  MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   type McpToolsetName,
 } from "./constants.js"
 import type { McpToolName } from "./observability-catalog.js"
@@ -732,7 +732,7 @@ const MCP_TOOLSET_REQUIREMENTS = Object.freeze({
 } satisfies Record<McpToolsetName, RequirementSource>)
 
 const LOCAL_TOOL_NAMES: ReadonlySet<McpToolName> = new Set([
-  MCP_DISCOVERY_TOOL_NAME,
+  ...MCP_ALWAYS_AVAILABLE_TOOL_NAMES,
   "compile_component_template",
   "compile_guild_blueprint_starter",
   "create_coordination_address",
