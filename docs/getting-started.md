@@ -55,7 +55,7 @@ By default the policy and guide are created in the per-user GuildControl configu
 
 The guide is named `guildcontrol-onboarding.html` beside the policy. The CLI creates only this non-secret private directory. Pass `--config FILE` or `--html FILE` for explicit locations; the parent of an explicit policy path must already satisfy the canonical private-directory checks.
 
-Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. The guide explains the selected route but never searches for, reads, or edits a host configuration. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
+Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. For a static JSON adapter, enter the exact host file and reviewed plan digest in the guide to build copy-ready `host plan`, `host apply`, and inspection commands for Bash, zsh, or PowerShell. Those inputs remain only in the open page and reset on reload. Codex stays an exact manual TOML merge, while Claude Desktop stays a host-native MCPB import. The guide never searches for, reads, or edits a host configuration. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
 
 For a non-interactive terminal or CI wrapper, make every public decision explicit. JSON mode never prompts or opens a browser:
 
@@ -254,7 +254,7 @@ The guide presents typed launch data similar to this shape:
 }
 ```
 
-The same activation digest binds six deterministic adapters shown together in the private guide:
+The same activation digest binds every deterministic adapter shown together in the private guide:
 
 The canonical `environment.forward` field remains the source of every adapter's environment-reference list; adapters never discover or invent another credential name.
 
