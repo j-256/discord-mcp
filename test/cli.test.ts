@@ -1716,6 +1716,37 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     file: "/configuration/discord.json",
     json: true,
   })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "replace",
+    "/configuration/discord.json",
+    "/configuration/candidate.json",
+  ]), {
+    acceptCurrentPlan: false,
+    action: "replace",
+    candidateFile: "/configuration/candidate.json",
+    command: "config",
+    file: "/configuration/discord.json",
+    json: false,
+  })
+  assert.deepEqual(parseCliArguments([
+    "config",
+    "replace",
+    "/configuration/discord.json",
+    "/configuration/candidate.json",
+    "--accept-current-plan",
+    "--confirm",
+    "support-bot",
+    "--json",
+  ]), {
+    acceptCurrentPlan: true,
+    action: "replace",
+    candidateFile: "/configuration/candidate.json",
+    command: "config",
+    confirmation: "support-bot",
+    file: "/configuration/discord.json",
+    json: true,
+  })
   const configChangeDigest = `sha256:${"b".repeat(64)}`
   assert.deepEqual(parseCliArguments([
     "config",
@@ -2037,6 +2068,47 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     name: "guild-builder",
     userIds: [],
   })
+  assert.deepEqual(parseCliArguments([
+    "recipe",
+    "enable",
+    "member-directory",
+    "/configuration/discord.json",
+    "--guild-id",
+    GUILD_ID,
+  ]), {
+    acceptCurrentPlan: false,
+    action: "enable",
+    channelIds: [],
+    command: "recipe",
+    file: "/configuration/discord.json",
+    guildIds: [GUILD_ID],
+    json: false,
+    name: "member-directory",
+    userIds: [],
+  })
+  assert.deepEqual(parseCliArguments([
+    "recipe",
+    "enable",
+    "channel-publisher",
+    "/configuration/discord.json",
+    "--channel-id",
+    CHANNEL_ID,
+    "--accept-current-plan",
+    "--confirm",
+    "channel-publisher",
+    "--json",
+  ]), {
+    acceptCurrentPlan: true,
+    action: "enable",
+    channelIds: [CHANNEL_ID],
+    command: "recipe",
+    confirmation: "channel-publisher",
+    file: "/configuration/discord.json",
+    guildIds: [],
+    json: true,
+    name: "channel-publisher",
+    userIds: [],
+  })
   const recipeDigest = `sha256:${"a".repeat(64)}`
   assert.deepEqual(parseCliArguments([
     "recipe",
@@ -2335,7 +2407,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
   assert.throws(
     () => parseCliArguments(["config", "migrate", "/configuration/discord.json"]),
-    /config requires apply, explain, init, plan, show, validate, or workbench/,
+    /config requires apply, explain, init, plan, replace, show, validate, or workbench/,
   )
   assert.throws(
     () => parseCliArguments(["migrate"]),
@@ -2482,7 +2554,66 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     /Setup preset must be one of/,
   )
   assert.throws(() => parseCliArguments(["preset"]), /requires install, list, or show/)
-  assert.throws(() => parseCliArguments(["recipe"]), /requires apply, list, plan, or show/)
+  assert.throws(
+    () => parseCliArguments(["recipe"]),
+    /requires apply, enable, list, plan, or show/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "replace",
+      "/configuration/discord.json",
+      "/configuration/candidate.json",
+      "--accept-current-plan",
+    ]),
+    /requires --accept-current-plan and --confirm together/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "replace",
+      "/configuration/discord.json",
+      "/configuration/candidate.json",
+      "--confirm",
+      "support-bot",
+    ]),
+    /requires --accept-current-plan and --confirm together/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "config",
+      "replace",
+      "/configuration/discord.json",
+      "/configuration/candidate.json",
+      "--json",
+    ]),
+    /--json requires --accept-current-plan and --confirm/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "recipe",
+      "enable",
+      "channel-publisher",
+      "/configuration/discord.json",
+      "--channel-id",
+      CHANNEL_ID,
+      "--confirm",
+      "channel-publisher",
+    ]),
+    /requires --accept-current-plan and --confirm together/,
+  )
+  assert.throws(
+    () => parseCliArguments([
+      "recipe",
+      "enable",
+      "channel-publisher",
+      "/configuration/discord.json",
+      "--channel-id",
+      CHANNEL_ID,
+      "--json",
+    ]),
+    /--json requires --accept-current-plan and --confirm/,
+  )
   assert.throws(
     () => parseCliArguments([
       "recipe",
@@ -2624,6 +2755,7 @@ test("CLI parser accepts strict contextual help for every action", () => {
     ["config", "explain"],
     ["config", "workbench"],
     ["config", "plan"],
+    ["config", "replace"],
     ["config", "apply"],
     ["coordination", "list"],
     ["coordination", "resolve"],
@@ -2642,6 +2774,7 @@ test("CLI parser accepts strict contextual help for every action", () => {
     ["recipe", "list"],
     ["recipe", "show"],
     ["recipe", "plan"],
+    ["recipe", "enable"],
     ["recipe", "apply"],
   ] as const
 
@@ -4182,9 +4315,15 @@ test("CLI inspects additive recipes without credentials or file access", async (
   assert.match(textOutput.value(), /channel-publisher/)
   assert.match(textOutput.value(), /direct-messenger/)
   assert.match(textOutput.value(), /incident-response/)
+  assert.match(textOutput.value(), /member-directory/)
+  assert.match(textOutput.value(), /ban-auditor/)
+  assert.match(textOutput.value(), /scheduled-event-manager/)
+  assert.match(textOutput.value(), /webhook-administrator/)
+  assert.match(textOutput.value(), /guild-command-manager/)
   assert.match(textOutput.value(), /Gateway evidence: guild-layout with GUILDS; event-feed policy unchanged/)
   assert.match(textOutput.value(), /Gateway evidence: none; event-feed policy unchanged/)
   assert.match(textOutput.value(), /Writes: enabled only through the underlying reviewed workflow gates/)
+  assert.match(textOutput.value(), /Writes: disabled; this recipe adds a bounded read workflow only/)
   assert.doesNotMatch(textOutput.value(), new RegExp(TOKEN))
   assert.deepEqual(JSON.parse(jsonOutput.value()), {
     recipe: getConfigRecipe("channel-publisher"),
@@ -4281,6 +4420,187 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
   assert.equal(stored.capabilities.interactions, true)
   assert.deepEqual(stored.scopes.interactionChannelIds, [CHANNEL_ID])
   assert.equal(JSON.stringify(applied).includes(TOKEN), false)
+})
+
+test("CLI interactively displays, confirms, and backs up recipe enablement", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-recipe-enable-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "guildcontrol.json")
+  const current = connectorProfile()
+  await writeConnectorConfigDocumentFile(file, current)
+
+  const stdout = outputStream()
+  let backupFile: string | undefined
+  let promptCalls = 0
+  const exit = await runCli({
+    args: [
+      "recipe",
+      "enable",
+      "message-channel",
+      file,
+      "--channel-id",
+      CHANNEL_ID,
+    ],
+    dependencies: dependencies({
+      async applyRecipe(options) {
+        const report = await applyConfigRecipe(options)
+        backupFile = report.backupFile
+        return report
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Recipe enablement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Recipe enablement must not request a credential")
+      },
+      async promptText(message) {
+        promptCalls += 1
+        assert.match(stdout.value(), /configuration recipe plan: message-channel \(planned\)/)
+        assert.match(stdout.value(), /Risk classes:/)
+        assert.match(stdout.value(), /Complete proposed non-secret configuration:/)
+        assert.match(stdout.value(), /Write recovery: atomic replacement preserves/)
+        assert.match(message, /Type message-channel to apply/)
+        return "message-channel"
+      },
+    },
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  assert.equal(promptCalls, 1)
+  const stored = loadConnectorConfigDocumentFile(file)
+  assert.equal(stored.capabilities.interactions, true)
+  assert.deepEqual(stored.scopes.interactionChannelIds, [CHANNEL_ID])
+  assert.equal(typeof backupFile, "string")
+  assert.deepEqual(loadConnectorConfigDocumentFile(backupFile as string), current)
+  assert.match(stdout.value(), /configuration recipe apply: message-channel \(applied\)/)
+  assert.match(stdout.value(), /Recoverable prior version:/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI recipe enablement cancellation leaves the policy unchanged", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-recipe-cancel-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "guildcontrol.json")
+  const current = connectorProfile()
+  await writeConnectorConfigDocumentFile(file, current)
+
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exit = await runCli({
+    args: [
+      "recipe",
+      "enable",
+      "message-channel",
+      file,
+      "--channel-id",
+      CHANNEL_ID,
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Recipe enablement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Recipe enablement must not request a credential")
+      },
+      async promptText() {
+        assert.match(stdout.value(), /configuration recipe plan: message-channel \(planned\)/)
+        throw new CliInteractionCancelledError()
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 130)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), current)
+  assert.match(stderr.value(), /guildctl: recipe canceled/)
+  assert.doesNotMatch(stderr.value(), /Operator command failed|Next:|See:/)
+})
+
+test("CLI recipe enablement requires explicit non-interactive acceptance", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-recipe-automation-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "guildcontrol.json")
+  const current = connectorProfile()
+  await writeConnectorConfigDocumentFile(file, current)
+
+  let planCalls = 0
+  let applyCalls = 0
+  const rejectedError = outputStream()
+  assert.equal(await runCli({
+    args: [
+      "recipe",
+      "enable",
+      "member-directory",
+      file,
+      "--guild-id",
+      GUILD_ID,
+    ],
+    dependencies: dependencies({
+      async applyRecipe(options) {
+        applyCalls += 1
+        return applyConfigRecipe(options)
+      },
+      planRecipe(options) {
+        planCalls += 1
+        return planConfigRecipe(options)
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stderr: rejectedError.stream,
+    stdin: { isTTY: false },
+  }), 2)
+  assert.equal(planCalls, 0)
+  assert.equal(applyCalls, 0)
+  assert.match(rejectedError.value(), /requires an interactive terminal/)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), current)
+
+  const acceptedOutput = outputStream()
+  assert.equal(await runCli({
+    args: [
+      "recipe",
+      "enable",
+      "member-directory",
+      file,
+      "--guild-id",
+      GUILD_ID,
+      "--accept-current-plan",
+      "--confirm",
+      "member-directory",
+      "--json",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Accepted recipe enablement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Accepted recipe enablement must not request a credential")
+      },
+      async promptText() {
+        assert.fail("Accepted recipe enablement must not prompt")
+      },
+    },
+    stdin: { isTTY: false },
+    stdout: acceptedOutput.stream,
+  }), 0)
+  assert.equal(JSON.parse(acceptedOutput.value()).status, "applied")
+  assert.equal(
+    loadConnectorConfigDocumentFile(file).capabilities.memberDirectory,
+    true,
+  )
 })
 
 test("CLI generates human and JSON bot installation plans with optional offline guides", async () => {
@@ -4731,6 +5051,249 @@ test("CLI plans and applies one exact candidate configuration without resolving 
   assert.match(stale.error.recovery.action, /Rerun guildctl config plan/)
   assert.equal(stale.error.recovery.retry, "after-correction")
   assert.doesNotMatch(staleOutput.value(), new RegExp(TOKEN))
+})
+
+test("CLI interactively displays, confirms, and backs up a configuration replacement", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-config-replace-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const current = connectorProfile()
+  const candidate = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    capabilities: { interactions: true },
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "reviewed-bot",
+    scopes: { interactionChannelIds: [CHANNEL_ID] },
+    toolsets: ["connector", "interactions", "messages"],
+    toolSurface: "progressive",
+  })
+  await writeConnectorConfigDocumentFile(file, current)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+
+  const stdout = outputStream()
+  let backupFile: string | undefined
+  let promptCalls = 0
+  const exit = await runCli({
+    args: ["config", "replace", file, candidateFile],
+    dependencies: dependencies({
+      async applyConfigChange(options) {
+        const report = await applyConfigChange(options)
+        backupFile = report.backupFile
+        return report
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Configuration replacement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Configuration replacement must not request a credential")
+      },
+      async promptText(message) {
+        promptCalls += 1
+        assert.match(stdout.value(), /configuration change plan: planned/)
+        assert.match(stdout.value(), /Complete candidate non-secret configuration:/)
+        assert.match(stdout.value(), /Write recovery: atomic replacement preserves/)
+        assert.match(message, /Type support-bot to apply/)
+        return "support-bot"
+      },
+    },
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 0)
+  assert.equal(promptCalls, 1)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), candidate)
+  assert.equal(typeof backupFile, "string")
+  assert.deepEqual(loadConnectorConfigDocumentFile(backupFile as string), current)
+  assert.match(stdout.value(), /configuration change apply: applied/)
+  assert.match(stdout.value(), /Recoverable prior version:/)
+  assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
+})
+
+test("CLI configuration replacement recomputes after review and rejects drift", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-config-drift-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const current = connectorProfile()
+  const candidate = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "reviewed-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  await writeConnectorConfigDocumentFile(file, current)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exit = await runCli({
+    args: ["config", "replace", file, candidateFile],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Configuration replacement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Configuration replacement must not request a credential")
+      },
+      async promptText() {
+        assert.match(stdout.value(), /configuration change plan: planned/)
+        await writeFile(candidateFile, `${JSON.stringify({
+          ...candidate,
+          name: "drifted-bot",
+        }, null, 2)}\n`)
+        return "support-bot"
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 2)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), current)
+  assert.match(stderr.value(), /plan is stale or does not match/)
+  assert.match(stderr.value(), /Rerun guildctl config plan/)
+})
+
+test("CLI configuration replacement cancellation leaves the policy unchanged", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-config-cancel-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const current = connectorProfile()
+  const candidate = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "reviewed-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  await writeConnectorConfigDocumentFile(file, current)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+
+  const stdout = outputStream()
+  const stderr = outputStream()
+  const exit = await runCli({
+    args: ["config", "replace", file, candidateFile],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Configuration replacement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Configuration replacement must not request a credential")
+      },
+      async promptText() {
+        assert.match(stdout.value(), /configuration change plan: planned/)
+        throw new CliInteractionCancelledError()
+      },
+    },
+    stderr: stderr.stream,
+    stdin: { isTTY: true },
+    stdout: stdout.stream,
+  })
+
+  assert.equal(exit, 130)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), current)
+  assert.match(stderr.value(), /guildctl: config canceled/)
+  assert.doesNotMatch(stderr.value(), /Operator command failed|Next:|See:/)
+})
+
+test("CLI configuration replacement requires explicit non-interactive acceptance", async (context) => {
+  const temporary = await mkdtemp(join(tmpdir(), "guildcontrol-cli-config-automation-"))
+  context.after(() => rm(temporary, { force: true, recursive: true }))
+  const root = await realpath(temporary)
+  const file = join(root, "active.json")
+  const candidateFile = join(root, "candidate.json")
+  const current = connectorProfile()
+  const candidate = createConnectorConfigDocument({
+    applicationId: APPLICATION_ID,
+    botId: BOT_ID,
+    channelIds: [CHANNEL_ID],
+    credentialVariable: TOKEN_ALIAS,
+    guildIds: [GUILD_ID],
+    name: "reviewed-bot",
+    toolsets: ["connector", "messages"],
+    toolSurface: "progressive",
+  })
+  await writeConnectorConfigDocumentFile(file, current)
+  await writeConnectorConfigDocumentFile(candidateFile, candidate)
+
+  let planCalls = 0
+  let applyCalls = 0
+  const rejectedError = outputStream()
+  assert.equal(await runCli({
+    args: ["config", "replace", file, candidateFile],
+    dependencies: dependencies({
+      async applyConfigChange(options) {
+        applyCalls += 1
+        return applyConfigChange(options)
+      },
+      planConfigChange(options) {
+        planCalls += 1
+        return planConfigChange(options)
+      },
+    }),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    stderr: rejectedError.stream,
+    stdin: { isTTY: false },
+  }), 2)
+  assert.equal(planCalls, 0)
+  assert.equal(applyCalls, 0)
+  assert.match(rejectedError.value(), /requires an interactive terminal/)
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), current)
+
+  const acceptedOutput = outputStream()
+  assert.equal(await runCli({
+    args: [
+      "config",
+      "replace",
+      file,
+      candidateFile,
+      "--accept-current-plan",
+      "--confirm",
+      "support-bot",
+      "--json",
+    ],
+    dependencies: dependencies(),
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    interaction: {
+      async openExternal() {
+        assert.fail("Accepted replacement must not open a browser")
+      },
+      async promptSecret() {
+        assert.fail("Accepted replacement must not request a credential")
+      },
+      async promptText() {
+        assert.fail("Accepted replacement must not prompt")
+      },
+    },
+    stdin: { isTTY: false },
+    stdout: acceptedOutput.stream,
+  }), 0)
+  assert.equal(JSON.parse(acceptedOutput.value()).status, "applied")
+  assert.deepEqual(loadConnectorConfigDocumentFile(file), candidate)
 })
 
 test("CLI explains only the typed configuration contract", async () => {

@@ -17,6 +17,7 @@ import {
   writeConnectorConfigDocumentFile,
   type ConnectorConfigSummary,
 } from "./config-operator.js"
+import { configRecipeDependencyGuidance } from "./config-recipe-guidance.js"
 import {
   CONNECTOR_CLI_COMMAND,
   CONNECTOR_LIMITS,
@@ -27,7 +28,7 @@ import {
   MCP_TOOLSET_NAMES,
   type McpToolsetName,
 } from "./constants.js"
-import { ConfigurationError } from "./errors.js"
+import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import {
   selectedCanonicalMcpToolNames,
   selectedMcpToolsets,
@@ -57,13 +58,18 @@ export const CONFIG_RECIPE_NAMES = Object.freeze([
   "channel-publisher",
   "direct-messenger",
   "incident-response",
+  "member-directory",
+  "ban-auditor",
+  "scheduled-event-manager",
+  "webhook-administrator",
+  "guild-command-manager",
 ] as const)
 
 export type ConfigRecipeName = typeof CONFIG_RECIPE_NAMES[number]
 export type ConfigRecipeScopeKind = "channel" | "guild" | "user"
 
 export interface ConfigRecipePrivilegedIntent {
-  readonly name: "MESSAGE_CONTENT"
+  readonly name: "GUILD_MEMBERS" | "MESSAGE_CONTENT"
   readonly status: "required"
 }
 
@@ -96,7 +102,7 @@ export interface ConfigRecipeDescriptor {
   readonly toolNames: readonly McpToolName[]
   readonly toolsets: readonly McpToolsetName[]
   readonly warnings: readonly string[]
-  readonly writeCapable: true
+  readonly writeCapable: boolean
 }
 
 interface ConfigRecipeSource {
@@ -479,6 +485,155 @@ const CONFIG_RECIPE_SOURCES = Object.freeze([
       "Discord documents a maximum 24-hour future deadline and does not document an audit-log reason header for this endpoint, so the human reason remains local review context only",
     ],
   },
+  {
+    botPermissions: [],
+    capabilities: ["memberDirectory"],
+    description: "Add privacy-minimized exact, paginated, and prefix member-directory reads inside exact selected guilds without enabling member administration or Gateway member caching.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "member-directory",
+    privilegedIntents: [{
+      name: "GUILD_MEMBERS",
+      status: "required",
+    }],
+    risks: [
+      "Member-directory reads expose exact user IDs and limited membership state for the selected guilds",
+      "The Guild Members privileged intent broadens what the application may request even though this recipe enables only bounded REST directory reads",
+    ],
+    scope: {
+      kind: "guild",
+      names: ["memberDirectoryGuildIds"],
+    },
+    toolsets: ["members"],
+    warnings: [
+      "Returned member evidence omits usernames, avatars, roles, nicknames except where an explicit bounded lookup permits one transient display value, and all profile data remains unpersisted",
+      "Enable Guild Members for the pinned application in the Developer Portal; the connector's optional Gateway still uses only its separately configured nonprivileged intents",
+      "This recipe adds no member moderation, nickname, role, verification, voice, audit-log, or protected-user authority",
+    ],
+  },
+  {
+    botPermissions: ["BAN_MEMBERS"],
+    capabilities: ["banAudit"],
+    description: "Add privacy-minimized paginated and exact ban inspection for selected guilds without enabling bans, unbans, bulk actions, or reason disclosure by default.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "ban-auditor",
+    privilegedIntents: [],
+    risks: [
+      "Ban inventory reveals exact banned user IDs and whether a reason exists in each selected guild",
+      "BAN_MEMBERS is a consequential Discord permission even though this recipe enables no mutation capability",
+    ],
+    scope: {
+      kind: "guild",
+      names: ["banAuditGuildIds"],
+    },
+    toolsets: ["bans"],
+    warnings: [
+      "Reasons remain redacted unless an exact inspection explicitly requests the bounded transient reason",
+      "This recipe does not enable administration, bulk bans, guild pruning, protected-target selection, or any write toolset",
+      "Use a narrower bot role or channel-independent permission grant when BAN_MEMBERS should not apply across unrelated guild activity",
+    ],
+  },
+  {
+    botPermissions: [
+      "MANAGE_EVENTS",
+      "CREATE_EVENTS",
+    ],
+    capabilities: [
+      "scheduledEventAudit",
+      "scheduledEventChanges",
+    ],
+    description: "Add privacy-safe scheduled-event inventory plus reviewed creation, metadata, lifecycle, and deletion for exact selected guilds without enabling subscriber identities.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "scheduled-event-manager",
+    privilegedIntents: [],
+    risks: [
+      "Event creation and changes publish or replace visible guild scheduling state",
+      "Canceling, completing, or deleting an event can disrupt attendees and deletion is irreversible",
+      "Recurring-event changes can alter a future series when the caller supplies an explicit complete recurrence replacement",
+    ],
+    scope: {
+      kind: "guild",
+      names: ["scheduledEventGuildIds"],
+    },
+    toolsets: ["scheduled-events"],
+    warnings: [
+      "External event creation needs CREATE_EVENTS; cross-owner changes need MANAGE_EVENTS, while bot-owned changes may use CREATE_EVENTS after exact creator proof",
+      "Voice and Stage hosting add exact channel permissions that this recipe reports but cannot grant; Stage creation requires MANAGE_CHANNELS, MUTE_MEMBERS, and MOVE_MEMBERS",
+      "Subscriber identity audit remains disabled until scheduledEventUserAudit is enabled separately",
+      "Cover image changes remain unavailable until a canonical owned storage.scheduledEventRoots path is configured",
+    ],
+  },
+  {
+    botPermissions: [
+      "VIEW_CHANNEL",
+      "MANAGE_WEBHOOKS",
+    ],
+    capabilities: [
+      "webhookAudit",
+      "webhookChanges",
+      "webhookDeletions",
+    ],
+    description: "Add credential-redacted webhook audit plus reviewed rename, same-guild move, and exact-ID deletion for selected direct channels without enabling webhook creation or message delivery.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "webhook-administrator",
+    privilegedIntents: [],
+    risks: [
+      "Webhook moves and renames change an integration's visible delivery endpoint metadata",
+      "Webhook deletion is irreversible and invalidates the external bearer capability",
+      "Another administrator can move a webhook during Discord's non-atomic inventory-to-delete window",
+    ],
+    scope: {
+      kind: "channel",
+      names: ["webhookChannelIds"],
+    },
+    toolsets: ["webhooks"],
+    warnings: [
+      "Every mutation requires complete source and destination inventories, exact permissions, a fresh keyed plan, signed approval, pending content-free evidence, one non-retried mutation, and exact readback",
+      "Webhook tokens, execution URLs, names, avatars, and message content are never returned or persisted by administration tools",
+      "Creation and webhook-message lifecycle capabilities remain disabled; those require a separately selected private storage.webhookCredentialRoot",
+    ],
+  },
+  {
+    botPermissions: [],
+    capabilities: ["applicationCommandChanges"],
+    description: "Add complete exact-guild application-command planning and reviewed create, update, or exact-ID deletion for the pinned current application without enabling global command changes.",
+    gateway: {
+      evidenceConnection: "none",
+      eventFeedPolicy: "unchanged",
+      intents: [],
+    },
+    name: "guild-command-manager",
+    privilegedIntents: [],
+    risks: [
+      "Command creation and complete updates change the pinned application's visible guild command surface",
+      "Command deletion is irreversible, and renaming or deletion permanently clears Discord's command-specific permission overwrites",
+    ],
+    scope: {
+      kind: "guild",
+      names: ["applicationCommandGuildIds"],
+    },
+    toolsets: ["application-commands", "connector"],
+    warnings: [
+      "Every mutation binds the complete localized definition and permission inventories, uses exact-ID update and deletion targets, reserves one key, writes once without retry, and verifies all survivors",
+      "Command-specific permission writes remain unsupported because Discord requires a user Bearer token",
+      "Global application-command changes remain disabled and retain their separate application-wide exposure and cross-guild permission-reset acknowledgements",
+    ],
+  },
 ] as const satisfies readonly ConfigRecipeSource[])
 
 function canonicalPermissions(
@@ -572,9 +727,7 @@ function createRecipeDescriptor(source: ConfigRecipeSource): ConfigRecipeDescrip
   const riskClasses = Object.freeze([
     ...new Set(toolNames.map((toolName) => MCP_TOOL_RISK_CLASSES[toolName])),
   ].sort() as McpToolRiskClass[])
-  if (!riskClasses.some((risk) => risk.endsWith("write"))) {
-    throw new Error(`Configuration recipe ${source.name} must expose a write workflow`)
-  }
+  const writeCapable = riskClasses.some((risk) => risk.endsWith("write"))
   const bitfield = botPermissions.reduce(
     (permissions, permission) => permissions | DISCORD_PERMISSIONS[permission],
     0n,
@@ -600,7 +753,7 @@ function createRecipeDescriptor(source: ConfigRecipeSource): ConfigRecipeDescrip
     toolNames,
     toolsets,
     warnings: Object.freeze([...source.warnings]),
-    writeCapable: true as const,
+    writeCapable,
   })
 }
 
@@ -876,11 +1029,21 @@ interface InternalRecipePlan {
 function createRecipePlan(options: ConfigRecipePlanOptions): InternalRecipePlan {
   const file = resolveConnectorConfigFile(options.file)
   const inspection = inspectConnectorConfigDocumentFile(file)
-  const currentDocument = validateConnectorConfigDocumentPolicy(
-    inspection.document,
-  )
   const request = normalizeConfigRecipeRequest(options)
   const recipe = getConfigRecipe(request.name)
+  let currentDocument: ConnectorConfigDocument
+  try {
+    currentDocument = validateConnectorConfigDocumentPolicy(
+      inspection.document,
+      { guidanceFile: file },
+    )
+  } catch (error) {
+    const guidance = error instanceof ConfigDocumentError
+      ? configRecipeDependencyGuidance(inspection.document, error.message, file)
+      : undefined
+    if (guidance?.recipe !== recipe.name) throw error
+    currentDocument = inspection.document
+  }
   assertInsideOuterBoundary(currentDocument, request)
   const proposed = proposedDocument(currentDocument, recipe, request)
   const changes = configChanges(currentDocument, proposed, recipe)

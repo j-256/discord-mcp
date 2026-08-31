@@ -31,6 +31,7 @@ import {
   type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
+import { appendConfigRecipeDependencyGuidance } from "./config-recipe-guidance.js"
 import { DEFAULT_TOKEN_ENVIRONMENT_VARIABLE } from "./constants.js"
 import { ConfigDocumentError, ConfigurationError } from "./errors.js"
 import { stableString } from "./normalize.js"
@@ -203,6 +204,7 @@ function validationDocument(
 
 export function validateConnectorConfigDocumentPolicy(
   documentValue: ConnectorConfigDocument,
+  options: { guidanceFile?: string } = {},
 ): ConnectorConfigDocument {
   const document = parseConnectorConfigDocument(documentValue)
   const placeholderDocument = validationDocument(document)
@@ -215,7 +217,14 @@ export function validateConnectorConfigDocumentPolicy(
   } catch (error) {
     if (error instanceof ConfigDocumentError) throw error
     if (error instanceof ConfigurationError) {
-      throw new ConfigDocumentError(error.message, { cause: error })
+      throw new ConfigDocumentError(
+        appendConfigRecipeDependencyGuidance(
+          document,
+          error.message,
+          options.guidanceFile,
+        ),
+        { cause: error },
+      )
     }
     throw error
   }
@@ -306,6 +315,7 @@ export function validateConnectorConfigFile(file: string): ConfigValidationRepor
   const inspection = inspectConnectorConfigDocumentFile(normalized)
   const document = validateConnectorConfigDocumentPolicy(
     inspection.document,
+    { guidanceFile: normalized },
   )
   return validationReport(normalized, document, inspection.targetFile)
 }
@@ -315,6 +325,7 @@ export function showConnectorConfigFile(file: string): ConfigShowReport {
   const inspection = inspectConnectorConfigDocumentFile(normalized)
   const document = validateConnectorConfigDocumentPolicy(
     inspection.document,
+    { guidanceFile: normalized },
   )
   return {
     ...validationReport(normalized, document, inspection.targetFile),
@@ -564,7 +575,10 @@ export async function writeConnectorConfigDocumentFile(
   const requestedFile = resolveConnectorConfigFile(file)
   const requestedDirectory = dirname(requestedFile)
   await assertConfigDirectory(requestedDirectory)
-  const document = validateConnectorConfigDocumentPolicy(documentValue)
+  const document = validateConnectorConfigDocumentPolicy(
+    documentValue,
+    { guidanceFile: requestedFile },
+  )
   const initiallyExists = await pathExists(requestedFile)
   const initialInspection = initiallyExists
     ? inspectConnectorConfigDocumentFile(requestedFile)
@@ -607,7 +621,7 @@ export async function writeConnectorConfigDocumentFile(
       if (
         options.expectedCurrent !== undefined
         && stableString(current) !== stableString(
-          validateConnectorConfigDocumentPolicy(options.expectedCurrent),
+          parseConnectorConfigDocument(options.expectedCurrent),
         )
       ) {
         throw new ConfigDocumentError(
