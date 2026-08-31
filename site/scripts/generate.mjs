@@ -296,6 +296,11 @@ const FULL_DOCUMENTS = Object.freeze([
     source: "docs/limitations.md",
   },
   {
+    description: "Threat, usability cost, retained controls, residual risk, and recovery rationale for each major safety decision",
+    route: "understand/safety-decisions",
+    source: "docs/safety-usability.md",
+  },
+  {
     description: "Credential custody, Discord-data handling, local records, observability, operator controls, and deletion",
     route: "understand/privacy",
     source: "PRIVACY.md",
@@ -667,6 +672,7 @@ Documentation: ${DOCUMENTATION_URL}/
 ## Safety and operation
 
 - [Safety model](${DOCUMENTATION_URL}/understand/safety/): Scope, exact IDs, reviewed writes, privacy, and ambiguity handling
+- [Safety and usability decisions](${DOCUMENTATION_URL}/understand/safety-decisions/): Risk analysis for retained, internalized, optional, and relaxed restrictions
 - [Operator path](${DOCUMENTATION_URL}/operate/): Evidence ladder and deliberate expansion
 - [Troubleshooting](${DOCUMENTATION_URL}/operate/troubleshooting/): Privacy-safe setup recovery
 - [Release verification](${DOCUMENTATION_URL}/operate/release-verification/): Provenance, inventory, signature, and reproducibility boundaries
@@ -822,6 +828,7 @@ async function main() {
     "docs/getting-started.md",
     "docs/migration.md",
     "docs/limitations.md",
+    "docs/safety-usability.md",
     "PRIVACY.md",
     "docs/comparison.md",
     "docs/reference.md",

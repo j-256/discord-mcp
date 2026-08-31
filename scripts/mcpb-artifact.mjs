@@ -73,6 +73,7 @@ const MCPB_DOCUMENTATION_ENTRIES = Object.freeze([
   "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
+  "docs/safety-usability.md",
 ])
 
 export const MCPB_ARCHIVE_ENTRIES = Object.freeze([

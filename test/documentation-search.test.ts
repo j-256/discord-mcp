@@ -22,10 +22,26 @@ test("documentation search finds exact mention-scope recovery guidance", async (
     "docs/reference.md#expanding-the-user-mention-allowlist",
   )
   assert.match(result.matches[0]?.excerpt || "", /scopes\.mentionUserIds/)
-  assert.match(result.matches[0]?.excerpt || "", /guildctl config plan/)
+  assert.match(result.matches[0]?.excerpt || "", /guildctl config replace/)
   assert.match(result.matches[0]?.excerpt || "", /notifyUserIds/)
   assert.doesNotMatch(JSON.stringify(result), /786955914723852309/)
   assert.doesNotMatch(JSON.stringify(result), /\/c\/guildcontrol/)
+})
+
+test("documentation search explains why mention scope is strict and when review replaces it", async () => {
+  const result = await searchGuildControlDocumentation({
+    limit: 2,
+    query: "Why require a strict user ID list for mentions?",
+  })
+
+  assert.equal(
+    result.matches[0]?.source,
+    "docs/safety-usability.md#why-a-strict-user-id-list-still-exists",
+  )
+  assert.match(result.matches[0]?.excerpt || "", /spam, phishing, or accidental escalation/)
+  assert.match(result.matches[0]?.excerpt || "", /unattended automation/)
+  assert.equal(result.authorityGranted, false)
+  assert.equal(result.discordContacted, false)
 })
 
 test("documentation search returns no weak match and validates its bounds", async () => {

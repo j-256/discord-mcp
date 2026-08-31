@@ -146,6 +146,7 @@ test("built documentation has complete local navigation and no remote runtime as
   assert.ok(await exists(join(DIST_DIRECTORY, "contribute", "documentation-portal", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "start", "manual-setup", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "start", "migration", "index.html")))
+  assert.ok(await exists(join(DIST_DIRECTORY, "understand", "safety-decisions", "index.html")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms.txt")))
   assert.ok(await exists(join(DIST_DIRECTORY, "llms-full.txt")))
   const comparisonMarkup = await readFile(
@@ -224,6 +225,7 @@ test("published machine-readable artifacts preserve credential-free evidence", a
   assert.match(llms, /\/start\/migration\//u)
   const llmsFull = await readFile(join(DIST_DIRECTORY, "llms-full.txt"), "utf8")
   assert.match(llmsFull, /===== SOURCE: docs\/migration\.md =====/u)
+  assert.match(llmsFull, /===== SOURCE: docs\/safety-usability\.md =====/u)
   const unpinnedPackage = new RegExp(`${packageJson.name.replace("/", "\\/")}@latest\\b`, "u")
   assert.doesNotMatch(llms, unpinnedPackage)
   const allTrackedSiteText = (await collectFiles(SITE_DIRECTORY))

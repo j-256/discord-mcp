@@ -16,6 +16,7 @@ const DOCUMENTATION_SOURCES = Object.freeze([
   "docs/migration.md",
   "docs/reference.md",
   "docs/releasing.md",
+  "docs/safety-usability.md",
   "PRIVACY.md",
   "SECURITY.md",
   "SUPPORT.md",
