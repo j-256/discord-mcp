@@ -201,7 +201,7 @@ export function renderDiscordHostActivationHtml(
   <header class="shell hero">
     <p class="eyebrow">Private host activation</p>
     <h1>Map the contract. Keep custody.</h1>
-    <p class="lede">This credential-free artifact turns one verified GuildControl MCP policy into an exact local stdio handoff and four digest-bound host projections. It supplies copyable schemas without writing host configuration or putting a bot token in this page.</p>
+    <p class="lede">This credential-free artifact turns one verified GuildControl MCP policy into an exact local stdio handoff and digest-bound host projections. It supplies copyable schemas without writing host configuration or putting a bot token in this page.</p>
     <div class="proofs" role="list" aria-label="Activation evidence">
       <div class="proof" role="listitem"><strong>${escapeHtml(plan.launch.transport)}</strong><span>Local MCP transport</span></div>
       <div class="proof" role="listitem"><strong>${escapeHtml(plan.launch.serverName)}</strong><span>Portable server label</span></div>
