@@ -67,7 +67,7 @@ import {
   type HostChangePlanReport,
 } from "./host-installation.js"
 import {
-  CONNECTOR_NAME,
+  CONNECTOR_CLI_COMMAND,
   CONNECTOR_NPX_ARGUMENTS,
   CONNECTOR_NPX_COMMAND,
   CONNECTOR_VERSION,
@@ -1871,7 +1871,7 @@ function contextualHelpText(
     throw new ConfigurationError("Contextual help is unavailable for this action")
   }
   return [
-    `Usage: ${CONNECTOR_NAME} ${topic} ${entry.synopsis}`,
+    `Usage: ${CONNECTOR_CLI_COMMAND} ${topic} ${entry.synopsis}`,
     "",
     entry.description,
   ].join("\n")
@@ -1885,14 +1885,14 @@ function helpText(
     return contextualHelpText(topic, action)
   }
   if (topic === "activity") {
-    return "Usage: guildcontrol activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} activity [--config FILE | --profile NAME] [--limit N] [--html FILE] [--json]\n\nReview bounded recent content-free write lifecycles together with durable coordination claims. The command resolves no credential, contacts no network or Discord endpoint, changes no activity or coordination state, and omits the local activity-file path. Optional HTML exclusively creates the requested private output file from the exact digest-bound report. Exit status is 0 when clear, 1 when evidence needs attention, and 2 on command failure.`
   }
   if (topic === "catalog") {
-    return "Usage: guildcontrol catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} catalog [--check] [--json] [--html FILE]\n\nAdvertise the exact production MCP catalog without credentials or execution. Add --check to verify and fingerprint the packaged contract; --json emits deterministic evidence and requires --check. Add --html FILE to perform the same check and exclusively write a standalone interactive contract explorer without replacing an existing file.`
   }
   if (topic === "config") {
     return [
-      "Usage: guildcontrol config <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} config <action> [options]`,
       "",
       "Actions:",
       "  init FILE --name NAME --application-id ID --bot-id ID --guild-id ID... [--preset PRESET] [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force] [--json]",
@@ -1907,13 +1907,13 @@ function helpText(
     ].join("\n")
   }
   if (topic === "doctor") {
-    return "Usage: guildcontrol doctor (--config FILE | --profile NAME) [--online] [-v | --verbose] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Default human output shows totals plus only actionable warnings and failures; -v or --verbose shows every check, while --json always emits the complete report. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} doctor (--config FILE | --profile NAME) [--online] [-v | --verbose] [--json]\n\nValidate the selected configuration and policy even when its referenced bot credential is unavailable. Credential availability is reported as its own check instead of aborting offline diagnostics. Add --online to verify Discord identity and scoped guild access; Discord is not contacted when the credential is unavailable. Default human output shows totals plus only actionable warnings and failures; -v or --verbose shows every check, while --json always emits the complete report. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments. Every warning or failure includes a next action and documentation reference. Exit status is 0 for clean, 1 for warnings, and 2 for failures.`
   }
   if (topic === "host") {
     return [
-      "Usage: guildcontrol host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]",
-      "       guildcontrol host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]",
-      "       guildcontrol host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} host [generate] (--config FILE | --profile NAME) [--name NAME] [--npx | --command COMMAND] [--adapter ID [--inspect-host-file FILE]] [--html FILE] [--json]`,
+      `       ${CONNECTOR_CLI_COMMAND} host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]`,
+      `       ${CONNECTOR_CLI_COMMAND} host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]`,
       "",
       `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog.`,
       "",
@@ -1926,7 +1926,7 @@ function helpText(
   }
   if (topic === "migrate") {
     return [
-      "Usage: guildcontrol migrate <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} migrate <action> [options]`,
       "",
       "Actions:",
       "  list [--json]",
@@ -1937,7 +1937,7 @@ function helpText(
   }
   if (topic === "coordination") {
     return [
-      "Usage: guildcontrol coordination <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} coordination <action> [options]`,
       "",
       "Actions:",
       "  list [--config FILE | --profile NAME] [--json]",
@@ -1947,17 +1947,17 @@ function helpText(
     ].join("\n")
   }
   if (topic === "setup") {
-    return "Usage: guildcontrol setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory. Completed setup exits 0 even when it reports non-blocking warnings; a command, policy, credential, identity, installation, or Discord verification failure exits 2."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} setup (--config FILE | --profile NAME) [--preset PRESET --guild-id ID... [--channel-id ID...] [--token-env VARIABLE | --token-file FILE] [--force]] [--name NAME] [--npx | --command COMMAND] [--json]\n\nVerify one schema-v2 policy, optionally create it from an exact-scope read-only preset, and print a credential-free portable stdio launch descriptor. Add --npx for a stable exact-version package launch instead of the current executable and entrypoint. A configuration parent must already exist as a canonical process-owned private directory. Completed setup exits 0 even when it reports non-blocking warnings; a command, policy, credential, identity, installation, or Discord verification failure exits 2.`
   }
   if (topic === "smoke") {
-    return "Usage: guildcontrol smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} smoke (--config FILE | --profile NAME) [--json]\n\nLaunch this CLI's serve entrypoint as a child, negotiate stable MCP 2026-07-28 over stdio, validate tool, resource, and prompt contracts, and call only discovery plus read-only connector status. The child receives a safe process baseline and exact secret environment values named by the selected policy. Normal configured runtimes start and shut down with the child. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments.`
   }
   if (topic === "serve") {
-    return "Usage: guildcontrol serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments."
+    return `Usage: ${CONNECTOR_CLI_COMMAND} serve (--config FILE | --profile NAME)\n\nRun the local stdio MCP server. This is also the default command. Pass --config for normal operation; the non-secret GUILDCONTROL_CONFIG_FILE selector is available for hosts that cannot supply arguments.`
   }
   if (topic === "profile") {
     return [
-      "Usage: guildcontrol profile <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} profile <action> [options]`,
       "",
       "Actions:",
       "  list [--json]",
@@ -1970,7 +1970,7 @@ function helpText(
   }
   if (topic === "preset") {
     return [
-      "Usage: guildcontrol preset <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} preset <action> [options]`,
       "",
       "Actions:",
       "  list [--json]",
@@ -1982,7 +1982,7 @@ function helpText(
   }
   if (topic === "recipe") {
     return [
-      "Usage: guildcontrol recipe <action> [options]",
+      `Usage: ${CONNECTOR_CLI_COMMAND} recipe <action> [options]`,
       "",
       "Actions:",
       "  list [--json]",
@@ -1993,10 +1993,10 @@ function helpText(
       "Review and add one bounded write workflow to an existing strict policy. Planning and application do not resolve secrets or contact Discord. Application recomputes the exact plan, rejects concurrent source changes, and preserves a recoverable backup.",
     ].join("\n")
   }
-  if (topic === "version") return "Usage: guildcontrol version\n\nPrint the package version."
+  if (topic === "version") return `Usage: ${CONNECTOR_CLI_COMMAND} version\n\nPrint the package version.`
   return [
-    `Usage: ${CONNECTOR_NAME} <command> [options]`,
-    `       ${CONNECTOR_NAME} ${STANDARD_RUNTIME_ARGUMENT} <command> [options]`,
+    `Usage: ${CONNECTOR_CLI_COMMAND} <command> [options]`,
+    `       ${CONNECTOR_CLI_COMMAND} ${STANDARD_RUNTIME_ARGUMENT} <command> [options]`,
     "",
     "The public launcher uses a memory-optimized Node profile by default. Add --standard-runtime to favor execution speed instead.",
     "",
@@ -2217,7 +2217,7 @@ function renderCliFailure(
   guidance: CliFailureGuidance,
 ): string {
   return [
-    `${CONNECTOR_NAME}: ${message}`,
+    `${CONNECTOR_CLI_COMMAND}: ${message}`,
     `Next: ${guidance.recovery.action}`,
     `See: ${guidance.recovery.reference}`,
   ].join("\n")
@@ -2915,7 +2915,7 @@ function renderConfigWrite(report: ConfigWriteReport): string {
       : []),
     renderConfigSummary(report),
     "",
-    "Next: Run guildcontrol doctor --config with the file path shown above.",
+    "Next: Run guildctl doctor --config with the file path shown above.",
   ].join("\n")
 }
 
@@ -3035,7 +3035,7 @@ function currentEntrypointLaunch(options: CliOptions): {
       }
     : {
         args: ["serve"],
-        command: CONNECTOR_NAME,
+        command: CONNECTOR_CLI_COMMAND,
       }
 }
 
@@ -3071,7 +3071,7 @@ function configSelectionEnvironment(
 }
 
 const CONFIG_SELECTION_REQUIRED_MESSAGE =
-  "Operational commands require --config FILE, --profile NAME, or GUILDCONTROL_CONFIG_FILE; create a policy with guildcontrol config init or setup --preset"
+  "Operational commands require --config FILE, --profile NAME, or GUILDCONTROL_CONFIG_FILE; create a policy with guildctl config init or setup --preset"
 
 interface RuntimeSelection {
   config: ConnectorConfig

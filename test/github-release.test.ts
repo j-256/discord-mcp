@@ -57,10 +57,10 @@ interface GitHubReleaseModule {
 
 const modulePath = pathToFileURL(resolve("scripts/github-release.mjs")).href
 const githubRelease = await import(modulePath) as GitHubReleaseModule
-const VERSION = "0.1.2"
+const VERSION = "0.2.0"
 const REVISION = "a".repeat(40)
 const OCI_DIGEST = `sha256:${"b".repeat(64)}`
-const ARCHIVE_NAME = `guildcontrol-${VERSION}.tgz`
+const ARCHIVE_NAME = `guildctl-${VERSION}.tgz`
 const BUNDLE_NAME = `guildcontrol-${VERSION}.mcpb`
 const BUNDLE_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const MCPB_DIGEST = `sha256:${sha256(BUNDLE_BYTES)}`
@@ -97,8 +97,8 @@ function validCatalog(overrides: Record<string, unknown> = {}): Record<string, u
 
 function validSbom(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    name: `guildcontrol@${VERSION}`,
-    packages: [{ name: "guildcontrol", versionInfo: VERSION }],
+    name: `guildctl@${VERSION}`,
+    packages: [{ name: "guildctl", versionInfo: VERSION }],
     spdxVersion: "SPDX-2.3",
     ...overrides,
   }
@@ -171,10 +171,10 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
   assert.match(notes, new RegExp(MCPB_DIGEST, "u"))
-  assert.match(notes, /gh release verify v0\.1\.2/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.2 guildcontrol-0\.1\.2\.tgz/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.2 guildcontrol-0\.1\.2\.mcpb/u)
-  assert.match(notes, /gh release verify-asset v0\.1\.2 release-notes\.md/u)
+  assert.match(notes, /gh release verify v0\.2\.0/u)
+  assert.match(notes, /gh release verify-asset v0\.2\.0 guildctl-0\.2\.0\.tgz/u)
+  assert.match(notes, /gh release verify-asset v0\.2\.0 guildcontrol-0\.2\.0\.mcpb/u)
+  assert.match(notes, /gh release verify-asset v0\.2\.0 release-notes\.md/u)
   assert.match(notes, /registers MCP Registry metadata only after this immutable Release/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)
@@ -261,7 +261,7 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
       }),
       label: "static requirement",
     },
-    { label: "SBOM", sbom: validSbom({ name: "other-package@0.1.2" }) },
+    { label: "SBOM", sbom: validSbom({ name: "other-package@0.2.0" }) },
   ]
   for (const [index, entry] of cases.entries()) {
     const directory = join(root, `case-${index}`)

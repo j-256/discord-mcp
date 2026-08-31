@@ -5486,14 +5486,14 @@ test("stdio launch descriptor requires one policy and forwards only its secrets"
   const result = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
     botId: BOT_ID,
-    command: "/opt/GuildControl MCP/bin/guildcontrol",
+    command: "/opt/GuildControl MCP/bin/guildctl",
     config,
     serverName: "team-discord",
   })
 
   assert.deepEqual(result, {
     args: ["serve", "--config", file],
-    command: "/opt/GuildControl MCP/bin/guildcontrol",
+    command: "/opt/GuildControl MCP/bin/guildctl",
     environment: {
       forward: [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE],
       set: {},
@@ -6190,7 +6190,7 @@ test("MCP smoke negotiates the adapter, validates risk annotations, and calls st
   assert.equal(report.transport, "in-memory")
   assert.match(report.protocolVersion, /^2025-/)
   assert.equal(report.serverName, "guildcontrol")
-  assert.equal(report.serverVersion, "0.1.2")
+  assert.equal(report.serverVersion, "0.2.0")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolCount, Object.keys(MCP_TOOL_CATALOG).length + 1)
@@ -6515,7 +6515,7 @@ test("MCP smoke negotiates the stable protocol through a minimized spawned stdio
   assert.equal(report.transport, "stdio")
   assert.equal(report.protocolVersion, "2026-07-28")
   assert.equal(report.serverName, "guildcontrol")
-  assert.equal(report.serverVersion, "0.1.2")
+  assert.equal(report.serverVersion, "0.2.0")
   assert.equal(report.applicationId, APPLICATION_ID)
   assert.equal(report.botId, BOT_ID)
   assert.equal(report.toolsets.includes("connector"), true)

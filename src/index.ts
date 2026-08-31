@@ -130,7 +130,7 @@ export type * from "./types.js"
 
 if (isMainModule(import.meta.url)) {
   process.stderr.write(
-    "[guildcontrol] The package library entrypoint does not run an MCP server. Use `guildcontrol serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
+    "[guildctl] The package library entrypoint does not run an MCP server. Use `guildctl serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
   )
   process.exitCode = 1
 }

@@ -15,7 +15,7 @@ const GITHUB_API_ORIGIN = "https://api.github.com"
 const GITHUB_API_VERSION = "2026-03-10"
 const GITHUB_REPOSITORY = "j-256/guildcontrol"
 const MCP_REGISTRY_NAME = "io.github.j-256/guildcontrol"
-const NPM_PACKAGE = "guildcontrol"
+const NPM_PACKAGE = "guildctl"
 const RELEASE_EVIDENCE_FORMAT = "guildcontrol.github-release-evidence.v2"
 const RELEASE_EVIDENCE_SCHEMA_VERSION = 2
 const RELEASE_NOTES_FILE = "release-notes.md"
@@ -60,7 +60,7 @@ function releaseTitle(version) {
 
 function npmArchiveName(version) {
   assertVersion(version)
-  return `guildcontrol-${version}.tgz`
+  return `guildctl-${version}.tgz`
 }
 
 function mcpbArchiveName(version) {

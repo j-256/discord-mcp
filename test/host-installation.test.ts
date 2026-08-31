@@ -52,7 +52,7 @@ function activationPlan(serverName = SERVER_NAME) {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildctl@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document, file: POLICY_FILE },

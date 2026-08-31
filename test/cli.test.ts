@@ -195,7 +195,7 @@ function setupReport(): SetupReport {
     installedInScopeGuildCount: 1,
     launch: {
       args: ["serve", "--config", configFile],
-      command: "guildcontrol",
+      command: "guildctl",
       environment: {
         forward: ["DISCORD_BOT_TOKEN"],
         set: {},
@@ -244,7 +244,7 @@ function smokeReport(): SmokeReport {
     resourceUris: ["discord://connector/safety"],
     schemaVersion: OPERATOR_REPORT_SCHEMA_VERSION,
     serverName: "guildcontrol",
-    serverVersion: "0.1.2",
+    serverVersion: "0.2.0",
     status: "ok",
     toolCount: 3,
     toolsets: ["connector", "messages"],
@@ -318,7 +318,7 @@ function catalogReport(): DiscordCatalogCheckReport {
     safetyResourceDigest: `sha256:${"b".repeat(64)}`,
     schemaVersion: 1,
     serverName: "guildcontrol",
-    serverVersion: "0.1.2",
+    serverVersion: "0.2.0",
     status: "ok",
     toolCount: 3,
     toolAccessManifest: createMcpToolAccessManifest(
@@ -968,7 +968,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "--name",
       "team-discord",
       "--command",
-      "/usr/local/bin/guildcontrol",
+      "/usr/local/bin/guildctl",
     ]),
     /requires --config FILE or --profile NAME/,
   )
@@ -1019,7 +1019,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     "--name",
     "team-discord",
     "--command",
-    "/usr/local/bin/guildcontrol",
+    "/usr/local/bin/guildctl",
     "--adapter",
     "vscode",
     "--inspect-host-file",
@@ -1035,7 +1035,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     htmlFile: "./host-activation.html",
     inspectHostFile: "./mcp.json",
     json: true,
-    launcherCommand: "/usr/local/bin/guildcontrol",
+    launcherCommand: "/usr/local/bin/guildctl",
     serverName: "team-discord",
   })
   assert.deepEqual(parseCliArguments([
@@ -1323,7 +1323,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "/configuration/discord.json",
       "--npx",
       "--command",
-      "/usr/local/bin/guildcontrol",
+      "/usr/local/bin/guildctl",
     ]),
     /--npx and --command are mutually exclusive/,
   )
@@ -1348,7 +1348,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
       "support-bot",
       "--npx",
       "--command",
-      "/usr/local/bin/guildcontrol",
+      "/usr/local/bin/guildctl",
     ]),
     /--npx and --command are mutually exclusive/,
   )
@@ -2413,7 +2413,7 @@ test("CLI keeps JSON usage and profile failures machine-readable", async () => {
   const usage = JSON.parse(usageOutput.value())
   assert.equal(usage.error.category, "usage")
   assert.equal(usage.error.recovery.retry, "after-correction")
-  assert.match(usage.error.recovery.action, /guildcontrol help catalog/)
+  assert.match(usage.error.recovery.action, /guildctl help catalog/)
   assert.equal(usageError.value(), "")
 
   assert.equal(await runCli({
@@ -2493,7 +2493,7 @@ test("CLI preserves long-running startup failure status with recovery text", asy
 
   assert.equal(exitCode, 1)
   assert.match(stderr.value(), /Operator command failed/)
-  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
+  assert.match(stderr.value(), /Next: Run guildctl doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
 })
 
@@ -2635,7 +2635,7 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
       "--config",
       CONFIG_FILE,
       "--command",
-      "/usr/local/bin/guildcontrol",
+      "/usr/local/bin/guildctl",
       "--adapter",
       "vscode",
       "--html",
@@ -2648,7 +2648,7 @@ test("CLI renders custom-command host activation and private-guide boundaries", 
 
   assert.equal(exitCode, 0)
   assert.match(stdout.value(), /GuildControl MCP host activation: ok/)
-  assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/guildcontrol"/)
+  assert.match(stdout.value(), /"command": "\/usr\/local\/bin\/guildctl"/)
   assert.match(stdout.value(), /Read-only host verification request:/)
   assert.match(stdout.value(), /Verified host adapters:/)
   assert.match(stdout.value(), /GuildControl MCP host adapter: Visual Studio Code \(vscode\)/)
@@ -2868,7 +2868,7 @@ test("CLI reports host parse failures without enumerating ambient credentials", 
   const report = JSON.parse(stdout.value())
   assert.equal(report.error.category, "usage")
   assert.equal(report.error.message, "Invalid command usage")
-  assert.match(report.error.recovery.action, /guildcontrol help host/)
+  assert.match(report.error.recovery.action, /guildctl help host/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
 
@@ -2884,7 +2884,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
       "--name",
       "team-discord",
       "--command",
-      "/bin/guildcontrol",
+      "/bin/guildctl",
     ],
     dependencies: dependencies({
       async prepareSetup(options) {
@@ -2902,7 +2902,7 @@ test("CLI redacts setup output and forwards setup options", async () => {
   assert.equal(exitCode, 0)
   assert.deepEqual(received, {
     args: ["serve"],
-    command: "/bin/guildcontrol",
+    command: "/bin/guildctl",
     configFile: CONFIG_FILE,
     environment: { DISCORD_BOT_TOKEN: `  ${TOKEN}  ` },
     overwriteConfig: false,
@@ -3353,7 +3353,7 @@ test("CLI plans and applies an exact recipe without resolving its credential", a
       "--confirm",
       "channel-publisher",
     ],
-    command: "guildcontrol",
+    command: "guildctl",
   })
   assert.match(textOutput.value(), /Configuration written: no/)
   assert.match(textOutput.value(), /No secret value was read and Discord was not contacted/)
@@ -3822,7 +3822,7 @@ test("CLI plans and applies one exact candidate configuration without resolving 
   assert.equal(staleError.value(), "")
   assert.equal(stale.error.category, "configuration")
   assert.match(stale.error.message, /stale or does not match/)
-  assert.match(stale.error.recovery.action, /Rerun guildcontrol config plan/)
+  assert.match(stale.error.recovery.action, /Rerun guildctl config plan/)
   assert.equal(stale.error.recovery.retry, "after-correction")
   assert.doesNotMatch(staleOutput.value(), new RegExp(TOKEN))
 })
@@ -4032,7 +4032,7 @@ test("CLI returns structured migration selection failures", async () => {
   const report = JSON.parse(stdout.value())
   assert.equal(report.status, "error")
   assert.equal(report.error.message, "Invalid command usage")
-  assert.match(report.error.recovery.action, /guildcontrol help migrate/)
+  assert.match(report.error.recovery.action, /guildctl help migrate/)
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
   assert.equal(stderr.value(), "")
 })
@@ -4092,7 +4092,7 @@ test("CLI renders contextual action help without consulting dependencies or envi
 
     assert.equal(exitCode, 0)
     assert.equal(
-      stdout.value().startsWith(`Usage: guildcontrol ${topic} ${action}`),
+      stdout.value().startsWith(`Usage: guildctl ${topic} ${action}`),
       true,
     )
     assert.equal(stderr.value(), "")
@@ -4107,7 +4107,7 @@ test("CLI renders contextual action help without consulting dependencies or envi
       environment: forbiddenEnvironment,
       stdout: stdout.stream,
     }), 0)
-    assert.match(stdout.value(), /^Usage: guildcontrol/u)
+    assert.match(stdout.value(), /^Usage: guildctl/u)
   }
 
   const canonical = outputStream()
@@ -4201,7 +4201,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /GuildControl MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
-  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.1\.2/)
+  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.2\.0/)
   assert.match(smokeOutput.value(), /Write-capable tools: delete_messages, send_message/)
   assert.match(smokeOutput.value(), /Destructive subset: delete_messages/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
@@ -4245,7 +4245,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
-  assert.match(versionOutput.value(), /0\.1\.2/)
+  assert.match(versionOutput.value(), /0\.2\.0/)
 })
 
 test("CLI converts unknown failures into bounded diagnostics", async () => {
@@ -4262,8 +4262,8 @@ test("CLI converts unknown failures into bounded diagnostics", async () => {
   })
 
   assert.equal(exitCode, 2)
-  assert.match(stderr.value(), /guildcontrol: Operator command failed/)
-  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
+  assert.match(stderr.value(), /guildctl: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run guildctl doctor/)
   assert.match(stderr.value(), /See: docs\/reference\.md#verification/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })
@@ -4282,7 +4282,7 @@ test("CLI redacts a custom profile credential when activation fails", async () =
   })
 
   assert.equal(exitCode, 2)
-  assert.match(stderr.value(), /guildcontrol: Operator command failed/)
-  assert.match(stderr.value(), /Next: Run guildcontrol doctor/)
+  assert.match(stderr.value(), /guildctl: Operator command failed/)
+  assert.match(stderr.value(), /Next: Run guildctl doctor/)
   assert.doesNotMatch(stderr.value(), new RegExp(TOKEN))
 })

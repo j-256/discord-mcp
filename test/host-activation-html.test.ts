@@ -51,7 +51,7 @@ function activationPlan(command = "npx"): HostActivationPlan {
   })
   const launch = createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildctl@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command,
     config: { document, file: CONFIG_FILE },

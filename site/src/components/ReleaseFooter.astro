@@ -1,14 +1,11 @@
 ---
 import Default from "@astrojs/starlight/components/Footer.astro"
-import { readFile } from "node:fs/promises"
-
-const packageFile = new URL("../../../package.json", import.meta.url)
-const packageJson = JSON.parse(await readFile(packageFile, "utf8")) as { version: string }
+import packageJson from "../../../package.json"
 ---
 
 <Default />
 <p class="release-context">
-  Documentation generated for <code>guildcontrol@{packageJson.version}</code>. Canonical source and edit history remain in the public repository. GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
+  Documentation generated for <code>guildctl@{packageJson.version}</code>. Canonical source and edit history remain in the public repository. GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to.
 </p>
 
 <style>

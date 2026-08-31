@@ -39,7 +39,7 @@ function launch() {
   const policy = document()
   return createStdioLaunchDescriptor({
     applicationId: APPLICATION_ID,
-    args: ["--yes", `guildcontrol@${CONNECTOR_VERSION}`, "serve"],
+    args: ["--yes", `guildctl@${CONNECTOR_VERSION}`, "serve"],
     botId: BOT_ID,
     command: "npx",
     config: { document: policy, file: CONFIG_FILE },

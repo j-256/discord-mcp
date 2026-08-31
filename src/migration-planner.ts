@@ -421,8 +421,8 @@ function recipeSteps(recipes: readonly ConfigRecipeName[]): MigrationPlanStep[] 
     const option = `${requirement.option} ${placeholder}`
     return [{
       commands: [
-        `guildcontrol recipe plan ${recipe} ${TARGET_CONFIG_FILE} ${option}`,
-        `guildcontrol recipe apply ${recipe} ${TARGET_CONFIG_FILE} ${option} --plan-digest ${PLACEHOLDER_PLAN_DIGEST} --confirm ${recipe}`,
+        `guildctl recipe plan ${recipe} ${TARGET_CONFIG_FILE} ${option}`,
+        `guildctl recipe apply ${recipe} ${TARGET_CONFIG_FILE} ${option} --plan-digest ${PLACEHOLDER_PLAN_DIGEST} --confirm ${recipe}`,
       ],
       completion: `The ${recipe} plan was reviewed, its fresh digest was used once, and only the intended exact scope was added.`,
       id: `recipe-${recipe}`,
@@ -440,13 +440,13 @@ function planSteps(
     : `--guild-id ${PLACEHOLDER_GUILD_ID}`
   return Object.freeze([
     {
-      commands: ["guildcontrol catalog --check"],
+      commands: ["guildctl catalog --check"],
       completion: "The installed target contract and digest were inspected without credentials or execution.",
       id: "inspect-target",
       title: "Inspect the target contract",
     },
     {
-      commands: [`guildcontrol setup --config ${TARGET_CONFIG_FILE} --preset ${preset} ${scopeArguments} --token-env ${TARGET_CREDENTIAL_VARIABLE}`],
+      commands: [`guildctl setup --config ${TARGET_CONFIG_FILE} --preset ${preset} ${scopeArguments} --token-env ${TARGET_CREDENTIAL_VARIABLE}`],
       completion: "A new strict schema-v2 policy contains only the selected exact read scope and a non-secret credential reference.",
       id: "create-baseline",
       title: "Create a least-privilege baseline",
@@ -454,23 +454,23 @@ function planSteps(
     ...recipeSteps(recipes),
     {
       commands: [
-        `guildcontrol config workbench ${TARGET_CONFIG_FILE} --html ./guildcontrol-policy-workbench.html`,
+        `guildctl config workbench ${TARGET_CONFIG_FILE} --html ./guildcontrol-policy-workbench.html`,
       ],
       completion: "Any outcome not covered by a named recipe was reviewed in the offline workbench and added with its exact capability and scope only.",
       id: "review-additional-authority",
       title: "Review any additional authority",
     },
     {
-      commands: [`guildcontrol host --config ${TARGET_CONFIG_FILE} --html ${TARGET_HOST_GUIDE_FILE}`],
+      commands: [`guildctl host --config ${TARGET_CONFIG_FILE} --html ${TARGET_HOST_GUIDE_FILE}`],
       completion: "The selected MCP host adapter, launch descriptor, and first read request were reviewed without changing host settings.",
       id: "plan-host-activation",
       title: "Generate host activation guidance",
     },
     {
       commands: [
-        `guildcontrol doctor --config ${TARGET_CONFIG_FILE}`,
-        `guildcontrol doctor --config ${TARGET_CONFIG_FILE} --online`,
-        `guildcontrol smoke --config ${TARGET_CONFIG_FILE}`,
+        `guildctl doctor --config ${TARGET_CONFIG_FILE}`,
+        `guildctl doctor --config ${TARGET_CONFIG_FILE} --online`,
+        `guildctl smoke --config ${TARGET_CONFIG_FILE}`,
       ],
       completion: "Offline policy checks, live identity and scope checks, and a real stdio MCP handshake all succeeded.",
       id: "verify-target",

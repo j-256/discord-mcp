@@ -60,7 +60,7 @@ test("library entrypoint direct execution fails with exact CLI guidance", async 
   assert.equal(stdout, "")
   assert.equal(
     stderr,
-    "[guildcontrol] The package library entrypoint does not run an MCP server. Use `guildcontrol serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
+    "[guildctl] The package library entrypoint does not run an MCP server. Use `guildctl serve --config FILE` or `node dist/bin.js serve --config FILE`.\n",
   )
   assert.doesNotMatch(stderr, new RegExp(privateToken))
 })

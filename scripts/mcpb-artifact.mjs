@@ -204,7 +204,7 @@ function validateSbom(document, packageJson, reproducibleBuild) {
   assert.deepEqual(document.creationInfo?.creators, ["Tool: guildcontrol-sbom/1"])
   invariant(
     typeof document.documentNamespace === "string"
-      && /^http:\/\/spdx\.org\/spdxdocs\/guildcontrol-[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{64}$/.test(document.documentNamespace),
+      && /^http:\/\/spdx\.org\/spdxdocs\/guildctl-[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{64}$/.test(document.documentNamespace),
     "MCPB SBOM namespace is invalid",
   )
   invariant(Array.isArray(document.packages) && document.packages.length > 1, "MCPB SBOM package inventory is missing")
