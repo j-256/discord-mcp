@@ -197,16 +197,18 @@ The guide presents typed launch data similar to this shape:
 }
 ```
 
-The same activation digest binds four deterministic adapters shown together in the private guide:
+The same activation digest binds six deterministic adapters shown together in the private guide:
 
 The canonical `environment.forward` field remains the source of every adapter's environment-reference list; adapters never discover or invent another credential name.
 
 | Adapter ID | Copyable artifact | Credential strategy |
 | --- | --- | --- |
-| `mcp-json` | Common top-level `mcpServers` document | The host starts from protected process state that already has the named variable; the portable JSON omits non-portable secret syntax |
+| `claude-code` | Project `.mcp.json` entry for Claude Code | Exact `${DISCORD_BOT_TOKEN}` reference expanded by Claude Code from protected process state |
+| `codex` | User or trusted-project `config.toml` table for Codex | Exact `env_vars = ["DISCORD_BOT_TOKEN"]` forwarding plus required-server, write-approval, and timeout controls |
 | `cursor` | Cursor `mcp.json` plus a reviewable private install URI | Exact `${env:DISCORD_BOT_TOKEN}` reference resolved at launch |
 | `vscode` | VS Code `mcp.json` with a password input | Host-protected `${input:guildcontrol-credential-1}` value; sandboxing stays disabled because VS Code auto-approves sandboxed MCP tools |
 | `gemini-extension` | Complete policy-specific `gemini-extension.json` | `sensitive: true` extension setting stored through Gemini CLI's system-keychain path and passed by exact environment name |
+| `mcp-json` | Common top-level `mcpServers` document | The host starts from protected process state that already has the named variable; the portable JSON omits non-portable secret syntax |
 
 For a terminal-only handoff, append one adapter ID to human output:
 
@@ -214,9 +216,9 @@ For a terminal-only handoff, append one adapter ID to human output:
 npx --yes guildctl@0.2.0 host --npx --config ./guildcontrol.json --adapter vscode
 ```
 
-`--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify every adapter digest against the same activation digest. Generation never writes or discovers a host configuration. A file-backed credential policy causes every adapter to omit environment, input, and extension-setting secret fields because the exact policy already names the protected file.
+`--json` always includes the complete `adapterCatalog`, regardless of `--adapter`, so automation can verify every adapter digest against the same activation digest. Generation never writes or discovers a host configuration. A file-backed credential policy causes every adapter to omit environment forwarding, input, and extension-setting fields because the exact policy already names the protected file.
 
-You may manually merge only the generated server and input records, or use the reviewed installer for a static JSON destination. Choose the adapter and exact host path yourself; the connector never searches for one. The parent directory must already exist as a canonical process-owned directory that is not writable by a group or the world. An existing file must be strict bounded JSON with private ownership and mode on POSIX:
+You may manually merge only the generated server and input records, or use the reviewed installer for a static JSON adapter. Codex TOML remains an exact manual projection because the installer deliberately does not parse or rewrite TOML. Choose the adapter and exact host path yourself; the connector never searches for one. The parent directory must already exist as a canonical process-owned directory that is not writable by a group or the world. An existing JSON file must be strict and bounded with private ownership and mode on POSIX:
 
 ```sh
 npx --yes guildctl@0.2.0 host plan \
@@ -240,9 +242,9 @@ npx --yes guildctl@0.2.0 host apply \
   --confirm HOST_SERVER_NAME
 ```
 
-Shared MCP JSON, Cursor, and VS Code files preserve every unrelated top-level value and server entry; VS Code also preserves unrelated inputs and refuses duplicate generated input IDs. A Gemini extension is a dedicated manifest, so its plan states that the complete document will be replaced. A changed existing file receives an owner-mode sibling backup before atomic publication. Apply rereads the exact output and adapter projection, restores the original on failed verification only while the published binding and bytes remain exact, and returns the backup path for recovery. If another writer changes the destination during verification, apply preserves that newer state and reports uncertainty instead of overwriting it. An already exact destination performs no write and creates no backup. External writers that ignore the sibling lock can still race the final publication window, so stop the host's configuration editor while applying. Portable owner modes and directory synchronization are platform-dependent. If interruption leaves a lock, first establish that no apply is running, preserve every backup, move only that target's exact stale lock or temporary artifact through a recoverable file workflow, and create a new plan.
+Shared Claude Code, common MCP JSON, Cursor, and VS Code files preserve every unrelated top-level value and server entry; VS Code also preserves unrelated inputs and refuses duplicate generated input IDs. A Gemini extension is a dedicated manifest, so its plan states that the complete document will be replaced. A changed existing file receives an owner-mode sibling backup before atomic publication. Apply rereads the exact output and adapter projection, restores the original on failed verification only while the published binding and bytes remain exact, and returns the backup path for recovery. If another writer changes the destination during verification, apply preserves that newer state and reports uncertainty instead of overwriting it. An already exact destination performs no write and creates no backup. External writers that ignore the sibling lock can still race the final publication window, so stop the host's configuration editor while applying. Portable owner modes and directory synchronization are platform-dependent. If interruption leaves a lock, first establish that no apply is running, preserve every backup, move only that target's exact stale lock or temporary artifact through a recoverable file workflow, and create a new plan.
 
-After manual merge or reviewed apply, inspect the destination directly. Replace the adapter ID and path with the host file you used; on POSIX systems make that file owner-private first:
+After manual merge or reviewed apply of a JSON adapter, inspect the destination directly. Replace the adapter ID and path with the host file you used; on POSIX systems make that file owner-private first. For Codex TOML, review the exact generated table and use Codex's own configuration diagnostics:
 
 ```sh
 chmod 600 /absolute/path/to/mcp.json

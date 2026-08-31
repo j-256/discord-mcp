@@ -1915,11 +1915,11 @@ function helpText(
       `       ${CONNECTOR_CLI_COMMAND} host plan (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] [--json]`,
       `       ${CONNECTOR_CLI_COMMAND} host apply (--config FILE | --profile NAME) --adapter ID --host-file FILE [--name NAME] [--npx | --command COMMAND] --plan-digest DIGEST --confirm SERVER_NAME [--json]`,
       "",
-      `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact JSON and guidance to human output; JSON output always includes the complete adapter catalog.`,
+      `Generate one exact credential-free local stdio activation plus verified adapters for ${HOST_ADAPTER_IDS.join(", ")}. The default launcher uses this installed entrypoint; --npx selects the exact published package version and --command selects an installed executable. --adapter appends one adapter's exact configuration and guidance to human output; JSON output always includes the complete adapter catalog.`,
       "",
-      "--inspect-host-file safely reads one explicitly selected bounded private JSON file, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. Optional HTML exclusively creates a mode-0600 interactive guide. Generation and inspection contact no network or Discord endpoint, start no process, discover no host, and change no policy or host configuration.",
+      "--inspect-host-file safely reads one explicitly selected bounded private JSON file for a JSON adapter, compares only that adapter's owned projection, returns fixed path- and value-free drift evidence, and never edits the file. Optional HTML exclusively creates a mode-0600 interactive guide. Generation and inspection contact no network or Discord endpoint, start no process, discover no host, and change no policy or host configuration.",
       "",
-      "host plan reads only the explicit static JSON target and returns a metadata-fresh plan without returning its path, values, unrelated state, or a stable hash of private bytes. host apply requires the same activation and adapter, exact plan digest, and exact server-name confirmation. It preserves unrelated shared JSON records, rejects ambiguous structures, keeps an owner-mode recovery backup for replacements, publishes atomically, rereads exactly, and rolls back on failed verification. It does not discover paths, create directories, resolve credentials, contact Discord or another network endpoint, start a process, or change connector policy. A successful file change still does not prove the host loaded the file or can start the connector.",
+      "host plan reads only the explicit static JSON target for a JSON adapter and returns a metadata-fresh plan without returning its path, values, unrelated state, or a stable hash of private bytes. host apply requires the same activation and adapter, exact plan digest, and exact server-name confirmation. It preserves unrelated shared JSON records, rejects ambiguous structures, keeps an owner-mode recovery backup for replacements, publishes atomically, rereads exactly, and rolls back on failed verification. TOML adapters remain reviewable manual projections. These commands do not discover paths, create directories, resolve credentials, contact Discord or another network endpoint, start a process, or change connector policy. A successful file change still does not prove the host loaded the file or can start the connector.",
       "",
       "Exit status is 0 on generation, exact inspection, a ready plan, or successful apply; 1 on inspection drift; and 2 on command failure.",
     ].join("\n")
@@ -2364,7 +2364,7 @@ function renderHostAdapter(adapter: HostAdapter): string {
           adapter.installUri,
         ]
       : []),
-    "Exact JSON:",
+    `Exact ${adapter.format.toUpperCase()}:`,
     adapter.content.trimEnd(),
     "Instructions:",
     ...adapter.instructions.map((instruction) => `- ${instruction}`),

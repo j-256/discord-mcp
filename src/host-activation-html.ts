@@ -143,9 +143,10 @@ function textList(values: readonly string[]): string {
 
 function renderHostAdapter(adapter: HostAdapter): string {
   const contentId = `adapter-content-${adapter.id}`
-  const contentLabel = adapter.id === "mcp-json"
+  const formatLabel = adapter.format.toUpperCase()
+  const contentLabel = adapter.title.toUpperCase().endsWith(formatLabel)
     ? adapter.title
-    : `${adapter.title} JSON`
+    : `${adapter.title} ${formatLabel}`
   const uriId = `adapter-uri-${adapter.id}`
   return `<article class="adapter" role="listitem" aria-labelledby="adapter-title-${adapter.id}">
     <div class="adapter-head"><div><p class="adapter-kicker">${escapeHtml(adapter.id)}</p><h3 id="adapter-title-${adapter.id}">${escapeHtml(adapter.title)}</h3></div><div class="tokens"><code>${escapeHtml(adapter.secret.strategy)}</code><code>${escapeHtml(adapter.hostServerName)}</code></div></div>

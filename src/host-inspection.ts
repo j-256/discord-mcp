@@ -89,7 +89,12 @@ interface ComparisonResult {
 }
 
 const HOST_INSPECTION_DIGEST_DOMAIN = "guildcontrol-host-inspection-v1\0"
-const SHARED_ADAPTER_IDS = new Set<HostAdapterId>(["cursor", "mcp-json", "vscode"])
+const SHARED_ADAPTER_IDS = new Set<HostAdapterId>([
+  "claude-code",
+  "cursor",
+  "mcp-json",
+  "vscode",
+])
 const STANDARD_SERVER_KEYS = new Set(["args", "command", "env", "type"])
 const HOST_INSPECTION_LIMITATIONS = Object.freeze([
   "A match proves one stable static file projection, not that the host loaded it or retained it unchanged.",
@@ -252,6 +257,11 @@ export function inspectHostAdapterFile(
   file: string,
 ): HostInspectionReport {
   const adapter = findHostAdapter(createHostAdapterCatalog(plan), adapterId)
+  if (adapter.format !== "json") {
+    throw new ConfigurationError(
+      `Host adapter ${adapter.id} renders ${adapter.format.toUpperCase()} and cannot be inspected as JSON`,
+    )
+  }
   const source = readHostJsonSnapshot(file)
   if (source.state !== "present") {
     throw new ConfigurationError("Host configuration file was not found")

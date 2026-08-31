@@ -1374,7 +1374,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   )
   assert.throws(
     () => parseCliArguments(["host", "--profile", "support-bot", "--adapter", "unknown"]),
-    /must be one of mcp-json, cursor, vscode, gemini-extension/,
+    /must be one of claude-code, codex, cursor, vscode, gemini-extension, mcp-json/,
   )
   assert.throws(
     () => parseCliArguments([
@@ -2567,7 +2567,10 @@ test("CLI generates an exact host activation plan without reading ambient creden
     HOST_ADAPTER_IDS,
   )
   assert.match(report.adapterCatalog.adapters[0].adapterDigest, /^sha256:[a-f0-9]{64}$/)
-  assert.match(report.adapterCatalog.adapters[2].content, /\$\{input:guildcontrol-credential-1\}/)
+  assert.match(
+    report.adapterCatalog.adapters.find((adapter: { id: string }) => adapter.id === "vscode").content,
+    /\$\{input:guildcontrol-credential-1\}/,
+  )
   assert.match(report.verification.prompt, new RegExp(APPLICATION_ID))
   assert.doesNotMatch(stdout.value(), new RegExp(TOKEN))
 })
@@ -4231,7 +4234,8 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(hostHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(hostHelpOutput.value(), /--adapter ID/)
   assert.match(hostHelpOutput.value(), /--inspect-host-file FILE/)
-  assert.match(hostHelpOutput.value(), /mcp-json, cursor, vscode, gemini-extension/)
+  assert.match(hostHelpOutput.value(), /claude-code, codex, cursor, vscode, gemini-extension, mcp-json/)
+  assert.match(hostHelpOutput.value(), /TOML adapters remain reviewable manual projections/)
   assert.match(hostHelpOutput.value(), /mode-0600 interactive guide/)
   assert.match(hostHelpOutput.value(), /bounded private JSON file/)
   assert.match(hostHelpOutput.value(), /without returning its path, values, unrelated state, or a stable hash/)
