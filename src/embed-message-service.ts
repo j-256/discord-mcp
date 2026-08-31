@@ -48,6 +48,8 @@ import { InteractionLimiter } from "./interaction-limiter.js"
 import {
   discordAllowedMentions,
   discordMentionedUserIds,
+  discordReviewedNotificationAuthorization,
+  type DiscordNotificationAuthorization,
 } from "./message-safety.js"
 import { discordMessageUrl } from "./normalize.js"
 import {
@@ -209,6 +211,7 @@ export interface EmbedMessagePlan {
     name: string
   }
   messageContentIntent: "enabled"
+  notificationAuthorization: DiscordNotificationAuthorization
   notificationUserIds: string[]
   notifyReplyAuthor: boolean
   operationKeyHash: string
@@ -318,6 +321,7 @@ interface EmbedMessageState {
   current: ExistingEmbedMessage | null
   guild: DiscordGuild
   guildId: string
+  notificationAuthorization: DiscordNotificationAuthorization
   parent: DiscordChannel | null
   permission: BotChannelPermissionResult & { confidence: "complete" }
   reply: DiscordMessage | null
@@ -1268,7 +1272,6 @@ export class EmbedMessageService {
       channel,
       stateOptions.permissionMode,
     )
-    this.#policy.assertNotificationUsers(request.notifyUserIds)
     const reply = rawReply === null
       ? null
       : exactReply(
@@ -1277,9 +1280,11 @@ export class EmbedMessageService {
           guildId,
           request.replyToMessageId as string,
         )
-    if (reply && request.notifyReplyAuthor) {
-      this.#policy.assertNotificationUsers([reply.author.id])
-    }
+    const notificationAuthorization = discordReviewedNotificationAuthorization(
+      request.notifyUserIds,
+      this.#policy,
+      reply && request.notifyReplyAuthor ? reply.author.id : undefined,
+    )
     const current = rawCurrent === null
       ? null
       : exactExistingMessage(
@@ -1295,6 +1300,7 @@ export class EmbedMessageService {
       current,
       guild,
       guildId,
+      notificationAuthorization,
       parent,
       permission,
       reply,
@@ -1362,6 +1368,7 @@ export class EmbedMessageService {
         ownerId: state.guild.owner_id,
       },
       messageContentIntent: "enabled",
+      notificationAuthorization: state.notificationAuthorization,
       parent: state.parent === null ? null : channelSnapshot(state.parent),
       permission,
       privacy,
@@ -1417,6 +1424,7 @@ export class EmbedMessageService {
       digest,
       guild: { id: state.guild.id, name: state.guild.name },
       messageContentIntent: "enabled",
+      notificationAuthorization: state.notificationAuthorization,
       notificationUserIds: request.notifyUserIds,
       notifyReplyAuthor: request.notifyReplyAuthor,
       operationKeyHash: request.operationKeyHash,

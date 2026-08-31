@@ -118,8 +118,10 @@ function request(filePath: string, overrides: Partial<AttachmentMessageRequest> 
 function policy(root: string, options: {
   channels?: readonly string[]
   enabled?: boolean
+  mentionUserIds?: readonly string[]
   permissions?: bigint
   readChannels?: readonly string[]
+  userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}) {
   const permissions = options.permissions
     ?? (
@@ -144,8 +146,9 @@ function policy(root: string, options: {
       interactionChannelIds: new Set(),
       interactionMaxWritesPerMinute: 10,
       interactionMinWriteIntervalMs: 0,
-      mentionUserIds: new Set([REPLY_AUTHOR_ID]),
+      mentionUserIds: new Set(options.mentionUserIds ?? [REPLY_AUTHOR_ID]),
       protectedUserIds: new Set(),
+      userMentionMode: options.userMentionMode ?? "allowlist",
     }),
     roles: [role(GUILD_ID, 0n), role(BOT_ROLE_ID, permissions)],
   }
@@ -366,6 +369,40 @@ test("attachment message normalization and plan bind exact local and Discord evi
     assert.equal(serialized.includes(OPERATION_KEY), false)
     assert.equal(serialized.includes(FILE_CONTENT), false)
     assert.equal(serialized.includes("contentDigest"), false)
+  } finally {
+    await current.cleanup()
+  }
+})
+
+test("attachment plans authorize unlisted exact notifications only through reviewed mode", async () => {
+  const current = await fixture({
+    policyOptions: {
+      mentionUserIds: [],
+      userMentionMode: "reviewed",
+    },
+  })
+  try {
+    const requested = request(current.filePath)
+    const plan = await current.service.plan(BOT_ID, requested)
+    const result = await current.service.execute(BOT_ID, requested, plan.digest)
+
+    assert.equal(result.status, "completed")
+    assert.deepEqual(plan.notificationAuthorization, {
+      replyAuthor: {
+        authorization: "reviewed",
+        userId: REPLY_AUTHOR_ID,
+      },
+      reviewRequired: true,
+      userMentions: {
+        allowlistedUserIds: [],
+        authorization: "reviewed",
+        reviewedUserIds: [REPLY_AUTHOR_ID],
+      },
+    })
+    assert.deepEqual(current.lastInput?.allowedMentions, {
+      replied_user: true,
+      users: [REPLY_AUTHOR_ID],
+    })
   } finally {
     await current.cleanup()
   }

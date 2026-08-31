@@ -31,6 +31,8 @@ import {
   assertDiscordMessageContent,
   canonicalDiscordNotificationUserIds,
   discordAllowedMentions,
+  discordReviewedNotificationAuthorization,
+  type DiscordNotificationAuthorization,
 } from "./message-safety.js"
 import { discordMessageUrl } from "./normalize.js"
 import {
@@ -105,6 +107,7 @@ export interface ForumPostPlan {
     name: string
     ownerId: string
   }
+  notificationAuthorization: DiscordNotificationAuthorization
   operationKeyHash: string
   parent: {
     availableTagCount: number
@@ -189,6 +192,7 @@ interface ForumPostState {
   guild: DiscordGuild
   guildId: string
   member: DiscordGuildMember
+  notificationAuthorization: DiscordNotificationAuthorization
   parent: DiscordChannel
   permission: BotChannelPermissionResult
   roles: DiscordRole[]
@@ -946,11 +950,15 @@ export class ForumPostService {
       roles,
     })
     assertPermission(permission, selectedTags.some((tag) => tag.moderated))
-    this.#policy.assertNotificationUsers(request.notifyUserIds)
+    const notificationAuthorization = discordReviewedNotificationAuthorization(
+      request.notifyUserIds,
+      this.#policy,
+    )
     return {
       guild,
       guildId,
       member,
+      notificationAuthorization,
       parent,
       permission,
       roles,
@@ -978,6 +986,7 @@ export class ForumPostService {
         roles: [...state.member.roles].sort(),
         userId: state.member.user?.id ?? null,
       },
+      notificationAuthorization: state.notificationAuthorization,
       parent: forumSnapshot(state.parent),
       permission: {
         administrator: state.permission.administrator,
@@ -1009,6 +1018,7 @@ export class ForumPostService {
         name: state.guild.name,
         ownerId: state.guild.owner_id as string,
       },
+      notificationAuthorization: state.notificationAuthorization,
       operationKeyHash: request.operationKeyHash,
       parent: {
         availableTagCount: (state.parent.available_tags as DiscordForumTag[]).length,

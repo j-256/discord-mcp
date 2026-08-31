@@ -16,6 +16,7 @@ import {
   InteractionConflictError,
   InteractionExecutionError,
   InteractionIdentityError,
+  InteractionNotificationPlanChangedError,
   PolicyError,
 } from "../src/errors.js"
 import {
@@ -138,6 +139,7 @@ function ownReactionAggregate(reaction: string) {
 function policy(options: {
   interactionChannelIds?: readonly string[]
   mentionUserIds?: readonly string[]
+  userMentionMode?: "allowlist" | "disabled" | "reviewed"
 } = {}): ScopePolicy {
   return new ScopePolicy({
     adminGuildIds: new Set(),
@@ -152,6 +154,7 @@ function policy(options: {
     interactionMinWriteIntervalMs: 0,
     mentionUserIds: new Set(options.mentionUserIds || []),
     protectedUserIds: new Set(),
+    userMentionMode: options.userMentionMode ?? "allowlist",
   })
 }
 
@@ -707,6 +710,106 @@ test("send rejects unconfigured, invisible, and detached notification requests b
     /requires a reply target/,
   )
   assert.equal(configured.calls.create.length, 0)
+})
+
+test("reviewed notification mode keeps direct sends strict and binds mixed recipients plus reply author", async () => {
+  const configured = fixture({
+    interactionPolicy: policy({
+      mentionUserIds: [NOTIFY_USER_ID],
+      userMentionMode: "reviewed",
+    }),
+  })
+  const request = {
+    channelId: CHANNEL_ID,
+    content: `Attention <@${NOTIFY_USER_ID}> and <@${MEMBER_ID}>; suppressed <@${OTHER_CHANNEL_ID}> @everyone <@&${GUILD_ID}>`,
+    idempotencyKey: IDEMPOTENCY_KEY,
+    notifyReplyAuthor: true,
+    notifyUserIds: [NOTIFY_USER_ID, MEMBER_ID],
+    replyToMessageId: REPLY_MESSAGE_ID,
+  }
+
+  await assert.rejects(
+    () => configured.service.sendMessage(BOT_ID, request),
+    /requires signed interactive notification review/,
+  )
+  const plan = await configured.service.planSendMessageNotifications(BOT_ID, request)
+
+  assert.equal(plan.reviewRequired, true)
+  assert.deepEqual(plan.notifications.userMentions, {
+    allowlistedUserIds: [NOTIFY_USER_ID],
+    authorization: "reviewed",
+    reviewedUserIds: [MEMBER_ID],
+  })
+  assert.deepEqual(plan.notifications.replyAuthor, {
+    authorId: MEMBER_ID,
+    authorization: "reviewed",
+  })
+  assert.deepEqual(plan.notifications.suppressedUserIds, [OTHER_CHANNEL_ID])
+
+  await configured.service.executeReviewedSendMessage(BOT_ID, request, plan.digest)
+
+  assert.deepEqual(configured.calls.messageReads, [REPLY_MESSAGE_ID, REPLY_MESSAGE_ID])
+  assert.deepEqual(configured.calls.create[0]?.allowedMentions, {
+    replied_user: true,
+    users: [MEMBER_ID, NOTIFY_USER_ID],
+  })
+})
+
+test("reviewed notification plans fail closed when content, target, or recipients change", async () => {
+  const reviewedPolicy = policy({
+    interactionChannelIds: [CHANNEL_ID, OTHER_CHANNEL_ID],
+    userMentionMode: "reviewed",
+  })
+  const original = {
+    channelId: CHANNEL_ID,
+    content: `Hello <@${MEMBER_ID}>`,
+    idempotencyKey: IDEMPOTENCY_KEY,
+    notifyUserIds: [MEMBER_ID],
+  }
+
+  for (const changed of [
+    { ...original, content: `Changed <@${MEMBER_ID}>` },
+    { ...original, channelId: OTHER_CHANNEL_ID },
+    {
+      ...original,
+      content: `Hello <@${NOTIFY_USER_ID}>`,
+      notifyUserIds: [NOTIFY_USER_ID],
+    },
+  ]) {
+    const configured = fixture({ interactionPolicy: reviewedPolicy })
+    const plan = await configured.service.planSendMessageNotifications(BOT_ID, original)
+    await assert.rejects(
+      () => configured.service.executeReviewedSendMessage(BOT_ID, changed, plan.digest),
+      InteractionNotificationPlanChangedError,
+    )
+    assert.equal(configured.calls.create.length, 0)
+  }
+})
+
+test("reviewed notification plans cover own-message edits without relaxing direct edits", async () => {
+  const configured = fixture({
+    interactionPolicy: policy({ userMentionMode: "reviewed" }),
+  })
+  const request = {
+    channelId: CHANNEL_ID,
+    content: `Edited for <@${MEMBER_ID}> @everyone <@&${GUILD_ID}>`,
+    messageId: MESSAGE_ID,
+    notifyUserIds: [MEMBER_ID],
+  }
+
+  await assert.rejects(
+    () => configured.service.editOwnMessage(BOT_ID, request),
+    /requires signed interactive notification review/,
+  )
+  const plan = await configured.service.planEditOwnMessageNotifications(BOT_ID, request)
+  await configured.service.executeReviewedEditOwnMessage(BOT_ID, request, plan.digest)
+
+  assert.equal(plan.reviewRequired, true)
+  assert.deepEqual(configured.calls.messageReads, [MESSAGE_ID, MESSAGE_ID])
+  assert.deepEqual(configured.calls.edit[0]?.allowedMentions, {
+    replied_user: false,
+    users: [MEMBER_ID],
+  })
 })
 
 test("send enforces content, key, and channel identity outside the MCP adapter", async () => {

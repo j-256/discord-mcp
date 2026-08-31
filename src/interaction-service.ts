@@ -23,6 +23,7 @@ import {
   InteractionConflictError,
   InteractionExecutionError,
   InteractionIdentityError,
+  InteractionNotificationPlanChangedError,
   InteractionRateLimitError,
   errorMessage,
 } from "./errors.js"
@@ -36,8 +37,9 @@ import {
   assertDiscordMessageIdentity,
   assertDiscordReplyReference,
   assertDiscordSnowflake,
+  canonicalDiscordNotificationUserIds,
   discordAllowedMentions,
-  discordNotificationUserIds,
+  discordMentionedUserIds,
 } from "./message-safety.js"
 import {
   discordMessageUrl,
@@ -49,7 +51,15 @@ import {
   type BotChannelPermissionResult,
   type DiscordPermissionName,
 } from "./permissions.js"
-import type { ScopePolicy } from "./policy.js"
+import type {
+  NotificationAuthorizationDecision,
+  ScopePolicy,
+} from "./policy.js"
+import {
+  createReviewedPlanKey,
+  REVIEWED_PLAN_DIGEST_PATTERN,
+  reviewedPlanDigest,
+} from "./reviewed-plan.js"
 import {
   normalizeReactionEmoji,
   parseReactionAggregates,
@@ -136,6 +146,53 @@ export interface EditOwnMessageResult {
   url: string
 }
 
+export interface MessageNotificationPlan {
+  action: "edit" | "send"
+  botId: string
+  channel: {
+    guildId: string
+    id: string
+    parentId: string | null
+    type: number
+  }
+  content: {
+    characters: number
+    digest: string
+  }
+  createdAt: string
+  digest: string
+  idempotencyKeyDigest: string | null
+  notifications: {
+    replyAuthor: {
+      authorId: string
+      authorization: NotificationAuthorizationDecision["authorization"]
+    } | null
+    suppressedUserIds: string[]
+    userMentions: NotificationAuthorizationDecision
+  }
+  reviewRequired: boolean
+  schemaVersion: number
+  status: "direct" | "review-required"
+  target: {
+    currentContentDigest: string | null
+    messageId: string | null
+    replyToMessageId: string | null
+  }
+  warnings: string[]
+}
+
+interface SendMessageNotificationState {
+  channel: DiscordChannel
+  guildId: string
+  reply: DiscordMessage | null
+}
+
+interface EditMessageNotificationState {
+  channel: DiscordChannel
+  existing: DiscordMessage
+  guildId: string
+}
+
 export interface AddReactionResult {
   activityId: string
   channelId: string
@@ -195,6 +252,7 @@ export interface InteractionServiceOptions {
   limiter?: InteractionLimiter
   maxWritesPerMinute: number
   minWriteIntervalMs: number
+  planKey?: Uint8Array
   policy: ScopePolicy
   randomId?: () => string
 }
@@ -454,6 +512,48 @@ export function interactionNonce(channelId: string, idempotencyKey: string): str
     .slice(0, DISCORD_LIMITS.messageNonceCharacters)
 }
 
+function interactionPrivateDigest(domain: string, value: unknown): string {
+  return `sha256:${createHash("sha256")
+    .update(domain)
+    .update("\0")
+    .update(stableString(value))
+    .digest("hex")}`
+}
+
+function validateSendMessageRequest(request: SendMessageRequest): string[] {
+  assertDiscordSnowflake(request.channelId, "Discord interaction channel ID")
+  assertDiscordMessageContent(request.content)
+  if (
+    request.idempotencyKey.length < CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters
+    || request.idempotencyKey.length > CONNECTOR_LIMITS.idempotencyKeyCharacters
+    || !IDEMPOTENCY_KEY_PATTERN.test(request.idempotencyKey)
+  ) {
+    throw new RangeError(
+      `Discord idempotency key must be ${CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters}-${CONNECTOR_LIMITS.idempotencyKeyCharacters} safe ASCII characters`,
+    )
+  }
+  if (request.notifyReplyAuthor && !request.replyToMessageId) {
+    throw new RangeError("Discord reply-author notification requires a reply target")
+  }
+  if (request.replyToMessageId !== undefined) {
+    assertDiscordSnowflake(request.replyToMessageId, "Discord reply message ID")
+  }
+  return canonicalDiscordNotificationUserIds(
+    request.content,
+    request.notifyUserIds,
+  )
+}
+
+function validateEditOwnMessageRequest(request: EditOwnMessageRequest): string[] {
+  assertDiscordSnowflake(request.channelId, "Discord interaction channel ID")
+  assertDiscordSnowflake(request.messageId, "Discord interaction message ID")
+  assertDiscordMessageContent(request.content)
+  return canonicalDiscordNotificationUserIds(
+    request.content,
+    request.notifyUserIds,
+  )
+}
+
 export class InteractionService {
   readonly #activityStore: ActivityStore
   readonly #client: InteractionServiceClient
@@ -461,6 +561,7 @@ export class InteractionService {
   readonly #ledger = new Map<string, SendLedgerEntry>()
   readonly #ledgerTtlMs: number
   readonly #limiter: InteractionLimiter
+  readonly #planKey: Uint8Array
   readonly #policy: ScopePolicy
   readonly #processingSignalLedger = new Map<string, ProcessingSignalLedgerEntry>()
   readonly #randomId: () => string
@@ -475,6 +576,7 @@ export class InteractionService {
       maxWritesPerMinute: options.maxWritesPerMinute,
       minWriteIntervalMs: options.minWriteIntervalMs,
     })
+    this.#planKey = options.planKey || createReviewedPlanKey()
     this.#policy = options.policy
     this.#randomId = options.randomId || randomUUID
   }
@@ -750,24 +852,147 @@ export class InteractionService {
     request: SendMessageRequest,
     options: RequestOptions = {},
   ): Promise<SendMessageResult> {
-    assertDiscordMessageContent(request.content)
-    if (
-      request.idempotencyKey.length < CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters
-      || request.idempotencyKey.length > CONNECTOR_LIMITS.idempotencyKeyCharacters
-      || !IDEMPOTENCY_KEY_PATTERN.test(request.idempotencyKey)
-    ) {
-      throw new RangeError(
-        `Discord idempotency key must be ${CONNECTOR_LIMITS.idempotencyKeyMinimumCharacters}-${CONNECTOR_LIMITS.idempotencyKeyCharacters} safe ASCII characters`,
-      )
-    }
-    if (request.notifyReplyAuthor && !request.replyToMessageId) {
-      throw new RangeError("Discord reply-author notification requires a reply target")
-    }
-    const notifyUserIds = discordNotificationUserIds(
+    return this.#sendMessage(botId, request, null, options)
+  }
+
+  async planSendMessageNotifications(
+    botId: string,
+    request: SendMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<MessageNotificationPlan> {
+    return (await this.#reviewSendMessageNotifications(botId, request, options)).plan
+  }
+
+  async #reviewSendMessageNotifications(
+    botId: string,
+    request: SendMessageRequest,
+    options: RequestOptions,
+  ): Promise<{ plan: MessageNotificationPlan; state: SendMessageNotificationState }> {
+    assertDiscordSnowflake(botId, "Discord interaction bot ID")
+    const notifyUserIds = validateSendMessageRequest(request)
+    const userMentions = this.#policy.notificationAuthorization(notifyUserIds)
+    const state = await this.#sendMessageNotificationState(request, options)
+    const { channel, guildId, reply } = state
+    const replyAuthorDecision = reply && request.notifyReplyAuthor
+      ? this.#policy.notificationAuthorization([reply.author.id])
+      : null
+    const replyAuthor = replyAuthorDecision && reply
+      ? {
+          authorId: reply.author.id,
+          authorization: replyAuthorDecision.authorization,
+        }
+      : null
+    const reviewRequired = userMentions.authorization === "reviewed"
+      || replyAuthor?.authorization === "reviewed"
+    const contentDigest = interactionPrivateDigest(
+      "guildcontrol-message-content.v1",
       request.content,
-      request.notifyUserIds,
-      this.#policy,
     )
+    const idempotencyKeyDigest = interactionPrivateDigest(
+      "guildcontrol-message-idempotency-key.v1",
+      request.idempotencyKey,
+    )
+    const suppressedUserIds = discordMentionedUserIds(request.content)
+      .filter((userId) => !notifyUserIds.includes(userId))
+    const digest = reviewedPlanDigest(this.#planKey, {
+      action: "send",
+      botId,
+      channel: {
+        guildId,
+        id: channel.id,
+        parentId: channel.parent_id ?? null,
+        type: channel.type,
+      },
+      contentDigest,
+      idempotencyKeyDigest,
+      notifyReplyAuthor: request.notifyReplyAuthor ?? false,
+      notifyUserIds,
+      reply: reply
+        ? {
+            authorId: reply.author.id,
+            id: reply.id,
+            type: reply.type,
+          }
+        : null,
+      replyAuthor,
+      reviewRequired,
+      suppressedUserIds,
+      userMentions,
+    })
+    const plan: MessageNotificationPlan = {
+      action: "send",
+      botId,
+      channel: {
+        guildId,
+        id: channel.id,
+        parentId: channel.parent_id ?? null,
+        type: channel.type,
+      },
+      content: {
+        characters: request.content.length,
+        digest: contentDigest,
+      },
+      createdAt: this.#clock().toISOString(),
+      digest,
+      idempotencyKeyDigest,
+      notifications: {
+        replyAuthor,
+        suppressedUserIds,
+        userMentions,
+      },
+      reviewRequired,
+      schemaVersion: SCHEMA_VERSION,
+      status: reviewRequired ? "review-required" : "direct",
+      target: {
+        currentContentDigest: null,
+        messageId: null,
+        replyToMessageId: request.replyToMessageId ?? null,
+      },
+      warnings: [
+        "Discord role and everyone notifications remain suppressed",
+        ...(reviewRequired
+          ? ["Approval applies only to the exact channel, content digest, visible user notification set, and observed reply author"]
+          : ["Every requested notification is covered by the configured exact allowlist"]),
+      ],
+    }
+    return {
+      plan,
+      state,
+    }
+  }
+
+  async executeReviewedSendMessage(
+    botId: string,
+    request: SendMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<SendMessageResult> {
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord message notification plan digest is invalid")
+    }
+    const reviewed = await this.#reviewSendMessageNotifications(botId, request, options)
+    const { plan } = reviewed
+    if (plan.digest !== planDigest) {
+      throw new InteractionNotificationPlanChangedError(planDigest, plan.digest)
+    }
+    if (!plan.reviewRequired) {
+      throw new RangeError("Discord message notifications do not require reviewed authorization")
+    }
+    return this.#sendMessage(botId, request, reviewed.state, options)
+  }
+
+  async #sendMessage(
+    botId: string,
+    request: SendMessageRequest,
+    reviewedState: SendMessageNotificationState | null,
+    options: RequestOptions,
+  ): Promise<SendMessageResult> {
+    const notifyUserIds = validateSendMessageRequest(request)
+    if (reviewedState) {
+      this.#policy.notificationAuthorization(notifyUserIds)
+    } else {
+      this.#policy.assertNotificationUsers(notifyUserIds)
+    }
     const nonce = interactionNonce(request.channelId, request.idempotencyKey)
     const fingerprint = createHash("sha256").update(stableString({
       channelId: request.channelId,
@@ -794,7 +1019,14 @@ export class InteractionService {
     if (this.#ledger.size >= CONNECTOR_LIMITS.interactionLedgerEntries) {
       throw new InteractionRateLimitError(this.#ledgerTtlMs)
     }
-    const promise = this.#sendOnce(botId, request, notifyUserIds, nonce, options)
+    const promise = this.#sendOnce(
+      botId,
+      request,
+      notifyUserIds,
+      nonce,
+      reviewedState,
+      options,
+    )
     const entry: SendLedgerEntry = {
       expiresAt: now + this.#ledgerTtlMs,
       fingerprint,
@@ -812,19 +1044,17 @@ export class InteractionService {
     request: SendMessageRequest,
     notifyUserIds: readonly string[],
     nonce: string,
+    reviewedState: SendMessageNotificationState | null,
     options: RequestOptions,
   ): Promise<SendMessageResult> {
-    const { guildId } = await this.#channel(request.channelId, options)
-    if (request.replyToMessageId) {
-      const target = await this.#message(
-        request.channelId,
-        guildId,
-        request.replyToMessageId,
-        options,
-      )
-      if (request.notifyReplyAuthor) {
-        assertDiscordSnowflake(target.author.id, "Discord reply author ID")
-        this.#policy.assertNotificationUsers([target.author.id])
+    const state = reviewedState ?? await this.#sendMessageNotificationState(request, options)
+    const { guildId, reply } = state
+    if (reply && request.notifyReplyAuthor) {
+      assertDiscordSnowflake(reply.author.id, "Discord reply author ID")
+      if (reviewedState) {
+        this.#policy.notificationAuthorization([reply.author.id])
+      } else {
+        this.#policy.assertNotificationUsers([reply.author.id])
       }
     }
     const activityId = this.#randomId()
@@ -880,25 +1110,152 @@ export class InteractionService {
     }
   }
 
+  async #sendMessageNotificationState(
+    request: SendMessageRequest,
+    options: RequestOptions,
+  ): Promise<SendMessageNotificationState> {
+    const { channel, guildId } = await this.#channel(request.channelId, options)
+    const reply = request.replyToMessageId === undefined
+      ? null
+      : await this.#message(
+          request.channelId,
+          guildId,
+          request.replyToMessageId,
+          options,
+        )
+    return { channel, guildId, reply }
+  }
+
   async editOwnMessage(
     botId: string,
     request: EditOwnMessageRequest,
     options: RequestOptions = {},
   ): Promise<EditOwnMessageResult> {
-    assertDiscordMessageContent(request.content)
-    const notifyUserIds = discordNotificationUserIds(
+    return this.#editOwnMessage(botId, request, null, options)
+  }
+
+  async planEditOwnMessageNotifications(
+    botId: string,
+    request: EditOwnMessageRequest,
+    options: RequestOptions = {},
+  ): Promise<MessageNotificationPlan> {
+    return (await this.#reviewEditOwnMessageNotifications(botId, request, options)).plan
+  }
+
+  async #reviewEditOwnMessageNotifications(
+    botId: string,
+    request: EditOwnMessageRequest,
+    options: RequestOptions,
+  ): Promise<{ plan: MessageNotificationPlan; state: EditMessageNotificationState }> {
+    assertDiscordSnowflake(botId, "Discord interaction bot ID")
+    const notifyUserIds = validateEditOwnMessageRequest(request)
+    const userMentions = this.#policy.notificationAuthorization(notifyUserIds)
+    const state = await this.#editMessageNotificationState(botId, request, options)
+    const { channel, existing, guildId } = state
+    const contentDigest = interactionPrivateDigest(
+      "guildcontrol-message-content.v1",
       request.content,
-      request.notifyUserIds,
-      this.#policy,
     )
-    const { guildId } = await this.#channel(request.channelId, options)
-    const existing = await this.#message(
-      request.channelId,
-      guildId,
-      request.messageId,
-      options,
+    const currentContentDigest = interactionPrivateDigest(
+      "guildcontrol-message-content.v1",
+      existing.content,
     )
-    assertDiscordBotMessage(existing, botId)
+    const suppressedUserIds = discordMentionedUserIds(request.content)
+      .filter((userId) => !notifyUserIds.includes(userId))
+    const reviewRequired = userMentions.authorization === "reviewed"
+    const digest = reviewedPlanDigest(this.#planKey, {
+      action: "edit",
+      botId,
+      channel: {
+        guildId,
+        id: channel.id,
+        parentId: channel.parent_id ?? null,
+        type: channel.type,
+      },
+      contentDigest,
+      currentContentDigest,
+      messageId: request.messageId,
+      notifyUserIds,
+      reviewRequired,
+      suppressedUserIds,
+      userMentions,
+    })
+    const plan: MessageNotificationPlan = {
+      action: "edit",
+      botId,
+      channel: {
+        guildId,
+        id: channel.id,
+        parentId: channel.parent_id ?? null,
+        type: channel.type,
+      },
+      content: {
+        characters: request.content.length,
+        digest: contentDigest,
+      },
+      createdAt: this.#clock().toISOString(),
+      digest,
+      idempotencyKeyDigest: null,
+      notifications: {
+        replyAuthor: null,
+        suppressedUserIds,
+        userMentions,
+      },
+      reviewRequired,
+      schemaVersion: SCHEMA_VERSION,
+      status: reviewRequired ? "review-required" : "direct",
+      target: {
+        currentContentDigest,
+        messageId: request.messageId,
+        replyToMessageId: null,
+      },
+      warnings: [
+        "Discord role and everyone notifications remain suppressed",
+        ...(reviewRequired
+          ? ["Approval applies only to the exact channel, message, replacement content digest, and visible user notification set"]
+          : ["Every requested notification is covered by the configured exact allowlist"]),
+      ],
+    }
+    return {
+      plan,
+      state,
+    }
+  }
+
+  async executeReviewedEditOwnMessage(
+    botId: string,
+    request: EditOwnMessageRequest,
+    planDigest: string,
+    options: RequestOptions = {},
+  ): Promise<EditOwnMessageResult> {
+    if (!REVIEWED_PLAN_DIGEST_PATTERN.test(planDigest)) {
+      throw new RangeError("Discord message notification plan digest is invalid")
+    }
+    const reviewed = await this.#reviewEditOwnMessageNotifications(botId, request, options)
+    const { plan } = reviewed
+    if (plan.digest !== planDigest) {
+      throw new InteractionNotificationPlanChangedError(planDigest, plan.digest)
+    }
+    if (!plan.reviewRequired) {
+      throw new RangeError("Discord message notifications do not require reviewed authorization")
+    }
+    return this.#editOwnMessage(botId, request, reviewed.state, options)
+  }
+
+  async #editOwnMessage(
+    botId: string,
+    request: EditOwnMessageRequest,
+    reviewedState: EditMessageNotificationState | null,
+    options: RequestOptions,
+  ): Promise<EditOwnMessageResult> {
+    const notifyUserIds = validateEditOwnMessageRequest(request)
+    if (reviewedState) {
+      this.#policy.notificationAuthorization(notifyUserIds)
+    } else {
+      this.#policy.assertNotificationUsers(notifyUserIds)
+    }
+    const { existing, guildId } = reviewedState
+      ?? await this.#editMessageNotificationState(botId, request, options)
     const activityId = this.#randomId()
     if (existing.content === request.content && notifyUserIds.length === 0) {
       await this.#activityStore.append(this.#activity({
@@ -958,6 +1315,22 @@ export class InteractionService {
       status: "completed",
       url: discordMessageUrl(guildId, request.channelId, request.messageId),
     }
+  }
+
+  async #editMessageNotificationState(
+    botId: string,
+    request: EditOwnMessageRequest,
+    options: RequestOptions,
+  ): Promise<EditMessageNotificationState> {
+    const { channel, guildId } = await this.#channel(request.channelId, options)
+    const existing = await this.#message(
+      request.channelId,
+      guildId,
+      request.messageId,
+      options,
+    )
+    assertDiscordBotMessage(existing, botId)
+    return { channel, existing, guildId }
   }
 
   async addReaction(

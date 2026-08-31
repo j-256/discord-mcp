@@ -42,6 +42,8 @@ import {
   assertDiscordSnowflake,
   canonicalDiscordNotificationUserIds,
   discordAllowedMentions,
+  discordReviewedNotificationAuthorization,
+  type DiscordNotificationAuthorization,
 } from "./message-safety.js"
 import { discordMessageUrl } from "./normalize.js"
 import {
@@ -125,6 +127,7 @@ export interface AttachmentMessagePlan {
     filename: string
     maxBytes: number
   }
+  notificationAuthorization: DiscordNotificationAuthorization
   notificationUserIds: string[]
   notifyReplyAuthor: boolean
   operationKeyHash: string
@@ -192,6 +195,7 @@ interface AttachmentMessageState {
   file: AttachmentFileSnapshot
   guildId: string
   member: DiscordGuildMember
+  notificationAuthorization: DiscordNotificationAuthorization
   parent: DiscordChannel | null
   permission: BotChannelPermissionResult
   reply: DiscordMessage | null
@@ -621,7 +625,6 @@ export class AttachmentMessageService {
       roles,
     })
     assertCompletePermissions(permission, channel)
-    this.#policy.assertNotificationUsers(request.notifyUserIds)
     if (reply) {
       assertDiscordMessageIdentity(
         reply,
@@ -636,14 +639,19 @@ export class AttachmentMessageService {
       }
       if (request.notifyReplyAuthor) {
         assertDiscordSnowflake(reply.author.id, "Discord attachment reply author ID")
-        this.#policy.assertNotificationUsers([reply.author.id])
       }
     }
+    const notificationAuthorization = discordReviewedNotificationAuthorization(
+      request.notifyUserIds,
+      this.#policy,
+      reply && request.notifyReplyAuthor ? reply.author.id : undefined,
+    )
     return {
       channel,
       file,
       guildId,
       member,
+      notificationAuthorization,
       parent,
       permission,
       reply,
@@ -669,6 +677,7 @@ export class AttachmentMessageService {
         roles: [...state.member.roles].sort(),
         userId: state.member.user?.id ?? null,
       },
+      notificationAuthorization: state.notificationAuthorization,
       parent: state.parent ? channelSnapshot(state.parent) : null,
       permission: {
         administrator: state.permission.administrator,
@@ -714,6 +723,7 @@ export class AttachmentMessageService {
         filename: request.filename,
         maxBytes: this.#attachmentMaxBytes,
       },
+      notificationAuthorization: state.notificationAuthorization,
       notificationUserIds: request.notifyUserIds,
       notifyReplyAuthor: request.notifyReplyAuthor,
       operationKeyHash: request.operationKeyHash,

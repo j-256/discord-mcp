@@ -118,6 +118,11 @@ import type {
   AttachmentMessageRequest,
 } from "../src/attachment-message-service.js"
 import type { MessageAttachmentReadResult } from "../src/message-attachment-read-service.js"
+import type {
+  EditOwnMessageRequest,
+  MessageNotificationPlan,
+  SendMessageRequest,
+} from "../src/interaction-service.js"
 import {
   reviewComponentLayout,
   type ComponentLayoutInput,
@@ -444,6 +449,7 @@ import {
   IntegrationDeletionExecutionError,
   IntegrationDeletionOperationConflictError,
   InteractionExecutionError,
+  InteractionNotificationPlanChangedError,
   InteractionRateLimitError,
   InviteCreationExecutionError,
   InviteCreationOperationConflictError,
@@ -6087,6 +6093,81 @@ function guildPrunePlan(
   }
 }
 
+function directNotificationAuthorization(
+  userIds: readonly string[] | undefined,
+  replyAuthorId?: string,
+) {
+  const allowlistedUserIds = [...(userIds || [])].sort()
+  return {
+    replyAuthor: replyAuthorId
+      ? { authorization: "direct" as const, userId: replyAuthorId }
+      : null,
+    reviewRequired: false,
+    userMentions: {
+      allowlistedUserIds,
+      authorization: "direct" as const,
+      reviewedUserIds: [],
+    },
+  }
+}
+
+function messageNotificationPlan(
+  action: "edit" | "send",
+  request: EditOwnMessageRequest | SendMessageRequest,
+  digest = DIGEST,
+  reviewRequired = true,
+): MessageNotificationPlan {
+  const userIds = [...(request.notifyUserIds || [])].sort()
+  const userReviewRequired = reviewRequired && userIds.length > 0
+  const replyAuthorRequested = action === "send"
+    && "notifyReplyAuthor" in request
+    && request.notifyReplyAuthor === true
+  return {
+    action,
+    botId: BOT_ID,
+    channel: {
+      guildId: GUILD_ID,
+      id: request.channelId,
+      parentId: null,
+      type: 0,
+    },
+    content: {
+      characters: request.content.length,
+      digest: `sha256:${"1".repeat(64)}`,
+    },
+    createdAt: "2026-08-31T00:00:00.000Z",
+    digest,
+    idempotencyKeyDigest: action === "send" ? `sha256:${"2".repeat(64)}` : null,
+    notifications: {
+      replyAuthor: replyAuthorRequested
+        ? {
+            authorId: USER_ID,
+            authorization: reviewRequired ? "reviewed" : "direct",
+          }
+        : null,
+      suppressedUserIds: [],
+      userMentions: {
+        allowlistedUserIds: userReviewRequired ? [] : userIds,
+        authorization: userReviewRequired ? "reviewed" : "direct",
+        reviewedUserIds: userReviewRequired ? userIds : [],
+      },
+    },
+    reviewRequired,
+    schemaVersion: 1,
+    status: reviewRequired ? "review-required" : "direct",
+    target: {
+      currentContentDigest: action === "edit" ? `sha256:${"3".repeat(64)}` : null,
+      messageId: action === "edit" && "messageId" in request
+        ? request.messageId
+        : null,
+      replyToMessageId: action === "send" && "replyToMessageId" in request
+        ? request.replyToMessageId ?? null
+        : null,
+    },
+    warnings: ["Role and everyone notifications remain suppressed"],
+  }
+}
+
 function attachmentPlan(
   request: AttachmentMessageRequest,
   digest = DIGEST,
@@ -6113,6 +6194,10 @@ function attachmentPlan(
       sizeBytes: 14,
       stableRead: true,
     },
+    notificationAuthorization: directNotificationAuthorization(
+      request.notifyUserIds,
+      request.notifyReplyAuthor && request.replyToMessageId ? USER_ID : undefined,
+    ),
     notificationUserIds: [...(request.notifyUserIds || [])].sort(),
     notifyReplyAuthor: request.notifyReplyAuthor ?? false,
     operationKeyHash: OPERATION_KEY_HASH,
@@ -6190,6 +6275,10 @@ function componentMessagePlan(
     digest,
     guild: { id: GUILD_ID, name: "Private guild name" },
     messageContentIntent: "enabled",
+    notificationAuthorization: directNotificationAuthorization(
+      request.notifyUserIds,
+      request.notifyReplyAuthor && request.replyToMessageId ? USER_ID : undefined,
+    ),
     notificationUserIds: review.notificationUserIds,
     notifyReplyAuthor: request.notifyReplyAuthor ?? false,
     operationKeyHash: OPERATION_KEY_HASH,
@@ -6301,6 +6390,10 @@ function embedMessagePlan(
     digest,
     guild: { id: GUILD_ID, name: "Private guild name" },
     messageContentIntent: "enabled",
+    notificationAuthorization: directNotificationAuthorization(
+      request.notifyUserIds,
+      request.notifyReplyAuthor && request.replyToMessageId ? USER_ID : undefined,
+    ),
     notificationUserIds: review.notificationUserIds,
     notifyReplyAuthor: request.notifyReplyAuthor ?? false,
     operationKeyHash: OPERATION_KEY_HASH,
@@ -6442,6 +6535,7 @@ function forumPostPlan(
       name: "Guild",
       ownerId: USER_ID,
     },
+    notificationAuthorization: directNotificationAuthorization(request.notifyUserIds),
     operationKeyHash: OPERATION_KEY_HASH,
     parent: {
       availableTagCount: 1,
@@ -9639,6 +9733,8 @@ function serviceFixture(overrides: {
   guildExpressionError?: Error
   guildExpressionPlanDigest?: string
   interactionError?: Error
+  interactionNotificationPlanDigest?: string
+  interactionNotificationReviewRequired?: boolean
   integrationDeletionError?: Error
   integrationDeletionPlanDigest?: string
   guildDepartureError?: Error
@@ -10321,6 +10417,14 @@ function serviceFixture(overrides: {
     }
   }
   const service: DiscordToolService = {
+    messageNotificationAuthorization(userIds) {
+      const reviewRequired = overrides.interactionNotificationReviewRequired ?? true
+      return {
+        allowlistedUserIds: reviewRequired ? [] : [...userIds],
+        authorization: reviewRequired ? "reviewed" as const : "direct" as const,
+        reviewedUserIds: reviewRequired ? [...userIds] : [],
+      }
+    },
     createCoordinationAddress() {
       calls.coordinationAddressCreate += 1
       return {
@@ -13494,6 +13598,27 @@ function serviceFixture(overrides: {
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
       }
     },
+    async planEditOwnMessageNotifications(input) {
+      return messageNotificationPlan(
+        "edit",
+        input,
+        overrides.interactionNotificationPlanDigest || DIGEST,
+        overrides.interactionNotificationReviewRequired ?? true,
+      )
+    },
+    async executeReviewedEditOwnMessage(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.edit += 1
+      return {
+        activityId: "activity-edit-reviewed",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        messageId: input.messageId,
+        schemaVersion: 1,
+        status: "completed" as const,
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${input.messageId}`,
+      }
+    },
     async getMessage() {
       return {
         channel: normalizeChannel(rawChannel()),
@@ -14823,6 +14948,29 @@ function serviceFixture(overrides: {
         nonce: "stable-nonce",
         schemaVersion: 1,
         status: "completed",
+        url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
+      }
+    },
+    async planSendMessageNotifications(input) {
+      return messageNotificationPlan(
+        "send",
+        input,
+        overrides.interactionNotificationPlanDigest || DIGEST,
+        overrides.interactionNotificationReviewRequired ?? true,
+      )
+    },
+    async executeReviewedSendMessage(input) {
+      if (overrides.interactionError) throw overrides.interactionError
+      calls.send += 1
+      return {
+        activityId: "activity-send-reviewed",
+        channelId: input.channelId,
+        guildId: GUILD_ID,
+        localReplay: false,
+        messageId: MESSAGE_ID,
+        nonce: "stable-reviewed-nonce",
+        schemaVersion: 1,
+        status: "completed" as const,
         url: `https://discord.com/channels/${GUILD_ID}/${input.channelId}/${MESSAGE_ID}`,
       }
     },
@@ -20986,6 +21134,196 @@ test("MCP interaction tools enforce bounded schemas and invoke classified servic
   assert.equal(calls.addReaction, 1)
   assert.equal(calls.addReactions, 1)
   assert.equal(calls.removeOwnReaction, 1)
+})
+
+test("MCP message notifications stay direct when empty or allowlisted", async (context) => {
+  const empty = await connectedFixture(context)
+  const emptyResult = await empty.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: "No notifications",
+      idempotencyKey: "notification-empty-0001",
+    },
+    name: "send_message",
+  })
+  assert.equal(structuredContent(emptyResult).status, "completed")
+  assert.equal(empty.calls.send, 1)
+
+  const allowlisted = await connectedFixture(context, {
+    serviceOverrides: { interactionNotificationReviewRequired: false },
+  })
+  const allowlistedResult = await allowlisted.client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: `Hello <@${USER_ID}>`,
+      idempotencyKey: "notification-allowlisted-0001",
+      notifyUserIds: [USER_ID],
+    },
+    name: "send_message",
+  })
+  assert.equal(structuredContent(allowlistedResult).status, "completed")
+  assert.equal(allowlisted.calls.send, 1)
+})
+
+test("MCP reviewed message notifications bind exact send, recipients, and reply author", async (context) => {
+  let confirmationMessage = ""
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async (request) => {
+      confirmationMessage = request.params.message
+      return { action: "accept", content: { approve: true } }
+    },
+  })
+  const content = `Notify <@${USER_ID}> while @everyone and <@&${ROLE_ID}> stay quiet`
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content,
+      idempotencyKey: "notification-reviewed-send-0001",
+      notifyReplyAuthor: true,
+      notifyUserIds: [USER_ID],
+      replyToMessageId: MESSAGE_ID,
+    },
+    name: "send_message",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.send, 1)
+  assert.match(confirmationMessage, new RegExp(CHANNEL_ID))
+  assert.match(confirmationMessage, new RegExp(MESSAGE_ID))
+  assert.match(confirmationMessage, new RegExp(USER_ID))
+  assert.match(confirmationMessage, /reviewed/iu)
+  assert.match(confirmationMessage, /role and everyone notifications remain suppressed/iu)
+  assert.match(confirmationMessage, /untrusted data/iu)
+})
+
+test("MCP reviewed message notification cancellation performs no write", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => ({ action: "decline" }),
+  })
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: `Hello <@${USER_ID}>`,
+      idempotencyKey: "notification-declined-0001",
+      notifyUserIds: [USER_ID],
+    },
+    name: "send_message",
+  })
+
+  assert.equal(structuredContent(result).status, "confirmation-declined")
+  assert.equal(calls.send, 0)
+})
+
+test("MCP reviewed message signed state rejects changed content, target, and recipient", async (context) => {
+  const fixture = await connectedModernStdioFixture(context)
+  const request = {
+    channelId: CHANNEL_ID,
+    content: `Hello <@${USER_ID}>`,
+    idempotencyKey: "notification-signed-state-0001",
+    notifyUserIds: [USER_ID],
+  }
+  const initial = await fixture.client.request({
+    method: "tools/call",
+    params: {
+      arguments: request,
+      name: "send_message",
+    },
+  }, withInputRequired(specTypeSchemas.CallToolResult), {
+    allowInputRequired: true,
+  })
+
+  assert.equal(initial.resultType, "input_required")
+  assert.equal(typeof initial.requestState, "string")
+  const signedPayload = signedRequestStatePayload(initial.requestState as string)
+  assert.equal(signedPayload.action, "send")
+  assert.equal(typeof signedPayload.requestDigest, "string")
+  assert.equal(signedPayload.planDigest, DIGEST)
+  assert.deepEqual(
+    Object.keys(signedPayload).sort(),
+    ["action", "planDigest", "requestDigest"],
+  )
+  assert.doesNotMatch(JSON.stringify(signedPayload), /Hello/)
+
+  for (const changed of [
+    { ...request, content: `Changed <@${USER_ID}>` },
+    { ...request, channelId: PARENT_ID },
+    {
+      ...request,
+      content: `Hello <@${OTHER_USER_ID}>`,
+      notifyUserIds: [OTHER_USER_ID],
+    },
+  ]) {
+    const result = await fixture.client.request({
+      method: "tools/call",
+      params: {
+        arguments: changed,
+        inputResponses: {
+          confirm_message_notification: {
+            action: "accept",
+            content: { approve: true },
+          },
+        },
+        name: "send_message",
+        requestState: initial.requestState,
+      },
+    }, specTypeSchemas.CallToolResult)
+    assert.equal(structuredContent(result).status, "confirmation-invalid")
+    assert.equal(result.isError, true)
+  }
+  assert.equal(fixture.calls.send, 0)
+})
+
+test("MCP reviewed own-message edit notifications use the same signed review boundary", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+  })
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content: `Replacement for <@${USER_ID}>`,
+      messageId: MESSAGE_ID,
+      notifyUserIds: [USER_ID],
+    },
+    name: "edit_own_message",
+  })
+
+  assert.equal(structuredContent(result).status, "completed")
+  assert.equal(calls.edit, 1)
+})
+
+test("MCP reviewed message notification drift returns content-free plan-changed evidence", async (context) => {
+  const { calls, client } = await connectedFixture(context, {
+    elicitationHandler: async () => ({
+      action: "accept",
+      content: { approve: true },
+    }),
+    serviceOverrides: {
+      interactionError: new InteractionNotificationPlanChangedError(DIGEST, DIFFERENT_DIGEST),
+    },
+  })
+  const content = `Private notification for <@${USER_ID}>`
+  const result = await client.callTool({
+    arguments: {
+      channelId: CHANNEL_ID,
+      content,
+      idempotencyKey: "notification-plan-drift-0001",
+      notifyUserIds: [USER_ID],
+    },
+    name: "send_message",
+  })
+  const structured = structuredContent(result)
+  const error = structured.error as Record<string, unknown>
+
+  assert.equal(result.isError, true)
+  assert.equal(structured.status, "plan-changed")
+  assert.equal(error.actualDigest, DIFFERENT_DIGEST)
+  assert.equal(error.expectedDigest, DIGEST)
+  assert.equal(calls.send, 0)
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(content))
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(USER_ID))
 })
 
 test("MCP interaction errors expose local retry timing without secrets", async (context) => {

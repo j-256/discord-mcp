@@ -498,6 +498,7 @@ function toolService(
     throw new Error("Unexpected smoke service call")
   }
   return {
+    messageNotificationAuthorization: unexpectedSync,
     addReaction: unexpected,
     addReactions: unexpected,
     catchUpMessages: unexpected,
@@ -663,6 +664,8 @@ function toolService(
       return status().policy
     },
     editOwnMessage: unexpected,
+    executeReviewedEditOwnMessage: unexpected,
+    executeReviewedSendMessage: unexpected,
     executeAttachmentMessage: unexpected,
     executeComponentMessage: unexpected,
     executeEmbedMessage: unexpected,
@@ -714,6 +717,8 @@ function toolService(
     listReactionUsers: unexpected,
     listRoles: unexpected,
     planMessageDeletion: unexpected,
+    planEditOwnMessageNotifications: unexpected,
+    planSendMessageNotifications: unexpected,
     planMessagePin: unexpected,
     planPollCreation: unexpected,
     planPollEnd: unexpected,
