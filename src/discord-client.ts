@@ -1511,7 +1511,7 @@ interface RequestParameters extends RequestOptions {
   accept?: string
   authentication?: "bot" | "none"
   auditReason?: string
-  automaticRateLimitRetry?: boolean
+  automaticRateLimitRetry?: false
   body?: unknown
   diagnosticRoute?: string
   expectedSuccessStatus?: number
@@ -1574,23 +1574,69 @@ function parseJson(text: string): unknown {
   }
 }
 
+function retryAfterHeaderMilliseconds(
+  headers: Headers,
+): number | undefined {
+  const retryAfter = headers.get("retry-after")
+  if (retryAfter) {
+    const seconds = Number(retryAfter)
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.ceil(seconds * 1_000)
+    }
+    const date = Date.parse(retryAfter)
+    const now = Date.now()
+    if (!Number.isNaN(date) && date >= now) return date - now
+  }
+  return undefined
+}
+
 function retryAfterMilliseconds(
   body: DiscordErrorBody | undefined,
   headers: Headers,
 ): number | undefined {
   const bodySeconds = body?.retry_after
-  if (typeof bodySeconds === "number" && Number.isFinite(bodySeconds)) {
-    return Math.max(0, Math.ceil(bodySeconds * 1_000))
+  if (
+    typeof bodySeconds === "number"
+    && Number.isFinite(bodySeconds)
+    && bodySeconds >= 0
+  ) {
+    return Math.ceil(bodySeconds * 1_000)
   }
-  for (const name of ["retry-after", "x-ratelimit-reset-after"]) {
-    const header = headers.get(name)
-    if (!header) continue
-    const seconds = Number(header)
-    if (Number.isFinite(seconds)) return Math.max(0, Math.ceil(seconds * 1_000))
-    const date = Date.parse(header)
-    if (!Number.isNaN(date)) return Math.max(0, date - Date.now())
+
+  const retryAfterMs = retryAfterHeaderMilliseconds(headers)
+  if (retryAfterMs !== undefined) return retryAfterMs
+
+  const resetAfter = headers.get("x-ratelimit-reset-after")
+  if (resetAfter) {
+    const seconds = Number(resetAfter)
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.ceil(seconds * 1_000)
+    }
   }
   return undefined
+}
+
+const TRANSIENT_READ_STATUSES: ReadonlySet<number> = new Set([502, 503, 504])
+const READ_RETRY_BASE_DELAY_MS = 100
+
+function localReadRetryDelay(attempt: number, maximumMs: number): number {
+  return Math.min(
+    maximumMs,
+    READ_RETRY_BASE_DELAY_MS * (2 ** Math.min(attempt, 16)),
+  )
+}
+
+function transientReadRetryDelay(
+  response: Response,
+  attempt: number,
+  maximumMs: number,
+): number | undefined {
+  const retryAfterPresent = response.headers.has("retry-after")
+  if (retryAfterPresent) {
+    const delay = retryAfterHeaderMilliseconds(response.headers)
+    return delay !== undefined && delay <= maximumMs ? delay : undefined
+  }
+  return localReadRetryDelay(attempt, maximumMs)
 }
 
 type QueryScalar = boolean | number | string
@@ -8783,6 +8829,9 @@ export class DiscordClient {
     parameters: RequestParameters = {},
   ): Promise<T> {
     const method = DISCORD_REST_OPERATIONS[operation]
+    // Method classification is authoritative; legacy false markers may only narrow retries
+    const automaticReadRetry = method === "GET"
+      && parameters.automaticRateLimitRetry !== false
     const url = new URL(`${this.#apiBaseUrl}${route}`)
     const queryIndex = route.indexOf("?")
     const diagnosticRoute = parameters.diagnosticRoute
@@ -8829,12 +8878,28 @@ export class DiscordClient {
             ? "request failed"
             : redactText(errorMessage(error), [this.#token])
           return new DiscordTransportError(
-            `Discord API ${method} ${diagnosticRoute} failed: ${message}`,
+            `Discord API ${method} ${diagnosticRoute} failed${attempt > 0 ? ` after ${attempt + 1} attempts` : ""}: ${message}`,
             category,
             parameters.suppressFailureCause || contentSensitive
               ? undefined
               : { cause: error },
           )
+        }
+        const retryReadAfter = async (delayMs: number): Promise<void> => {
+          if (parameters.signal?.aborted) {
+            throw transportFailure(parameters.signal.reason)
+          }
+          try {
+            observation?.retry()
+          } catch {}
+          try {
+            await this.#sleep(delayMs, parameters.signal)
+          } catch (error) {
+            throw transportFailure(error)
+          }
+          if (parameters.signal?.aborted) {
+            throw transportFailure(parameters.signal.reason)
+          }
         }
         let response: Response
         try {
@@ -8847,7 +8912,19 @@ export class DiscordClient {
           if (body !== undefined) requestInit.body = body
           response = await this.#fetch(url, requestInit)
         } catch (error) {
-          throw transportFailure(error)
+          const failure = transportFailure(error)
+          if (
+            automaticReadRetry
+            && attempt < this.#maxRetries
+            && !parameters.signal?.aborted
+          ) {
+            await retryReadAfter(localReadRetryDelay(
+              attempt,
+              this.#maxAutomaticRetryWaitMs,
+            ))
+            continue
+          }
+          throw failure
         }
         try {
           const rateLimitScope = response.headers.get("X-RateLimit-Scope")
@@ -8861,7 +8938,19 @@ export class DiscordClient {
         try {
           responseText = await response.text()
         } catch (error) {
-          throw transportFailure(error)
+          const failure = transportFailure(error)
+          if (
+            automaticReadRetry
+            && attempt < this.#maxRetries
+            && !parameters.signal?.aborted
+          ) {
+            await retryReadAfter(localReadRetryDelay(
+              attempt,
+              this.#maxAutomaticRetryWaitMs,
+            ))
+            continue
+          }
+          throw failure
         }
         if (
           parameters.maxResponseBytes !== undefined
@@ -8881,16 +8970,29 @@ export class DiscordClient {
 
         if (
           response.status === 429
-          && parameters.automaticRateLimitRetry !== false
+          && automaticReadRetry
           && attempt < this.#maxRetries
           && retryAfterMs !== undefined
           && retryAfterMs <= this.#maxAutomaticRetryWaitMs
         ) {
-          try {
-            observation?.retry()
-          } catch {}
-          await this.#sleep(retryAfterMs, parameters.signal)
+          await retryReadAfter(retryAfterMs)
           continue
+        }
+
+        if (
+          automaticReadRetry
+          && TRANSIENT_READ_STATUSES.has(response.status)
+          && attempt < this.#maxRetries
+        ) {
+          const delayMs = transientReadRetryDelay(
+            response,
+            attempt,
+            this.#maxAutomaticRetryWaitMs,
+          )
+          if (delayMs !== undefined) {
+            await retryReadAfter(delayMs)
+            continue
+          }
         }
 
         if (!response.ok) {
@@ -8900,7 +9002,7 @@ export class DiscordClient {
           throw new DiscordApiError({
             ...(discordError?.code !== undefined ? { code: discordError.code } : {}),
             message: redactText(
-              `Discord API ${method} ${diagnosticRoute} returned ${response.status}: ${detail}`,
+              `Discord API ${method} ${diagnosticRoute} returned ${response.status}${attempt > 0 ? ` after ${attempt + 1} attempts` : ""}: ${detail}`,
               [this.#token],
             ),
             method,
