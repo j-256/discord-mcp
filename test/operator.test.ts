@@ -5993,6 +5993,54 @@ test("setup creates and verifies a preset-backed configuration with recoverable 
   )
 
   const saved = await readFile(configFile, "utf8")
+  const reused = await prepareSetup({
+    args: ["/srv/guildcontrol/dist/cli.js", "serve"],
+    command: "/usr/bin/node",
+    configFile,
+    environment: { [TOKEN_ALIAS]: TOKEN },
+    expectedApplicationId: APPLICATION_ID,
+    preset: {
+      guildIds: [GUILD_ID],
+      name: "server-observer",
+    },
+    reuseExistingConfig: true,
+    service: statusProvider(),
+  })
+  assert.deepEqual(reused.preset, getSetupPreset("server-observer"))
+  assert.equal(reused.configBackupFile, null)
+  assert.equal(await readFile(configFile, "utf8"), saved)
+
+  await assert.rejects(
+    () => prepareSetup({
+      configFile,
+      environment: { [TOKEN_ALIAS]: TOKEN },
+      expectedApplicationId: APPLICATION_ID,
+      preset: {
+        guildIds: [OTHER_GUILD_ID],
+        name: "server-observer",
+      },
+      reuseExistingConfig: true,
+      service: statusProvider(),
+    }),
+    /does not exactly match the requested application, guild, read-only preset, identity, and credential custody/,
+  )
+  assert.equal(await readFile(configFile, "utf8"), saved)
+
+  await assert.rejects(
+    () => prepareSetup({
+      configFile,
+      credentialVariable: TOKEN_ALIAS,
+      environment: { [TOKEN_ALIAS]: TOKEN },
+      preset: {
+        guildIds: [GUILD_ID],
+        name: "server-observer",
+      },
+      reuseExistingConfig: true,
+      service: statusProvider(),
+    }),
+    /owns its credential reference/,
+  )
+
   const verified = await prepareSetup({
     configFile,
     environment: { [TOKEN_ALIAS]: TOKEN },

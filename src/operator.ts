@@ -74,6 +74,7 @@ import {
   MCP_RESOURCE_URIS,
   selectedMcpPromptNames,
 } from "./mcp-guidance.js"
+import { stableString } from "./normalize.js"
 import {
   createGuildControlServer,
   type DiscordToolService,
@@ -429,6 +430,7 @@ export interface SetupOptions {
   overwriteProfile?: boolean
   profileDirectory?: string
   profileName?: string
+  reuseExistingConfig?: boolean
   preset?: SetupPresetSelection
   serverName?: string
   service?: StatusProvider
@@ -4131,11 +4133,33 @@ export async function prepareSetup(
   if (options.configFile === undefined && options.overwriteConfig) {
     throw new ConfigurationError("Configuration replacement requires a configuration file")
   }
+  if (options.reuseExistingConfig && (
+    options.configFile === undefined
+    || options.profileName !== undefined
+    || options.preset === undefined
+  )) {
+    throw new ConfigurationError(
+      "Existing preset reuse requires one configuration file and one exact preset",
+    )
+  }
+  if (options.reuseExistingConfig && options.overwriteConfig) {
+    throw new ConfigurationError(
+      "Existing preset reuse and configuration replacement are mutually exclusive",
+    )
+  }
   if (options.profileName === undefined && options.overwriteProfile) {
     throw new ConfigurationError("Profile replacement requires a profile name")
   }
   if (options.credentialFile !== undefined && options.credentialVariable !== undefined) {
     throw new ConfigurationError("Options --token-file and --token-env are mutually exclusive")
+  }
+  if (options.reuseExistingConfig && (
+    options.credentialFile !== undefined
+    || options.credentialVariable !== undefined
+  )) {
+    throw new ConfigurationError(
+      "An existing reusable policy owns its credential reference",
+    )
   }
   const expectedApplicationId = options.expectedApplicationId?.trim()
   if (expectedApplicationId !== undefined && (
@@ -4183,7 +4207,15 @@ export async function prepareSetup(
   const overwriteTarget = configFile
     ? options.overwriteConfig
     : options.overwriteProfile
-  if (options.preset && targetExists && !overwriteTarget) {
+  if (options.reuseExistingConfig && !targetExists) {
+    throw new ConfigurationError("Existing preset reuse target was not found")
+  }
+  if (
+    options.preset
+    && targetExists
+    && !overwriteTarget
+    && !options.reuseExistingConfig
+  ) {
     throw new ConfigurationError(
       "Setup target already exists; rerun without --preset to verify it or add --force after review",
     )
@@ -4213,15 +4245,6 @@ export async function prepareSetup(
   let profile: ConnectorProfile | null = null
   let config: ConnectorConfig
   if (options.preset) {
-    credential = options.credentialFile === undefined
-      ? {
-          provider: "environment",
-          variable: (options.credentialVariable ?? DEFAULT_TOKEN_ENVIRONMENT_VARIABLE).trim(),
-        }
-      : {
-          path: resolveConnectorSecretFile(options.credentialFile),
-          provider: "file",
-        }
     appliedPreset = applySetupPreset({
       ...(options.preset.channelIds
         ? { channelIds: options.preset.channelIds }
@@ -4229,23 +4252,38 @@ export async function prepareSetup(
       guildIds: options.preset.guildIds,
       name: options.preset.name,
     })
-    const bootstrapDocument = createConnectorConfigDocument({
-      applicationId: SETUP_BOOTSTRAP_APPLICATION_ID,
-      botId: SETUP_BOOTSTRAP_BOT_ID,
-      channelIds: appliedPreset.policy.channelIds,
-      ...(credential.provider === "environment"
-        ? { credentialVariable: credential.variable }
-        : { credentialFile: credential.path }),
-      gatewayEnabled: appliedPreset.policy.gatewayEnabled,
-      guildIds: appliedPreset.policy.guildIds,
-      name: configName,
-      toolsets: appliedPreset.policy.toolsets,
-      toolSurface: appliedPreset.policy.toolSurface,
-    })
-    config = {
-      ...loadConnectorConfigDocument(bootstrapDocument, environment),
-      expectedApplicationId,
-      expectedBotId: undefined,
+    if (options.reuseExistingConfig && configFile) {
+      portableConfig = loadConnectorConfigDocumentFile(configFile)
+      credential = portableConfig.credential
+      config = loadConnectorConfigDocument(portableConfig, environment)
+    } else {
+      credential = options.credentialFile === undefined
+        ? {
+            provider: "environment",
+            variable: (options.credentialVariable ?? DEFAULT_TOKEN_ENVIRONMENT_VARIABLE).trim(),
+          }
+        : {
+            path: resolveConnectorSecretFile(options.credentialFile),
+            provider: "file",
+          }
+      const bootstrapDocument = createConnectorConfigDocument({
+        applicationId: SETUP_BOOTSTRAP_APPLICATION_ID,
+        botId: SETUP_BOOTSTRAP_BOT_ID,
+        channelIds: appliedPreset.policy.channelIds,
+        ...(credential.provider === "environment"
+          ? { credentialVariable: credential.variable }
+          : { credentialFile: credential.path }),
+        gatewayEnabled: appliedPreset.policy.gatewayEnabled,
+        guildIds: appliedPreset.policy.guildIds,
+        name: configName,
+        toolsets: appliedPreset.policy.toolsets,
+        toolSurface: appliedPreset.policy.toolSurface,
+      })
+      config = {
+        ...loadConnectorConfigDocument(bootstrapDocument, environment),
+        expectedApplicationId,
+        expectedBotId: undefined,
+      }
     }
   } else if (configFile) {
     portableConfig = loadConnectorConfigDocumentFile(configFile)
@@ -4282,7 +4320,7 @@ export async function prepareSetup(
     throw new ConfigurationError("Discord bot has no accessible guilds inside the configured local scope")
   }
   if (appliedPreset) {
-    portableConfig = createConnectorConfigDocument({
+    const expectedPresetConfig = createConnectorConfigDocument({
       applicationId: status.application.id,
       botId: status.bot.id,
       channelIds: appliedPreset.policy.channelIds,
@@ -4295,6 +4333,15 @@ export async function prepareSetup(
       toolsets: appliedPreset.policy.toolsets,
       toolSurface: appliedPreset.policy.toolSurface,
     })
+    if (
+      options.reuseExistingConfig
+      && stableString(portableConfig) !== stableString(expectedPresetConfig)
+    ) {
+      throw new ConfigurationError(
+        "Existing policy does not exactly match the requested application, guild, read-only preset, identity, and credential custody",
+      )
+    }
+    portableConfig = expectedPresetConfig
     config = loadConnectorConfigDocument(portableConfig, environment)
     profile = profileName ? portableConfig : null
   }
@@ -4324,7 +4371,7 @@ export async function prepareSetup(
       ...(options.profileDirectory ? { directory: options.profileDirectory } : {}),
     })
   }
-  const configWrite = appliedPreset && configFile
+  const configWrite = appliedPreset && configFile && !options.reuseExistingConfig
     ? await writeConnectorConfigDocumentFile(configFile, portableConfig, {
       overwrite: options.overwriteConfig ?? false,
     })

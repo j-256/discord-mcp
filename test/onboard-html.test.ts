@@ -39,6 +39,7 @@ test("onboarding HTML is host-specific, interactive, offline, and credential-fre
   assert.match(html, /\[mcp_servers\.discord\]/)
   assert.match(html, /Reuse DISCORD_BOT_TOKEN through Codex/)
   assert.match(html, /No second token entry is needed after confirming/)
+  assert.match(html, /<span>Policy action<\/span><code>created<\/code>/)
   assert.match(html, /data-check/)
   assert.match(html, /connect-src 'none'/)
   assert.match(html, /First read-only request/)

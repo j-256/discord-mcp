@@ -37,13 +37,15 @@ The command performs one linear sequence:
 3. Generate the recommended `server-observer` grant and offer to open the guild-locked Discord install page.
 4. Require the exact Server ID after Discord shows the installation is complete.
 5. Resolve the bot token from `DISCORD_BOT_TOKEN`, another named environment variable, a protected file where the host route supports it, or a hidden one-time prompt.
-6. Verify that the token belongs to the requested application, audit the exact guild installation, and publish one strict non-secret read-only policy.
+6. Verify that the token belongs to the requested application, audit the exact guild installation, and create or revalidate one strict non-secret read-only policy.
 7. Launch the exact versioned `npx` server in a child process, negotiate MCP over stdio, validate its catalogs, and call only discovery plus connector status.
 8. Create one private host-specific activation guide and print the first read-only request.
 
 The command asks for browser authorization and one exact installation confirmation. It does not ask you to reconfirm already supplied policy choices, enable a write, or approve a host-file edit. It never places the token in a command argument, policy, report, HTML guide, digest, or activity record, and it does not read Discord message content. A hidden prompt keeps the token only for setup and smoke, then clears it. To avoid entering it again, start onboarding with an existing protected environment variable for Claude Code, Codex, Cursor, or a common MCP JSON host that will inherit the same state, or select an externally managed protected token file for any adapter route. With an environment-backed policy, Claude Desktop MCPB, VS Code secure input, and Gemini CLI keychain custody still require their own protected host-side entry. The terminal result and private guide state the exact handoff for the selected combination.
 
 Interactive host and credential menus accept a displayed number, canonical ID, or displayed name. Correctable input remains at the same prompt for bounded retries, and credential source sub-prompts accept `:back` so a mistaken environment or protected-file choice does not force a restart. Progress is labeled by setup stage, and Ctrl-C exits as a cancellation instead of printing failure recovery. Automation remains strict and never repairs an invalid supplied value.
+
+Rerun the same command after a failure. If the selected policy already exists, onboarding treats its credential reference as authoritative, verifies that the complete document still equals the requested one-guild `server-observer` policy, rechecks Discord and stdio, and leaves the policy bytes unchanged. A different application, guild, bot identity, scope, preset, Gateway setting, tool surface, or credential reference fails closed; choose another `--config` path or review the existing policy explicitly instead of expecting onboarding to replace it.
 
 By default the policy and guide are created in the per-user GuildControl configuration directory:
 
@@ -53,7 +55,7 @@ By default the policy and guide are created in the per-user GuildControl configu
 | Linux | `${XDG_CONFIG_HOME:-~/.config}/guildcontrol/guildcontrol.json` |
 | Windows | `%APPDATA%\guildcontrol\guildcontrol.json` |
 
-The guide is named `guildcontrol-onboarding.html` beside the policy. The CLI creates only this non-secret private directory. Pass `--config FILE` or `--html FILE` for explicit locations; the parent of an explicit policy path must already satisfy the canonical private-directory checks.
+The first implicit guide is named `guildcontrol-onboarding.html` beside the policy. If that name is occupied, onboarding exclusively creates the next available numbered guide instead of overwriting it. An explicit `--html FILE` remains exact and fails when occupied. The CLI creates only this non-secret private directory. Pass `--config FILE` or `--html FILE` for explicit locations; the parent of an explicit policy path must already satisfy the canonical private-directory checks.
 
 Choose `claude-desktop` for the verified MCPB import or one of `claude-code`, `codex`, `cursor`, `vscode`, `gemini-extension`, and `mcp-json` for an exact adapter. For a static JSON adapter, enter the exact host file and reviewed plan digest in the guide to build copy-ready `host plan`, `host apply`, and inspection commands for Bash, zsh, or PowerShell. Those inputs remain only in the open page and reset on reload. Codex stays an exact manual TOML merge, while Claude Desktop stays a host-native MCPB import. The guide never searches for, reads, or edits a host configuration. A protected token file is deliberately unavailable for the Claude Desktop MCPB path because its sensitive prompt satisfies an environment-backed policy, not a file-custody contract.
 

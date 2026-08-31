@@ -33,6 +33,7 @@ export interface OnboardFixture {
   readonly credentialAccess: OnboardCredentialAccess
   readonly document: ReturnType<typeof createConnectorConfigDocument>
   readonly install: BotInstallPlan
+  readonly policyDisposition: "created"
   readonly setup: SetupReport
   readonly smoke: SmokeReport
 }
@@ -122,6 +123,7 @@ export function onboardFixture(
       guildId: ONBOARD_GUILD_ID,
       preset: "server-observer",
     }),
+    policyDisposition: "created",
     setup,
     smoke,
   }

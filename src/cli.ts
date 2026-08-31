@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -34,10 +35,12 @@ import {
 } from "./onboard-html.js"
 import {
   ONBOARD_HOST_IDS,
+  assertReusableOnboardPolicy,
   createOnboardReport,
   isOnboardHostId,
   onboardHostDescriptor,
   onboardHostSupportsCredentialFile,
+  resolveAvailableOnboardHtmlFile,
   resolveDefaultOnboardConfigFile,
   type OnboardCredentialAccess,
   type OnboardHostId,
@@ -113,6 +116,7 @@ import {
 } from "./config-workbench-html.js"
 import {
   loadConnectorConfigDocumentFile,
+  type ConnectorCredentialReference,
   type ConnectorConfigDocument,
 } from "./config-document.js"
 import {
@@ -120,6 +124,7 @@ import {
   ensureConnectorConfigDirectory,
   initializeConnectorConfigFile,
   resolveConnectorConfigFile,
+  resolveConnectorSecretFile,
   showConnectorConfigFile,
   validateConnectorConfigFile,
   type ConfigExplainReport,
@@ -575,6 +580,7 @@ export interface CliDependencies {
   prepareSetup(options: SetupOptions): Promise<SetupReport>
   migrationCatalog(): MigrationCatalogReport
   migrationPlan(sourceId: string): Promise<MigrationPlanReport>
+  pathExists(file: string): boolean
   reviewActivity(
     activityFile: string,
     limit: number,
@@ -659,6 +665,7 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
   loadProfile,
   migrationCatalog: createMigrationCatalog,
   migrationPlan: createMigrationPlan,
+  pathExists: existsSync,
   prepareSetup,
   planConfigChange,
   planHostFile: planHostAdapterFile,
@@ -2098,14 +2105,14 @@ function helpText(
       "Five verified stages:",
       "  1. Identify the host, Discord application, and exact guild",
       "  2. Install the bounded read-only bot and confirm the guild",
-      "  3. Verify identity and installation, then publish one private policy",
+      "  3. Verify identity and installation, then create or revalidate one private policy",
       "  4. Smoke-test the real MCP stdio path without reading message content",
       "  5. Create a credential-free host activation handoff",
       "",
       `Supported hosts: ${ONBOARD_HOST_IDS.map((id) => `${onboardHostDescriptor(id).title} (${id})`).join(", ")}.`,
-      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
+      "The default credential reference is DISCORD_BOT_TOKEN. An existing environment or protected-file source can be reused when the selected host supports that custody path. A one-time hidden prompt verifies setup but is cleared after smoke, so the selected host still needs its own protected credential entry. Rerunning with an exact existing onboarding policy revalidates it without replacement and chooses the next available default guide filename; drift fails closed. GuildControl never writes a host configuration, stores a token value, requests Administrator, enables write tools, or reads Discord message content during onboarding.",
       "",
-      "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy publication failure, stdio failure, or guide export failure.",
+      "Exit status is 0 on a fully verified handoff and 2 on invalid input, exhausted interactive attempts, failed identity or installation verification, policy creation or revalidation failure, stdio failure, or guide export failure.",
     ].join("\n")
   }
   if (topic === "coordination") {
@@ -2500,7 +2507,7 @@ function renderOnboard(
     `Verified application: ${report.setup.applicationId}`,
     `Verified bot: ${report.setup.botId}`,
     `Exact guild: ${report.install.guildId}`,
-    `Policy: ${report.configFile}`,
+    `Policy: ${report.configFile} (${report.policyDisposition})`,
     `MCP smoke test: ${report.smoke.transport} passed with ${report.smoke.toolCount} tools`,
     `Private activation guide: ${guide.file}`,
     `Install page opened: ${browser.installOpened ? "yes" : "no"}`,
@@ -3445,11 +3452,17 @@ async function promptProtectedCredentialFile(
   )
 }
 
-async function promptHiddenToken(interaction: CliInteraction): Promise<string> {
+async function promptHiddenToken(
+  interaction: CliInteraction,
+  credentialVariable = DEFAULT_TOKEN_ENVIRONMENT_VARIABLE,
+): Promise<string> {
+  const label = credentialVariable === DEFAULT_TOKEN_ENVIRONMENT_VARIABLE
+    ? "Discord bot token"
+    : `Discord bot token for ${credentialVariable}`
   for (let attempt = 0; attempt < ONBOARD_PROMPT_ATTEMPTS; attempt += 1) {
     const message = attempt === 0
-      ? "Discord bot token: "
-      : "Token was empty. Discord bot token: "
+      ? `${label}: `
+      : `Token was empty. ${label}: `
     const value = await interaction.promptSecret(message)
     if (value.trim()) return value.trim()
   }
@@ -3459,6 +3472,67 @@ async function promptHiddenToken(interaction: CliInteraction): Promise<string> {
 }
 
 type OnboardCredentialSource = "environment" | "file" | "prompt"
+
+async function selectExistingOnboardCredential(
+  parsed: Extract<ParsedCliArguments, { command: "onboard" }>,
+  hostId: OnboardHostId,
+  interactive: boolean,
+  interaction: CliInteraction,
+  environment: NodeJS.ProcessEnv,
+  credential: ConnectorCredentialReference,
+): Promise<OnboardCredentialSelection> {
+  if (credential.provider === "file") {
+    if (!onboardHostSupportsCredentialFile(hostId)) {
+      throw new ConfigurationError(
+        "The existing file-backed policy cannot be activated through the selected MCPB host; choose another host or policy",
+      )
+    }
+    if (parsed.credentialVariable) {
+      throw new ConfigurationError(
+        "The existing onboarding policy uses a protected token file; --token-env cannot replace its credential custody",
+      )
+    }
+    if (
+      parsed.credentialFile
+      && resolveConnectorSecretFile(parsed.credentialFile) !== credential.path
+    ) {
+      throw new ConfigurationError(
+        "Option --token-file does not match the existing onboarding policy's protected credential path",
+      )
+    }
+    return {
+      access: "protected-file",
+      credentialFile: credential.path,
+    }
+  }
+  if (parsed.credentialFile) {
+    throw new ConfigurationError(
+      `The existing onboarding policy uses environment variable ${credential.variable}; --token-file cannot replace its credential custody`,
+    )
+  }
+  if (
+    parsed.credentialVariable
+    && parsed.credentialVariable.trim() !== credential.variable
+  ) {
+    throw new ConfigurationError(
+      `Option --token-env must match existing onboarding variable ${credential.variable}`,
+    )
+  }
+  if (environment[credential.variable]?.trim()) {
+    return {
+      access: "existing-environment",
+      credentialVariable: credential.variable,
+    }
+  }
+  if (!interactive) {
+    throw new CredentialUnavailableError("environment", credential.variable)
+  }
+  return {
+    access: "one-time-prompt",
+    credentialVariable: credential.variable,
+    hiddenToken: await promptHiddenToken(interaction, credential.variable),
+  }
+}
 
 async function selectOnboardCredentialSource(
   interaction: CliInteraction,
@@ -3503,7 +3577,18 @@ async function selectOnboardCredential(
   interactive: boolean,
   interaction: CliInteraction,
   environment: NodeJS.ProcessEnv,
+  existingCredential?: ConnectorCredentialReference,
 ): Promise<OnboardCredentialSelection> {
+  if (existingCredential) {
+    return selectExistingOnboardCredential(
+      parsed,
+      hostId,
+      interactive,
+      interaction,
+      environment,
+      existingCredential,
+    )
+  }
   const credentialFileSupported = onboardHostSupportsCredentialFile(hostId)
   if (parsed.credentialFile) {
     if (!credentialFileSupported) {
@@ -3689,24 +3774,47 @@ async function executeOnboard(
     parsed.confirmation,
   )
 
-  progress(3, "Verify identity and installation, then publish the private policy")
   const defaultConfig = parsed.configFile === undefined
   const configFile = resolveConnectorConfigFile(
     parsed.configFile || resolveDefaultOnboardConfigFile({ environment }),
   )
+  const policyExists = dependencies.pathExists(configFile)
+  progress(
+    3,
+    policyExists
+      ? "Verify identity and installation against the existing private policy"
+      : "Verify identity and installation, then publish the private policy",
+  )
+  const existingDocument = policyExists
+    ? dependencies.loadConfigDocument(configFile)
+    : undefined
+  if (existingDocument) {
+    assertReusableOnboardPolicy(existingDocument, configFile, install)
+  }
   const credential = await selectOnboardCredential(
     parsed,
     hostId,
     interactive,
     interaction,
     environment,
+    existingDocument?.credential,
   )
-  if (defaultConfig) await dependencies.ensureConfigDirectory(dirname(configFile))
-  const executionEnvironment = {
+  if (defaultConfig && !policyExists) {
+    await dependencies.ensureConfigDirectory(dirname(configFile))
+  }
+  const hiddenCredentialVariable = credential.hiddenToken
+    ? credential.credentialVariable
+    : undefined
+  if (credential.hiddenToken && !hiddenCredentialVariable) {
+    throw new ConfigurationError(
+      "One-time onboarding credential access requires one exact environment variable",
+    )
+  }
+  const executionEnvironment: NodeJS.ProcessEnv = {
     ...environment,
     [CONFIG_FILE_ENVIRONMENT_VARIABLE]: configFile,
-    ...(credential.hiddenToken
-      ? { [DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]: credential.hiddenToken }
+    ...(credential.hiddenToken && hiddenCredentialVariable
+      ? { [hiddenCredentialVariable]: credential.hiddenToken }
       : {}),
   }
   const launcher = publishedPackageLaunch()
@@ -3716,12 +3824,16 @@ async function executeOnboard(
       args: launcher.args,
       command: launcher.command,
       configFile,
-      ...(credential.credentialFile
-        ? { credentialFile: credential.credentialFile }
-        : {}),
-      ...(credential.credentialVariable
-        ? { credentialVariable: credential.credentialVariable }
-        : {}),
+      ...(policyExists
+        ? { reuseExistingConfig: true }
+        : {
+            ...(credential.credentialFile
+              ? { credentialFile: credential.credentialFile }
+              : {}),
+            ...(credential.credentialVariable
+              ? { credentialVariable: credential.credentialVariable }
+              : {}),
+          }),
       environment: executionEnvironment,
       expectedApplicationId: install.applicationId,
       preset: {
@@ -3752,6 +3864,7 @@ async function executeOnboard(
       credentialAccess: credential.access,
       hostId,
       install,
+      policyDisposition: policyExists ? "reused" : "created",
       setup,
       smoke,
     })
@@ -3766,14 +3879,14 @@ async function executeOnboard(
     const message = error instanceof Error ? error.message : String(error)
     throw new ConfigurationError(redactText(message, [credential.hiddenToken]))
   } finally {
-    if (credential.hiddenToken) {
-      delete executionEnvironment[DEFAULT_TOKEN_ENVIRONMENT_VARIABLE]
+    if (hiddenCredentialVariable) {
+      delete executionEnvironment[hiddenCredentialVariable]
     }
   }
 
   const htmlFile = parsed.htmlFile
     ? resolve(parsed.htmlFile)
-    : resolve(dirname(configFile), "guildcontrol-onboarding.html")
+    : resolveAvailableOnboardHtmlFile(configFile, dependencies.pathExists)
   progress(5, `Create the private ${onboardHostDescriptor(hostId).title} activation handoff`)
   const guide = await dependencies.exportOnboardHtml(htmlFile, report)
   let guideOpened = false
