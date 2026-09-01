@@ -13,7 +13,7 @@ RUN npm run build \
   && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
-ARG VERSION=0.3.1
+ARG VERSION=0.4.0
 ARG REVISION=local
 
 LABEL org.opencontainers.image.title="GuildControl MCP" \
