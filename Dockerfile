@@ -18,7 +18,7 @@ ARG REVISION=local
 
 LABEL org.opencontainers.image.title="GuildControl MCP" \
   org.opencontainers.image.description="Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration" \
-  org.opencontainers.image.url="https://guildcontrol.lasers.app" \
+  org.opencontainers.image.url="https://docs.guildcontrol.lasers.app" \
   org.opencontainers.image.source="https://github.com/j-256/guildcontrol" \
   org.opencontainers.image.documentation="https://github.com/j-256/guildcontrol/blob/v${VERSION}/README.md" \
   org.opencontainers.image.licenses="AGPL-3.0-only" \

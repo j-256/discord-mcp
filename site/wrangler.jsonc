@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "guildcontrol",
+  "name": "guildcontrol-docs",
   "compatibility_date": "2026-08-30",
   "send_metrics": false,
   "workers_dev": true,

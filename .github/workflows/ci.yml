@@ -277,7 +277,7 @@ jobs:
     needs: gate
     environment:
       name: documentation
-      url: https://guildcontrol.lasers.app
+      url: https://docs.guildcontrol.lasers.app
     permissions:
       actions: read # Download only this run's verified portal
       contents: read

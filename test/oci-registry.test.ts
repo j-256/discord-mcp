@@ -130,7 +130,7 @@ function validConfig(): object {
         "org.opencontainers.image.revision": REVISION,
         "org.opencontainers.image.source": "https://github.com/j-256/guildcontrol",
         "org.opencontainers.image.title": "GuildControl MCP",
-        "org.opencontainers.image.url": "https://guildcontrol.lasers.app",
+        "org.opencontainers.image.url": "https://docs.guildcontrol.lasers.app",
         "org.opencontainers.image.version": VERSION,
       },
       User: "node",

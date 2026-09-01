@@ -28,6 +28,8 @@ const MCP_TITLE = "GuildControl MCP"
 const MCP_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
 const TRADEMARK_DISCLAIMER = "GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to."
 const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
+const PRODUCT_URL = "https://guildcontrol.lasers.app"
+const PRODUCT_REDIRECT_REF = "guildcontrol_product_to_docs"
 const REPOSITORY_ID = "1334461127"
 const ICON_SHA256 = "4b65ca78a84dc8d5cc5ac5e1e19a08c4bab20d7d455cc0cb57185e6ff2ca15de"
 const ICON_MIME_TYPE = "image/png"
@@ -85,6 +87,7 @@ const NARROW_COMPETITOR_LEAD_OUTCOMES = Object.freeze([
 ])
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
+const ABSOLUTE_HTTPS_REFERENCE = /\bhttps:\/\/[^\s<>"'`]+/gu
 const EXPECTED_DEPENDENCIES = {
   "@modelcontextprotocol/client": "2.0.0",
   "@modelcontextprotocol/server": "2.0.0",
@@ -147,6 +150,20 @@ const LEGACY_IDENTITY_EXCEPTIONS = new Set([
 const LEGACY_IDENTITY_PATTERN = /discord[-_]?mcp/iu
 const LEGACY_SELF_IDENTITY_PATTERN = new RegExp("j-256(?:\\/|%2f)discord" + "-mcp", "iu")
 const LEGACY_SCOPED_PACKAGE_PATTERN = /(?:@|%40)j-256(?:\/|%2f)guildcontrol/iu
+
+function referencesExactOrigin(source, expectedOrigin) {
+  const expected = new URL(expectedOrigin)
+  for (const [reference] of source.matchAll(ABSOLUTE_HTTPS_REFERENCE)) {
+    let parsed
+    try {
+      parsed = new URL(reference)
+    } catch {
+      continue
+    }
+    if (parsed.origin === expected.origin) return true
+  }
+  return false
+}
 
 async function checkNeutrality() {
   const clientCompatibilityPaths = new Set([
@@ -521,11 +538,11 @@ async function checkDocumentationPortal() {
     invariant(documentationSources.includes(required), `documentation source frontier lacks ${required}`)
   }
   invariant(DOCUMENTATION_MANIFEST_FORMAT === "guildcontrol.docs-manifest.v1", "documentation manifest format changed")
-  invariant(astroConfiguration.includes('const SITE_ORIGIN = "https://guildcontrol.lasers.app"'), "documentation origin is invalid")
+  invariant(astroConfiguration.includes(`const SITE_ORIGIN = "${DOCUMENTATION_URL}"`), "documentation origin is invalid")
   invariant(!astroConfiguration.includes("\n  base:"), "documentation must publish at the canonical origin root")
   assertEqual(wranglerConfiguration, {
     $schema: "./node_modules/wrangler/config-schema.json",
-    name: "guildcontrol",
+    name: "guildcontrol-docs",
     compatibility_date: "2026-08-30",
     send_metrics: false,
     workers_dev: true,
@@ -644,13 +661,20 @@ async function checkDocumentation(packageJson) {
   invariant(documentedVersions.every((version) => version === packageJson.version), "documentation npm versions are out of sync")
   invariant(readme.includes(`https://raw.githubusercontent.com/j-256/guildcontrol/v${packageJson.version}/assets/guildcontrol-icon.png`), "README icon URL is out of sync")
   invariant(readme.includes(`[Documentation portal](${DOCUMENTATION_URL}/)`), "README lacks the public documentation portal")
+  invariant(!referencesExactOrigin(readme, PRODUCT_URL), "README must not identify the temporary product origin as documentation")
   invariant(readme.includes(TRADEMARK_DISCLAIMER), "README lacks the independent-project trademark disclaimer")
   invariant(releaseFooter.includes(TRADEMARK_DISCLAIMER), "documentation portal lacks the independent-project trademark disclaimer")
   invariant(releasing.includes("[documentation portal operations guide](documentation-portal.md)"), "release runbook lacks the documentation operations boundary")
   invariant(releasing.includes("node scripts/check-public-documentation.mjs"), "release runbook lacks the documentation release precondition")
+  invariant(!referencesExactOrigin(releasing, PRODUCT_URL), "release runbook must require the canonical documentation origin")
   invariant(documentationPortal.includes(`Set the GitHub repository homepage to \`${DOCUMENTATION_URL}\``), "documentation operations guide lacks the canonical homepage")
   invariant(documentationPortal.includes("node scripts/check-public-documentation.mjs"), "documentation operations guide lacks public verification")
   invariant(documentationPortal.includes("CLOUDFLARE_WORKERS_DEPLOY_TOKEN"), "documentation operations guide lacks the purpose-specific deployment secret")
+  invariant(documentationPortal.includes(`stable ref \`${PRODUCT_REDIRECT_REF}\``), "documentation operations guide lacks the stable product redirect reference")
+  invariant(documentationPortal.includes("HTTP 307"), "documentation operations guide lacks the temporary redirect status")
+  invariant(documentationPortal.includes("path and query string"), "documentation operations guide lacks redirect preservation")
+  invariant(documentationPortal.includes("AAAA 100::"), "documentation operations guide lacks the originless redirect placeholder")
+  invariant(documentationPortal.includes("MCP verification `TXT`"), "documentation operations guide lacks exact-name TXT preservation")
   invariant(Buffer.byteLength(readme) <= README_MAX_BYTES, "README must remain a concise landing page")
   invariant((readme.match(/^# /gm) || []).length === 1, "README must contain one top-level heading")
   let previousHeading = -1
@@ -1643,7 +1667,7 @@ async function checkAutomation(packageJson) {
     "needs.gate.result == 'success'",
     "needs: gate",
     "name: documentation",
-    "url: https://guildcontrol.lasers.app",
+    `url: ${DOCUMENTATION_URL}`,
     "actions: read",
     "contents: read",
     "node-version: \"24.19.0\"",

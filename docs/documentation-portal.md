@@ -1,10 +1,12 @@
 # Documentation portal operations
 
-This guide owns the infrastructure lifecycle for `https://guildcontrol.lasers.app`. The release runbook owns version publication and treats a healthy, exact documentation deployment as a precondition. It does not duplicate hosting setup here.
+This guide owns the infrastructure lifecycle for the canonical documentation origin at `https://docs.guildcontrol.lasers.app` and the temporary product-host redirect at `https://guildcontrol.lasers.app`. The release runbook owns version publication and treats a healthy, exact documentation deployment as a precondition. It does not duplicate hosting setup here.
 
 ## Deployment contract
 
-GuildControl publishes an assets-only Cloudflare Worker from `site/wrangler.jsonc`. The canonical site is a deterministic Astro build with no runtime origin, server function, secret, or Discord access. The stable `workers.dev` route remains available for bootstrap and provider-level diagnosis, while per-version preview URLs are disabled and canonical metadata remains bound to `guildcontrol.lasers.app`. The tracked Worker configuration also disables Wrangler telemetry for this project.
+GuildControl publishes an assets-only Cloudflare Worker from `site/wrangler.jsonc`. The canonical site is a deterministic Astro build with no runtime origin, server function, secret, or Discord access. The stable `guildcontrol-docs.etzios.workers.dev` route remains available for bootstrap and provider-level diagnosis, while per-version preview URLs are disabled and canonical metadata remains bound to `docs.guildcontrol.lasers.app`. The tracked Worker configuration also disables Wrangler telemetry for this project.
+
+Until a product is deployed, `guildcontrol.lasers.app` is the reserved product origin and returns an HTTP 307 redirect to the documentation origin. The zone-level rule uses stable ref `guildcontrol_product_to_docs` and preserves the complete path and query string. Its proxied `AAAA 100::` record is an originless placeholder that lets the redirect rule receive traffic; it is not an application origin. The exact-name MCP verification `TXT` record is independent and must remain intact. Do not add shorthand product or documentation aliases without a separate review.
 
 The CI workflow separates verification from authority:
 
@@ -12,11 +14,11 @@ The CI workflow separates verification from authority:
 2. The `CI gate` requires the documentation job and every other release-quality job to pass.
 3. The `Publish documentation portal` job runs only for protected `main` pushes or an explicit `deploy-documentation` dispatch at `main`. It downloads the verified artifact from the same workflow run, receives the deployment credential only from the protected `documentation` environment, uploads those exact files, and checks the public manifest over HTTPS.
 
-Pull requests, scheduled checks, build steps, browser tests, and artifact uploads never receive a Cloudflare credential. CI has no DNS or custom-domain authority.
+Pull requests, scheduled checks, build steps, browser tests, and artifact uploads never receive a Cloudflare credential. CI has no DNS, custom-domain, certificate, or redirect-rule authority.
 
-## One-time Cloudflare and GitHub setup
+## Cloudflare and GitHub setup
 
-Use [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) for the site and keep the Worker name `guildcontrol`.
+Use [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) for the site and keep the Worker name `guildcontrol-docs`.
 
 1. Create a GitHub Actions environment named `documentation` and restrict its deployment branches to protected `main`. A required reviewer is unnecessary for this public static site because the protected branch and complete CI gate already define the reviewed content boundary.
 2. Set the environment variable `CLOUDFLARE_ACCOUNT_ID` to the deployment account identifier. This identifier is routing metadata, not a credential.
@@ -34,18 +36,19 @@ npm --prefix site run deploy:dry-run
 ```
 
 6. Bootstrap the Worker with the dedicated token available only in the process environment, then discard the process-local value. The tracked deployment command is `npm --prefix site run deploy`; do not add an alternate dashboard build configuration.
+7. Attach only `docs.guildcontrol.lasers.app` to the `guildcontrol-docs` Worker as a Custom Domain. Keep `workers_dev` enabled and preview URLs disabled.
+8. Set the GitHub repository homepage to `https://docs.guildcontrol.lasers.app`.
 
-The Workers Scripts Write token can upload Worker code and assets. It cannot edit DNS or attach a custom domain. Keep those authorities with a maintainer credential used only during deliberate infrastructure operations.
+The Workers Scripts Write token can upload Worker code and assets. It cannot edit DNS, attach a custom domain, manage certificates, or change redirect rules. Keep those authorities with a maintainer credential used only during deliberate infrastructure operations.
 
-## Custom-domain cutover
+## Documentation-host cutover
 
-Cloudflare cannot attach a Workers Custom Domain while a conflicting DNS record exists. Follow the official [Pages-to-Workers migration](https://developers.cloudflare.com/workers/static-assets/migration-guides/migrate-from-pages/) and [Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) procedures in this order:
+Use purpose-built Cloudflare inventory and reviewed mutation paths. Preserve all unrelated `lasers.app` DNS records and redirect rules throughout the cutover.
 
-1. Confirm the Worker upload completed and the exact local `site/dist/generated/docs-manifest.json` is retained for verification.
-2. Remove the custom-domain binding from the old GitHub Pages site.
-3. Delete only the exact DNS record for `guildcontrol.lasers.app`. Do not change the wildcard `*.j-256.dev` repository redirect or unrelated `lasers.app` records.
-4. Attach `guildcontrol.lasers.app` to the `guildcontrol` Worker as a Custom Domain. Let Cloudflare create and manage its DNS record and certificate.
-5. Require a valid HTTPS response and run:
+1. Inventory the exact Worker custom domains, every DNS record at both GuildControl hostnames, the relevant certificate packs, the complete `http_request_dynamic_redirect` ruleset, the GitHub homepage, and the live canonical metadata.
+2. Attach `docs.guildcontrol.lasers.app` to the existing `guildcontrol-docs` Worker without detaching the product hostname. Require the new binding to be enabled, require its certificate pack and leaf certificates to be active, and require a successful HTTPS response before continuing.
+3. Push the source migration through the normal protected pull-request path. Require every status check, merge to protected `main`, and require `Publish documentation portal` to deploy and verify the exact workflow artifact at the new documentation origin.
+4. Independently retain the local `site/dist/generated/docs-manifest.json` and verify the canonical deployment:
 
 ```sh
 node scripts/check-public-documentation.mjs \
@@ -54,10 +57,18 @@ node scripts/check-public-documentation.mjs \
   --delay-ms 10000
 ```
 
-6. Merge the prepared deployment change, or explicitly redeploy the exact `main` commit with `gh workflow run ci.yml --ref main -f operation=deploy-documentation`, then require `Publish documentation portal` to upload the same verified artifact and pass its independent public check.
-7. Set the GitHub repository homepage to `https://guildcontrol.lasers.app`, disable the obsolete GitHub Pages site, and confirm that no Pages deployment action or Pages-specific repository authority remains.
+5. Only after the exact canonical verification passes, add the enabled zone-level redirect rule with stable ref `guildcontrol_product_to_docs`. Match only `guildcontrol.lasers.app`, return HTTP 307, build the target from `https://docs.guildcontrol.lasers.app` plus `http.request.uri.path`, and preserve the query string.
+6. Verify representative root, nested, encoded-path, and multi-value query requests before changing the old Worker binding.
+7. Detach only the `guildcontrol.lasers.app` Worker custom domain. Confirm its Cloudflare-managed read-only DNS record is gone, then create one proxied originless `AAAA 100::` record at that exact name. Preserve the MCP verification `TXT` record and every unrelated record.
+8. Recheck the complete custom-domain, DNS, certificate, and redirect-rule inventories. Require the canonical host to return exact Worker bytes, the product host to return exactly HTTP 307 with its path and query string preserved, and the stable workers.dev route to remain available.
 
-Do not delete the old Pages configuration before the Worker and rollback inputs are ready. If the custom-domain verification fails during cutover, detach the Worker domain and restore the exact prior Pages binding and DNS record while diagnosing the Worker separately.
+Keep the old Worker serving path available until the new custom domain has active TLS and the protected-main canonical deployment passes the exact artifact verifier. Do not detach the old binding merely because DNS or a certificate request is pending.
+
+## Rollback
+
+Before detaching the old Worker custom domain, disable or remove only the `guildcontrol_product_to_docs` rule and continue serving both custom domains while the source or deployment issue is corrected.
+
+After detachment, first remove only the originless product-host `AAAA` placeholder. Reattach `guildcontrol.lasers.app` to the `guildcontrol-docs` Worker, require Cloudflare-managed DNS and active TLS, verify the old origin against the retained artifact, and then disable or remove only the product redirect rule. Preserve the exact-name MCP verification `TXT` record throughout. Revert a source regression through the protected pull-request path rather than editing Worker assets in the dashboard.
 
 ## Routine deployment and recovery
 
