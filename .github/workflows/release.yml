@@ -10,10 +10,8 @@ on:
         options:
           - candidate
           - stage
-          - image
-          - github-release
+          - promote
           - github-release-recovery
-          - register
       tag:
         description: Exact stable release tag such as vMAJOR.MINOR.PATCH
         required: true
@@ -38,17 +36,16 @@ env:
   NPM_CONFIG_REPLACE_REGISTRY_HOST: never
 
 jobs:
-  release:
-    name: ${{ inputs.operation }} ${{ inputs.tag }}
-    if: ${{ inputs.operation != 'image' && inputs.operation != 'github-release-recovery' }}
-    environment: release
+  preflight:
+    name: preflight ${{ inputs.operation }} ${{ inputs.tag }}
+    if: ${{ inputs.operation != 'github-release-recovery' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       artifact-metadata: write # Associate signed attestations with release artifacts
       attestations: write # Store signed release attestations
       contents: read
-      id-token: write # Authenticate npm, attestations, and MCP Registry with OIDC
+      id-token: write # Sign release attestations
       packages: read # Distinguish an absent image tag from an inaccessible package
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,110 +198,124 @@ jobs:
           set -eu
           node scripts/check-published-artifacts.mjs \
             --tarball "$TARBALL" \
-            --expect-package matching \
+            --expect-package matching-or-migration \
             --expect-npm missing \
             --expect-oci missing \
             --expect-registry missing
+      - name: Verify promotion prerequisites
+        if: ${{ inputs.operation == 'promote' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-oci missing-or-matching \
+            --expect-registry missing-or-matching
+
+  stage:
+    name: stage npm ${{ inputs.tag }}
+    if: ${{ always() && inputs.operation == 'stage' && needs.preflight.result == 'success' }}
+    needs: preflight
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read # Download only this run's verified npm evidence
+      contents: read
+      id-token: write # Authenticate staged npm publication with OIDC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-evidence-stage-${{ inputs.tag }}
+          path: ${{ runner.temp }}/release
+      - name: Reverify exact staged npm evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -eu
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          test "$GITHUB_REPOSITORY" = "j-256/guildcontrol"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+          test "$REPOSITORY_PRIVATE" = "false"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          set -- "$RUNNER_TEMP"/release/*.tgz
+          test "$#" -eq 1
+          test "$(basename "$1")" = "guildctl-$version.tgz"
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$1" \
+            --expect-package matching-or-migration \
+            --expect-npm missing \
+            --expect-oci missing \
+            --expect-registry missing
+          printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
       - name: Stage the npm candidate for human approval
-        if: ${{ inputs.operation == 'stage' }}
         run: npm stage publish "$TARBALL" --provenance
 
-      - name: Verify promoted npm artifact and registry state
-        if: ${{ inputs.operation == 'register' }}
+  promotion_approval:
+    name: approve promotion ${{ inputs.tag }}
+    if: ${{ always() && inputs.operation == 'promote' && needs.preflight.result == 'success' }}
+    needs: preflight
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Authorize the exact stable tag
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          state_file="$RUNNER_TEMP/published-state.json"
-          node scripts/check-published-artifacts.mjs \
-            --tarball "$TARBALL" \
-            --expect-package matching \
-            --expect-npm matching \
-            --expect-oci matching \
-            --expect-registry missing-or-matching \
-            --json > "$state_file"
-          cat "$state_file"
-          registry_state="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).registryVersion" "$state_file")"
-          oci_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).ociDigest" "$state_file")"
-          printf 'REGISTRY_STATE=%s\n' "$registry_state" >> "$GITHUB_ENV"
-          printf 'OCI_DIGEST=%s\n' "$oci_digest" >> "$GITHUB_ENV"
-      - name: Verify exact immutable GitHub Release before registration
-        if: ${{ inputs.operation == 'register' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          evidence="$RUNNER_TEMP/register-release-evidence.json"
-          node scripts/github-release.mjs prepare \
-            --directory "$RUNNER_TEMP/release" \
-            --oci-digest "$OCI_DIGEST" \
-            --revision "$GITHUB_SHA" \
-            --output "$evidence"
-          node scripts/github-release.mjs verify \
-            --directory "$RUNNER_TEMP/release" \
-            --evidence "$evidence" \
-            --expect immutable \
-            --revision "$GITHUB_SHA" \
-            --json > "$RUNNER_TEMP/register-release-verification.json"
-          cat "$RUNNER_TEMP/register-release-verification.json"
-      - name: Authenticate to MCP Registry
-        if: ${{ inputs.operation == 'register' && env.REGISTRY_STATE == 'missing' }}
-        run: |
-          "$RUNNER_TEMP/mcp-publisher" login github-oidc
-      - name: Register exact MCP metadata
-        if: ${{ inputs.operation == 'register' && env.REGISTRY_STATE == 'missing' }}
-        run: |
-          "$RUNNER_TEMP/mcp-publisher" publish server.json
-      - name: Verify exact MCP Registry metadata
-        if: ${{ inputs.operation == 'register' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          attempt=1
-          until node scripts/check-published-artifacts.mjs \
-            --tarball "$TARBALL" \
-            --expect-package matching \
-            --expect-npm matching \
-            --expect-oci matching \
-            --expect-registry matching
-          do
-            test "$attempt" -lt 6
-            attempt=$((attempt + 1))
-            sleep 10
-          done
-      - name: Retain registration verification
-        if: ${{ inputs.operation == 'register' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: registry-verification-${{ inputs.tag }}
-          path: |
-            ${{ runner.temp }}/published-state.json
-            ${{ runner.temp }}/register-release-evidence.json
-            ${{ runner.temp }}/register-release-verification.json
-          if-no-files-found: error
-          retention-days: 14
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
 
-      - name: Verify complete public distribution for GitHub Release
-        if: ${{ inputs.operation == 'github-release' }}
+  recovery_approval:
+    name: approve GitHub Release recovery ${{ inputs.tag }}
+    if: ${{ inputs.operation == 'github-release-recovery' }}
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Authorize the exact recovery tag
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          node scripts/check-published-artifacts.mjs \
-            --tarball "$TARBALL" \
-            --expect-package matching \
-            --expect-npm matching \
-            --expect-oci matching \
-            --expect-registry missing-or-matching
+          printf '%s\n' "$GITHUB_REF" | grep -Eq "^refs/tags/${RELEASE_TAG}-recovery\\.[1-9][0-9]*$"
 
   github_release:
     name: github-release ${{ inputs.tag }}
     if: >-
       ${{ always() &&
-          ((inputs.operation == 'github-release' && needs.release.result == 'success') ||
-           (inputs.operation == 'github-release-recovery' && needs.release.result == 'skipped')) }}
-    needs: release
-    environment: release
+          ((inputs.operation == 'promote' &&
+            needs.preflight.result == 'success' &&
+            needs.promotion_approval.result == 'success' &&
+            needs.image.result == 'success' &&
+            needs.recovery_approval.result == 'skipped') ||
+           (inputs.operation == 'github-release-recovery' &&
+            needs.preflight.result == 'skipped' &&
+            needs.promotion_approval.result == 'skipped' &&
+            needs.image.result == 'skipped' &&
+            needs.recovery_approval.result == 'success')) }}
+    needs:
+      - preflight
+      - promotion_approval
+      - recovery_approval
+      - image
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -383,12 +394,12 @@ jobs:
             test "$control_version" = "$source_version"
             verifier=".release-recovery-control/scripts/github-release.mjs"
           else
-            test "$OPERATION" = "github-release"
+            test "$OPERATION" = "promote"
           fi
           test -f "$verifier"
           printf 'GITHUB_RELEASE_VERIFIER=%s\n' "$verifier" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: ${{ inputs.operation == 'github-release' }}
+        if: ${{ inputs.operation == 'promote' }}
         with:
           name: release-evidence-${{ inputs.operation }}-${{ inputs.tag }}
           path: ${{ runner.temp }}/release
@@ -396,7 +407,7 @@ jobs:
         if: ${{ inputs.operation == 'github-release-recovery' }}
         with:
           github-token: ${{ github.token }}
-          name: release-evidence-github-release-${{ inputs.tag }}
+          name: release-evidence-promote-${{ inputs.tag }}
           path: ${{ runner.temp }}/release
           repository: ${{ github.repository }}
           run-id: ${{ inputs.evidence_run_id }}
@@ -454,7 +465,7 @@ jobs:
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
           source_revision="$(git rev-list -n 1 "$RELEASE_TAG")"
           test "$(git rev-parse HEAD)" = "$source_revision"
-          if [ "$OPERATION" = "github-release" ]
+          if [ "$OPERATION" = "promote" ]
           then
             test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
             test "$source_revision" = "$GITHUB_SHA"
@@ -654,8 +665,14 @@ jobs:
 
   image:
     name: image ${{ inputs.tag }}
-    if: ${{ inputs.operation == 'image' }}
-    environment: release
+    if: >-
+      ${{ always() &&
+          inputs.operation == 'promote' &&
+          needs.preflight.result == 'success' &&
+          needs.promotion_approval.result == 'success' }}
+    needs:
+      - preflight
+      - promotion_approval
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -750,7 +767,7 @@ jobs:
             --expect-package matching \
             --expect-npm matching \
             --expect-oci unchecked \
-            --expect-registry missing
+            --expect-registry missing-or-matching
           tag_state="$RUNNER_TEMP/image-tag-state.json"
           node scripts/check-image-tag.mjs --image "$IMAGE" --json > "$tag_state"
           cat "$tag_state"
@@ -822,7 +839,7 @@ jobs:
             --expect-package matching \
             --expect-npm matching \
             --expect-oci matching \
-            --expect-registry missing \
+            --expect-registry missing-or-matching \
             --json > "$state_file"
           do
             test "$attempt" -lt 6
@@ -865,5 +882,145 @@ jobs:
             ${{ runner.temp }}/public-container/catalog-evidence.json
             ${{ runner.temp }}/public-container/container-evidence.json
             ${{ runner.temp }}/release/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+  registry:
+    name: registry ${{ inputs.tag }}
+    if: >-
+      ${{ always() &&
+          inputs.operation == 'promote' &&
+          needs.preflight.result == 'success' &&
+          needs.promotion_approval.result == 'success' &&
+          needs.image.result == 'success' &&
+          needs.github_release.result == 'success' }}
+    needs:
+      - preflight
+      - promotion_approval
+      - image
+      - github_release
+    environment: release-credentials
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read # Download only this run's verified promotion evidence
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-evidence-promote-${{ inputs.tag }}
+          path: ${{ runner.temp }}/release
+      - name: Install and verify MCP Registry publisher
+        run: |
+          set -eu
+          test "$(uname -m)" = "x86_64"
+          publisher_archive="$RUNNER_TEMP/mcp-publisher_linux_amd64.tar.gz"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
+            -fsSLo "$publisher_archive" \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          printf '%s  %s\n' \
+            a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc \
+            "$publisher_archive" | sha256sum -c -
+          tar -xzf "$publisher_archive" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" --version 2>&1 | grep -F "mcp-publisher 1.8.1 "
+          "$RUNNER_TEMP/mcp-publisher" validate server.json
+      - name: Verify exact public promotion before Registry authentication
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -eu
+          test "$(node --version)" = "v24.19.0"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          test "$GITHUB_REPOSITORY" = "j-256/guildcontrol"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+          test "$REPOSITORY_PRIVATE" = "false"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          test "$(node -p "require('./server.json').name")" = "app.lasers.guildcontrol/discord"
+          set -- "$RUNNER_TEMP"/release/*.tgz
+          test "$#" -eq 1
+          test "$(basename "$1")" = "guildctl-$version.tgz"
+          state_file="$RUNNER_TEMP/published-state.json"
+          node scripts/check-published-artifacts.mjs \
+            --tarball "$1" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-oci matching \
+            --expect-registry missing-or-matching \
+            --json > "$state_file"
+          cat "$state_file"
+          registry_state="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).registryVersion" "$state_file")"
+          oci_digest="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).ociDigest" "$state_file")"
+          evidence="$RUNNER_TEMP/registry-release-evidence.json"
+          node scripts/github-release.mjs prepare \
+            --directory "$RUNNER_TEMP/release" \
+            --oci-digest "$oci_digest" \
+            --revision "$GITHUB_SHA" \
+            --output "$evidence"
+          node scripts/github-release.mjs verify \
+            --directory "$RUNNER_TEMP/release" \
+            --evidence "$evidence" \
+            --expect immutable \
+            --revision "$GITHUB_SHA" \
+            --json > "$RUNNER_TEMP/registry-release-verification.json"
+          cat "$RUNNER_TEMP/registry-release-verification.json"
+          printf 'REGISTRY_STATE=%s\n' "$registry_state" >> "$GITHUB_ENV"
+          printf 'TARBALL=%s\n' "$1" >> "$GITHUB_ENV"
+      - name: Authenticate the product DNS namespace
+        if: ${{ env.REGISTRY_STATE == 'missing' }}
+        env:
+          MCP_REGISTRY_DNS_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_DNS_PRIVATE_KEY }}
+        run: |
+          set -eu
+          test "${#MCP_REGISTRY_DNS_PRIVATE_KEY}" -eq 64
+          "$RUNNER_TEMP/mcp-publisher" login dns \
+            -algorithm ed25519 \
+            -domain guildcontrol.lasers.app \
+            -private-key "$MCP_REGISTRY_DNS_PRIVATE_KEY"
+      - name: Register exact MCP metadata
+        if: ${{ env.REGISTRY_STATE == 'missing' }}
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" publish server.json
+      - name: Verify exact MCP Registry metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          attempt=1
+          until node scripts/check-published-artifacts.mjs \
+            --tarball "$TARBALL" \
+            --expect-package matching \
+            --expect-npm matching \
+            --expect-oci matching \
+            --expect-registry matching \
+            --json > "$RUNNER_TEMP/registry-state.json"
+          do
+            test "$attempt" -lt 6
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          cat "$RUNNER_TEMP/registry-state.json"
+      - name: Retain registration verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: registry-verification-${{ inputs.tag }}
+          path: |
+            ${{ runner.temp }}/published-state.json
+            ${{ runner.temp }}/registry-release-evidence.json
+            ${{ runner.temp }}/registry-release-verification.json
+            ${{ runner.temp }}/registry-state.json
           if-no-files-found: error
           retention-days: 14

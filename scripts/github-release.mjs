@@ -16,7 +16,7 @@ const GITHUB_API_VERSION = "2026-03-10"
 const GITHUB_REPOSITORY = "j-256/guildcontrol"
 const RELEASE_WORKFLOW_NAME = "Release"
 const RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml"
-const MCP_REGISTRY_NAME = "io.github.j-256/guildcontrol"
+const MCP_REGISTRY_NAME = "app.lasers.guildcontrol/discord"
 const NPM_PACKAGE = "guildctl"
 const RELEASE_EVIDENCE_FORMAT = "guildcontrol.github-release-evidence.v2"
 const RELEASE_EVIDENCE_SCHEMA_VERSION = 2
@@ -83,7 +83,7 @@ function mcpbReleaseUrl(version) {
 
 function recoveryEvidenceArtifactName(version) {
   assertVersion(version)
-  return `release-evidence-github-release-${releaseTag(version)}`
+  return `release-evidence-promote-${releaseTag(version)}`
 }
 
 function registryVersionUrl(version) {

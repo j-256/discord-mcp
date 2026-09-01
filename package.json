@@ -1,6 +1,6 @@
 {
   "name": "guildctl",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
   "license": "AGPL-3.0-only",
   "author": "j-256",
@@ -20,7 +20,7 @@
     "moderation",
     "least-privilege"
   ],
-  "mcpName": "io.github.j-256/guildcontrol",
+  "mcpName": "app.lasers.guildcontrol/discord",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

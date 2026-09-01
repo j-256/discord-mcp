@@ -23,7 +23,7 @@ import {
 } from "./documentation-manifest.mjs"
 
 const PACKAGE_NAME = "guildctl"
-const MCP_NAME = "io.github.j-256/guildcontrol"
+const MCP_NAME = "app.lasers.guildcontrol/discord"
 const MCP_TITLE = "GuildControl MCP"
 const MCP_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
 const TRADEMARK_DISCLAIMER = "GuildControl is an independent project and is not affiliated with or endorsed by Discord Inc. Discord is used only to identify the platform that GuildControl connects to."
@@ -1195,7 +1195,7 @@ async function checkContainerSource(packageJson) {
     `org.opencontainers.image.url="${DOCUMENTATION_URL}"`,
     "org.opencontainers.image.documentation=\"https://github.com/j-256/guildcontrol/blob/v${VERSION}/README.md\"",
     "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
-    "io.modelcontextprotocol.server.name=\"io.github.j-256/guildcontrol\"",
+    "io.modelcontextprotocol.server.name=\"app.lasers.guildcontrol/discord\"",
     "ENV NODE_ENV=production",
     "COPY --from=build --chown=node:node /app/dist ./dist",
     "COPY --from=build --chown=node:node /app/node_modules ./node_modules",
@@ -1239,7 +1239,7 @@ async function checkContainerSource(packageJson) {
   )
 }
 
-async function checkAutomation() {
+async function checkAutomation(packageJson) {
   const npmConfiguration = await readFile(join(REPOSITORY_ROOT, ".npmrc"), "utf8")
   invariant(npmConfiguration === NPM_CONFIGURATION, "project npm registry configuration is invalid")
   const workflowsDirectory = join(REPOSITORY_ROOT, ".github/workflows")
@@ -1263,14 +1263,18 @@ async function checkAutomation() {
   const release = await readFile(join(workflowsDirectory, "release.yml"), "utf8")
   for (const required of [
     "environment: release",
+    "environment: release-credentials",
     "candidate",
     "stage",
+    "promote",
     "image",
-    "register",
-    "github-release",
     "github-release-recovery",
     "evidence_run_id",
     "Require a clean first-publication candidate",
+    "Verify promotion prerequisites",
+    "Reverify exact staged npm evidence",
+    "Authorize the exact stable tag",
+    "Authorize the exact recovery tag",
     "npm stage publish",
     "--provenance",
     "test \"$(node --version)\" = \"v24.19.0\"",
@@ -1290,8 +1294,13 @@ async function checkAutomation() {
     "Attest reproducible MCPB",
     "Attest MCPB SPDX SBOM",
     "Attest exact OCI image provenance",
-    "Verify complete public distribution for GitHub Release",
-    "Verify exact immutable GitHub Release before registration",
+    "Verify exact public promotion before Registry authentication",
+    "Authenticate the product DNS namespace",
+    "MCP_REGISTRY_DNS_PRIVATE_KEY",
+    "app.lasers.guildcontrol/discord",
+    "guildcontrol.lasers.app",
+    "login dns",
+    "-algorithm ed25519",
     "Verify exact tag and prepare immutable release evidence",
     "Verify protected recovery provenance",
     "Verify recovered artifact attestations",
@@ -1332,6 +1341,7 @@ async function checkAutomation() {
     "provenance: mode=max",
     `sbom: generator=${SBOM_GENERATOR_IMAGE}`,
     "--bundle-from-oci",
+    "matching-or-migration",
     "v1.8.1",
     "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc",
   ]) {
@@ -1344,6 +1354,8 @@ async function checkAutomation() {
     "operation == 'bootstrap'",
     'npm publish "$TARBALL"',
     "guildcontrol-${RELEASE_TAG#v}.tgz",
+    "login github-oidc",
+    "secrets.NPM_TOKEN",
   ]) {
     invariant(!release.includes(forbidden), `release workflow contains forbidden first-publication automation ${forbidden}`)
   }
@@ -1364,12 +1376,22 @@ async function checkAutomation() {
   const ociRegistry = await readFile(join(REPOSITORY_ROOT, "scripts/oci-registry.mjs"), "utf8")
   const githubReleaseHelper = await readFile(join(REPOSITORY_ROOT, "scripts/github-release.mjs"), "utf8")
   const mcpbBuilder = await readFile(join(REPOSITORY_ROOT, "scripts/build-mcpb.mjs"), "utf8")
+  const publishedArtifactChecker = await readFile(join(REPOSITORY_ROOT, "scripts/check-published-artifacts.mjs"), "utf8")
   invariant(release.includes(SBOM_GENERATOR_IMAGE), "release workflow does not pin its SBOM generator")
   invariant(ociRegistry.includes(SBOM_GENERATOR_IMAGE), "OCI utilities do not pin their SBOM generator")
   invariant(ociLayoutVerifier.includes("SBOM_GENERATOR_IMAGE"), "OCI preflight does not use the pinned SBOM generator")
   invariant(!githubReleaseHelper.includes("/immutable-releases"), "GitHub Release automation must not require unavailable repository administration authority")
   invariant(mcpbBuilder.includes("MCPB artifact digest differs from server.json"), "MCPB builder must bind output to Registry metadata")
   invariant(mcpbBuilder.includes("--allow-registry-mismatch"), "MCPB builder lacks the explicit release-preparation escape hatch")
+  for (const migrationBoundary of [
+    'fromName: "io.github.j-256/guildcontrol"',
+    'fromVersion: "0.3.0"',
+    `toName: "${MCP_NAME}"`,
+    `toVersion: "${packageJson.version}"`,
+    '"matching-or-migration"',
+  ]) {
+    invariant(publishedArtifactChecker.includes(migrationBoundary), `npm identity migration is missing ${migrationBoundary}`)
+  }
   const mcpbCompileStep = mcpbBuilder.indexOf("await run(process.execPath, [TYPESCRIPT_COMPILER")
   const mcpbArtifactStep = mcpbBuilder.indexOf("await buildAndVerifyMcpb(options)")
   invariant(
@@ -1398,18 +1420,75 @@ async function checkAutomation() {
   invariant((release.match(/artifact-metadata: write/g) || []).length === 1, "only file attestations may write artifact metadata")
   invariant(release.includes("create-storage-record: false"), "personal image attestation must disable unsupported storage records")
   invariant((release.match(/packages: write/g) || []).length === 1, "only the image release job may write packages")
-  invariant((release.match(/packages: read/g) || []).length === 1, "the non-image release job must use read-only package access")
+  invariant((release.match(/packages: read/g) || []).length === 1, "only release preflight may use read-only package access")
   invariant((release.match(/contents: write/g) || []).length === 1, "only the immutable GitHub Release job may write repository contents")
-  invariant((release.match(/actions: read/g) || []).length === 1, "only the immutable GitHub Release job may read retained workflow evidence")
+  invariant((release.match(/actions: read/g) || []).length === 3, "only npm staging, GitHub Release, and Registry jobs may read retained workflow evidence")
   invariant((release.match(/attestations: read/g) || []).length === 1, "only the immutable GitHub Release job may use read-only attestation authority")
+  invariant((release.match(/^    environment: release$/gm) || []).length === 3, "normal npm, promotion, and recovery approvals must remain separate explicit gates")
+  invariant((release.match(/^    environment: release-credentials$/gm) || []).length === 1, "only Registry publication may receive the DNS credential environment")
+  invariant((release.match(/secrets\.MCP_REGISTRY_DNS_PRIVATE_KEY/g) || []).length === 1, "only one Registry authentication step may receive the DNS private key")
+  invariant((release.match(/id-token: write/g) || []).length === 3, "only preflight attestations, npm staging, and image publication may mint OIDC tokens")
   invariant((release.match(/name: Install verified GitHub CLI/g) || []).length === 2, "every GitHub CLI consumer must install the reviewed binary")
+  const preflightStart = release.indexOf("\n  preflight:")
+  const stageStart = release.indexOf("\n  stage:", preflightStart)
+  const promotionApprovalStart = release.indexOf("\n  promotion_approval:", stageStart)
+  const recoveryApprovalStart = release.indexOf("\n  recovery_approval:", promotionApprovalStart)
   const githubReleaseStart = release.indexOf("\n  github_release:")
   const githubReleaseEnd = release.indexOf("\n  image:", githubReleaseStart)
-  invariant(githubReleaseStart > 0 && githubReleaseEnd > githubReleaseStart, "immutable GitHub Release job boundaries are invalid")
+  const registryStart = release.indexOf("\n  registry:", githubReleaseEnd)
+  invariant(
+    preflightStart > 0
+      && stageStart > preflightStart
+      && promotionApprovalStart > stageStart
+      && recoveryApprovalStart > promotionApprovalStart
+      && githubReleaseStart > recoveryApprovalStart
+      && githubReleaseEnd > githubReleaseStart
+      && registryStart > githubReleaseEnd,
+    "release job boundaries are invalid",
+  )
+  const preflightJob = release.slice(preflightStart, stageStart)
+  const stageJob = release.slice(stageStart, promotionApprovalStart)
+  const promotionApprovalJob = release.slice(promotionApprovalStart, recoveryApprovalStart)
+  const recoveryApprovalJob = release.slice(recoveryApprovalStart, githubReleaseStart)
   const githubReleaseJob = release.slice(githubReleaseStart, githubReleaseEnd)
+  const imageJob = release.slice(githubReleaseEnd, registryStart)
+  const registryJob = release.slice(registryStart)
   for (const required of [
-    "needs: release",
+    "artifact-metadata: write",
+    "attestations: write",
+    "contents: read",
+    "id-token: write",
+    "packages: read",
+    "release-evidence-${{ inputs.operation }}-${{ inputs.tag }}",
+    "Verify promotion prerequisites",
+  ]) {
+    invariant(preflightJob.includes(required), `release preflight job is missing ${required}`)
+  }
+  invariant(!preflightJob.includes("environment:"), "release preflight must not require an operator approval")
+  for (const required of [
+    "needs: preflight",
     "environment: release",
+    "actions: read",
+    "contents: read",
+    "id-token: write",
+    "release-evidence-stage-${{ inputs.tag }}",
+    "matching-or-migration",
+    "npm stage publish",
+  ]) {
+    invariant(stageJob.includes(required), `npm staging job is missing ${required}`)
+  }
+  for (const [job, label] of [
+    [promotionApprovalJob, "promotion approval"],
+    [recoveryApprovalJob, "recovery approval"],
+  ]) {
+    invariant(job.includes("environment: release"), `${label} job lacks protected review`)
+    invariant(job.includes("permissions: {}"), `${label} job must not receive repository authority`)
+  }
+  invariant(promotionApprovalJob.includes("needs: preflight"), "promotion approval must follow exact preflight evidence")
+  for (const required of [
+    "- image",
+    "- promotion_approval",
+    "- recovery_approval",
     "actions: read",
     "attestations: read",
     "contents: write",
@@ -1427,12 +1506,8 @@ async function checkAutomation() {
   ]) {
     invariant(githubReleaseJob.includes(required), `immutable GitHub Release job is missing ${required}`)
   }
-  invariant(
-    release.indexOf("Verify exact immutable GitHub Release before registration")
-      < release.indexOf('"$RUNNER_TEMP/mcp-publisher" publish server.json'),
-    "Registry publication must follow immutable GitHub Release verification",
-  )
   for (const forbidden of [
+    "environment:",
     "attestations: write",
     "artifact-metadata: write",
     "id-token: write",
@@ -1444,6 +1519,46 @@ async function checkAutomation() {
     "gh release delete-asset",
   ]) {
     invariant(!githubReleaseJob.includes(forbidden), `immutable GitHub Release job contains forbidden authority ${forbidden}`)
+  }
+  for (const required of [
+    "- preflight",
+    "- promotion_approval",
+    "packages: write",
+    "attestations: write",
+    "id-token: write",
+    "--expect-registry missing-or-matching",
+  ]) {
+    invariant(imageJob.includes(required), `image publication job is missing ${required}`)
+  }
+  invariant(!imageJob.includes("environment:"), "image publication must reuse the promotion approval dependency")
+  for (const required of [
+    "- github_release",
+    "- image",
+    "- promotion_approval",
+    "environment: release-credentials",
+    "actions: read",
+    "contents: read",
+    "release-evidence-promote-${{ inputs.tag }}",
+    "Verify exact public promotion before Registry authentication",
+    "--expect immutable",
+    "secrets.MCP_REGISTRY_DNS_PRIVATE_KEY",
+    "login dns",
+    "-algorithm ed25519",
+    "-domain guildcontrol.lasers.app",
+    '"$RUNNER_TEMP/mcp-publisher" publish server.json',
+  ]) {
+    invariant(registryJob.includes(required), `Registry publication job is missing ${required}`)
+  }
+  for (const forbidden of [
+    "contents: write",
+    "packages: write",
+    "attestations: write",
+    "artifact-metadata: write",
+    "id-token: write",
+    "login github-oidc",
+    "secrets.NPM_TOKEN",
+  ]) {
+    invariant(!registryJob.includes(forbidden), `Registry publication job contains forbidden authority ${forbidden}`)
   }
   invariant(!release.includes("secrets.NPM_TOKEN"), "release workflow must not use a standing npm token")
   invariant(
@@ -1577,5 +1692,5 @@ await checkCommunityFiles()
 await checkMcpbSource(packageJson)
 await checkRegistryManifest(packageJson)
 await checkContainerSource(packageJson)
-await checkAutomation()
+await checkAutomation(packageJson)
 process.stdout.write(`Release metadata verified for ${packageJson.name}@${packageJson.version}\n`)
