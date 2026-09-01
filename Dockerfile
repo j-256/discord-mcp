@@ -33,7 +33,7 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json LICENSE ./
 COPY --chown=node:node README.md PRIVACY.md SECURITY.md SUPPORT.md ./
-COPY --chown=node:node docs/comparison.md docs/getting-started.md docs/limitations.md docs/migration.md docs/reference.md docs/releasing.md ./docs/
+COPY --chown=node:node docs/comparison.md docs/getting-started.md docs/limitations.md docs/migration.md docs/reference.md docs/releasing.md docs/safety-usability.md ./docs/
 
 USER node
 ENTRYPOINT ["node", "--no-expose-wasm", "--lite-mode", "dist/cli.js"]
