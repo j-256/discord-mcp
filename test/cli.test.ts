@@ -2318,7 +2318,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
   assert.deepEqual(parseCliArguments([
     "migrate",
     "plan",
-    "CAPPYEO@0.25.0",
+    "CAPPYEO@0.26.0",
     "--html",
     "./migration.html",
     "--json",
@@ -2327,7 +2327,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "migrate",
     htmlFile: "./migration.html",
     json: true,
-    sourceId: "cappyeo@0.25.0",
+    sourceId: "cappyeo@0.26.0",
   })
   assert.deepEqual(parseCliArguments(["profile", "list", "--json"]), {
     action: "list",
@@ -2579,7 +2579,7 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     () => parseCliArguments([
       "migrate",
       "plan",
-      "cappyeo@0.25.0",
+      "cappyeo@0.26.0",
       "--html",
       "first.html",
       "--html",
@@ -5672,7 +5672,7 @@ test("CLI lists release-exact migration sources and renders complete plans with 
   const catalog = JSON.parse(listOutput.value())
   const plan = JSON.parse(planOutput.value())
   assert.deepEqual(catalog.sources.map(({ id }: { id: string }) => id), [
-    "cappyeo@0.25.0",
+    "cappyeo@0.26.0",
     "hypark@0.1.1",
     "jaimen-bell@0.1.1",
     "oratorian@1.1.4",

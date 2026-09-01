@@ -76,6 +76,13 @@ const LIMITATIONS_REQUIRED_HEADINGS = Object.freeze([
   "## What verification proves",
   "## Choose the next path",
 ])
+const NARROW_COMPETITOR_LEAD_OUTCOMES = Object.freeze([
+  "Update an existing generated default-path Codex launcher with one explicit apply command",
+  "Inventory recognized tool-name references in a caller-selected source checkout",
+  "Execute a complete multi-operation convergence from one apply call",
+  "Repeat catch-up without caller-held cursor state",
+  "Friendly aliases and personas",
+])
 const STABLE_SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/
 const EXPECTED_DEPENDENCIES = {
@@ -748,6 +755,7 @@ async function checkDocumentation(packageJson) {
   for (const required of [
     "## How to read the matrix",
     "## Head-to-head matrix",
+    "## Narrower competitor leads and product gaps",
     "## Why each lead is material",
     "## Soundboard playback head-to-head",
     "## Bot-installation drift head-to-head",
@@ -767,14 +775,14 @@ async function checkDocumentation(packageJson) {
   }
   const comparisonMatrix = comparison
     .split("## Head-to-head matrix\n", 2)[1]
-    ?.split("\n## Why each lead is material", 1)[0]
+    ?.split("\n## Narrower competitor leads and product gaps", 1)[0]
   invariant(comparisonMatrix !== undefined, "field comparison matrix cannot be parsed")
   const comparisonRows = comparisonMatrix
     .split("\n")
     .filter((line) => line.startsWith("| "))
   invariant(comparisonRows.length > 2, "field comparison has no scored outcomes")
   invariant(
-    comparisonRows[0]?.startsWith("| Operator outcome | GuildControl MCP |"),
+    comparisonRows[0]?.startsWith("| Aggregate operator outcome | GuildControl MCP |"),
     "field comparison has an invalid header",
   )
   invariant(
@@ -798,6 +806,7 @@ async function checkDocumentation(packageJson) {
   )
   let scoredComparisonTables = 0
   let sourceHeadComparisonTables = 0
+  const missingNarrowCompetitorLeadOutcomes = new Set(NARROW_COMPETITOR_LEAD_OUTCOMES)
   for (let index = 0; index < comparisonLines.length; index += 1) {
     const header = comparisonLines[index]
       ?.split("|")
@@ -822,10 +831,20 @@ async function checkDocumentation(packageJson) {
       const line = comparisonLines[rowIndex]
       if (!line?.startsWith("| ")) break
       const cells = line.split("|").slice(1, -1).map((cell) => cell.trim())
-      if (!sourceHeadComparison) {
+      const outcome = cells[0] ?? ""
+      const guildControlLeads = cells[1]?.startsWith("**Lead") ?? false
+      const competitorLeads = cells.slice(2).some((cell) => cell.startsWith("**Lead"))
+      const declaredCompetitorLead = missingNarrowCompetitorLeadOutcomes.has(outcome)
+      if (declaredCompetitorLead) {
         invariant(
-          cells[1]?.startsWith("**Lead**"),
-          `field comparison table ${header[0]} contains a row GuildControl MCP does not lead`,
+          !guildControlLeads && competitorLeads,
+          `field comparison table ${header[0]} does not preserve declared competitor lead ${outcome}`,
+        )
+        missingNarrowCompetitorLeadOutcomes.delete(outcome)
+      } else {
+        invariant(
+          guildControlLeads,
+          `field comparison table ${header[0]} contains an undeclared row GuildControl MCP does not lead`,
         )
       }
       scoredRows += 1
@@ -840,11 +859,15 @@ async function checkDocumentation(packageJson) {
     sourceHeadComparisonTables > 0,
     "field comparison lacks focused source-head tables",
   )
+  invariant(
+    missingNarrowCompetitorLeadOutcomes.size === 0,
+    `field comparison lacks declared competitor leads: ${[...missingNarrowCompetitorLeadOutcomes].join(", ")}`,
+  )
   invariant(migration.startsWith("# Migrate from another Discord MCP\n"), "migration guide heading is invalid")
   for (const required of [
     "## Supported source releases",
     "guildctl migrate list",
-    "guildctl migrate plan cappyeo@0.25.0",
+    "guildctl migrate plan cappyeo@0.26.0",
     "## Read the dispositions correctly",
     "## Follow the staged path",
     "## Configuration remains a clean break",
@@ -884,10 +907,11 @@ async function checkDocumentation(packageJson) {
   invariant(limitations.includes("Native-process memory parity"), "product boundaries lack the native-memory limitation")
   invariant(readme.includes("deterministic adapters for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and common MCP JSON"), "README lacks verified host adapter discovery")
   invariant(readme.includes("`host plan` and `host apply`"), "README lacks reviewed host installation")
-  invariant(comparison.includes("GuildControl MCP is the only implementation classified as `Lead` in every row"), "field comparison lacks its cross-category lead claim")
+  invariant(comparison.includes("A `Lead` classification applies only to its row"), "field comparison lacks its scoped classification claim")
+  invariant(comparison.includes("while focused rows below identify narrower tasks where a competitor leads"), "field comparison lacks its competitor-lead qualification")
   invariant(comparison.includes("one deterministic MCPB for macOS, Windows, or Linux"), "field comparison lacks the cross-platform one-click outcome")
   invariant(comparison.includes("executes the unpacked server handshake"), "field comparison lacks bundle execution evidence")
-  invariant(comparison.includes("Reviewed static host-configuration installation, drift inspection, and recovery"), "field comparison lacks reviewed host installation")
+  invariant(comparison.includes("Optional host discovery plus reviewed configuration installation, drift inspection, and recovery"), "field comparison lacks usable reviewed host installation")
   invariant(reference.includes("[release runbook](releasing.md)"), "complete reference release link is invalid")
   invariant(readme.includes("[CONTRIBUTING.md](CONTRIBUTING.md)"), "README lacks the contributor guide link")
   invariant(readme.includes("[SUPPORT.md](SUPPORT.md)"), "README lacks the support guide link")
