@@ -13,7 +13,7 @@ RUN npm run build \
   && npm cache clean --force
 
 FROM ${NODE_IMAGE} AS runtime
-ARG VERSION=0.3.0
+ARG VERSION=0.3.1
 ARG REVISION=local
 
 LABEL org.opencontainers.image.title="GuildControl MCP" \
@@ -24,7 +24,7 @@ LABEL org.opencontainers.image.title="GuildControl MCP" \
   org.opencontainers.image.licenses="AGPL-3.0-only" \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.revision="${REVISION}" \
-  io.modelcontextprotocol.server.name="io.github.j-256/guildcontrol"
+  io.modelcontextprotocol.server.name="app.lasers.guildcontrol/discord"
 
 ENV NODE_ENV=production
 WORKDIR /app

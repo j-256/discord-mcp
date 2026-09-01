@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 
 export const MCP_REGISTRY_ORIGIN = "https://registry.modelcontextprotocol.io"
-export const SELF_REGISTRY_NAME = "io.github.j-256/guildcontrol"
+export const SELF_REGISTRY_NAME = "app.lasers.guildcontrol/discord"
 
 const LATEST_METADATA_KEY = "io.modelcontextprotocol.registry/official"
 const MAXIMUM_PAGE_RESULTS = 100

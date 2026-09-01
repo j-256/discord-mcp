@@ -14,7 +14,14 @@ import { inspectPublicOciImage } from "./oci-registry.mjs"
 const NPM_REGISTRY_ORIGIN = "https://registry.npmjs.org"
 const MCP_REGISTRY_ORIGIN = "https://registry.modelcontextprotocol.io"
 const EXPECTATIONS = new Set(["matching", "missing", "missing-or-matching"])
+const PACKAGE_EXPECTATIONS = new Set([...EXPECTATIONS, "matching-or-migration"])
 const OCI_EXPECTATIONS = new Set([...EXPECTATIONS, "unchecked"])
+const MCP_IDENTITY_MIGRATION = Object.freeze({
+  fromName: "io.github.j-256/guildcontrol",
+  fromVersion: "0.3.0",
+  toName: "app.lasers.guildcontrol/discord",
+  toVersion: "0.3.1",
+})
 
 function parseArguments(args) {
   const options = {
@@ -42,8 +49,8 @@ function parseArguments(args) {
     else throw new Error(`Unknown option ${argument}`)
   }
   invariant(options.tarball, "--tarball is required")
+  invariant(PACKAGE_EXPECTATIONS.has(options.expectPackage), `--expect-package has invalid expectation ${options.expectPackage}`)
   for (const [name, value] of [
-    ["--expect-package", options.expectPackage],
     ["--expect-npm", options.expectNpm],
     ["--expect-registry", options.expectRegistry],
   ]) {
@@ -68,6 +75,7 @@ async function requestJson(url) {
 
 function assertExpectation(actual, expected, label) {
   if (expected === "missing-or-matching") return
+  if (expected === "matching-or-migration" && (actual === "matching" || actual === "migration")) return
   invariant(actual === expected, `${label} is ${actual}, expected ${expected}`)
 }
 
@@ -85,9 +93,19 @@ if (packageResponse.state === "present") {
   const latestVersion = packageResponse.value?.["dist-tags"]?.latest
   invariant(typeof latestVersion === "string", "npm package does not have a latest version")
   const latestMetadata = packageResponse.value?.versions?.[latestVersion]
-  invariant(latestMetadata?.mcpName === packageJson.mcpName, "npm package has a mismatched MCP identity")
   invariant(canonicalJson(latestMetadata?.repository) === canonicalJson(packageJson.repository), "npm package has a mismatched repository identity")
-  packageState = "matching"
+  if (latestMetadata?.mcpName === packageJson.mcpName) {
+    packageState = "matching"
+  } else {
+    invariant(
+      latestVersion === MCP_IDENTITY_MIGRATION.fromVersion
+        && latestMetadata?.mcpName === MCP_IDENTITY_MIGRATION.fromName
+        && packageJson.version === MCP_IDENTITY_MIGRATION.toVersion
+        && packageJson.mcpName === MCP_IDENTITY_MIGRATION.toName,
+      "npm package has a mismatched MCP identity",
+    )
+    packageState = "migration"
+  }
 }
 assertExpectation(packageState, options.expectPackage, "npm package")
 

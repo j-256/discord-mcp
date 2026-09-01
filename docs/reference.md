@@ -2,7 +2,7 @@
 
 [Getting started and first verified read](getting-started.md) | [Safety and usability decisions](safety-usability.md) | [Migration from another Discord MCP](migration.md) | [Product boundaries and host compatibility](limitations.md) | [Privacy policy](../PRIVACY.md) | [Project overview](../README.md)
 
-<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.3.0/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
+<img src="https://raw.githubusercontent.com/j-256/guildcontrol/v0.3.1/assets/guildcontrol-icon.png" alt="GuildControl MCP shield and reviewed connection icon" width="128">
 
 GuildControl MCP is a local stdio Model Context Protocol server that lets compatible MCP clients inspect Discord guilds, exact allowlisted one-to-one private messages, current-application command exposure, privacy-bounded guild profiles, complete obfuscation-safe channel layouts, named guild settings, time-bounded guild incident actions, exact channel metadata and transient voice-channel status, complete ordered forum tags, roles, threads, forums, message pins, exact-message direct replies, directed coordination notes, privacy-safe reaction aggregates, native polls, privacy-safe guild integrations, application-owned emojis, guild emojis, stickers, soundboard sounds, AutoMod rules, scheduled events, active Stage instances, exact member voice state, guild onboarding, Welcome Screens, authenticated widget settings, guild bans, and guild vanity URL state, credential-redacted webhooks and announcement subscriptions, capability-safe guild invites and native Guild Templates, channel permission overwrites, effective permissions, privacy-minimized members and guild audit history, and indexed message history through a dedicated bot. It includes exact member and role permission diagnostics, bounded channel-role access audits, exact-tool progressive discovery, risk-separated toolsets, portable non-secret multi-bot profiles, an optional privacy-safe real-time Gateway feed, optional exact-scope native Discord Interaction ingress with authenticated request Buttons, privacy-safe local and OpenTelemetry observability, privacy-tiered MCP resources, validated read-only and plan-only prompts, a credential-safe operator CLI, compact bounded search, a model-neutral exact-message and directed-note coordination playbook, safe idempotent message interactions, reviewed exact-recipient private-message plain-text or static Components V2 send, reply, same-format edit, deletion, and receipt verification, reviewed Components V2 and remote-free rich-embed creation and editing, opt-in reaction-user and scheduled-event-subscriber audits, reviewed reaction moderation, reviewed native command management, reviewed policy-justified privileged-intent enablement, reviewed test-entitlement creation and receipt-proven deletion, reviewed externally fulfilled consumable-entitlement consumption, reviewed native poll creation and irreversible ending, reviewed exact announcement crossposts, reviewed immutable message forwarding, reviewed announcement subscribe and exact-ID unsubscribe operations, reviewed Guild Template lifecycle, guild-integration deletion, sparse guild-profile text, named guild-settings changes, time-bounded guild incident-action changes, forum-tag, application-emoji, guild-expression, soundboard, AutoMod, scheduled-event, Stage-instance, complete onboarding, complete ordered Welcome Screen, authenticated widget-settings, member nickname, member verification-bypass, member-role, member voice, and exact thread lifecycle and membership administration, reviewed credential-safe webhook creation, rename, move, and deletion, credential-private webhook message reads, idempotent plain-text delivery and editing, and signed exact-message deletion, capability-safe invite revocation, reviewed message pin, channel metadata, voice-channel status, channel ordering, exact channel and standard-role retirement, atomic same-guild channel cloning, channel permission overwrite, exact standard-role configuration, and exact relative role-order changes, reviewed local-file attachment messages, reviewed forum posts, reviewed message-anchored and standalone public or private thread creation, caller-retained declarative guild blueprints, resumable additive guild scaffolds, reviewed additive channel and role creation, exact reviewed message deletion, exact reviewed member moderation, reviewed native bulk guild bans, bounded reviewed non-exact guild pruning, and content-free local activity records.
 
@@ -396,7 +396,7 @@ GuildControl MCP is self-hosted and uses no shared application identity. Each op
 The recommended first installation is derived from the same immutable read-only preset contract used by setup. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), confirm its Bot page has a bot user, copy the public Application ID, enable Guild Install on the Installation page, copy the target Server ID with Discord Developer Mode, and run:
 
 ```sh
-npx --yes guildctl@0.3.0 preset install server-observer \
+npx --yes guildctl@0.3.1 preset install server-observer \
   --application-id APPLICATION_ID \
   --guild-id GUILD_ID \
   --html ./guildcontrol-onboarding.html
@@ -582,14 +582,14 @@ Activity and receipt records contain only application, beneficiary, SKU, and ent
 
 ## Install
 
-A compatible MCPB host can import `guildcontrol-0.3.0.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
+A compatible MCPB host can import `guildcontrol-0.3.1.mcpb` from the [immutable GitHub Release](https://github.com/j-256/guildcontrol/releases) or the MCP Registry. The cross-platform manifest requires Node.js 22 through 26, asks for one existing strict configuration file as non-secret input, and asks for the bot token through one sensitive input. The launcher maps that token only to the exact environment variable named by the selected policy, removes the bundle-only input before server startup, and never persists it. It deliberately refuses a file-backed credential policy; use the generated host adapter or OCI secret-volume path when protected-file custody is required.
 
 The bundle embeds its privacy policy, deterministic SPDX inventory, exact dependency notices, credential-free catalog evidence, and a single self-contained ESM server. Its verifier builds twice, checks exact ZIP structure and metadata, compares bytes, scans every entry for secrets and non-neutral branding, validates the embedded evidence, unpacks to a fresh directory, and completes a real MCP initialization and catalog handshake. Verify the downloaded file against its `SHA256SUMS` entry and GitHub Release attestation before import.
 
 After a release is published, run an exact version from npm:
 
 ```sh
-npx --yes guildctl@0.3.0 help
+npx --yes guildctl@0.3.1 help
 ```
 
 Pinning the version keeps the executable stable across restarts. The MCP Registry manifest uses the same exact npm version.
@@ -605,7 +605,7 @@ docker run --rm -i \
   --cap-drop=ALL \
   --security-opt=no-new-privileges:true \
   --pids-limit=64 \
-  ghcr.io/j-256/guildcontrol:0.3.0 catalog --check
+  ghcr.io/j-256/guildcontrol:0.3.1 catalog --check
 ```
 
 For an operational read-only connection, create one verified non-secret policy file on the host, then mount it read-only and supply only the caller-owned token. The container needs outbound network access to Discord, but it needs no writable root filesystem or Linux capability:
@@ -615,7 +615,7 @@ export DISCORD_BOT_TOKEN
 printf 'Discord bot token: '
 read -r -s DISCORD_BOT_TOKEN
 printf '\n'
-npx --yes guildctl@0.3.0 setup \
+npx --yes guildctl@0.3.1 setup \
   --npx \
   --config ./guildcontrol.json \
   --preset server-observer \
@@ -628,7 +628,7 @@ docker run --rm -i \
   --pids-limit=64 \
   --env DISCORD_BOT_TOKEN \
   --mount "type=bind,source=$PWD/guildcontrol.json,target=/configuration/guildcontrol.json,readonly" \
-  ghcr.io/j-256/guildcontrol:0.3.0 serve --config /configuration/guildcontrol.json
+  ghcr.io/j-256/guildcontrol:0.3.1 serve --config /configuration/guildcontrol.json
 ```
 
 For a Docker or Kubernetes secret volume, create the policy with `credential.provider` set to `file` and `credential.path` set to the exact in-container path such as `/run/secrets/discord_bot_token`, then mount both the policy and secret read-only. The projected target must be owned by root or the image's `node` user, must not be group or world writable, and must have one hard link; the common root-owned read-only secret-volume shape passes this boundary. A projected-secret symlink is accepted so atomic orchestrator rotation works without broadening ordinary config-file link policy.
@@ -740,7 +740,7 @@ Every non-passing doctor check includes one bounded next action and one package-
 
 The offline nickname diagnostics report the base self-only gate, exact guild scope, broader other-member gate, protected-user and hierarchy boundary, required `CHANGE_NICKNAME` or `MANAGE_NICKNAMES` evidence, signed approval, one-shot execution, and exact readback without reading a member or nickname or contacting Discord.
 
-`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildctl@0.3.0 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
+`setup` requires one `--config FILE` or `--profile NAME`, validates the complete selected policy and local file boundary, performs the same safe online identity check, audits configured against installed guild scope, requires at least one accessible guild inside local scope, and prints a portable credential-free stdio launch descriptor. It is the normal first-run readiness gate, so a completed setup exits 0 while preserving non-blocking warnings in human and JSON output; command, policy, credential, identity, installation, or Discord verification failures exit 2. Without `--preset`, it loads and verifies an existing policy without rewriting it. With `--preset`, it creates the selected target after verification or replaces it only with `--force`. By default the descriptor points at the exact running Node.js executable and CLI entrypoint. Add `--npx` to use `npx --yes guildctl@0.3.1 serve` as the stable exact-version package launch, or `--command COMMAND` for an already installed executable that accepts `serve`; the two choices are mutually exclusive. Every mode selects the same policy, sets no policy values, and names exactly the environment variables and files that must be supplied as secrets. It never includes a bot token or collector header value.
 
 The `host` generation form requires one explicit `--config FILE` or `--profile NAME` and turns the validated non-secret policy into a domain-digested activation plan without resolving a credential, contacting Discord or another network endpoint, starting a process, discovering a host, or changing policy or host configuration. The default descriptor uses the installed Node.js executable and CLI entrypoint. Add `--npx` for the exact published package version or `--command COMMAND` for an installed executable; the choices are mutually exclusive. `--name NAME` changes only the portable server label. The plan binds the pinned public application and bot identities, exact guild and channel read scope, tool surface and toolsets, exact policy selector, ordered stdio launch, named external secret references, an empty inline environment map, required-server behavior, write approval, elicitation, timeouts, and a read-only verification request. `--json` emits the same structured evidence.
 
@@ -1038,7 +1038,7 @@ Create that canonical directory before startup with ownership matching the conne
 
 The path is operational policy rather than a credential value, so it may appear in the local configuration and offline workbench. It is deliberately absent from MCP results, errors, diagnostics, telemetry, activity records, and operation receipts. Back up and permission this directory as bearer-secret storage. Moving or sharing it changes credential custody, not Discord or connector authorization; exact capability gates and channel scope remain mandatory.
 
-When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildctl@0.3.0`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
+When using the published package directly, configure the stdio command as `npx` with arguments `--yes`, `guildctl@0.3.1`, `serve`, `--config`, and the absolute file path. Pinning the package version prevents an unreviewed update from replacing the executable. The Registry's npm entry prompts for the config path as a file argument and only for the bot-token secret. Its OCI entry additionally supplies the hardened runtime flags, prompts for one read-only bind mount, and fixes the in-container path. The canonical descriptor remains host-neutral while the separate verified adapters project only documented host schemas; no projection edits or replaces a destination file.
 
 Restart or reload the MCP host after changing its configuration, inspect the negotiated server, and confirm that required-server behavior, write approval, elicitation, and timeouts match the descriptor before enabling reviewed write policies. A host without MCP elicitation can use read-only and plan-only capabilities but must not execute reviewed writes.
 
@@ -3941,39 +3941,39 @@ Neither command queries or changes voice-channel status or application linked-ro
 
 The npm package, MCPB archive, OCI image, source constant, lockfile root, MCP Registry manifest, versioned icon URL, generated config schema, and release tag are checked as one identity. The MCPB Registry package names the exact immutable GitHub Release URL and SHA-256, prompts only for the bot-token secret and one non-secret config file, and declares stdio transport. The npm package passes only the config selector; the OCI entry additionally fixes the operational command and hardened read-only mount. The same metadata gate scans every tracked and unignored repository file as raw bytes to prevent model- or harness-specific branding, including hidden binary metadata. Production and development dependencies are exactly pinned to the public npm registry, both container stages use one reviewed base-image digest, and the build engine, architecture emulator, and SBOM generator used by automation are pinned by image digest. Dependency installation disables lifecycle scripts and explicitly rebuilds only the reviewed esbuild version. CI also audits known vulnerabilities and npm registry signatures.
 
-Release candidates are reconstructed from the selected tag. The npm archive and MCPB are each built repeatedly and verified in isolated consumers; the bundle additionally executes from a fresh unpacked directory. The archive, bundle, catalog evidence, and matching SPDX statements receive GitHub artifact attestations. Because npm does not permit staging or trusted publishing before a package exists, the first version is published from the exact attested archive by a maintainer completing an interactive passkey challenge. Every later npm release uses stage-only trusted publishing, followed by human two-factor approval. A separately approved image operation publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime. Existing image tags are never overwritten.
+Release candidates are reconstructed from the selected tag. The npm archive and MCPB are each built repeatedly and verified in isolated consumers; the bundle additionally executes from a fresh unpacked directory. The archive, bundle, catalog evidence, and matching SPDX statements receive GitHub artifact attestations. Because npm does not permit staging or trusted publishing before a package exists, the first version is published from the exact attested archive by a maintainer completing an interactive passkey challenge. Every later npm release uses stage-only trusted publishing behind one protected review, followed by human two-factor approval. A second protected review authorizes dependency-chained OCI, immutable GitHub Release, and MCP Registry jobs. The OCI job alone publishes only an absent exact semantic-version tag for both supported architectures, binds per-platform BuildKit provenance and SPDX records into the image index, signs provenance for that exact root digest, and verifies the public digest plus restricted runtime. Existing image tags are never overwritten.
 
-After npm and OCI identities agree, an immutable GitHub Release operation reconstructs and attests the evidence under read-only authority, then delegates only draft creation and publication to a dependent protected job with `contents: write` plus read-only current-run artifact and attestation access. Its protected environment reviewer confirms repository-level Release immutability because GitHub does not expose that administrative setting to `GITHUB_TOKEN`; automation receives no standing repository-administration credential. The job installs a SHA-256-pinned GitHub CLI, requires the exact protected tag and source commit, generates deterministic notes and checksums, and allows only the npm archive, MCPB, credential-free catalog evidence, canonical release notes, validated SPDX SBOM, and `SHA256SUMS`. Because GitHub permits displayed immutable-Release notes to be edited, the canonical notes are an attested, checksummed asset. The job verifies the complete draft before publication, then requires GitHub's immutable Release attestation, verifies every local asset against it, and compares every public download byte-for-byte. Only after that exact immutable asset frontier exists may the Registry operation publish metadata containing the bundle's public URL and SHA-256. An exact immutable Release or Registry record is a no-op; published mutable state, prereleases, mismatched evidence, or unexpected assets fail closed, and automation never deletes or overwrites public evidence.
+After npm and OCI identities agree, the immutable GitHub Release job alone receives `contents: write` plus read-only current-run artifact and attestation access. The promotion reviewer confirms repository-level Release immutability because GitHub does not expose that administrative setting to `GITHUB_TOKEN`; automation receives no standing repository-administration credential. The job installs a SHA-256-pinned GitHub CLI, requires the exact protected tag and source commit, generates deterministic notes and checksums, and allows only the npm archive, MCPB, credential-free catalog evidence, canonical release notes, validated SPDX SBOM, and `SHA256SUMS`. Because GitHub permits displayed immutable-Release notes to be edited, the canonical notes are an attested, checksummed asset. The job verifies the complete draft before publication, then requires GitHub's immutable Release attestation, verifies every local asset against it, and compares every public download byte-for-byte. Only after that exact immutable asset frontier exists may the Registry job receive the product-scoped DNS seed and publish `app.lasers.guildcontrol/discord` metadata containing the bundle's public URL and SHA-256. The Registry job has no package, attestation-signing, OIDC, or repository-write authority. An exact immutable Release or Registry record is a no-op; published mutable state, prereleases, mismatched evidence, or unexpected assets fail closed, and automation never deletes or overwrites public evidence.
 
 A publisher defect embedded in an immutable release tag may be recovered only through a distinct protected `vMAJOR.MINOR.PATCH-recovery.N` audit tag on a green `main` commit. Recovery accepts one explicit failed run ID, validates that run's repository, workflow, event, source tag, source commit, terminal failure, and exact retained evidence artifact, then verifies every recovered artifact attestation against the original release workflow, tag, commit, and GitHub-hosted runner boundary. The job checks out the original stable tag for all product metadata and public-distribution proofs while retaining the recovery tag as the reviewed execution identity. It receives the same narrow write authority and performs the same draft, immutability, public-byte, checksum, and asset-attestation checks as ordinary publication. Recovery cannot move a stable tag, replace evidence, accept an expired or mismatched artifact, repair a mutable published Release, or convert local files into release evidence.
 
 To verify a downloaded release archive:
 
 ```sh
-npm pack guildctl@0.3.0
-gh attestation verify guildctl-0.3.0.tgz \
+npm pack guildctl@0.3.1
+gh attestation verify guildctl-0.3.1.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.3.0 \
+  --source-ref refs/tags/v0.3.1 \
   --deny-self-hosted-runners
-gh attestation verify guildctl-0.3.0.tgz \
+gh attestation verify guildctl-0.3.1.tgz \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.3.0 \
+  --source-ref refs/tags/v0.3.1 \
   --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3
-gh release download v0.3.0 --repo j-256/guildcontrol --pattern guildcontrol-0.3.0.mcpb
-gh release verify-asset v0.3.0 guildcontrol-0.3.0.mcpb --repo j-256/guildcontrol
-docker pull ghcr.io/j-256/guildcontrol:0.3.0
-gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.3.0 \
+gh release download v0.3.1 --repo j-256/guildcontrol --pattern guildcontrol-0.3.1.mcpb
+gh release verify-asset v0.3.1 guildcontrol-0.3.1.mcpb --repo j-256/guildcontrol
+docker pull ghcr.io/j-256/guildcontrol:0.3.1
+gh attestation verify oci://ghcr.io/j-256/guildcontrol:0.3.1 \
   --repo j-256/guildcontrol \
   --signer-workflow j-256/guildcontrol/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.3.0 \
+  --source-ref refs/tags/v0.3.1 \
   --deny-self-hosted-runners \
   --bundle-from-oci
 ```
 
-The [release runbook](releasing.md) covers the one-time attested first publication, protected npm staging, human approval, immutable OCI publication, immutable GitHub Release publication, registry registration, and independent verification.
+The [release runbook](releasing.md) covers the one-time attested first publication, protected npm staging, human approval, the single reviewed promotion chain, product-scoped Registry DNS authentication, credential recovery and rotation, and independent verification.
 
 ## Expansion
 

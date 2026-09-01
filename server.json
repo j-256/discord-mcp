@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.j-256/guildcontrol",
+  "name": "app.lasers.guildcontrol/discord",
   "title": "GuildControl MCP",
   "description": "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration",
   "repository": {
@@ -8,11 +8,11 @@
     "source": "github",
     "id": "1334461127"
   },
-  "version": "0.3.0",
+  "version": "0.3.1",
   "websiteUrl": "https://guildcontrol.lasers.app",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/j-256/guildcontrol/v0.3.0/assets/guildcontrol-icon.png",
+      "src": "https://raw.githubusercontent.com/j-256/guildcontrol/v0.3.1/assets/guildcontrol-icon.png",
       "mimeType": "image/png",
       "sizes": [
         "1254x1254"
@@ -24,7 +24,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "guildctl",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -59,7 +59,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/j-256/guildcontrol:0.3.0",
+      "identifier": "ghcr.io/j-256/guildcontrol:0.3.1",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"
@@ -123,8 +123,8 @@
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/j-256/guildcontrol/releases/download/v0.3.0/guildcontrol-0.3.0.mcpb",
-      "fileSha256": "d0b670d23adfdcbc636dda42dd4d97ec884b9a4fc5e556afd482cc9f093e4752",
+      "identifier": "https://github.com/j-256/guildcontrol/releases/download/v0.3.1/guildcontrol-0.3.1.mcpb",
+      "fileSha256": "6496dcf920d85ec5ee1af3f3f32142e9500f46432db8af648a0b12f89f5954cb",
       "transport": {
         "type": "stdio"
       }
