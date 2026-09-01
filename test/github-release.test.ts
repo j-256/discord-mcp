@@ -70,7 +70,7 @@ interface GitHubReleaseModule {
 
 const modulePath = pathToFileURL(resolve("scripts/github-release.mjs")).href
 const githubRelease = await import(modulePath) as GitHubReleaseModule
-const VERSION = "0.3.1"
+const VERSION = "0.4.0"
 const REVISION = "a".repeat(40)
 const OCI_DIGEST = `sha256:${"b".repeat(64)}`
 const ARCHIVE_NAME = `guildctl-${VERSION}.tgz`
@@ -223,10 +223,10 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
   assert.match(notes, new RegExp(MCPB_DIGEST, "u"))
-  assert.match(notes, /gh release verify v0\.3\.1/u)
-  assert.match(notes, /gh release verify-asset v0\.3\.1 guildctl-0\.3\.1\.tgz/u)
-  assert.match(notes, /gh release verify-asset v0\.3\.1 guildcontrol-0\.3\.1\.mcpb/u)
-  assert.match(notes, /gh release verify-asset v0\.3\.1 release-notes\.md/u)
+  assert.match(notes, /gh release verify v0\.4\.0/u)
+  assert.match(notes, /gh release verify-asset v0\.4\.0 guildctl-0\.4\.0\.tgz/u)
+  assert.match(notes, /gh release verify-asset v0\.4\.0 guildcontrol-0\.4\.0\.mcpb/u)
+  assert.match(notes, /gh release verify-asset v0\.4\.0 release-notes\.md/u)
   assert.match(notes, /registers MCP Registry metadata only after this immutable Release/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)
@@ -313,7 +313,7 @@ test("rejects secret-bearing or unverified catalog evidence and mismatched SBOM 
       }),
       label: "static requirement",
     },
-    { label: "SBOM", sbom: validSbom({ name: "other-package@0.3.1" }) },
+    { label: "SBOM", sbom: validSbom({ name: "other-package@0.4.0" }) },
   ]
   for (const [index, entry] of cases.entries()) {
     const directory = join(root, `case-${index}`)
