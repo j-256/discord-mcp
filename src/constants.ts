@@ -9,7 +9,7 @@ export const CONNECTOR_NPX_ARGUMENTS = Object.freeze([
   `${CONNECTOR_NPM_PACKAGE}@${CONNECTOR_VERSION}`,
 ] as const)
 export const CONNECTOR_DESCRIPTION = "Safety-first MCP server for Discord with privacy-safe reads, audits, and reviewed administration"
-export const CONNECTOR_WEBSITE_URL = "https://guildcontrol.lasers.app"
+export const CONNECTOR_WEBSITE_URL = "https://docs.guildcontrol.lasers.app"
 export const CONNECTOR_ICON_URL = `https://raw.githubusercontent.com/j-256/guildcontrol/v${CONNECTOR_VERSION}/assets/guildcontrol-icon.png`
 export const CONNECTOR_ICON_MIME_TYPE = "image/png"
 export const CONNECTOR_ICON_SIZES = Object.freeze(["1254x1254"] as const)

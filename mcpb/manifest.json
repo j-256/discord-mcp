@@ -14,8 +14,8 @@
     "type": "git",
     "url": "https://github.com/j-256/guildcontrol.git"
   },
-  "homepage": "https://guildcontrol.lasers.app",
-  "documentation": "https://guildcontrol.lasers.app/start/choose/",
+  "homepage": "https://docs.guildcontrol.lasers.app",
+  "documentation": "https://docs.guildcontrol.lasers.app/start/choose/",
   "support": "https://github.com/j-256/guildcontrol/issues",
   "icon": "icon.png",
   "server": {

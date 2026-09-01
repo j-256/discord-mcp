@@ -4,7 +4,7 @@ import { defineConfig } from "astro/config"
 
 import accessibleTables from "./plugins/accessible-tables.mjs"
 
-const SITE_ORIGIN = "https://guildcontrol.lasers.app"
+const SITE_ORIGIN = "https://docs.guildcontrol.lasers.app"
 const REPOSITORY_URL = "https://github.com/j-256/guildcontrol"
 
 const referenceGroups = [
