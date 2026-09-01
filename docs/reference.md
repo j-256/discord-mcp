@@ -654,6 +654,8 @@ The CLI provides a safe path from one non-secret configuration document to a ver
 
 Every command and nested action accepts `-h` and `--help`, writes help to stdout, returns status 0, reads no environment or credential, and invokes no operator dependency. Use `guildctl FAMILY --help` for the complete family catalog, `guildctl FAMILY ACTION --help` for one exact action, or `guildctl help FAMILY ACTION` for the same contextual result. Unknown actions and extra arguments remain usage errors even when a help flag is present, so a typo cannot silently select broader documentation.
 
+Examples retain the canonical long option names. Where the corresponding option is accepted, `-j` aliases `--json`, `-c` aliases `--config`, and `-p` aliases `--profile`; catalog uses `-c` for `--check`, activity also accepts `-l` for `--limit`, and doctor accepts `-o` for `--online` plus `-v` for `--verbose`. Exact identifiers, credential selectors, confirmation and digest gates, overwrite controls, host file targets, and collision siblings remain long-only so sensitive operations stay explicit.
+
 ```sh
 node dist/bin.js catalog --check
 node dist/bin.js catalog --html ./guildcontrol-contract.html

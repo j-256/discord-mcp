@@ -246,6 +246,85 @@ const CLI_EXIT_CODES = Object.freeze({
 
 const CLI_HELP_FLAGS: ReadonlySet<string> = new Set(["--help", "-h"])
 
+const CLI_OPTION_VALUE_NAMES: ReadonlySet<string> = new Set([
+  "--adapter",
+  "--application-id",
+  "--bot-id",
+  "--channel-id",
+  "--command",
+  "--config",
+  "--confirm",
+  "--confirm-installed",
+  "--guild-id",
+  "--host",
+  "--host-file",
+  "--html",
+  "--inspect-host-file",
+  "--limit",
+  "--name",
+  "--plan-digest",
+  "--preset",
+  "--profile",
+  "--token-env",
+  "--token-file",
+  "--user-id",
+])
+
+const CLI_SHORT_OPTION_ALIASES: Readonly<
+  Partial<Record<CliCommand, Readonly<Record<string, string>>>>
+> = Object.freeze({
+  activity: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-l": "--limit",
+    "-p": "--profile",
+  }),
+  catalog: Object.freeze({
+    "-c": "--check",
+    "-j": "--json",
+  }),
+  config: Object.freeze({ "-j": "--json" }),
+  coordination: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-p": "--profile",
+  }),
+  doctor: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-o": "--online",
+    "-p": "--profile",
+    "-v": "--verbose",
+  }),
+  host: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-p": "--profile",
+  }),
+  migrate: Object.freeze({ "-j": "--json" }),
+  onboard: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+  }),
+  preset: Object.freeze({ "-j": "--json" }),
+  profile: Object.freeze({ "-j": "--json" }),
+  recipe: Object.freeze({ "-j": "--json" }),
+  serve: Object.freeze({
+    "-c": "--config",
+    "-p": "--profile",
+  }),
+  setup: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-p": "--profile",
+  }),
+  smoke: Object.freeze({
+    "-c": "--config",
+    "-j": "--json",
+    "-p": "--profile",
+  }),
+})
+
 const CLI_COMMAND_ACTIONS = Object.freeze({
   config: Object.freeze([
     "init",
@@ -723,6 +802,27 @@ const DEFAULT_DEPENDENCIES: CliDependencies = {
 
 function isCommand(value: string): value is CliCommand {
   return (CLI_COMMANDS as readonly string[]).includes(value)
+}
+
+function normalizeCliShortOptions(
+  command: CliCommand,
+  args: readonly string[],
+): readonly string[] {
+  const aliases = CLI_SHORT_OPTION_ALIASES[command]
+  if (!aliases) return args
+  const normalized: string[] = []
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (argument === undefined) continue
+    const option = aliases[argument] || argument
+    normalized.push(option)
+    if (CLI_OPTION_VALUE_NAMES.has(option) && index + 1 < args.length) {
+      index += 1
+      const value = args[index]
+      if (value !== undefined) normalized.push(value)
+    }
+  }
+  return normalized
 }
 
 function parseBooleanOptions(
@@ -1864,18 +1964,20 @@ function parseCoordinationCommand(
 export function parseCliArguments(args: readonly string[]): ParsedCliArguments {
   if (args.length === 0) return { command: "serve" }
   const command = args[0]
-  const rest = args.slice(1)
   if (isCliHelpFlag(command)) {
+    const rest = args.slice(1)
     if (rest.length > 0) throw new ConfigurationError(`${command} does not accept arguments`)
     return { command: "help", topic: undefined }
   }
   if (command === "--version" || command === "-v") {
+    const rest = args.slice(1)
     if (rest.length > 0) throw new ConfigurationError(`${command} does not accept arguments`)
     return { command: "version" }
   }
   if (!command || !isCommand(command)) {
     throw new ConfigurationError(`Unknown command ${command || ""}`)
   }
+  const rest = normalizeCliShortOptions(command, args.slice(1))
   if (command === "help") {
     if (rest.length === 1 && isCliHelpFlag(rest[0])) {
       return { command: "help", topic: undefined }
@@ -2157,6 +2259,41 @@ function contextualHelpText(
     "",
     entry.description,
   ].join("\n")
+}
+
+function shortOptionHelpText(
+  topic: CliCommand | undefined,
+  action?: CliCommandAction,
+): string {
+  if (topic === undefined) {
+    return [
+      "Short options:",
+      "  -h  --help",
+      "  -v  --version (or --verbose for doctor)",
+      "  -c  --config (or --check for catalog)",
+      "  -j  --json",
+      "  -l  --limit (activity)",
+      "  -o  --online (doctor)",
+      "  -p  --profile",
+    ].join("\n")
+  }
+  const aliases = topic === "host" && action === "detect"
+    ? { "-j": "--json" }
+    : CLI_SHORT_OPTION_ALIASES[topic]
+  return [
+    "Short options:",
+    "  -h  --help",
+    ...Object.entries(aliases || {}).map(([shortName, longName]) => (
+      `  ${shortName}  ${longName}`
+    )),
+  ].join("\n")
+}
+
+function completeHelpText(
+  topic: CliCommand | undefined,
+  action?: CliCommandAction,
+): string {
+  return `${helpText(topic, action)}\n\n${shortOptionHelpText(topic, action)}`
 }
 
 function helpText(
@@ -4557,7 +4694,7 @@ export async function runCli(options: CliOptions = {}): Promise<number> {
       case "help":
         safeWrite(
           stdout,
-          helpText(parsed.topic, parsed.action),
+          completeHelpText(parsed.topic, parsed.action),
           {},
         )
         return CLI_EXIT_CODES.success

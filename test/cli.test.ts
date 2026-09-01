@@ -1766,6 +1766,46 @@ test("CLI parser defaults to serve and strictly parses operator commands", () =>
     command: "serve",
     configFile: "/configuration/discord.json",
   })
+  assert.deepEqual(parseCliArguments(["catalog", "-c", "-j"]), {
+    check: true,
+    command: "catalog",
+    json: true,
+  })
+  assert.deepEqual(parseCliArguments([
+    "activity",
+    "-p",
+    "support-bot",
+    "-l",
+    "10",
+    "-j",
+  ]), {
+    command: "activity",
+    json: true,
+    limit: 10,
+    profileName: "support-bot",
+  })
+  assert.deepEqual(parseCliArguments([
+    "doctor",
+    "-c",
+    "/configuration/discord.json",
+    "-o",
+    "-j",
+  ]), {
+    command: "doctor",
+    configFile: "/configuration/discord.json",
+    json: true,
+    online: true,
+    verbose: false,
+  })
+  assert.deepEqual(parseCliArguments(["serve", "-p", "support-bot"]), {
+    command: "serve",
+    profileName: "support-bot",
+  })
+  assert.deepEqual(parseCliArguments(["host", "detect", "-j"]), {
+    action: "detect",
+    command: "host",
+    json: true,
+  })
   assert.deepEqual(parseCliArguments([
     "config",
     "init",
@@ -5895,10 +5935,15 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
   assert.match(smokeOutput.value(), /Prompts: summarize_channel/)
   assert.match(helpOutput.value(), /doctor \(--config FILE \| --profile NAME\).*--verbose/)
+  assert.match(helpOutput.value(), /-c  --config/)
+  assert.match(helpOutput.value(), /-j  --json/)
+  assert.match(helpOutput.value(), /-p  --profile/)
   assert.match(activityHelpOutput.value(), /activity \[--config FILE \| --profile NAME\]/)
   assert.match(activityHelpOutput.value(), /changes no activity or coordination state/)
   assert.match(activityHelpOutput.value(), /Exit status is 0 when clear, 1 when evidence needs attention/)
   assert.match(catalogHelpOutput.value(), /catalog \[--check\] \[--json\] \[--html FILE\]/)
+  assert.match(catalogHelpOutput.value(), /-c  --check/)
+  assert.match(catalogHelpOutput.value(), /-j  --json/)
   assert.match(catalogHelpOutput.value(), /without replacing an existing file/)
   assert.match(smokeHelpOutput.value(), /serve entrypoint as a child/)
   assert.match(smokeHelpOutput.value(), /stable MCP 2026-07-28 over stdio/)
@@ -5914,6 +5959,9 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(recipeHelpOutput.value(), /--plan-digest DIGEST --confirm NAME/)
   assert.match(recipeHelpOutput.value(), /do not resolve secrets or contact Discord/)
   assert.match(hostHelpOutput.value(), /host \[generate\] \(--config FILE \| --profile NAME\)/)
+  assert.match(hostHelpOutput.value(), /-c  --config/)
+  assert.match(hostHelpOutput.value(), /-j  --json/)
+  assert.match(hostHelpOutput.value(), /-p  --profile/)
   assert.match(hostHelpOutput.value(), /host detect \[--json\]/)
   assert.match(hostHelpOutput.value(), /host plan \(--config FILE \| --profile NAME\) --adapter ID --host-file FILE/)
   assert.match(hostHelpOutput.value(), /host apply .*--plan-digest DIGEST --confirm SERVER_NAME/)
