@@ -1,1 +1,15 @@
-{}
+{
+  "2.2.0": {
+    "version": "2.2.0",
+    "paragraphs": [
+      "GuildControl MCP 2.2.0 establishes the stable version line without a new runtime, command, or configuration break from 0.4.0.",
+      "The 2.x major records the earlier package and executable rename from `guildcontrol` to `guildctl`; the 2.1 and 2.2 minor milestones carry forward the compatible policy, documentation-search, thread-conversation, host-detection, and safe short-option additions released after that clean break.",
+      "This is a forward rebaseline that preserves the project's real compatibility history without inventing retroactive published artifacts."
+    ],
+    "highlights": [
+      "Keep the existing 0.4.0 policy documents and `guildctl` commands compatible",
+      "Publish npm, OCI, MCPB, and MCP Registry distributions under one stable 2.2.0 identity",
+      "Retain the reviewed-write, least-privilege, privacy, and evidence boundaries"
+    ]
+  }
+}

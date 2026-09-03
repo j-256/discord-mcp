@@ -20,7 +20,7 @@ const MCP_IDENTITY_MIGRATION = Object.freeze({
   fromName: "io.github.j-256/guildcontrol",
   fromVersion: "0.3.0",
   toName: "app.lasers.guildcontrol/discord",
-  toVersion: "0.4.0",
+  toVersion: "2.2.0",
 })
 
 function parseArguments(args) {
