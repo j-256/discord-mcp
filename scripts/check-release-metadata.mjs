@@ -1315,7 +1315,8 @@ async function checkAutomation(packageJson) {
   const releaseCheck = await readFile(join(REPOSITORY_ROOT, "scripts/release-check.mjs"), "utf8")
   for (const required of [
     'import { BUILDKIT_IMAGE } from "./oci-registry.mjs"',
-    'const SHARED_TEMP_DIRECTORY = join(REPOSITORY_ROOT, "node_modules")',
+    'const SHARED_TEMP_DIRECTORY = await mkdtemp(join(REPOSITORY_ROOT, ".release-tmp-"))',
+    'const SBOM_OUTPUT = join(SHARED_TEMP_DIRECTORY, "sbom.spdx.json")',
     'TMPDIR: SHARED_TEMP_DIRECTORY',
     '"buildx",',
     '"create",',
@@ -1323,6 +1324,7 @@ async function checkAutomation(packageJson) {
     '`image=${BUILDKIT_IMAGE}`',
     'BUILDX_BUILDER: builderName',
     '["buildx", "rm", builderName]',
+    'await rm(SHARED_TEMP_DIRECTORY, { force: true, recursive: true })',
   ]) {
     invariant(releaseCheck.includes(required), `local release check is missing ${required}`)
   }
