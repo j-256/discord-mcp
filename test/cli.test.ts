@@ -5929,7 +5929,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(smokeOutput.value(), /GuildControl MCP smoke: ok/)
   assert.match(smokeOutput.value(), /Transport: stdio/)
   assert.match(smokeOutput.value(), /Protocol: 2026-07-28/)
-  assert.match(smokeOutput.value(), /Server: guildcontrol 0\.4\.0/)
+  assert.equal(smokeOutput.value().includes(`Server: guildcontrol ${CONNECTOR_VERSION}\n`), true)
   assert.match(smokeOutput.value(), /Write-capable tools: delete_messages, send_message/)
   assert.match(smokeOutput.value(), /Destructive subset: delete_messages/)
   assert.match(smokeOutput.value(), /Resources: discord:\/\/connector\/safety/)
@@ -5998,7 +5998,7 @@ test("CLI renders smoke, help, and version output", async () => {
   assert.match(setupHelpOutput.value(), /--npx \| --command COMMAND/)
   assert.match(setupHelpOutput.value(), /stable exact-version package launch/)
   assert.match(setupHelpOutput.value(), /canonical process-owned private directory/)
-  assert.match(versionOutput.value(), /0\.4\.0/)
+  assert.equal(versionOutput.value(), `${CONNECTOR_VERSION}\n`)
 })
 
 test("CLI converts unknown failures into bounded diagnostics", async () => {
