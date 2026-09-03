@@ -48,6 +48,11 @@ interface GitHubReleaseModule {
     mcpbDigest: string
     npmIntegrity: string
     ociDigest: string
+    releaseSummary?: {
+      highlights: string[]
+      paragraphs: string[]
+      version: string
+    }
     revision: string
     version: string
   }): string
@@ -231,6 +236,39 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)
   assert.equal(notes.endsWith("\n"), true)
+})
+
+test("renders a version-matched public release summary before installation", () => {
+  const notes = githubRelease.renderGitHubReleaseNotes({
+    mcpbDigest: MCPB_DIGEST,
+    npmIntegrity: NPM_INTEGRITY,
+    ociDigest: OCI_DIGEST,
+    releaseSummary: {
+      highlights: ["Retain compatible policy documents"],
+      paragraphs: ["Establish the stable version line without a new runtime break."],
+      version: VERSION,
+    },
+    revision: REVISION,
+    version: VERSION,
+  })
+  assert.match(notes, /## Release summary\n\nEstablish the stable version line/)
+  assert.match(notes, /## Highlights\n\n- Retain compatible policy documents/)
+  assert.ok(notes.indexOf("## Release summary") < notes.indexOf("## Install"))
+  assert.throws(
+    () => githubRelease.renderGitHubReleaseNotes({
+      mcpbDigest: MCPB_DIGEST,
+      npmIntegrity: NPM_INTEGRITY,
+      ociDigest: OCI_DIGEST,
+      releaseSummary: {
+        highlights: ["Retain compatible policy documents"],
+        paragraphs: ["Establish the stable version line."],
+        version: "9.9.9",
+      },
+      revision: REVISION,
+      version: VERSION,
+    }),
+    /summary version is invalid/,
+  )
 })
 
 test("renders sorted exact checksums and rejects ambiguous checksum inputs", () => {

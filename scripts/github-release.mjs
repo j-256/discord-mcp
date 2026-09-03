@@ -21,6 +21,7 @@ const NPM_PACKAGE = "guildctl"
 const RELEASE_EVIDENCE_FORMAT = "guildcontrol.github-release-evidence.v2"
 const RELEASE_EVIDENCE_SCHEMA_VERSION = 2
 const RELEASE_NOTES_FILE = "release-notes.md"
+const RELEASE_SUMMARIES_FILE = "release-summaries.json"
 const RELEASE_CHECKSUM_FILE = "SHA256SUMS"
 const CATALOG_EVIDENCE_FILE = "catalog-evidence.json"
 const SPDX_SBOM_FILE = "sbom.spdx.json"
@@ -91,7 +92,23 @@ function registryVersionUrl(version) {
   return `https://registry.modelcontextprotocol.io/v0.1/servers/${encodeURIComponent(MCP_REGISTRY_NAME)}/versions/${version}`
 }
 
-export function renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, revision, version }) {
+function renderReleaseSummary(summary, version) {
+  if (summary === undefined) return []
+  invariant(summary?.version === version, "GitHub Release summary version is invalid")
+  invariant(Array.isArray(summary.paragraphs) && summary.paragraphs.length > 0, "GitHub Release summary paragraphs are missing")
+  invariant(Array.isArray(summary.highlights) && summary.highlights.length > 0, "GitHub Release summary highlights are missing")
+  return [
+    "## Release summary",
+    "",
+    ...summary.paragraphs.flatMap((paragraph) => [paragraph, ""]),
+    "## Highlights",
+    "",
+    ...summary.highlights.map((highlight) => `- ${highlight}`),
+    "",
+  ]
+}
+
+export function renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, releaseSummary, revision, version }) {
   assertVersion(version)
   assertRevision(revision)
   assertOciDigest(ociDigest)
@@ -101,6 +118,7 @@ export function renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, 
   return [
     `GuildControl MCP ${version} is published from the protected [${tag}](https://github.com/${GITHUB_REPOSITORY}/tree/${tag}) source tag at commit \`${revision}\`.`,
     "",
+    ...renderReleaseSummary(releaseSummary, version),
     "## Install",
     "",
     "```sh",
@@ -248,7 +266,10 @@ export async function prepareGitHubReleaseEvidence({ directory, mcpbDigest, ociD
     "GitHub Release SBOM root package is missing",
   )
 
-  const notes = renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, revision, version })
+  const releaseSummaries = await readJson(join(REPOSITORY_ROOT, RELEASE_SUMMARIES_FILE))
+  const releaseSummary = releaseSummaries[version]
+  invariant(version.startsWith("0.") || releaseSummary, `Stable GitHub Release ${version} lacks a public summary`)
+  const notes = renderGitHubReleaseNotes({ mcpbDigest, npmIntegrity, ociDigest, releaseSummary, revision, version })
   const notesPath = join(root, RELEASE_NOTES_FILE)
   await writeFile(notesPath, notes, { flag: "wx" })
   const notesAsset = await releaseAsset(notesPath)

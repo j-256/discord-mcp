@@ -378,11 +378,13 @@ async function checkPackageAndLock() {
     "pack:verify": "node scripts/pack-and-verify.mjs",
     prepack: "npm run config:schema:check && npm run metadata:check && npm run build",
     "probe:live": "node dist/bin.js doctor --online --json",
+    "release:check": "node scripts/release-check.mjs",
     sbom: "node scripts/generate-sbom.mjs",
     "security:check": "npm audit --audit-level=moderate && npm audit signatures",
     test: "tsx --test test/*.test.ts",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=80 test/*.test.ts",
     typecheck: "tsc --noEmit",
+    "version:prepare": "node scripts/prepare-version.mjs",
   }, "package scripts do not match the verified release contract")
 
   invariant(lock.name === packageJson.name, "lockfile package name is out of sync")
@@ -408,6 +410,26 @@ async function checkPackageAndLock() {
     invariant(typeof metadata.integrity === "string" && metadata.integrity.startsWith("sha512-"), `${path} lacks SHA-512 integrity`)
   }
   return packageJson
+}
+
+async function checkReleaseSummaries(packageJson) {
+  const summaries = await readJson(join(REPOSITORY_ROOT, "release-summaries.json"))
+  invariant(summaries && typeof summaries === "object" && !Array.isArray(summaries), "release summaries must be an object")
+  for (const [version, summary] of Object.entries(summaries)) {
+    invariant(STABLE_SEMVER.test(version), `release summary version ${version} is invalid`)
+    invariant(summary?.version === version, `release summary ${version} has a mismatched version`)
+    assertEqual(Object.keys(summary).sort(), ["highlights", "paragraphs", "version"], `release summary ${version} fields are invalid`)
+    for (const [name, entries] of [["paragraphs", summary.paragraphs], ["highlights", summary.highlights]]) {
+      invariant(Array.isArray(entries) && entries.length > 0 && entries.length <= 6, `release summary ${version} ${name} are invalid`)
+      for (const entry of entries) {
+        invariant(typeof entry === "string" && entry.length > 0 && entry.length <= 600, `release summary ${version} ${name} entry is invalid`)
+        invariant(entry.trim() === entry && !/[\r\n]/u.test(entry), `release summary ${version} ${name} entry must be one trimmed line`)
+      }
+    }
+  }
+  if (!packageJson.version.startsWith("0.")) {
+    invariant(summaries[packageJson.version], `stable release ${packageJson.version} lacks a public summary`)
+  }
 }
 
 async function checkDocumentationPortal() {
@@ -1290,6 +1312,21 @@ async function checkContainerSource(packageJson) {
 async function checkAutomation(packageJson) {
   const npmConfiguration = await readFile(join(REPOSITORY_ROOT, ".npmrc"), "utf8")
   invariant(npmConfiguration === NPM_CONFIGURATION, "project npm registry configuration is invalid")
+  const releaseCheck = await readFile(join(REPOSITORY_ROOT, "scripts/release-check.mjs"), "utf8")
+  for (const required of [
+    'import { BUILDKIT_IMAGE } from "./oci-registry.mjs"',
+    'const SHARED_TEMP_DIRECTORY = join(REPOSITORY_ROOT, "node_modules")',
+    'TMPDIR: SHARED_TEMP_DIRECTORY',
+    '"buildx",',
+    '"create",',
+    '"docker-container",',
+    '`image=${BUILDKIT_IMAGE}`',
+    'BUILDX_BUILDER: builderName',
+    '["buildx", "rm", builderName]',
+  ]) {
+    invariant(releaseCheck.includes(required), `local release check is missing ${required}`)
+  }
+  invariant(!releaseCheck.includes("colima"), "local release check must use the active Docker context")
   const workflowsDirectory = join(REPOSITORY_ROOT, ".github/workflows")
   const workflowNames = (await readdir(workflowsDirectory)).filter((name) => name.endsWith(".yml")).sort()
   assertEqual(workflowNames, ["ci.yml", "codeql.yml", "release.yml"], "workflow catalog is invalid")
@@ -1721,6 +1758,7 @@ async function checkAutomation(packageJson) {
     "/Dockerfile",
     "/package.json",
     "/package-lock.json",
+    "/release-summaries.json",
     "/server.json",
     "/scripts/",
     "/SECURITY.md",
@@ -1732,6 +1770,7 @@ async function checkAutomation(packageJson) {
 }
 
 const packageJson = await checkPackageAndLock()
+await checkReleaseSummaries(packageJson)
 await checkDocumentationPortal()
 await checkNeutrality()
 await checkSourceIdentity(packageJson)
