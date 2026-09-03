@@ -69,11 +69,13 @@
     "pack:verify": "node scripts/pack-and-verify.mjs",
     "prepack": "npm run config:schema:check && npm run metadata:check && npm run build",
     "probe:live": "node dist/bin.js doctor --online --json",
+    "release:check": "node scripts/release-check.mjs",
     "sbom": "node scripts/generate-sbom.mjs",
     "security:check": "npm audit --audit-level=moderate && npm audit signatures",
     "test": "tsx --test test/*.test.ts",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=80 test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version:prepare": "node scripts/prepare-version.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
