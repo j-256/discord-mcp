@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto"
+import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 import { BUILDKIT_IMAGE } from "./oci-registry.mjs"
 import { REPOSITORY_ROOT, run } from "./release-lib.mjs"
 
 const PINNED_BUILDER = Symbol("pinned-builder")
-const SHARED_TEMP_DIRECTORY = join(REPOSITORY_ROOT, "node_modules")
+const SHARED_TEMP_DIRECTORY = await mkdtemp(join(REPOSITORY_ROOT, ".release-tmp-"))
+const SBOM_OUTPUT = join(SHARED_TEMP_DIRECTORY, "sbom.spdx.json")
 
 const CONTAINER_ENVIRONMENT = Object.freeze({
   ...process.env,
@@ -25,7 +27,7 @@ const RELEASE_CHECKS = Object.freeze([
   ["Container", "npm", ["run", "container:verify"], CONTAINER_ENVIRONMENT],
   ["Container index", "npm", ["run", "container:index:verify"], CONTAINER_ENVIRONMENT, PINNED_BUILDER],
   ["Dependency security", "npm", ["run", "security:check"]],
-  ["SBOM", "npm", ["run", "--silent", "sbom", "--", "--output", "sbom.spdx.json"]],
+  ["SBOM", "npm", ["run", "--silent", "sbom", "--", "--output", SBOM_OUTPUT]],
 ])
 
 async function runWithPinnedBuilder(command, arguments_, environment) {
@@ -52,11 +54,15 @@ async function runWithPinnedBuilder(command, arguments_, environment) {
   }
 }
 
-for (const [label, command, arguments_, environment, executionMode] of RELEASE_CHECKS) {
-  process.stdout.write(`==> ${label}\n`)
-  if (executionMode === PINNED_BUILDER) {
-    await runWithPinnedBuilder(command, arguments_, environment)
-  } else {
-    await run(command, arguments_, environment ? { env: environment } : {})
+try {
+  for (const [label, command, arguments_, environment, executionMode] of RELEASE_CHECKS) {
+    process.stdout.write(`==> ${label}\n`)
+    if (executionMode === PINNED_BUILDER) {
+      await runWithPinnedBuilder(command, arguments_, environment)
+    } else {
+      await run(command, arguments_, environment ? { env: environment } : {})
+    }
   }
+} finally {
+  await rm(SHARED_TEMP_DIRECTORY, { force: true, recursive: true })
 }

@@ -1,4 +1,5 @@
 node_modules/
+.release-tmp-*/
 dist/
 coverage/
 site/.astro/
