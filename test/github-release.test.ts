@@ -87,6 +87,10 @@ const RECOVERY_RUN_ID = 33409582869
 const REPOSITORY_ID = 1334461127
 const DRAFT_RELEASE_IDENTIFIER = "untagged-e716f676f8a4d8ed324c"
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+}
+
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex")
 }
@@ -228,10 +232,10 @@ test("renders deterministic release notes with exact public identities and verif
   assert.match(notes, new RegExp(REVISION, "u"))
   assert.match(notes, new RegExp(OCI_DIGEST, "u"))
   assert.match(notes, new RegExp(MCPB_DIGEST, "u"))
-  assert.match(notes, /gh release verify v0\.4\.0/u)
-  assert.match(notes, /gh release verify-asset v0\.4\.0 guildctl-0\.4\.0\.tgz/u)
-  assert.match(notes, /gh release verify-asset v0\.4\.0 guildcontrol-0\.4\.0\.mcpb/u)
-  assert.match(notes, /gh release verify-asset v0\.4\.0 release-notes\.md/u)
+  assert.match(notes, new RegExp(`gh release verify v${escapeRegExp(VERSION)}`, "u"))
+  assert.match(notes, new RegExp(`gh release verify-asset v${escapeRegExp(VERSION)} ${escapeRegExp(ARCHIVE_NAME)}`, "u"))
+  assert.match(notes, new RegExp(`gh release verify-asset v${escapeRegExp(VERSION)} ${escapeRegExp(BUNDLE_NAME)}`, "u"))
+  assert.match(notes, new RegExp(`gh release verify-asset v${escapeRegExp(VERSION)} release-notes\\.md`, "u"))
   assert.match(notes, /registers MCP Registry metadata only after this immutable Release/u)
   assert.match(notes, /Attestations establish artifact identity, origin, and integrity/u)
   assert.doesNotMatch(notes, /DISCORD_BOT_TOKEN/u)

@@ -15,6 +15,10 @@ const RELEASE_BRANCH = "main"
 const RELEASE_SUMMARIES_FILE = "release-summaries.json"
 const STABLE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
 const UTC_DAY = /^(?<year>[0-9]{4})-(?<month>[0-9]{2})-(?<day>[0-9]{2})$/
+const PACKAGE_VERSION_FILES = Object.freeze([
+  "package-lock.json",
+  "package.json",
+])
 const VERSION_SOURCE_FILES = Object.freeze([
   "Dockerfile",
   "PRIVACY.md",
@@ -22,16 +26,22 @@ const VERSION_SOURCE_FILES = Object.freeze([
   "docs/getting-started.md",
   "docs/reference.md",
   "mcpb/manifest.json",
-  "package-lock.json",
-  "package.json",
   "scripts/check-published-artifacts.mjs",
   "server.json",
-  "site/package-lock.json",
   "src/constants.ts",
   "test/cli.test.ts",
   "test/github-release.test.ts",
   "test/oci-registry.test.ts",
   "test/operator.test.ts",
+])
+const VERSION_MATCH_EXCEPTIONS = Object.freeze([
+  "site/package-lock.json",
+])
+const MUTATED_FILES = Object.freeze([
+  ...PACKAGE_VERSION_FILES,
+  ...VERSION_SOURCE_FILES,
+  RELEASE_SUMMARIES_FILE,
+  "mcpb/reproducible-build.json",
 ])
 
 function versionParts(version) {
@@ -134,11 +144,15 @@ async function assertVersionFrontier(currentVersion) {
   const result = await gitOutput(["grep", "-l", "--fixed-strings", currentVersion, "--"], [0, 1])
   const actual = result.value ? result.value.split("\n").sort() : []
   const summaries = await readJson(resolve(REPOSITORY_ROOT, RELEASE_SUMMARIES_FILE))
-  const expected = [...VERSION_SOURCE_FILES]
+  const expected = [...PACKAGE_VERSION_FILES, ...VERSION_SOURCE_FILES]
   if (summaries[currentVersion] !== undefined) expected.push(RELEASE_SUMMARIES_FILE)
+  const expectedSet = new Set(expected)
+  const exceptions = new Set(VERSION_MATCH_EXCEPTIONS)
+  const missing = expected.filter((path) => !actual.includes(path)).sort()
+  const unexpected = actual.filter((path) => !expectedSet.has(path) && !exceptions.has(path)).sort()
   invariant(
-    canonicalJson(actual) === canonicalJson(expected.sort()),
-    `Current version source frontier differs: ${actual.join(", ")}`,
+    missing.length === 0 && unexpected.length === 0,
+    `Current version source frontier differs: missing ${missing.join(", ") || "none"}; unexpected ${unexpected.join(", ") || "none"}`,
   )
 }
 
@@ -169,6 +183,20 @@ async function updateMcpbDigest(version) {
   process.stdout.write(`Prepared ${report.name} with ${report.digest}\n`)
 }
 
+async function snapshotMutatedFiles() {
+  const snapshots = new Map()
+  for (const path of MUTATED_FILES) {
+    snapshots.set(path, await readFile(resolve(REPOSITORY_ROOT, path), "utf8"))
+  }
+  return snapshots
+}
+
+async function restoreMutatedFiles(snapshots) {
+  await Promise.all(
+    [...snapshots.entries()].map(([path, contents]) => writeFile(resolve(REPOSITORY_ROOT, path), contents)),
+  )
+}
+
 async function prepareVersion(options) {
   const packageJson = await readJson(resolve(REPOSITORY_ROOT, "package.json"))
   const currentVersion = packageJson.version
@@ -183,24 +211,31 @@ async function prepareVersion(options) {
   process.stdout.write(`==> Verifying ${currentVersion} before version preparation\n`)
   await run("npm", ["run", "release:check"])
 
-  await Promise.all(VERSION_SOURCE_FILES.map((path) => replaceVersion(path, currentVersion, options.version)))
-  await writeFile(
-    resolve(REPOSITORY_ROOT, "mcpb/reproducible-build.json"),
-    `${JSON.stringify({ sourceDateEpoch: sourceDateEpoch(options.sourceDate) }, null, 2)}\n`,
-  )
-  const summariesPath = resolve(REPOSITORY_ROOT, RELEASE_SUMMARIES_FILE)
-  const summaries = await readJson(summariesPath)
-  invariant(summaries[options.version] === undefined, `Release summary ${options.version} already exists`)
-  summaries[options.version] = summary
-  const orderedSummaries = Object.fromEntries(
-    Object.entries(summaries).sort(([left], [right]) => compareVersions(left, right)),
-  )
-  await writeFile(summariesPath, `${JSON.stringify(orderedSummaries, null, 2)}\n`)
-  await updateMcpbDigest(options.version)
+  const snapshots = await snapshotMutatedFiles()
+  try {
+    await run("npm", ["version", options.version, "--no-git-tag-version", "--ignore-scripts"])
+    await Promise.all(VERSION_SOURCE_FILES.map((path) => replaceVersion(path, currentVersion, options.version)))
+    await writeFile(
+      resolve(REPOSITORY_ROOT, "mcpb/reproducible-build.json"),
+      `${JSON.stringify({ sourceDateEpoch: sourceDateEpoch(options.sourceDate) }, null, 2)}\n`,
+    )
+    const summariesPath = resolve(REPOSITORY_ROOT, RELEASE_SUMMARIES_FILE)
+    const summaries = await readJson(summariesPath)
+    invariant(summaries[options.version] === undefined, `Release summary ${options.version} already exists`)
+    summaries[options.version] = summary
+    const orderedSummaries = Object.fromEntries(
+      Object.entries(summaries).sort(([left], [right]) => compareVersions(left, right)),
+    )
+    await writeFile(summariesPath, `${JSON.stringify(orderedSummaries, null, 2)}\n`)
+    await updateMcpbDigest(options.version)
 
-  process.stdout.write(`==> Verifying prepared ${options.version}\n`)
-  await run("npm", ["run", "release:check"])
-  await run("git", ["diff", "--check"])
+    process.stdout.write(`==> Verifying prepared ${options.version}\n`)
+    await run("npm", ["run", "release:check"])
+    await run("git", ["diff", "--check"])
+  } catch (error) {
+    await restoreMutatedFiles(snapshots)
+    throw error
+  }
   const status = await gitOutput(["status", "--short"])
   process.stdout.write(`Prepared ${options.version}; inspect and commit these unstaged changes:\n${status.value}\n`)
 }
